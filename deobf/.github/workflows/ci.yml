@@ -1,0 +1,133 @@
+name: CI
+
+on:
+    push:
+        branches:
+            - master
+        paths-ignore:
+            - "**/*.md"
+            - ".gitignore"
+            - ".idea/**"
+    pull_request:
+        branches:
+            - master
+        paths-ignore:
+            - "**/*.md"
+            - ".gitignore"
+            - ".idea/**"
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+jobs:
+    decrypt-test:
+        runs-on: ubuntu-latest
+        if: |
+            github.event_name == 'workflow_dispatch' || 
+            (
+              !startsWith(github.event.head_commit.message, '[skip ci]') && 
+              (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+            )
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Set up JDK 21
+              uses: actions/setup-java@v5
+              with:
+                  distribution: temurin
+                  java-version: 21
+                  cache: gradle
+
+            - name: Set up uv
+              uses: astral-sh/setup-uv@v5
+              with:
+                enable-cache: false
+
+            - name: Make scripts executable
+              run: |
+                  chmod +x gradlew
+                  chmod +x tools/postprocess.py
+                  chmod +x run_deobf.sh
+
+            - name: Run decryption harness
+              run: ./gradlew -p unidbg-harness run
+
+            - name: Run post-processing
+              run: ./tools/postprocess.py
+
+            - name: Verify outputs
+              run: |
+                  echo "Checking generated output files..."
+                  if [ -d "output" ]; then
+                    ls -lh output/
+                    required_files=("C.dex" "big.dex" "m1.dex" "m2.dex" "m3.dex" "load2.apk" "load2_classes.dex" "H_p.json" "M.json" "S.json" "P.json")
+                    for f in "${required_files[@]}"; do
+                      if [ ! -f "output/$f" ]; then
+                        echo "Error: Missing required output file $f"
+                        exit 1
+                      fi
+                    done
+                    echo "All 11 output files are present and verified!"
+                  else
+                    echo "Error: Output directory not found!"
+                    exit 1
+                  fi
+
+            - name: Upload Decrypted Payloads Artifact
+              uses: actions/upload-artifact@v7
+              with:
+                  name: decrypted-payloads
+                  path: output/
+
+    release-ci:
+        needs: decrypt-test
+        runs-on: ubuntu-latest
+        if: ${{ success() && github.ref == 'refs/heads/master' }}
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Download Decrypted Payloads
+              uses: actions/download-artifact@v8
+              with:
+                  name: decrypted-payloads
+                  path: output
+
+            - name: Create ZIP archive of outputs
+              run: |
+                  zip -j wechatx_decrypted_payloads.zip output/*
+
+            - name: Delete existing CI release (if exists)
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh release delete CI --yes || true
+                  gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/CI || true
+
+            - name: Create CI release and upload payloads
+              uses: softprops/action-gh-release@v3
+              with:
+                  tag_name: CI
+                  name: CI
+                  body: |
+                      This release always contains the latest decrypted and structured WeChatX payloads from the master branch.
+
+                      Commit SHA: `${{ github.sha }}`
+
+                      Commit Message:
+                      ```
+                      ${{ github.event.head_commit.message || 'Manual build' }}
+                      ```
+                  files: |
+                      wechatx_decrypted_payloads.zip
+                      output/*
+                  prerelease: true
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

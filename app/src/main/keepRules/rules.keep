@@ -1,0 +1,67 @@
+# App
+-keepnames class * implements com.Johnny.wcx.dexkit.abc.IResolveDex
+-keep class com.alibaba.fastjson2.** { *; }
+-keep class okhttp3.** { *; }
+
+# Monet overlay builder: ARSCLib + apksig + BouncyCastle
+-keep class com.reandroid.** { *; }
+-dontwarn com.reandroid.**
+-keep class com.android.apksig.** { *; }
+-dontwarn com.android.apksig.**
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+
+# Attributes
+-keepattributes Signature,RuntimeVisibleAnnotations,AnnotationDefault,LineNumberTable,SourceFile,*Annotation*
+-keep class kotlin.Metadata { *; }
+
+# Natives
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# BeanShell
+-keep class bsh.This { *; }
+-keep class bsh.This$* { *; }
+-keep class bsh.Primitive { *; }
+-keep class bsh.Primitive$* { *; }
+-keep class bsh.commands.** {
+    public static *** invoke(...);
+}
+-keepclassmembers class bsh.BshLambda {
+    public final *** invoke(...);
+}
+-keep class bsh.BSH** { *; }
+-keep class bsh.SimpleNode { *; }
+-keep class bsh.Node { *; }
+-keep class bsh.Modifiers { *; }
+-keep class bsh.snapshot.BshSnapshot { *; }
+-keepclassmembers class * implements java.io.Serializable {
+    static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}
+
+# Suppress warnings
+-dontwarn java.lang.reflect.AnnotatedType
+-dontwarn java.beans.**
+-dontwarn io.netty.internal.tcnative.**
+-dontwarn jdk.jfr.**
+-dontwarn org.apache.log4j.**
+-dontwarn org.apache.logging.log4j.**
+-dontwarn java.lang.management.**
+-dontwarn reactor.blockhound.**
+-dontwarn com.aayushatharva.brotli4j.**
+-dontwarn com.github.luben.zstd.**
+-dontwarn com.jcraft.jzlib.**
+-dontwarn com.ning.compress.**
+-dontwarn lzma.sdk.**
+-dontwarn net.jpountz.**
+-dontwarn com.oracle.svm.core.annotate.**
+-dontwarn io.netty.pkitesting.**
+-dontwarn com.sun.nio.file.SensitivityWatchEventModifier
+-dontwarn org.osgi.annotation.**
+-dontwarn javax.naming.**

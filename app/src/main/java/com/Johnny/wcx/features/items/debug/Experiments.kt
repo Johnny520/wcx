@@ -1,0 +1,217 @@
+package com.Johnny.wcx.features.items.debug
+
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import com.Johnny.wcx.features.api.core.WeDatabaseApi
+import com.Johnny.wcx.features.api.net.WeTransferApi
+import com.Johnny.wcx.features.api.net.WeTransferApi.fetchBeforeTransfer
+import com.Johnny.wcx.features.api.net.WeTransferApi.sendPlaceOrder
+import com.Johnny.wcx.features.core.ClickableFeature
+import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.DefaultColumn
+import com.Johnny.wcx.ui.content.SingleContactSelector
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.ShowComposeDialogScope
+import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.WeLogger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
+@Feature(name = "测试", categories = ["调试"], description = "手动对指定 wxId 依次执行 beforetransfer 和 transferplaceorder 两个阶段的发包请求，并显示原始返回值")
+object Experiments : ClickableFeature() {
+
+    @Suppress("unused")
+    private const val TAG = "Experiments"
+
+    override fun onClick(context: ComponentActivity) {
+        showComposeDialog(context) { ExperimentDialog() }
+    }
+
+    // ── Phase model ──────────────────────────────────────────────────────────
+
+    private sealed interface Phase {
+        data object Idle : Phase
+        data object Running : Phase
+        data class Done(
+            /** beforetransfer 的完整 protobuf 响应 */
+            val beforeTransfer: String,
+            /** transferplaceorder 的完整 JSON 响应 */
+            val placeOrder: String?
+        ) : Phase
+    }
+
+    // ── Dialog ───────────────────────────────────────────────────────────────
+
+    @Composable
+    private fun ShowComposeDialogScope.ExperimentDialog() {
+        var phase by remember { mutableStateOf<Phase>(Phase.Idle) }
+        var selectedWxId by remember { mutableStateOf<String?>(null) }
+
+        val contacts = remember { WeDatabaseApi.getContacts() }
+
+        LaunchedEffect(phase) {
+            if (phase is Phase.Running) {
+                dialog.setCancelable(false)
+                CoroutineScope(Dispatchers.IO).launch {
+                    val id = selectedWxId!!
+                    val result = runCatching {
+                        val beforeTransfer = fetchBeforeTransfer(id, null)
+                        val beforeStr = if (beforeTransfer != null) {
+                            buildString {
+                                appendLine("maskedRealName: ${beforeTransfer.maskedRealName}")
+                                append("key: ${beforeTransfer.key}")
+                            }
+                        } else {
+                            "请求失败 (可能被删除/拉黑/账号异常)"
+                        }
+
+                        val placeOrderStr = if (beforeTransfer?.key != null) {
+                            val ctx = WeTransferApi.TransferContext(
+                                memberId = id,
+                                groupId = null,
+                                maskedRealName = beforeTransfer.maskedRealName ?: "",
+                                truenameExtend = beforeTransfer.key,
+                                nickname = id,
+                                amountYuan = 100000.0,
+                                placeorderReserves = System.currentTimeMillis().toString()
+                            )
+                            val resp = sendPlaceOrder(ctx, inputName = null, checknameSign = null)
+                            if (resp != null) resp.toString(2) else "请求超时"
+                        } else null
+
+                        Phase.Done(beforeStr, placeOrderStr)
+                    }.getOrElse { e ->
+                        WeLogger.e(TAG, "发包失败", e)
+                        Phase.Done("异常: ${e.message}", null)
+                    }
+
+                    if (phase is Phase.Running) {
+                        phase = result
+                        dialog.setCancelable(true)
+                    }
+                }
+            }
+        }
+
+        AlertDialogContent(
+            title = { Text("测试 — 两阶段发包") },
+            text = {
+                DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                    when (val current = phase) {
+                        is Phase.Idle -> {
+                            Text(
+                                "先选择目标联系人，然后点击「开始」依次执行两阶段发包:\n" +
+                                        "1) beforetransfer — 取 maskedRealName / key\n" +
+                                        "2) transferplaceorder — 探测 checkname 挑战"
+                            )
+
+                            Spacer(Modifier.height(8.dp))
+
+                            OutlinedCard(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showComposeDialog(context) {
+                                            SingleContactSelector(
+                                                title = "选择目标联系人",
+                                                contacts = contacts,
+                                                initialSelectedWxId = selectedWxId,
+                                                onDismiss = onDismiss,
+                                                onConfirm = { wxId ->
+                                                    selectedWxId = wxId
+                                                    onDismiss()
+                                                }
+                                            )
+                                        }
+                                    },
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = selectedWxId ?: "点击选择联系人",
+                                        color = if (selectedWxId != null) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        is Phase.Running -> {
+                            Text("发包中, 请稍等...")
+                            LinearWavyProgressIndicator()
+                        }
+
+                        is Phase.Done -> {
+                            Text(
+                                text = "阶段一 (beforetransfer):\n${current.beforeTransfer}",
+                                fontFamily = FontFamily.Monospace
+                            )
+                            if (current.placeOrder != null) {
+                                Text("\n\n阶段二 (transferplaceorder):")
+                                Text(
+                                    text = current.placeOrder,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                when (phase) {
+                    is Phase.Idle -> {
+                        Button(
+                            onClick = {
+                                if (selectedWxId != null) phase = Phase.Running
+                            },
+                            enabled = selectedWxId != null
+                        ) { Text("开始") }
+                    }
+
+                    is Phase.Done -> Button(onDismiss) { Text("关闭") }
+                    else -> {}
+                }
+            },
+            dismissButton = {
+                when (phase) {
+                    is Phase.Running -> TextButton(onClick = {
+                        dialog.setCancelable(true)
+                        phase = Phase.Idle
+                    }) { Text("终止") }
+                    else -> {}
+                }
+            }
+        )
+    }
+}

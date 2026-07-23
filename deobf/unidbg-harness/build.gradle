@@ -1,0 +1,26 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.github.zhkl0228:unidbg-android:0.9.9'
+    implementation 'org.slf4j:slf4j-simple:2.0.9'
+}
+
+application {
+    mainClass = 'x.DecryptorHarness'
+}
+
+// Java compatibility
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+run {
+    systemProperty "java.library.path", "${projectDir}/natives/linux_64"
+}

@@ -1,0 +1,18 @@
+# Gradle files and build caches
+.gradle/
+unidbg-harness/.gradle/
+unidbg-harness/build/
+unidbg-harness/tmp/
+
+# Runtime rootfs generated during emulation
+unidbg-harness/rootfs/
+
+# Generated decrypted outputs and temporary binaries
+moduledata/x7_3.0/*_decrypted.bin
+moduledata/x7_3.0/*_decrypted.dex
+output/
+
+# IDE files
+.idea/
+*.iml
+.DS_Store

@@ -1,0 +1,86 @@
+package com.Johnny.wcx.features.items.system
+
+import android.content.Context
+import android.widget.Button
+import androidx.compose.material3.Text
+import androidx.core.view.isGone
+import androidx.core.view.isVisible
+import com.Johnny.reflekt.reflekt
+import com.Johnny.reflekt.utils.toClass
+import com.Johnny.wcx.dexkit.abc.IResolveDex
+import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.showComposeDialog
+
+@Feature(name = "强制平板模式", categories = ["系统与隐私"], description = "让微信将当前设备识别为平板")
+object ForceTabletMode : SwitchFeature(), IResolveDex {
+
+    private val methodIsTablet by dexMethod {
+        matcher {
+            usingEqStrings("Lenovo TB-9707F", "eebbk")
+        }
+    }
+    private val methodIsTablet2 by dexMethod {
+        matcher {
+            usingEqStrings("MicroMsg.UIUtils", "isRoyoleFoldableDevice!!!")
+        }
+    }
+    private val methodOtherDeviceLoginButtonIsVisible by dexMethod {
+        matcher {
+            usingEqStrings("loginAsOtherDeviceBtn")
+        }
+    }
+
+    override fun onEnable() {
+        methodIsTablet.hookBefore {
+            result = true
+        }
+
+        methodIsTablet2.hookBefore {
+            result = true
+        }
+
+        methodOtherDeviceLoginButtonIsVisible.hookBefore {
+            val view = args[0] as? Button? ?: return@hookBefore
+            if (view.isGone) view.isVisible = true
+        }
+
+        "com.tencent.mm.plugin.account.ui.LoginHistoryUI".toClass().reflekt().firstMethod("initView").hookAfter {
+            val btn = thisObject.reflekt().firstField {
+                type = Button::class
+            }.get()!! as Button
+            btn.isVisible = true
+        }
+    }
+
+    override fun onBeforeToggle(newState: Boolean, context: Context): Boolean {
+        if (newState) {
+            showComposeDialog(context) {
+                AlertDialogContent(
+                    title = { Text(text = "警告") },
+                    text = { Text(text = "此功能可能导致账号异常, 确定要启用吗?") },
+                    confirmButton = {
+                        Button(onClick = {
+                            applyToggle(true)
+                            onDismiss()
+                        }) {
+                            Text("确定")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onDismiss) {
+                            Text("取消")
+                        }
+                    }
+                )
+            }
+            return false
+        }
+
+        return true
+    }
+}
