@@ -29,8 +29,7 @@ class LruCache<K, V>(
     @Synchronized
     override fun clear() = super.clear()
 
-    @Synchronized
-    override val size: Int get() = super.size
+    override val size: Int @Synchronized get() = super.size
 
     @Synchronized
     override fun isEmpty(): Boolean = super.isEmpty()
