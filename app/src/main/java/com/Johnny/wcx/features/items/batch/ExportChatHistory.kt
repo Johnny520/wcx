@@ -37,7 +37,7 @@ import java.util.Locale
 @Feature(
     name = "导出聊天记录",
     categories = ["批量操作"],
-    description = "导出选中对话的聊天记录为 TXT / CSV / JSON 格式，保存到 Download/WeKit 目录"
+    description = "导出选中对话的聊天记录为 TXT / CSV / JSON 格式，保存到 Download/WCX 目录"
 )
 object ExportChatHistory : ClickableFeature() {
 
@@ -80,7 +80,7 @@ object ExportChatHistory : ClickableFeature() {
                     text = {
                         DefaultColumn {
                             Text("已选择 ${selectedWxIds.size} 个对话")
-                            Text("导出后文件将保存到: Download/WeKit/")
+                            Text("导出后文件将保存到: Download/WCX/")
                             Spacer(Modifier.padding(top = 8.dp))
                             ExportFormat.values().forEach { format ->
                                 TextButton(
@@ -113,7 +113,7 @@ object ExportChatHistory : ClickableFeature() {
             runCatching {
                 val exportDir = File(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    "WeKit"
+                    "WCX"
                 )
                 exportDir.mkdirs()
 

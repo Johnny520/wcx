@@ -438,7 +438,7 @@ object DetectDeletedFriends : ClickableFeature() {
                                     availableLabels = null
                                     phase = DialogPhase.SelectLabel(
                                         friends = abnormalFriends,
-                                        suggestedLabelName = "WeKit_单删好友_${formatEpoch(System.currentTimeMillis(), includeDate = true)}"
+                                        suggestedLabelName = "WCX_单删好友_${formatEpoch(System.currentTimeMillis(), includeDate = true)}"
                                     )
                                 }) { Text("标记标签") }
                                 TextButton(onClick = {

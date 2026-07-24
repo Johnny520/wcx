@@ -168,13 +168,13 @@ jobs:
       - name: Upload Release APKs
         uses: actions/upload-artifact@v7
         with:
-          name: wekit-apk
+          name: wcx-apk
           path: dist/apk/*.apk
 
       - name: Upload Release Obfuscation Mapping
         uses: actions/upload-artifact@v7
         with:
-          name: wekit-mapping
+          name: wcx-mapping
           path: dist/mapping/*.txt
 
   release-ci:
@@ -194,7 +194,7 @@ jobs:
       - name: Download APK artifact
         uses: actions/download-artifact@v8
         with:
-          name: wekit-apk
+          name: wcx-apk
           path: artifacts
 
       - name: Delete existing CI release (if exists)
@@ -237,7 +237,7 @@ jobs:
           files: |
             artifacts/*.apk
             artifacts/update.json
-          prerelease: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -259,7 +259,7 @@ jobs:
       - name: Download APK artifact
         uses: actions/download-artifact@v8
         with:
-          name: wekit-apk
+          name: wcx-apk
           path: artifacts
 
       - name: Wait for Telegram API
