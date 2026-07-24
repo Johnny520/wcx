@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.scripting_java
 
 import android.content.ContentValues
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,11 +29,13 @@ import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.items.chat.ChatInputBarEnhancements
 import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.fs.createDirsSafe
+import com.Johnny.wcx.utils.openInSystem
 import com.Johnny.wcx.utils.serialization.XmlUtils.extractXmlAttr
 import com.Johnny.wcx.utils.serialization.XmlUtils.extractXmlTag
 import kotlinx.coroutines.CoroutineScope
@@ -132,58 +135,179 @@ object JavaScriptingHook : ClickableFeature(), IResolveDex, WeDatabaseListenerAp
     }
 
     override fun onClick(context: ComponentActivity) {
-        val entries = listScriptEntries()
-        showComposeDialog(context) {
-            AlertDialogContent(
-                title = { Text("Java 脚本") },
-                text = {
-                    if (entries.isEmpty()) {
-                        Text("暂无脚本")
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 480.dp),
-                        ) {
-                            items(entries, key = { it.dir.name }) { entry ->
-                                var enabled by remember(entry.dir) { mutableStateOf(entry.enabled) }
-                                fun toggle() {
-                                    val newState = !enabled
-                                    if (setScriptEnabled(entry.dir, newState)) {
-                                        enabled = newState
+        var showHelp by mutableStateOf(false)
+
+        fun refreshAndShow() {
+            val entries = listScriptEntries()
+            showComposeDialog(context) {
+                var showHelpState by remember { mutableStateOf(showHelp) }
+
+                if (showHelpState) {
+                    ScriptHelpScreen(
+                        onDismiss = {
+                            showHelpState = false
+                            showHelp = false
+                        },
+                        onOpenScriptDir = { openScriptsDirectory(context) }
+                    )
+                } else {
+                    AlertDialogContent(
+                        title = { Text("Java 脚本") },
+                        text = {
+                            DefaultColumn {
+                                if (entries.isEmpty()) {
+                                    Text("暂无脚本，点击下方「使用说明」了解如何添加脚本")
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 400.dp),
+                                    ) {
+                                        items(entries, key = { it.dir.name }) { entry ->
+                                            var enabled by remember(entry.dir) { mutableStateOf(entry.enabled) }
+                                            fun toggle() {
+                                                val newState = !enabled
+                                                if (setScriptEnabled(entry.dir, newState)) {
+                                                    enabled = newState
+                                                }
+                                            }
+
+                                            ListItem(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { toggle() },
+                                                headlineContent = { Text(entry.info.name) },
+                                                supportingContent = {
+                                                    Text(
+                                                        buildList {
+                                                            add(entry.dir.name)
+                                                            add(if (enabled) "已启用" else "已禁用")
+                                                            entry.info.version?.let { add("版本 $it") }
+                                                            entry.info.author?.let { add("作者 $it") }
+                                                        }.joinToString(" · ")
+                                                    )
+                                                },
+                                                trailingContent = {
+                                                    Switch(
+                                                        checked = enabled,
+                                                        onCheckedChange = null,
+                                                    )
+                                                },
+                                            )
+                                        }
                                     }
                                 }
-
-                                ListItem(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { toggle() },
-                                    headlineContent = { Text(entry.info.name) },
-                                    supportingContent = {
-                                        Text(
-                                            buildList {
-                                                add(entry.dir.name)
-                                                add(if (enabled) "已启用" else "已禁用")
-                                                entry.info.version?.let { add("版本 $it") }
-                                                entry.info.author?.let { add("作者 $it") }
-                                            }.joinToString(" · ")
-                                        )
-                                    },
-                                    trailingContent = {
-                                        Switch(
-                                            checked = enabled,
-                                            onCheckedChange = null,
-                                        )
-                                    },
-                                )
+                                TextButton(onClick = {
+                                    showHelpState = true
+                                    showHelp = true
+                                }) {
+                                    Text("使用说明")
+                                }
                             }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = onDismiss) { Text("完成") }
-                },
-            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = onDismiss) { Text("完成") }
+                        },
+                    )
+                }
+            }
+        }
+
+        refreshAndShow()
+    }
+
+    @Composable
+    private fun ScriptHelpScreen(onDismiss: () -> Unit, onOpenScriptDir: () -> Unit) {
+        val scrollState = androidx.compose.foundation.rememberScrollState()
+        AlertDialogContent(
+            title = { Text("Java 脚本使用说明") },
+            text = {
+                DefaultColumn(Modifier.verticalScroll(scrollState)) {
+                    Text("📁 脚本存放路径", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Android/data/com.tencent.mm/WCX/scripts_java/",
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "每个脚本是一个独立文件夹，包含 main.java（脚本代码）和 info.prop（脚本信息）",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Text("📝 脚本结构", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                    Text("脚本目录结构：", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "scripts_java/\n" +
+                                "└── my_script/\n" +
+                                "    ├── main.java    # 脚本代码\n" +
+                                "    └── info.prop    # 脚本信息",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Text("📋 info.prop 格式", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                    Text(
+                        "name=脚本名称\nauthor=作者\nversion=1.0\nupdateTime=2024-01-01",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Text("🎯 可用回调函数", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                    Text(
+                        "• onLoad() - 脚本加载时调用\n" +
+                                "• onUnload() - 脚本卸载时调用\n" +
+                                "• onHandleMsg(msg) - 收到消息时调用\n" +
+                                "• onClickSendBtn(chatFooter, text) - 点击发送按钮时调用\n" +
+                                "• onRecvPayMsg(payMsg) - 收到转账/红包时调用\n" +
+                                "• onNewFriend(username, ticket, scene) - 新朋友申请时调用",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Text("💡 简单示例", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                    Text(
+                        "// 收到消息时打印日志\n" +
+                                "import com.Johnny.wcx.utils.WeLogger;\n\n" +
+                                "void onLoad() {\n" +
+                                "    WeLogger.d(\"MyScript\", \"脚本加载成功\");\n" +
+                                "}\n\n" +
+                                "void onHandleMsg(Object msg) {\n" +
+                                "    WeLogger.d(\"MyScript\", \"收到消息: \" + msg);\n" +
+                                "}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Text("🔧 可用 API", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                    Text(
+                        "• WeMessageApi - 消息相关操作\n" +
+                                "• WeDatabaseApi - 数据库操作\n" +
+                                "• WeApi - 通用 API\n" +
+                                "• WeLogger - 日志输出\n" +
+                                "• JavaHookApi - Hook 相关 API",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onOpenScriptDir) { Text("打开脚本目录") }
+            },
+            confirmButton = {
+                TextButton(onClick = onDismiss) { Text("我知道了") }
+            }
+        )
+    }
+
+    private fun openScriptsDirectory(context: Context) {
+        runCatching {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            val uri = Uri.parse("content://com.android.externalstorage.documents/document/primary:Android/data/com.tencent.mm/WCX/scripts_java")
+            intent.setDataAndType(uri, "resource/folder")
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        }.onFailure {
+            com.Johnny.wcx.utils.android.showToast("请手动打开路径: Android/data/com.tencent.mm/WCX/scripts_java/")
         }
     }
 

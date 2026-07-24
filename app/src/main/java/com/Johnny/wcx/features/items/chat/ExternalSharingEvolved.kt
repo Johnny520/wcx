@@ -18,7 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
-@Feature(name = "分享进化", categories = ["聊天"], description = "让微信的系统分享菜单更易用 (没写完)")
+@Feature(name = "分享进化", categories = ["聊天"], description = "让微信的系统分享菜单更易用，常用好友直达分享")
 object ExternalSharingEvolved : ClickableFeature() {
 
     private const val TAG = "ExternalSharingEvolved"
