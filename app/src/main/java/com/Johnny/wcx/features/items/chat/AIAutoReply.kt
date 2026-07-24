@@ -3,10 +3,13 @@ package com.Johnny.wcx.features.items.chat
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,7 +28,6 @@ import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
-import com.Johnny.wcx.ui.content.SwitchRow
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
@@ -123,15 +125,19 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                         Spacer(Modifier.padding(top = 12.dp))
                         Text("回复设置", style = MaterialTheme.typography.titleSmall)
 
-                        SwitchRow(
-                            checked = localEnablePrivate,
-                            onCheckedChange = { localEnablePrivate = it },
-                            text = "私聊自动回复"
+                        ListItem(
+                            modifier = Modifier.clickable { localEnablePrivate = !localEnablePrivate },
+                            trailingContent = {
+                                Switch(checked = localEnablePrivate, onCheckedChange = null)
+                            },
+                            headlineContent = { Text("私聊自动回复") }
                         )
-                        SwitchRow(
-                            checked = localEnableGroup,
-                            onCheckedChange = { localEnableGroup = it },
-                            text = "群聊自动回复"
+                        ListItem(
+                            modifier = Modifier.clickable { localEnableGroup = !localEnableGroup },
+                            trailingContent = {
+                                Switch(checked = localEnableGroup, onCheckedChange = null)
+                            },
+                            headlineContent = { Text("群聊自动回复") }
                         )
 
                         if (localEnableGroup) {
@@ -190,7 +196,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
         val talker = msgInfo.talker
         val content = msgInfo.content ?: return
-        val isGroup = talker.isGroupChatWxId()
+        val isGroup = talker.isGroupChatWxId
 
         if (isGroup) {
             if (!enableForGroup) return

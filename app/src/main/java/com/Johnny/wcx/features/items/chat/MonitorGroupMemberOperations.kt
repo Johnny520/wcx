@@ -10,14 +10,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -273,21 +272,28 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             var showTemplateEdit by remember { mutableStateOf(false) }
             var editWhich by remember { mutableStateOf(0) }
 
-            val leaveTemplateState = rememberTextFieldState(leaveTemplate)
-            val joinTemplateState = rememberTextFieldState(joinTemplate)
+            var leaveTemplateText by remember { mutableStateOf(leaveTemplate) }
+            var joinTemplateText by remember { mutableStateOf(joinTemplate) }
 
             if (showTemplateEdit) {
                 TemplateEditor(
                     title = if (editWhich == 0) "退群提示模板" else "进群提示模板",
-                    template = if (editWhich == 0) leaveTemplateState else joinTemplateState,
+                    template = if (editWhich == 0) leaveTemplateText else joinTemplateText,
+                    onTemplateChange = { newText ->
+                        if (editWhich == 0) {
+                            leaveTemplateText = newText
+                        } else {
+                            joinTemplateText = newText
+                        }
+                    },
                     onDismiss = { showTemplateEdit = false },
                     onSave = { newTemplate ->
                         if (editWhich == 0) {
                             leaveTemplate = newTemplate
-                            leaveTemplateState.setTextAndPlaceCursorAtEnd(newTemplate)
+                            leaveTemplateText = newTemplate
                         } else {
                             joinTemplate = newTemplate
-                            joinTemplateState.setTextAndPlaceCursorAtEnd(newTemplate)
+                            joinTemplateText = newTemplate
                         }
                         showTemplateEdit = false
                     }
@@ -396,7 +402,8 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     @Composable
     private fun TemplateEditor(
         title: String,
-        template: androidx.compose.foundation.text.input.TextFieldState,
+        template: String,
+        onTemplateChange: (String) -> Unit,
         onDismiss: () -> Unit,
         onSave: (String) -> Unit
     ) {
@@ -405,10 +412,10 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             text = {
                 DefaultColumn {
                     OutlinedTextField(
-                        state = template,
+                        value = template,
+                        onValueChange = onTemplateChange,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 120.dp),
+                            .fillMaxWidth(),
                         label = { Text("模板内容") },
                         minLines = 4
                     )
@@ -422,7 +429,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
             confirmButton = {
-                Button(onClick = { onSave(template.text.toString()) }) { Text("保存") }
+                Button(onClick = { onSave(template) }) { Text("保存") }
             }
         )
     }

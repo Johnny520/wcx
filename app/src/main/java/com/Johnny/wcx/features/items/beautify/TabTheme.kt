@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.compose.ContentScale
 import coil3.load
 import coil3.request.crossfade
 import dev.ujhhgtg.reflekt.reflekt
@@ -67,6 +68,11 @@ import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.fs.createDirsSafe
 import com.Johnny.wcx.utils.nul
 import com.Johnny.wcx.utils.serialization.DefaultJson
+import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlined.Delete
+import com.composables.icons.materialsymbols.outlined.Delete_forever
+import com.composables.icons.materialsymbols.outlined.Download
+import com.composables.icons.materialsymbols.outlined.Wallpaper
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.nio.file.Files
@@ -234,6 +240,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
                 )
             } else {
                 TabThemeSettings(
+                    onDismiss = onDismiss,
                     onOpenThemeList = { showThemeList = true },
                     onSaveAs = { name ->
                         saveCurrentAsTheme(name)
@@ -246,6 +253,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
 
     @Composable
     private fun TabThemeSettings(
+        onDismiss: () -> Unit,
         onOpenThemeList: () -> Unit,
         onSaveAs: (String) -> Unit
     ) {
@@ -366,11 +374,11 @@ object TabTheme : ClickableFeature(), IResolveDex {
                         model = getTabBackgroundFile(tabIndex).toFile(),
                         contentDescription = null,
                         modifier = Modifier.size(48.dp),
-                        contentScale = coil3.compose.ContentScale.Crop
+                        contentScale = ContentScale.Crop
                     )
                 } else {
                     Icon(
-                        imageVector = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Wallpaper,
+                        imageVector = MaterialSymbols.Outlined.Wallpaper,
                         contentDescription = null,
                         modifier = Modifier.size(48.dp),
                         tint = Color.Gray
@@ -388,7 +396,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
                         showToast("已清除 $tabName 背景")
                     }) {
                         Icon(
-                            imageVector = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Delete,
+                            imageVector = MaterialSymbols.Outlined.Delete,
                             contentDescription = "删除"
                         )
                     }
@@ -444,13 +452,13 @@ object TabTheme : ClickableFeature(), IResolveDex {
                                         ) {
                                             IconButton(onClick = { onExport(theme) }) {
                                                 Icon(
-                                                    imageVector = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Download,
+                                                    imageVector = MaterialSymbols.Outlined.Download,
                                                     contentDescription = "导出"
                                                 )
                                             }
                                             IconButton(onClick = { onDelete(theme) }) {
                                                 Icon(
-                                                    imageVector = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Delete_forever,
+                                                    imageVector = MaterialSymbols.Outlined.Delete_forever,
                                                     contentDescription = "删除",
                                                     tint = Color.Red
                                                 )
