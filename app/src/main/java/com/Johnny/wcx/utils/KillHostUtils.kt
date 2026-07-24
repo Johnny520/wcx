@@ -1,7 +1,7 @@
 package com.Johnny.wcx.utils
 
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.utils.android.showToast
 import kotlin.system.exitProcess
 

@@ -77,7 +77,7 @@ import com.composables.icons.materialsymbols.outlinedfilled.Qr_code_scanner
 import com.composables.icons.materialsymbols.outlinedfilled.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Update
 import com.composables.icons.materialsymbols.outlinedfilled.Wallet
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi

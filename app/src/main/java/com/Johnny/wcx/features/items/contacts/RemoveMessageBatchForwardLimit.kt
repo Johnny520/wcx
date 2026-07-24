@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.items.contacts
 
 import android.app.Activity
-import com.Johnny.reflekt.utils.toClassOrNull
+import dev.ujhhgtg.reflekt.utils.toClassOrNull
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger

@@ -1,6 +1,6 @@
 package com.Johnny.wcx.features.api.net
 
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod

@@ -33,9 +33,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.firstMethod
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.firstMethod
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod

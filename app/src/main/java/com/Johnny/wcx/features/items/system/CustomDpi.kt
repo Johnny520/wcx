@@ -12,9 +12,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
-import com.Johnny.reflekt.utils.isStatic
-import com.Johnny.reflekt.utils.makeAccessible
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.utils.isStatic
+import dev.ujhhgtg.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ClickableFeature

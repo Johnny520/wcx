@@ -2,7 +2,7 @@ package com.Johnny.wcx.features.items.chat
 
 import android.view.View
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.WeServiceApi
 import com.Johnny.wcx.features.api.core.models.MessageType

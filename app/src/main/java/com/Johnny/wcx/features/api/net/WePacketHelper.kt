@@ -4,11 +4,11 @@ import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
 import com.tencent.mm.network.v0
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.createInstance
-import com.Johnny.reflekt.utils.isBuiltin
-import com.Johnny.reflekt.utils.isSubclassOf
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.createInstance
+import dev.ujhhgtg.reflekt.utils.isBuiltin
+import dev.ujhhgtg.reflekt.utils.isSubclassOf
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod

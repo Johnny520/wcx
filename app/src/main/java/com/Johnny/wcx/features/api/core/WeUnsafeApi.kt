@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.api.core
 
 import android.annotation.SuppressLint
-import com.Johnny.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import java.lang.reflect.Method

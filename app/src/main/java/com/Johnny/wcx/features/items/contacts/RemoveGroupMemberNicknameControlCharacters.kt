@@ -4,7 +4,7 @@ import android.text.SpannableStringBuilder
 import android.view.View
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature

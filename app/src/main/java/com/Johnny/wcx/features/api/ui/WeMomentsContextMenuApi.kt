@@ -5,8 +5,8 @@ import android.content.Context
 import android.graphics.drawable.Drawable
 import android.view.ContextMenu
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.Modifiers
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.DexMethodDelegate
 import com.Johnny.wcx.dexkit.dsl.dexMethod

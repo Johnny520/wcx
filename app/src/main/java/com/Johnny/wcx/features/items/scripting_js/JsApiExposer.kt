@@ -3,9 +3,9 @@ package com.Johnny.wcx.features.items.scripting_js
 import android.os.Handler
 import android.os.Looper
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.utils.createInstance
-import com.Johnny.reflekt.utils.makeAccessible
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.utils.createInstance
+import dev.ujhhgtg.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.net.WePacketHelper

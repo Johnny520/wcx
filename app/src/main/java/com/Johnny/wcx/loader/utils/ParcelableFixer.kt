@@ -3,7 +3,7 @@ package com.Johnny.wcx.loader.utils
 import android.content.Intent
 import android.os.Bundle
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.hookDirectly
 import com.Johnny.wcx.utils.reflection.BString

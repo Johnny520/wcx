@@ -1,7 +1,7 @@
 package com.Johnny.wcx.dexkit
 
-import com.Johnny.reflekt.utils.isPrivate
-import com.Johnny.reflekt.utils.isStatic
+import dev.ujhhgtg.reflekt.utils.isPrivate
+import dev.ujhhgtg.reflekt.utils.isStatic
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 

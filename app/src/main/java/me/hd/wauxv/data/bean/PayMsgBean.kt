@@ -1,7 +1,7 @@
 package me.hd.wauxv.data.bean
 
 import androidx.annotation.Keep
-import com.Johnny.reflekt.spec.typeMatches
+import dev.ujhhgtg.reflekt.spec.typeMatches
 import com.Johnny.wcx.utils.reflection.int
 
 @Keep

@@ -62,9 +62,9 @@ import com.composables.icons.materialsymbols.outlinedfilled.Contacts
 import com.composables.icons.materialsymbols.outlinedfilled.Explore
 import com.composables.icons.materialsymbols.outlinedfilled.Home
 import com.composables.icons.materialsymbols.outlinedfilled.Person
-import com.Johnny.reflekt.firstMethod
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.firstMethod
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi

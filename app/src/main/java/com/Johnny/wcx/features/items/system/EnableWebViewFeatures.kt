@@ -3,7 +3,7 @@ package com.Johnny.wcx.features.items.system
 import android.app.Activity
 import android.content.Intent
 import com.tencent.mm.plugin.webview.ui.tools.WebViewUI
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature

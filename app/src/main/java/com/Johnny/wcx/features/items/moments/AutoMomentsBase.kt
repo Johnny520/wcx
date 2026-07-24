@@ -6,8 +6,8 @@ import android.view.ViewGroup
 import com.tencent.mm.plugin.sns.ui.SnsUserUI
 import com.tencent.mm.plugin.sns.ui.improve.ImproveSnsTimelineUI
 import com.tencent.mm.view.recyclerview.WxRecyclerView
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.isSubclassOf
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.isSubclassOf
 import com.Johnny.wcx.features.api.ui.WeMomentsApi
 import com.Johnny.wcx.features.api.ui.WeMomentsApi.classImproveInteractionLayout
 import com.Johnny.wcx.features.api.ui.WeMomentsApi.classImproveSnsInfo

@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.items.miniapps
 
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import org.json.JSONObject

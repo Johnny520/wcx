@@ -4,8 +4,8 @@ package com.Johnny.wcx.utils
 
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
-import com.Johnny.reflekt.reflected.BaseReflectedMethod
-import com.Johnny.reflekt.reflected.ReflectedConstructor
+import dev.ujhhgtg.reflekt.reflected.BaseReflectedMethod
+import dev.ujhhgtg.reflekt.reflected.ReflectedConstructor
 import java.lang.reflect.Executable
 
 typealias HookAction = XC_MethodHook.MethodHookParam.() -> Unit

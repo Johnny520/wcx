@@ -1,8 +1,8 @@
 package com.Johnny.wcx.features.api.core
 
 import android.content.Context
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.Modifiers
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod

@@ -6,7 +6,7 @@ import android.content.pm.ApplicationInfo
 import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature

@@ -3,8 +3,8 @@ package com.Johnny.wcx.features.api.core
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import com.tencent.wcdb.database.SQLiteDatabase
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.constants.WeChatVersions
 import com.Johnny.wcx.features.core.ApiFeature

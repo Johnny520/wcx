@@ -7,10 +7,10 @@ import com.tencent.mm.chatroom.ui.ChatroomInfoUI
 import com.tencent.mm.plugin.profile.ui.ContactInfoUI
 import com.tencent.mm.ui.base.preference.MMPreference
 import com.tencent.mm.ui.base.preference.Preference
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.Modifiers
-import com.Johnny.reflekt.utils.isSubclassOf
-import com.Johnny.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.Modifiers
+import dev.ujhhgtg.reflekt.utils.isSubclassOf
+import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.WeLogger

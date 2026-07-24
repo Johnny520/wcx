@@ -5,9 +5,9 @@ import android.content.Context
 import androidx.annotation.Keep
 import com.android.dx.stock.ProxyBuilder
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.createInstance
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.createInstance
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.loader.utils.ParcelableFixer
 import com.Johnny.wcx.utils.hookAfterDirectly
 import com.Johnny.wcx.utils.hookBeforeDirectly

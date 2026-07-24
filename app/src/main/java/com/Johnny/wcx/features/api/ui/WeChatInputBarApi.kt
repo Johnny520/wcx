@@ -3,7 +3,7 @@ package com.Johnny.wcx.features.api.ui
 import android.text.Editable
 import android.text.TextWatcher
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.ui.WeChatInputBarApi.addListener
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature

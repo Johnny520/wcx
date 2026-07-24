@@ -2,7 +2,7 @@ package me.hd.wauxv.data.bean
 
 import androidx.annotation.Keep
 import com.alibaba.fastjson2.JSONObject
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 
 @Suppress("unused")
 @Keep

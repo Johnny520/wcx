@@ -1,7 +1,7 @@
 package com.Johnny.wcx.utils.reflection
 
 import android.content.Context
-import com.Johnny.reflekt.utils.ReflectionClassLoader
+import dev.ujhhgtg.reflekt.utils.ReflectionClassLoader
 import com.Johnny.wcx.loader.utils.HybridClassLoader
 
 object ClassLoaders {

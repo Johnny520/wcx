@@ -40,9 +40,9 @@ import com.tencent.mm.ui.conversation.BaseConversationUI
 import com.tencent.mm.ui.conversation.ConvBoxServiceConversationUI
 import com.tencent.mm.ui.conversation.MainUI
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.Modifiers
-import com.Johnny.reflekt.utils.isSubclassOf
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.Modifiers
+import dev.ujhhgtg.reflekt.utils.isSubclassOf
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.core.WeConversationApi

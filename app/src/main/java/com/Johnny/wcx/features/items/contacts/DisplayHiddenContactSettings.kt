@@ -2,7 +2,7 @@ package com.Johnny.wcx.features.items.contacts
 
 import android.widget.BaseAdapter
 import com.tencent.mm.plugin.profile.ui.ProfileSettingUI
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 

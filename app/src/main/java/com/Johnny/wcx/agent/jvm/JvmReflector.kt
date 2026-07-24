@@ -2,7 +2,7 @@
 
 package com.Johnny.wcx.agent.jvm
 
-import com.Johnny.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.utils.makeAccessible
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method

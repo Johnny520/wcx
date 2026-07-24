@@ -4,8 +4,8 @@ import android.view.View
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import com.tencent.mm.plugin.setting.ui.setting.SettingsAboutMMHeaderPreference
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.createInstance
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.createInstance
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ClickableFeature

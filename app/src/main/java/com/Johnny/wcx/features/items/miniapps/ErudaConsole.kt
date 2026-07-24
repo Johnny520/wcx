@@ -2,7 +2,7 @@ package com.Johnny.wcx.features.items.miniapps
 
 import android.webkit.ValueCallback
 import android.webkit.WebView
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.eruda.ErudaProvider

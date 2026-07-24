@@ -21,7 +21,7 @@ import android.os.PersistableBundle
 import android.os.TestLooperManager
 import android.view.KeyEvent
 import android.view.MotionEvent
-import com.Johnny.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger

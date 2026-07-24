@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.api.ui
 
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import java.lang.ref.WeakReference

@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.items.payment
 
 import android.app.Activity
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 

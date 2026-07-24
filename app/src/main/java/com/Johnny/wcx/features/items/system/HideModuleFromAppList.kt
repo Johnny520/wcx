@@ -3,7 +3,7 @@ package com.Johnny.wcx.features.items.system
 import android.app.ApplicationPackageManager
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature

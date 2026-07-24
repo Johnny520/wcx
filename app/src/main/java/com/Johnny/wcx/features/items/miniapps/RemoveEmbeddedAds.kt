@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.items.miniapps
 
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.isBuiltin
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.isBuiltin
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexConstructor
 import com.Johnny.wcx.dexkit.dsl.dexMethod

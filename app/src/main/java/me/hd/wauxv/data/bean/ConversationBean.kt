@@ -1,7 +1,7 @@
 package me.hd.wauxv.data.bean
 
 import androidx.annotation.Keep
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 
 @Suppress("unused")
 @Keep

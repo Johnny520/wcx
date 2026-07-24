@@ -3,7 +3,7 @@ package com.Johnny.wcx.agent.jvm
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.Keep
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.utils.reflection.ClassLoaders
 import com.Johnny.wcx.utils.reflection.bool
 import com.Johnny.wcx.utils.reflection.byte

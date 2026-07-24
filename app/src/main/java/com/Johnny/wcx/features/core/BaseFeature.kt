@@ -5,9 +5,9 @@ package com.Johnny.wcx.features.core
 import androidx.compose.runtime.Composable
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
-import com.Johnny.reflekt.reflected.BaseReflectedMethod
-import com.Johnny.reflekt.reflected.ReflectedConstructor
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflected.BaseReflectedMethod
+import dev.ujhhgtg.reflekt.reflected.ReflectedConstructor
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.dsl.BaseDexDelegate
 import com.Johnny.wcx.dexkit.dsl.DexConstructorDelegate
 import com.Johnny.wcx.dexkit.dsl.DexMethodDelegate

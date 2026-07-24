@@ -3,9 +3,9 @@ package com.Johnny.wcx.features.items.moments
 import android.content.ContentValues
 import android.database.Cursor
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.Modifiers
-import com.Johnny.reflekt.utils.isBuiltin
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.Modifiers
+import dev.ujhhgtg.reflekt.utils.isBuiltin
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.net.models.protobuf.SnsCommentActionProto

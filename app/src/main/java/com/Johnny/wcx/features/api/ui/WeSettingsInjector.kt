@@ -16,9 +16,9 @@ import com.tencent.mm.plugin.setting.ui.setting_new.settings.SettingGroupPersona
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import com.tencent.mm.ui.LauncherUI
 import com.tencent.mm.ui.base.preference.IconPreference
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.isBuiltin
-import com.Johnny.reflekt.utils.toClassOrNull
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.isBuiltin
+import dev.ujhhgtg.reflekt.utils.toClassOrNull
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.constants.PackageNames

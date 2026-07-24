@@ -3,7 +3,7 @@
 package com.Johnny.wcx.features.api.core.models
 
 import android.content.ContentValues
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.utils.WeLogger

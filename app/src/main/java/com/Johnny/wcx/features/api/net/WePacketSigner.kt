@@ -1,6 +1,6 @@
 package com.Johnny.wcx.features.api.net
 
-import com.Johnny.reflekt.utils.createInstance
+import dev.ujhhgtg.reflekt.utils.createInstance
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.net.MsgIdPreviewer.generateClientMsgId
 import com.Johnny.wcx.features.api.net.MsgIdPreviewer.previewNextId

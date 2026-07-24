@@ -27,7 +27,7 @@ import com.composables.icons.materialsymbols.outlinedfilled.Visibility
 import com.composables.icons.materialsymbols.outlinedfilled.Visibility_off
 import com.tencent.mm.plugin.fingerprint.ui.FingerPrintAuthTransparentUI
 import com.tenpay.android.wechat.MyKeyboardWindow
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature

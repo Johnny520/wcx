@@ -2,8 +2,8 @@
 
 package com.Johnny.wcx.dexkit.dsl
 
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClassOrNull
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClassOrNull
 import com.Johnny.wcx.dexkit.DexMethodDescriptor
 import com.Johnny.wcx.features.core.BaseFeature
 import com.Johnny.wcx.utils.WeLogger

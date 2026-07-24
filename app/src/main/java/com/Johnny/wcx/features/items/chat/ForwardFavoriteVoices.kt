@@ -3,8 +3,8 @@ package com.Johnny.wcx.features.items.chat
 import android.app.Activity
 import android.view.View
 import androidx.compose.material3.Text
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.net.models.protobuf.FavInfoProto
 import com.Johnny.wcx.features.api.ui.WeCurrentConversationApi

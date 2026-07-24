@@ -1,7 +1,7 @@
 package com.Johnny.wcx.utils.reflection
 
 import com.android.dx.stock.ProxyBuilder
-import com.Johnny.reflekt.reflekt
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.fs.createDirsSafe
 import com.Johnny.wcx.utils.hookAfterDirectly

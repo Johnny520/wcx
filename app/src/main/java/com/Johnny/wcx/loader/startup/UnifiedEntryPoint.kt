@@ -2,8 +2,8 @@ package com.Johnny.wcx.loader.startup
 
 import android.app.Application
 import android.content.Context
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.abc.ILoaderService
 import com.Johnny.wcx.loader.utils.HybridClassLoader

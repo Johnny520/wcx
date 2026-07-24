@@ -4,8 +4,8 @@ import android.view.View
 import android.widget.TextView
 import com.tencent.mm.plugin.setting.ui.setting.EditSignatureUI
 import de.robv.android.xposed.XC_MethodHook
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod

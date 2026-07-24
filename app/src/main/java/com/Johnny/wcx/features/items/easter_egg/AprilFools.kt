@@ -11,9 +11,9 @@ import android.view.animation.LinearInterpolator
 import android.widget.ImageView
 import android.widget.TextView
 import com.tencent.mm.ui.base.NoMeasuredTextView
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.makeAccessible
-import com.Johnny.reflekt.utils.toClass
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.features.core.BaseFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.preferences.WePrefs

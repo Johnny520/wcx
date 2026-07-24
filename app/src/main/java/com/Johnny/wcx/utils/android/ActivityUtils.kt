@@ -7,7 +7,7 @@ import android.app.Activity
 import android.app.ActivityThread
 import android.os.IBinder
 import android.util.ArrayMap
-import com.Johnny.reflekt.utils.makeAccessible
+import dev.ujhhgtg.reflekt.utils.makeAccessible
 import com.Johnny.wcx.utils.WeLogger
 
 private val mActivitiesField = ActivityThread::class.java.getDeclaredField("mActivities").makeAccessible()

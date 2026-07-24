@@ -33,8 +33,8 @@ import androidx.core.view.isVisible
 import androidx.core.view.postDelayed
 import coil3.load
 import coil3.request.crossfade
-import com.Johnny.reflekt.reflekt
-import com.Johnny.reflekt.utils.Modifiers
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.dexkit.abc.IResolveDex
