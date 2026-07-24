@@ -3,6 +3,11 @@ package com.Johnny.wcx.features.items.batch
 import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -45,9 +50,9 @@ object ExportChatHistory : ClickableFeature() {
         val contacts = WeDatabaseApi.getFriends() + WeDatabaseApi.getGroups()
 
         showComposeDialog(context) {
-            var selectedWxIds = emptySet<String>()
-            var step = 0
-            var selectedFormat = ExportFormat.TXT
+            var selectedWxIds by remember { mutableStateOf(emptySet<String>()) }
+            var step by remember { mutableIntStateOf(0) }
+            var selectedFormat by remember { mutableStateOf(ExportFormat.TXT) }
 
             if (step == 0) {
                 ContactsSelector(
