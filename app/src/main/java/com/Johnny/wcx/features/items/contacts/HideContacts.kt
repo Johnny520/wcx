@@ -189,18 +189,21 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
         // source means the adapter never sees the row, so there is no flash at all.
         hookNewMessageNotification()
 
+        runCatching {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            HostInfo.application.registerReceiver(ScreenOffReceiver, filter)
+            WeLogger.d(TAG, "registered screen off receiver")
+        }
+
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
             migrateLegacyHiddenParentRef()
 
             val context = thisObject.reflekt()
                 .firstField { type { it isSubclassOf Activity::class } }
                 .get()!! as Activity
-            val filter = IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_OFF)
-                addAction(Intent.ACTION_USER_PRESENT)
-            }
-            context.registerReceiver(ScreenOffReceiver, filter)
-            WeLogger.d(TAG, "registered screen off receiver")
 
             // Triple-click on the main-screen title to toggle temporary show/hide.
             val titleView = context.window?.decorView
@@ -246,8 +249,10 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             if (temporarilyShown) return@hookBefore
 
             val contacts = args[0] as MutableList<*>
+            if (contacts.isEmpty()) return@hookBefore
 
-            val contactInfoField = contacts[0]!!.reflekt()
+            val firstContact = contacts[0] ?: return@hookBefore
+            val contactInfoField = firstContact.reflekt()
                 .firstField { type { it.name.startsWith("${PackageNames.WECHAT}.storage") } }
                 .self
             val usernameField = contactInfoField.type.reflekt()
@@ -259,8 +264,8 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             val hiddenContacts = hiddenContacts
 
             contacts.removeAll { contact ->
-                val contactInfo = contactInfoField.get(contact!!)
-                val username = usernameField.get(contactInfo) as String
+                val contactInfo = contactInfoField.get(contact ?: return@removeAll false)
+                val username = usernameField.get(contactInfo) as? String ?: return@removeAll false
                 username in hiddenContacts
             }
         }

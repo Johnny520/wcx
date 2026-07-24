@@ -241,6 +241,7 @@ class PipVoipActivity : ComponentActivity() {
 
 class PipVoipActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        PipVoipActivity.current!!.handleAction(intent.action!!)
+        val action = intent.action ?: return
+        PipVoipActivity.current?.handleAction(action)
     }
 }

@@ -31,31 +31,35 @@ object AutoCleanCache : ClickableFeature() {
     private var cleanJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val cleanPaths = run {
-        val paths = mutableListOf<Path>()
+    private val cleanPaths: List<Path>
+        get() {
+            val paths = mutableListOf<Path>()
 
-        val dataDir = HostInfo.application.filesDir.parentFile!!.toPath()
-        val storageDataDir = HostInfo.application.externalCacheDir!!.toPath().parent!!
+            val dataDir = HostInfo.application.filesDir.parentFile?.toPath() ?: return paths
+            paths.add(dataDir / "cache")
+            paths.add(dataDir / "MicroMsg" / "crash")
+            paths.add(dataDir / "appbrand")
+            paths.add(dataDir / "cache" / "appbrand")
+            paths.add(dataDir / "MicroMsg" / "appbrand")
+            paths.add(dataDir / "cache" / "liteapp")
+            paths.add(dataDir / "files" / "liteapp")
+            paths.add(dataDir / "tinker")
+            paths.add(dataDir / "tinker_server")
+            paths.add(dataDir / "tinker_temp")
 
-        paths.add(dataDir / "cache")
-        paths.add(dataDir / "MicroMsg" / "crash")
-        paths.add(dataDir / "appbrand")
-        paths.add(dataDir / "cache" / "appbrand")
-        paths.add(dataDir / "MicroMsg" / "appbrand")
-        paths.add(dataDir / "cache" / "liteapp")
-        paths.add(dataDir / "files" / "liteapp")
-        paths.add(dataDir / "tinker")
-        paths.add(dataDir / "tinker_server")
-        paths.add(dataDir / "tinker_temp")
-        paths.add(storageDataDir / "cache")
-        paths.add(storageDataDir / "files" / "xlog")
-        paths.add(storageDataDir / "files" / "onelog")
-        paths.add(storageDataDir / "files" / "tbslog")
-        paths.add(storageDataDir / "files" / "Tencent" / "tbs_common_log")
-        paths.add(storageDataDir / "files" / "Tencent" / "tbs_live_log")
+            val externalCacheDir = HostInfo.application.externalCacheDir
+            if (externalCacheDir != null) {
+                val storageDataDir = externalCacheDir.toPath().parent ?: return paths
+                paths.add(storageDataDir / "cache")
+                paths.add(storageDataDir / "files" / "xlog")
+                paths.add(storageDataDir / "files" / "onelog")
+                paths.add(storageDataDir / "files" / "tbslog")
+                paths.add(storageDataDir / "files" / "Tencent" / "tbs_common_log")
+                paths.add(storageDataDir / "files" / "Tencent" / "tbs_live_log")
+            }
 
-        return@run paths
-    }
+            return paths
+        }
 
     override fun onEnable() {
         startCleaningJob()

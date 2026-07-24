@@ -490,7 +490,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
     }
 
     private fun removeSession(activity: Activity) {
-        if (sessions.remove(activity)!!.pipActive) closePipActivity(activity)
+        if (sessions.remove(activity)?.pipActive == true) closePipActivity(activity)
     }
 
     private fun closePipActivity(context: Context) {
