@@ -36,3 +36,4 @@ local.properties
 /app/src/main/java/com/Johnny/wcx/features/items/debug/Experiments2.kt
 /app/src/main/java/com/Johnny/wcx/features/items/debug/LoadWeChatXDex.kt
 /app/src/main/java/com/Johnny/wcx/features/items/debug/MTH7851.kt
+dist/
