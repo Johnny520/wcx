@@ -112,8 +112,10 @@ jobs:
             echo "Project keystore unreadable, generating a fresh one."
           fi
 
+          rm -f "$KS_FILE"
           keytool -genkeypair -v \
             -keystore "$KS_FILE" \
+            -storetype PKCS12 \
             -alias "$KEY_ALIAS" \
             -keyalg RSA -keysize 2048 \
             -validity 10000 \
@@ -123,6 +125,8 @@ jobs:
           echo "KS_PASS=$KS_PASS"      >> "$GITHUB_ENV"
           echo "KEY_ALIAS=$KEY_ALIAS"  >> "$GITHUB_ENV"
           echo "KEY_PASS=$KEY_PASS"    >> "$GITHUB_ENV"
+          # Verify the generated keystore is readable
+          keytool -list -keystore "$KS_FILE" -storepass "$KS_PASS" -alias "$KEY_ALIAS"
 
       - name: Build Release (Signed)
         if: github.event_name != 'pull_request'
