@@ -797,10 +797,10 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
 
     fun postTextAndVideo(context: Context, text: String, videoPath: String, thumbPath: String, sdkId: String? = null, sdkAppName: String? = null): Boolean {
         return try {
-            val tempVideo = KnownPaths.moduleCache / "wekit_moments_temp_${System.currentTimeMillis()}.mp4"
+            val tempVideo = KnownPaths.moduleCache / "wcx_moments_temp_${System.currentTimeMillis()}.mp4"
             val tempVideoPath = tempVideo.absolutePathString()
 
-            val tempThumb = KnownPaths.moduleCache / "wekit_moments_temp_${System.currentTimeMillis()}.jpg"
+            val tempThumb = KnownPaths.moduleCache / "wcx_moments_temp_${System.currentTimeMillis()}.jpg"
             val tempThumbPath = tempThumb.absolutePathString()
             if (!copyExistingFile(thumbPath, tempThumbPath)) return false
 
@@ -1249,7 +1249,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
 
     private fun generateVideoThumb(context: Context, videoPath: String): String? {
         return runCatching {
-            val localVideo = KnownPaths.moduleCache / "wekit_moments_thumb_src_${System.currentTimeMillis()}.mp4"
+            val localVideo = KnownPaths.moduleCache / "wcx_moments_thumb_src_${System.currentTimeMillis()}.mp4"
             val localVideoPath = localVideo.absolutePathString()
             val sourcePath = if (videoPath.asPath.isRegularFile()) {
                 videoPath
@@ -1258,7 +1258,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
                 localVideoPath
             }
 
-            val thumbFile = KnownPaths.moduleCache / "wekit_moments_thumb_${System.currentTimeMillis()}.jpg"
+            val thumbFile = KnownPaths.moduleCache / "wcx_moments_thumb_${System.currentTimeMillis()}.jpg"
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(sourcePath)
@@ -1283,7 +1283,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
         val localVideo = if (isRegularFile) {
             null
         } else {
-            KnownPaths.moduleCache / "wekit_moments_probe_${System.currentTimeMillis()}.mp4"
+            KnownPaths.moduleCache / "wcx_moments_probe_${System.currentTimeMillis()}.mp4"
         }
         val sourcePath = localVideo?.let { file ->
             if (!copyExistingFile(path, file.absolutePathString())) return false
@@ -1618,8 +1618,8 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     private fun resolveLivePhotoFieldAccessors(): LivePhotoFieldAccessors {
         val probe = galleryLivePhotoMediaItemCtor.newInstance(
             -1L,
-            "wekit_live_probe_video",
-            "wekit_live_probe_cover",
+            "wcx_live_probe_video",
+            "wcx_live_probe_cover",
             MIME_IMAGE_JPEG
         )
         val intRoles = mutableMapOf<String, Field>()
@@ -1676,7 +1676,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             val sourcePath = if (videoPath.asPath.isRegularFile()) {
                 videoPath
             } else {
-                val temp = KnownPaths.moduleCache / "wekit_moments_probe_live_${System.currentTimeMillis()}.mp4"
+                val temp = KnownPaths.moduleCache / "wcx_moments_probe_live_${System.currentTimeMillis()}.mp4"
                 if (!copyExistingFile(videoPath, temp.absolutePathString())) return@runCatching
                 tempVideo = temp
                 temp.absolutePathString()
@@ -2085,7 +2085,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             // 已是可读的真实文件则直接用
             if (regularFileSize(srcPath) > 0L) return srcPath
 
-            val dest = KnownPaths.moduleCache / "wekit_moments_img_${System.currentTimeMillis()}_$index.jpg"
+            val dest = KnownPaths.moduleCache / "wcx_moments_img_${System.currentTimeMillis()}_$index.jpg"
             val destPath = dest.absolutePathString()
             if (!copyExistingFile(srcPath, destPath)) {
                 WeLogger.e(TAG, "materialize failed (copy): $srcPath")
@@ -2102,7 +2102,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
 
     fun materializeVideoToTemp(context: Context, srcPath: String, index: Int = 0): String? {
         return runCatching {
-            val dest = KnownPaths.moduleCache / "wekit_moments_video_${System.currentTimeMillis()}_$index.mp4"
+            val dest = KnownPaths.moduleCache / "wcx_moments_video_${System.currentTimeMillis()}_$index.mp4"
             val destPath = dest.absolutePathString()
             if (!copyExistingFile(srcPath, destPath)) {
                 WeLogger.e(TAG, "failed to materialize Moments video to cache: $srcPath")

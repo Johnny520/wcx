@@ -52,7 +52,7 @@ import kotlinx.serialization.protobuf.ProtoBuf
 @Feature(
     name = "进退群提示增强",
     categories = ["联系人与群组"],
-    description = "监控群成员进退群，支持自定义提示模板、仅本地可见、自动获取昵称和ID"
+    description = "监控群成员进退群，自动发送提示消息到群里，支持自定义模板、自动获取昵称和ID"
 )
 object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     WeDatabaseListenerApi.IUpdateListener, WeDatabaseListenerApi.IInsertListener {
@@ -180,51 +180,21 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     }
 
     private fun sendLeaveNotification(group: String, wxId: String, displayName: String) {
-        val displayString = if (displayName.isNotEmpty() && displayName != wxId) {
-            "$displayName ($wxId)"
-        } else wxId
-
         val content = leaveTemplate
             .replace("{displayName}", displayName)
             .replace("{wxId}", wxId)
             .replace("{group}", group)
 
-        val href = "weixin://weixinhongbao/wekit/chatroom_userinfo/$wxId"
-        val linkedContent = """<_wc_custom_link_ color="#28C445" href="$href">$displayString</_wc_custom_link_> ${content.substringAfter(displayString).trimStart()}"""
-
-        val finalContent = if (content.contains(displayString)) {
-            content.replaceFirst(displayString, """<_wc_custom_link_ color="#28C445" href="$href">$displayString</_wc_custom_link_>""")
-        } else content
-
-        WeMessageApi.createSimpleMsgInfoAndInsert(
-            type = MessageType.SYSTEM.code,
-            talker = group,
-            content = finalContent,
-            currentTime = System.currentTimeMillis()
-        )
+        WeMessageApi.sendText(group, content)
     }
 
     private fun sendJoinNotification(group: String, wxId: String, displayName: String) {
-        val displayString = if (displayName.isNotEmpty() && displayName != wxId) {
-            "$displayName ($wxId)"
-        } else wxId
-
-        val href = "weixin://weixinhongbao/wekit/chatroom_userinfo/$wxId"
         val content = joinTemplate
             .replace("{displayName}", displayName)
             .replace("{wxId}", wxId)
             .replace("{group}", group)
 
-        val finalContent = if (content.contains(displayString)) {
-            content.replaceFirst(displayString, """<_wc_custom_link_ color="#28C445" href="$href">$displayString</_wc_custom_link_>""")
-        } else content
-
-        WeMessageApi.createSimpleMsgInfoAndInsert(
-            type = MessageType.SYSTEM.code,
-            talker = group,
-            content = finalContent,
-            currentTime = System.currentTimeMillis()
-        )
+        WeMessageApi.sendText(group, content)
     }
 
     private fun handleDisplayNameChange(group: String, origDisplayNames: Map<String, String>, newRoomData: ByteArray?) {
