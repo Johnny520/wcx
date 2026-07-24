@@ -95,18 +95,19 @@ jobs:
           # Try the project keystore first; fall back to a freshly generated one
           # if the stored keystore is missing or incompatible with the CI JDK.
           KS_FILE="$RUNNER_TEMP/wekit-keystore.jks"
+          CRED_FILE="$RUNNER_TEMP/keystore-creds.env"
           KS_PASS="wcx-store-pass"
           KEY_ALIAS="wcx"
-          KEY_PASS="wcx-key-pass"
+          KEY_PASS="wcx-store-pass"
 
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KS_FILE" 2>/dev/null || true
             if keytool -list -keystore "$KS_FILE" -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
                  -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
               echo "Using project keystore."
-              echo "KS_PASS=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
-              echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$GITHUB_ENV"
-              echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$GITHUB_ENV"
+              echo "KS_PASS=${{ secrets.KEYSTORE_PASSWORD }}" > "$CRED_FILE"
+              echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$CRED_FILE"
+              echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$CRED_FILE"
               exit 0
             fi
             echo "Project keystore unreadable, generating a fresh one."
@@ -122,10 +123,9 @@ jobs:
             -storepass "$KS_PASS" \
             -keypass "$KEY_PASS" \
             -dname "CN=wcx, OU=CI, O=Johnny520, L=CI, S=CI, C=CN"
-          echo "KS_PASS=$KS_PASS"      >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=$KEY_ALIAS"  >> "$GITHUB_ENV"
-          echo "KEY_PASS=$KEY_PASS"    >> "$GITHUB_ENV"
-          # Verify the generated keystore is readable
+          echo "KS_PASS=$KS_PASS" > "$CRED_FILE"
+          echo "KEY_ALIAS=$KEY_ALIAS" >> "$CRED_FILE"
+          echo "KEY_PASS=$KEY_PASS" >> "$CRED_FILE"
           keytool -list -keystore "$KS_FILE" -storepass "$KS_PASS" -alias "$KEY_ALIAS"
 
       - name: Build Release (Signed)
@@ -133,10 +133,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WEKIT_KEYSTORE_FILE: ${{ runner.temp }}/wekit-keystore.jks
-          WEKIT_KEYSTORE_PASSWORD: ${{ env.KS_PASS }}
-          WEKIT_KEY_ALIAS: ${{ env.KEY_ALIAS }}
-          WEKIT_KEY_PASSWORD: ${{ env.KEY_PASS }}
-        run: ./gradlew assembleRelease --warning-mode all --stacktrace
+        run: |
+          source "$RUNNER_TEMP/keystore-creds.env"
+          export WEKIT_KEYSTORE_PASSWORD="$KS_PASS"
+          export WEKIT_KEY_ALIAS="$KEY_ALIAS"
+          export WEKIT_KEY_PASSWORD="$KEY_PASS"
+          ./gradlew assembleRelease --warning-mode all --stacktrace
 
       - name: Build Release (Unsigned)
         if: github.event_name == 'pull_request'
