@@ -101,7 +101,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
 
-    private var enabled by prefOption("tab_theme_enabled", false)
+    private var tabThemeEnabled by prefOption("tab_theme_enabled", false)
     private var opacity by prefOption("tab_theme_opacity", 0.15f)
 
     @Serializable
@@ -140,7 +140,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
     }
 
     override fun onEnable() {
-        if (!enabled) return
+        if (!tabThemeEnabled) return
         applyTheme()
     }
 
@@ -258,7 +258,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
         onSaveAs: (String) -> Unit
     ) {
         val config = remember { loadConfig() }
-        var enabledState by remember { mutableStateOf(enabled) }
+        var enabledState by remember { mutableStateOf(tabThemeEnabled) }
         var opacityState by remember { mutableFloatStateOf(opacity) }
         var showSaveDialog by remember { mutableStateOf(false) }
         var saveName by remember { mutableStateOf(config.name.ifEmpty { "我的主题" }) }
@@ -322,7 +322,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
             dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
             confirmButton = {
                 Button(onClick = {
-                    enabled = enabledState
+                    tabThemeEnabled = enabledState
                     opacity = opacityState
                     if (enabledState) {
                         showToast("设置已保存，重启微信生效")
