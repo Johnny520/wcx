@@ -340,7 +340,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                             ListItem(
                                 modifier = Modifier.clickable {
                                     editWhich = 0
-                                    leaveTemplateState.setTextAndPlaceCursorAtEnd(leaveTemplate)
+                                    leaveTemplateText = leaveTemplate
                                     showTemplateEdit = true
                                 },
                                 headlineContent = { Text("退群提示模板") },
@@ -356,7 +356,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                             ListItem(
                                 modifier = Modifier.clickable {
                                     editWhich = 1
-                                    joinTemplateState.setTextAndPlaceCursorAtEnd(joinTemplate)
+                                    joinTemplateText = joinTemplate
                                     showTemplateEdit = true
                                 },
                                 headlineContent = { Text("进群提示模板") },
