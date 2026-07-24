@@ -314,7 +314,7 @@ private fun ErrorDetailsSection(
 }
 
 private fun buildErrorReport(failedResults: List<ScanResult.Failed>) = buildString {
-    append("=== WeKit Dex 扫描错误报告 ===\n\n")
+    append("=== WCX Dex 扫描错误报告 ===\n\n")
     failedResults.forEachIndexed { i, r ->
         append("${i + 1}. ${r.displayName}\n")
         append("   错误信息: ${r.error.message}\n")

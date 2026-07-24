@@ -227,9 +227,9 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     .filter { it.isSupported(msgInfoWrapper) }
 
                 if (MergeChatMessageContextMenuItems.isEnabled) {
-                    // collapse everything into a single "WeKit" entry backed by a Compose dialog
+                    // collapse everything into a single "WCX" entry backed by a Compose dialog
                     if (applicableItems.isNotEmpty()) {
-                        addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WeKit", ExtensionIcon)
+                        addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
                     }
                 } else {
                     for (item in applicableItems) {
@@ -294,8 +294,8 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                         returnType = android.view.MenuItem::class
                     }
 
-                // collapse everything into a single "WeKit" entry backed by a Compose dialog
-                addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WeKit", ExtensionIcon)
+                // collapse everything into a single "WCX" entry backed by a Compose dialog
+                addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
             } catch (ex: Throwable) {
                 WeLogger.e(
                     TAG,
@@ -337,7 +337,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
     ) {
         showComposeDialog(view.context) {
             AlertDialogContent(
-                title = { Text("WeKit") },
+                title = { Text("WCX") },
                 text = {
                     LazyColumn(
                         Modifier
@@ -414,13 +414,13 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
 
         if (adaptedRows.isEmpty() && autoRows.isEmpty()) {
-            showToast("没有可用于所选消息的 WeKit 菜单项")
+            showToast("没有可用于所选消息的 WCX 菜单项")
             return
         }
 
         showComposeDialog(view.context) {
             AlertDialogContent(
-                title = { Text("WeKit (${msgInfos.size} 条消息)") },
+                title = { Text("WCX (${msgInfos.size} 条消息)") },
                 text = {
                     LazyColumn(
                         Modifier

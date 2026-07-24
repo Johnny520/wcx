@@ -129,7 +129,7 @@ object AppUpdater {
      */
     suspend fun downloadAndInstall(context: Context, info: UpdateInfo) {
         val apkUrl = apkUrlForDevice()
-        val fileName = "wekit-${info.versionName}.apk"
+        val fileName = "wcx-${info.versionName}.apk"
 
         val downloadId = enqueueDownload(context, apkUrl, fileName)
         val apkFile = waitForDownload(context, downloadId)
@@ -152,7 +152,7 @@ object AppUpdater {
 
     private fun enqueueDownload(context: Context, url: String, fileName: String): Long {
         val request = DownloadManager.Request(url.toUri()).apply {
-            setTitle("WeKit 更新")
+            setTitle("WCX 更新")
             setDescription("正在下载更新...")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)

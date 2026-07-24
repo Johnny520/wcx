@@ -45,7 +45,9 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,6 +79,7 @@ import com.composables.icons.materialsymbols.outlinedfilled.Qr_code_scanner
 import com.composables.icons.materialsymbols.outlinedfilled.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Update
 import com.composables.icons.materialsymbols.outlinedfilled.Wallet
+import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.features.api.core.WeConversationApi
@@ -201,7 +204,28 @@ object AddMainScreenFab : ClickableFeature() {
                 }
                 .get()!! as Activity
 
-            // 动态解析已经保存的配置生成菜单项目
+            val viewPager = thisObject.reflekt()
+                .firstField {
+                    name = "mViewPager"
+                }
+                .get()!! as android.view.ViewGroup
+            val tabsAdapter = thisObject.reflekt()
+                .firstField {
+                    name = "mTabsAdapter"
+                }
+                .get()!!
+
+            val currentTabState = mutableIntStateOf(0)
+            tabsAdapter.reflekt()
+                .firstMethod { name = "onPageScrolled" }
+                .hookBefore {
+                    val position = args[0] as Int
+                    val positionOffset = args[1] as Float
+                    if (positionOffset == 0f) {
+                        currentTabState.intValue = position
+                    }
+                }
+
             val configList = loadConfig()
             val menuItems = mutableMapOf<String, Pair<ImageVector, () -> Unit>>()
 
@@ -251,89 +275,97 @@ object AddMainScreenFab : ClickableFeature() {
                             val activeColor = MaterialTheme.colorScheme.primary
 
                             var expanded by remember { mutableStateOf(false) }
+                            val currentTab by currentTabState
+                            val isHomeTab = currentTab == 0
 
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(bottom = 60.dp)
+                            AnimatedVisibility(
+                                visible = isHomeTab,
+                                enter = fadeIn(animationSpec = tween(durationMillis = 150)),
+                                exit = fadeOut(animationSpec = tween(durationMillis = 150))
                             ) {
-                                Column(
+                                Box(
                                     modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(16.dp),
-                                    horizontalAlignment = Alignment.End,
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                        .fillMaxSize()
+                                        .padding(bottom = 60.dp)
                                 ) {
                                     Column(
-                                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                                        horizontalAlignment = Alignment.End
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(16.dp),
+                                        horizontalAlignment = Alignment.End,
+                                        verticalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
-                                        menuItems.entries.forEachIndexed { index, (name, pair) ->
-                                            val itemDelay = index * 35
-                                            val reverseDelay = (menuItems.size - 1 - index) * 35
+                                        Column(
+                                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                            horizontalAlignment = Alignment.End
+                                        ) {
+                                            menuItems.entries.forEachIndexed { index, (name, pair) ->
+                                                val itemDelay = index * 35
+                                                val reverseDelay = (menuItems.size - 1 - index) * 35
 
-                                            AnimatedVisibility(
-                                                visible = expanded,
-                                                enter = fadeIn(
-                                                    animationSpec = tween(durationMillis = 160, delayMillis = reverseDelay, easing = EaseOut)
-                                                ) + slideInVertically(
-                                                    animationSpec = tween(durationMillis = 180, delayMillis = reverseDelay, easing = EaseOutCubic),
-                                                    initialOffsetY = { it / 2 }
-                                                ),
-                                                exit = fadeOut(
-                                                    animationSpec = tween(durationMillis = 100, delayMillis = itemDelay, easing = EaseIn)
-                                                ) + slideOutVertically(
-                                                    animationSpec = tween(durationMillis = 100, delayMillis = itemDelay, easing = EaseInCubic),
-                                                    targetOffsetY = { it / 2 }
-                                                )
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                AnimatedVisibility(
+                                                    visible = expanded,
+                                                    enter = fadeIn(
+                                                        animationSpec = tween(durationMillis = 160, delayMillis = reverseDelay, easing = EaseOut)
+                                                    ) + slideInVertically(
+                                                        animationSpec = tween(durationMillis = 180, delayMillis = reverseDelay, easing = EaseOutCubic),
+                                                        initialOffsetY = { it / 2 }
+                                                    ),
+                                                    exit = fadeOut(
+                                                        animationSpec = tween(durationMillis = 100, delayMillis = itemDelay, easing = EaseIn)
+                                                    ) + slideOutVertically(
+                                                        animationSpec = tween(durationMillis = 100, delayMillis = itemDelay, easing = EaseInCubic),
+                                                        targetOffsetY = { it / 2 }
+                                                    )
                                                 ) {
-                                                    Surface(
-                                                        shape = MaterialTheme.shapes.large,
-                                                        color = backgroundColor,
-                                                        tonalElevation = 2.dp,
-                                                        shadowElevation = 2.dp
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                                     ) {
-                                                        Text(
-                                                            text = name,
-                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                                            color = activeColor,
-                                                            fontSize = 14.sp,
-                                                            fontWeight = FontWeight.Medium
-                                                        )
-                                                    }
+                                                        Surface(
+                                                            shape = MaterialTheme.shapes.large,
+                                                            color = backgroundColor,
+                                                            tonalElevation = 2.dp,
+                                                            shadowElevation = 2.dp
+                                                        ) {
+                                                            Text(
+                                                                text = name,
+                                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                                                color = activeColor,
+                                                                fontSize = 14.sp,
+                                                                fontWeight = FontWeight.Medium
+                                                            )
+                                                        }
 
-                                                    SmallFloatingActionButton(
-                                                        onClick = {
-                                                            pair.second()
-                                                            expanded = false
-                                                        },
-                                                        containerColor = backgroundColor,
-                                                        shape = CircleShape,
-                                                        elevation = FloatingActionButtonDefaults.elevation(2.dp)
-                                                    ) {
-                                                        Icon(pair.first, contentDescription = null, tint = activeColor)
+                                                        SmallFloatingActionButton(
+                                                            onClick = {
+                                                                pair.second()
+                                                                expanded = false
+                                                            },
+                                                            containerColor = backgroundColor,
+                                                            shape = CircleShape,
+                                                            elevation = FloatingActionButtonDefaults.elevation(2.dp)
+                                                        ) {
+                                                            Icon(pair.first, contentDescription = null, tint = activeColor)
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
 
-                                    FloatingActionButton(
-                                        onClick = { expanded = !expanded },
-                                        containerColor = backgroundColor,
-                                        shape = CircleShape
-                                    ) {
-                                        val rotation by animateFloatAsState(if (expanded) 45f else 0f)
-                                        Icon(
-                                            MaterialSymbols.OutlinedFilled.Add,
-                                            contentDescription = null,
-                                            tint = activeColor,
-                                            modifier = Modifier.rotate(rotation)
-                                        )
+                                        FloatingActionButton(
+                                            onClick = { expanded = !expanded },
+                                            containerColor = backgroundColor,
+                                            shape = CircleShape
+                                        ) {
+                                            val rotation by animateFloatAsState(if (expanded) 45f else 0f)
+                                            Icon(
+                                                MaterialSymbols.OutlinedFilled.Add,
+                                                contentDescription = null,
+                                                tint = activeColor,
+                                                modifier = Modifier.rotate(rotation)
+                                            )
+                                        }
                                     }
                                 }
                             }

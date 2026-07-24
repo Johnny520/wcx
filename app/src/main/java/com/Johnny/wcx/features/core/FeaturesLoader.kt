@@ -57,7 +57,7 @@ object FeaturesLoader {
         WeLogger.i(TAG, "enabling all hook items took $elapsed")
 
         if (TargetProcesses.isInMain && Preferences.showStartupToast) {
-            showToast("WeKit 加载成功!")
+            showToast("WCX 加载成功!")
         }
     }
 

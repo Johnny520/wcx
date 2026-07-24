@@ -61,6 +61,7 @@ import com.composables.icons.materialsymbols.outlined.License
 import com.composables.icons.materialsymbols.outlined.Lightbulb_2
 import com.composables.icons.materialsymbols.outlined.Notifications
 import com.composables.icons.materialsymbols.outlined.Palette
+import com.composables.icons.materialsymbols.outlined.Public
 import com.composables.icons.materialsymbols.outlined.Rule_settings
 import com.composables.icons.materialsymbols.outlined.Search
 import com.composables.icons.materialsymbols.outlined.Style
@@ -290,10 +291,15 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
                     icon = GitHubIcon,
                     onClick = { "https://github.com/Johnny520/wcx".toUri().openInSystem(context, true) })
                 PrefArrow(
-                    title = "Telegram",
-                    summary = "Telegram 超级群组",
+                    title = "官方网站",
+                    summary = "https://johnny520.github.io/Johnny/",
+                    icon = MaterialSymbols.Outlined.Public,
+                    onClick = { "https://johnny520.github.io/Johnny/".toUri().openInSystem(context, true) })
+                PrefArrow(
+                    title = "Telegram 群组",
+                    summary = "暂无群组",
                     icon = TelegramIcon,
-                    onClick = { "https://t.me/+7j5dJ6g16B43OWVl".toUri().openInSystem(context, true) })
+                )
             }
         }
 

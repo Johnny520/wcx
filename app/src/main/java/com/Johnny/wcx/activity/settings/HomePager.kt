@@ -93,7 +93,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
     }
     val totalCount = remember { FeaturesProvider.ALL_HOOK_ITEMS.size }
 
-    MiuixListScaffold(title = "WeKit") {
+    MiuixListScaffold(title = "WCX") {
         item {
             Column(
                 modifier = Modifier.padding(top = 12.dp),

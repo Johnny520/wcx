@@ -37,7 +37,7 @@ object CrashInfoCollector {
         // 崩溃头部信息
 
         val sb = "========================================\n" +
-                "WeKit Crash Report\n" +
+                "WCX Crash Report\n" +
                 "========================================\n\n" +
                 "Crash Time: " + currentTime + "\n" +
                 "Crash Type: " + crashType + "\n\n" +
