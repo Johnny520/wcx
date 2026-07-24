@@ -50,7 +50,7 @@ import java.net.URL
     categories = ["聊天"],
     description = "接入 AI 大模型自动回复消息，支持 OpenAI 兼容接口（借鉴 GodHook 设计理念）"
 )
-object AIAutoReply : SwitchFeature(), WeDatabaseListenerApi.IInsertListener {
+object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
     private const val TAG = "AIAutoReply"
 
