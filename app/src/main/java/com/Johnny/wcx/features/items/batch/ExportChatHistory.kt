@@ -2,12 +2,17 @@ package com.Johnny.wcx.features.items.batch
 
 import android.os.Environment
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -16,7 +21,7 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.ContactsSelector
 import com.Johnny.wcx.ui.content.DefaultColumn
-import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.content.TextButton as UiTextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.android.showToastSuspend
@@ -76,9 +81,9 @@ object ExportChatHistory : ClickableFeature() {
                         DefaultColumn {
                             Text("已选择 ${selectedWxIds.size} 个对话")
                             Text("导出后文件将保存到: Download/WeKit/")
-                            androidx.compose.foundation.layout.Spacer(androidx.compose.foundation.layout.padding(top = 8.dp))
+                            Spacer(Modifier.padding(top = 8.dp))
                             ExportFormat.values().forEach { format ->
-                                androidx.compose.material3.TextButton(
+                                TextButton(
                                     onClick = { selectedFormat = format }
                                 ) {
                                     val icon = if (selectedFormat == format) "● " else "○ "
@@ -88,7 +93,7 @@ object ExportChatHistory : ClickableFeature() {
                         }
                     },
                     dismissButton = {
-                        TextButton(onClick = { step = 0 }) { Text("上一步") }
+                        UiTextButton(onClick = { step = 0 }) { Text("上一步") }
                     },
                     confirmButton = {
                         Button(onClick = {
@@ -134,15 +139,7 @@ object ExportChatHistory : ClickableFeature() {
     }
 
     private fun getDisplayName(wxId: String): String {
-        return runCatching {
-            if (wxId.endsWith("@chatroom")) {
-                WeDatabaseApi.getGroup(wxId)?.nickname ?: wxId
-            } else {
-                WeDatabaseApi.getFriend(wxId)?.let { c ->
-                    c.remarkName.ifEmpty { c.nickname }
-                } ?: wxId
-            }
-        }.getOrDefault(wxId)
+        return runCatching { WeDatabaseApi.getDisplayName(wxId) }.getOrDefault(wxId)
     }
 
     private fun exportAsText(writer: FileWriter, wxIds: Set<String>) {

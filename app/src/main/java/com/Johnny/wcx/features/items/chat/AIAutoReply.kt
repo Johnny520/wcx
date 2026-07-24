@@ -3,7 +3,9 @@ package com.Johnny.wcx.features.items.chat
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,7 +21,6 @@ import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -93,7 +94,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                 title = { Text("AI 自动回复设置") },
                 text = {
                     DefaultColumn(Modifier.padding(vertical = 8.dp)) {
-                        Text("API 配置", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+                        Text("API 配置", style = MaterialTheme.typography.titleSmall)
                         OutlinedTextField(
                             value = localApiUrl,
                             onValueChange = { localApiUrl = it },
@@ -119,8 +120,8 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                             maxLines = 3
                         )
 
-                        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 12.dp))
-                        Text("回复设置", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.padding(top = 12.dp))
+                        Text("回复设置", style = MaterialTheme.typography.titleSmall)
 
                         SwitchRow(
                             checked = localEnablePrivate,
