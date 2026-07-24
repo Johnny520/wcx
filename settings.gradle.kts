@@ -49,8 +49,8 @@ dependencyResolutionManagement {
         }
         maven("https://jitpack.io") {
             content {
-                includeGroup("com.github.Johnny520")
-                includeGroup("com.github.Johnny520.rhino")
+                includeGroup("com.github.Ujhhgtg")
+                includeGroup("com.github.Ujhhgtg.rhino")
                 includeGroup("com.github.topjohnwu.libsu")
             }
         }
