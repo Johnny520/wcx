@@ -31,6 +31,7 @@ import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -96,8 +97,12 @@ object ScheduledMessage : ClickableFeature() {
             }
         }
 
-        val filter = IntentFilter(ALARM_ACTION)
-        android.content.ContextWrapper(android.content.ContextWrapper(null)).applicationContext.registerReceiver(alarmReceiver, filter)
+        runCatching {
+            val filter = IntentFilter(ALARM_ACTION)
+            HostInfo.application.registerReceiver(alarmReceiver, filter)
+        }.onFailure {
+            WeLogger.e(TAG, "failed to register alarm receiver", it)
+        }
 
         schedules.filter { it.enabled }.forEach { schedule ->
             scheduleAlarm(schedule)
@@ -107,19 +112,22 @@ object ScheduledMessage : ClickableFeature() {
     override fun onDisable() {
         activeAlarms.values.forEach { it.cancel() }
         activeAlarms.clear()
-        kotlin.runCatching {
-            android.content.ContextWrapper(android.content.ContextWrapper(null)).applicationContext.unregisterReceiver(alarmReceiver)
+        runCatching {
+            HostInfo.application.unregisterReceiver(alarmReceiver)
+        }.onFailure {
+            WeLogger.e(TAG, "failed to unregister alarm receiver", it)
         }
     }
 
     private fun scheduleAlarm(schedule: ScheduleConfig) {
-        val alarmManager = android.content.ContextWrapper(android.content.ContextWrapper(null)).applicationContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val context = HostInfo.application
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val intent = Intent(ALARM_ACTION).apply {
             putExtra(EXTRA_SCHEDULE_ID, schedule.id)
         }
 
         val pendingIntent = PendingIntent.getBroadcast(
-            android.content.ContextWrapper(android.content.ContextWrapper(null)).applicationContext,
+            context,
             schedule.id.hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -307,7 +315,8 @@ object ScheduledMessage : ClickableFeature() {
     ) {
         val isEditing = existing != null
         val contacts = remember {
-            (WeDatabaseApi.getFriends() + WeDatabaseApi.getGroups()).filter { it.wxId.isNotBlank() }
+            WeDatabaseApi.getFriends().map { it.wxId to it.nickname } +
+                    WeDatabaseApi.getGroups().map { it.wxId to it.displayName }
         }
 
         var selectedTalker by remember { mutableStateOf(existing?.talker ?: "") }
@@ -450,16 +459,16 @@ object ScheduledMessage : ClickableFeature() {
                 title = { Text("选择发送对象") },
                 text = {
                     DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
-                        contacts.forEach { contact ->
+                        contacts.forEach { (wxId, name) ->
                             ListItem(
                                 modifier = Modifier.clickable {
-                                    selectedTalker = contact.wxId
-                                    selectedTalkerName = contact.displayName
+                                    selectedTalker = wxId
+                                    selectedTalkerName = name
                                     showTalkerSelector = false
                                 },
-                                headlineContent = { Text(contact.displayName) },
-                                supportingContent = { Text(contact.wxId) },
-                                trailingContent = { Text(if (selectedTalker == contact.wxId) "✓" else "") }
+                                headlineContent = { Text(name) },
+                                supportingContent = { Text(wxId) },
+                                trailingContent = { Text(if (selectedTalker == wxId) "✓" else "") }
                             )
                         }
                     }
