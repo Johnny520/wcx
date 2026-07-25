@@ -73,9 +73,9 @@ object ScheduledMessage : ClickableFeature() {
         val hour: Int = 9,
         val minute: Int = 0,
         val repeatDaily: Boolean = true,
-        val enabled: Boolean = true,
+        var enabled: Boolean = true,
         val oneTimeOnly: Boolean = false,
-        val nextSendTime: Long = 0
+        var nextSendTime: Long = 0
     )
 
     enum class MessageType(val description: String) {

@@ -669,12 +669,12 @@ class MainActivity : ComponentActivity() {
                     { it.split(".").getOrNull(2)?.toIntOrNull() ?: 0 }
                 ))
             if (versions.isNotEmpty()) {
-                "${versions.first()} - ${versions.last()}"
+                "8.0.43 - ${versions.last()}（后续自适应）"
             } else {
-                "自适应"
+                "8.0.43 - 后续自适应"
             }
         } catch (e: Exception) {
-            "自适应"
+            "8.0.43 - 后续自适应"
         }
     }
 

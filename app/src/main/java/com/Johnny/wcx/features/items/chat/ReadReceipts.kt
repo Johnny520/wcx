@@ -168,7 +168,7 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
         val talker = msgInfo.talker
         if (!talker.isGroupChatWxId) return
 
-        val msgId = msgInfo.msgId
+        val msgId = msgInfo.id
 
         val tag = view.tag ?: return
         val timeTV = tag.reflekt()
