@@ -9,8 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -122,18 +121,20 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
 
-        methodHandleSpanClick.hookBefore {
-            val url = args[1].reflekt().firstField {
-                type = BString
-                modifiers(Modifiers.FINAL)
-            }.get()!! as String
-            if (!url.startsWith("weixin://weixinhongbao/wekit/chatroom_userinfo/")) return@hookBefore
+        runCatching {
+            methodHandleSpanClick.hookBefore {
+                val url = args[1].reflekt().firstField {
+                    type = BString
+                    modifiers(Modifiers.FINAL)
+                }.get()!! as String
+                if (!url.startsWith("weixin://weixinhongbao/wekit/chatroom_userinfo/")) return@hookBefore
 
-            val wxId = url.substringAfterLast('/')
-            val context = (args[0] as View).context
+                val wxId = url.substringAfterLast('/')
+                val context = (args[0] as View).context
 
-            WeApi.openContact(context, wxId, WeApi.OpenContactDestination.HOMEPAGE)
-        }
+                WeApi.openContact(context, wxId, WeApi.OpenContactDestination.HOMEPAGE)
+            }
+        }.onFailure { WeLogger.e(TAG, "failed to hook methodHandleSpanClick", it) }
     }
 
     override fun onDisable() {
@@ -331,6 +332,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         }.getOrElse { emptyMap() }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var globalEnabledState by remember { mutableStateOf(globalEnabled) }
@@ -376,7 +378,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                 AlertDialogContent(
                     title = { Text("进退群提示增强") },
                     text = {
-                        DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                        DefaultColumn {
                             ListItem(
                                 modifier = Modifier.clickable { globalEnabledState = !globalEnabledState },
                                 trailingContent = {
@@ -489,6 +491,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun GroupListScreen(
         onDismiss: () -> Unit,
@@ -501,7 +504,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         AlertDialogContent(
             title = { Text("群聊单独设置") },
             text = {
-                DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                DefaultColumn {
                     if (groups.isEmpty()) {
                         Text("暂无群聊", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
@@ -534,6 +537,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         )
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun TemplateEditor(
         title: String,

@@ -472,7 +472,7 @@ object TabTheme : ClickableFeature() {
     }
 
     private fun pickImageForTab(activity: ComponentActivity, tabIndex: Int) {
-        TransparentActivity.launch(activity) {
+        TransparentActivity.launch(HostInfo.application) {
             val context = this
             val launcher = registerForActivityResult(
                 ActivityResultContracts.PickVisualMedia()
@@ -610,7 +610,7 @@ object TabTheme : ClickableFeature() {
     }
 
     private fun importTheme(context: ComponentActivity) {
-        TransparentActivity.launch(context) {
+        TransparentActivity.launch(HostInfo.application) {
             val launcher = registerForActivityResult(
                 ActivityResultContracts.OpenDocument()
             ) { uri ->

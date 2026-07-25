@@ -6,20 +6,23 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -41,6 +46,7 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.fs.KnownPaths
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -48,9 +54,12 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.absolutePathString
 
 @Feature(
     name = "定时发送消息",
@@ -315,6 +324,76 @@ object ScheduledMessage : ClickableFeature() {
         }
     }
 
+    /**
+     * 通过 TransparentActivity 拉起系统文件选择器，把选中的 Uri 内容拷贝到 moduleCache
+     * 并把本地路径回调给调用方。IMAGE/VIDEO 走 PickVisualMedia，VOICE/FILE 走 OpenDocument。
+     */
+    private fun pickMediaFile(
+        type: MessageType,
+        onPicked: (String) -> Unit
+    ) {
+        TransparentActivity.launch(HostInfo.application) {
+            if (type == MessageType.IMAGE || type == MessageType.VIDEO) {
+                val launcher = registerForActivityResult(
+                    ActivityResultContracts.PickVisualMedia()
+                ) { uri ->
+                    finish()
+                    if (uri == null) return@registerForActivityResult
+                    copyUriToCache(uri, type)?.let(onPicked)
+                }
+                val visualMediaType = if (type == MessageType.IMAGE) {
+                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                } else {
+                    ActivityResultContracts.PickVisualMedia.VideoOnly
+                }
+                launcher.launch(PickVisualMediaRequest(visualMediaType))
+            } else {
+                val mimeTypes = when (type) {
+                    MessageType.VOICE -> arrayOf("audio/*")
+                    MessageType.FILE -> arrayOf("*/*")
+                    else -> arrayOf("*/*")
+                }
+                val launcher = registerForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri ->
+                    finish()
+                    if (uri == null) return@registerForActivityResult
+                    copyUriToCache(uri, type)?.let(onPicked)
+                }
+                launcher.launch(mimeTypes)
+            }
+        }
+    }
+
+    private fun FragmentActivity.copyUriToCache(uri: Uri, type: MessageType): String? {
+        return try {
+            val resolver = contentResolver
+            val displayName = resolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "picked_${System.currentTimeMillis()}"
+            val safeName = displayName.ifBlank { "picked_${System.currentTimeMillis()}" }
+            val destFile = KnownPaths.moduleCache.resolve("sched_${System.currentTimeMillis()}_$safeName")
+            resolver.openInputStream(uri)?.use { input ->
+                Files.copy(input, destFile, StandardCopyOption.REPLACE_EXISTING)
+            } ?: run {
+                WeLogger.e(TAG, "copyUriToCache: openInputStream returned null for $uri")
+                return null
+            }
+            WeLogger.i(TAG, "picked media file cached: ${destFile.absolutePathString()}")
+            destFile.absolutePathString()
+        } catch (e: Exception) {
+            WeLogger.e(TAG, "copyUriToCache failed for type=$type uri=$uri", e)
+            null
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var showAddDialog by remember { mutableStateOf(false) }
@@ -344,7 +423,7 @@ object ScheduledMessage : ClickableFeature() {
                 AlertDialogContent(
                     title = { Text("定时发送消息") },
                     text = {
-                        DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                        DefaultColumn {
                             if (schedules.isEmpty()) {
                                 Text(
                                     "还没有定时任务，点击下方按钮添加",
@@ -398,6 +477,7 @@ object ScheduledMessage : ClickableFeature() {
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun ScheduleEditorDialog(
         onDismiss: () -> Unit,
@@ -432,8 +512,11 @@ object ScheduledMessage : ClickableFeature() {
                 } ?: emptyList()
             )
         }
-        var hour by remember { mutableStateOf(existing?.hour?.toString() ?: "9") }
-        var minute by remember { mutableStateOf(existing?.minute?.toString() ?: "0") }
+        val timePickerState = rememberTimePickerState(
+            initialHour = existing?.hour ?: 9,
+            initialMinute = existing?.minute ?: 0,
+            is24Hour = true
+        )
         var repeatDaily by remember { mutableStateOf(existing?.repeatDaily ?: true) }
         var enabled by remember { mutableStateOf(existing?.enabled ?: true) }
         var showTalkerSelector by remember { mutableStateOf(false) }
@@ -448,7 +531,7 @@ object ScheduledMessage : ClickableFeature() {
         AlertDialogContent(
             title = { Text(if (isEditing) "编辑定时任务" else "添加定时任务") },
             text = {
-                DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                DefaultColumn {
                     ListItem(
                         modifier = Modifier.clickable { showTalkerSelector = true },
                         headlineContent = { Text(if (selectedTalkerName.isNotBlank()) selectedTalkerName else "选择发送对象") },
@@ -486,20 +569,7 @@ object ScheduledMessage : ClickableFeature() {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("发送时间", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = hour,
-                            onValueChange = { hour = it.filter { c -> c.isDigit() }.take(2) },
-                            label = { Text("小时") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = minute,
-                            onValueChange = { minute = it.filter { c -> c.isDigit() }.take(2) },
-                            label = { Text("分钟") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    TimePicker(state = timePickerState)
 
                     ListItem(
                         modifier = Modifier.clickable { repeatDaily = !repeatDaily },
@@ -519,8 +589,8 @@ object ScheduledMessage : ClickableFeature() {
             dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
             confirmButton = {
                 Button(onClick = {
-                    val h = hour.toIntOrNull()?.coerceIn(0, 23) ?: 9
-                    val m = minute.toIntOrNull()?.coerceIn(0, 59) ?: 0
+                    val h = timePickerState.hour
+                    val m = timePickerState.minute
 
                     if (selectedTalker.isBlank()) {
                         showToast("请选择发送对象")
@@ -568,7 +638,7 @@ object ScheduledMessage : ClickableFeature() {
             AlertDialogContent(
                 title = { Text("选择发送对象") },
                 text = {
-                    DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                    DefaultColumn {
                         contacts.forEach { (wxId, name) ->
                             ListItem(
                                 modifier = Modifier.clickable {
@@ -592,7 +662,7 @@ object ScheduledMessage : ClickableFeature() {
             AlertDialogContent(
                 title = { Text("选择消息段类型") },
                 text = {
-                    DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                    DefaultColumn {
                         MessageType.values().forEach { type ->
                             ListItem(
                                 modifier = Modifier.clickable {
@@ -618,7 +688,7 @@ object ScheduledMessage : ClickableFeature() {
             AlertDialogContent(
                 title = { Text("添加${type.description}消息段") },
                 text = {
-                    DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                    DefaultColumn {
                         when (type) {
                             MessageType.TEXT -> {
                                 OutlinedTextField(
@@ -639,12 +709,19 @@ object ScheduledMessage : ClickableFeature() {
                                 )
                             }
                             MessageType.VOICE -> {
-                                OutlinedTextField(
-                                    value = tempFilePath,
-                                    onValueChange = { tempFilePath = it },
-                                    label = { Text("语音文件路径") },
+                                Button(
+                                    onClick = {
+                                        pickMediaFile(type) { path -> tempFilePath = path }
+                                    },
                                     modifier = Modifier.fillMaxWidth()
-                                )
+                                ) { Text("选择语音文件") }
+                                if (tempFilePath.isNotBlank()) {
+                                    Text(
+                                        "已选: ${tempFilePath.substringAfterLast('/')}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 OutlinedTextField(
                                     value = tempDuration,
                                     onValueChange = { tempDuration = it.filter { c -> c.isDigit() } },
@@ -652,13 +729,35 @@ object ScheduledMessage : ClickableFeature() {
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
-                            MessageType.IMAGE, MessageType.VIDEO, MessageType.FILE -> {
-                                OutlinedTextField(
-                                    value = tempFilePath,
-                                    onValueChange = { tempFilePath = it },
-                                    label = { Text("文件路径") },
+                            MessageType.IMAGE, MessageType.VIDEO -> {
+                                Button(
+                                    onClick = {
+                                        pickMediaFile(type) { path -> tempFilePath = path }
+                                    },
                                     modifier = Modifier.fillMaxWidth()
-                                )
+                                ) { Text("选择${type.description}文件") }
+                                if (tempFilePath.isNotBlank()) {
+                                    Text(
+                                        "已选: ${tempFilePath.substringAfterLast('/')}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            MessageType.FILE -> {
+                                Button(
+                                    onClick = {
+                                        pickMediaFile(type) { path -> tempFilePath = path }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("选择文件") }
+                                if (tempFilePath.isNotBlank()) {
+                                    Text(
+                                        "已选: ${tempFilePath.substringAfterLast('/')}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }

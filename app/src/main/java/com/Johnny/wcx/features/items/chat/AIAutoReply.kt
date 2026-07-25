@@ -4,10 +4,20 @@ import android.annotation.SuppressLint
 import android.content.ContentValues
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -18,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,6 +50,8 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.strings.isGroupChatWxId
+import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlined.More_vert
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -96,6 +109,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         WeDatabaseListenerApi.removeListener(this)
     }
 
+    @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var localApiUrl by remember { mutableStateOf(apiUrl) }
@@ -106,10 +120,22 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             var localEnableGroup by remember { mutableStateOf(enableForGroup) }
             var localKeyword by remember { mutableStateOf(groupTriggerKeyword) }
             var localPrefix by remember { mutableStateOf(replyPrefix) }
-            var localDelay by remember { mutableStateOf(replyDelay.toString()) }
+            var localDelayMs by remember { mutableStateOf(replyDelay) }
             var localTriggerMode by remember { mutableStateOf(triggerMode) }
             var localUseWhitelist by remember { mutableStateOf(useWhitelist) }
             var showGroupSelector by remember { mutableStateOf(false) }
+            var showFavMenu by remember { mutableStateOf(false) }
+
+            val delayPresets = remember {
+                listOf(
+                    0 to "立即",
+                    1000 to "1秒",
+                    2000 to "2秒",
+                    3000 to "3秒",
+                    5000 to "5秒",
+                    10000 to "10秒"
+                )
+            }
 
             if (showGroupSelector) {
                 GroupSelectorScreen(
@@ -123,7 +149,37 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                 )
             } else {
                 AlertDialogContent(
-                    title = { Text("AI 自动回复设置") },
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("AI 自动回复设置")
+                            Box {
+                                IconButton(onClick = { showFavMenu = true }) {
+                                    Icon(
+                                        imageVector = MaterialSymbols.Outlined.More_vert,
+                                        contentDescription = "更多"
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showFavMenu,
+                                    onDismissRequest = { showFavMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("从收藏中选择回复") },
+                                        onClick = {
+                                            showFavMenu = false
+                                            // TODO: 接入 WeMessageApi 或新增 FavApi 获取微信收藏列表
+                                            //       当前项目中没有可用的微信收藏读取 API，待后续实现
+                                            showToast("暂未接入微信收藏 API")
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    },
                     text = {
                         DefaultColumn(Modifier.padding(vertical = 8.dp)) {
                             Text("API 配置", style = MaterialTheme.typography.titleSmall)
@@ -220,12 +276,19 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                                 singleLine = true
                             )
 
-                            OutlinedTextField(
-                                value = localDelay,
-                                onValueChange = { localDelay = it },
-                                label = { Text("回复延迟（毫秒）") },
-                                singleLine = true
-                            )
+                            Text("回复延迟", style = MaterialTheme.typography.titleSmall)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                delayPresets.forEach { (ms, label) ->
+                                    FilterChip(
+                                        selected = localDelayMs == ms,
+                                        onClick = { localDelayMs = ms },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
                         }
                     },
                     dismissButton = {
@@ -241,7 +304,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                             enableForGroup = localEnableGroup
                             groupTriggerKeyword = localKeyword
                             replyPrefix = localPrefix
-                            replyDelay = localDelay.toIntOrNull()?.coerceIn(0, 10000) ?: 1000
+                            replyDelay = localDelayMs.coerceIn(0, 10000)
                             triggerMode = localTriggerMode
                             useWhitelist = localUseWhitelist
                             showToast("设置已保存")
@@ -253,6 +316,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun GroupSelectorScreen(
         onDismiss: () -> Unit,
@@ -267,7 +331,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         AlertDialogContent(
             title = { Text("选择群聊") },
             text = {
-                DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                DefaultColumn {
                     Text(
                         if (useWhitelist) "选择需要开启 AI 自动回复的群聊" else "选择需要排除 AI 自动回复的群聊",
                         style = MaterialTheme.typography.bodySmall,

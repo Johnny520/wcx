@@ -80,6 +80,7 @@ import com.composables.icons.materialsymbols.outlined.Upload
 import com.composables.icons.materialsymbols.outlined.Volunteer_activism
 import com.composables.icons.materialsymbols.outlined.Wallpaper
 import com.composables.icons.materialsymbols.outlined.Qr_code
+import com.composables.icons.materialsymbols.outlined.Send
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.tencent.mm.ui.LauncherUI
@@ -304,6 +305,11 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
                     summary = "Johnny520/wcx",
                     icon = GitHubIcon,
                     onClick = { "https://github.com/Johnny520/wcx".toUri().openInSystem(context, true) })
+                PrefArrow(
+                    title = "TG 群组",
+                    summary = "暂无群组",
+                    icon = MaterialSymbols.Outlined.Send,
+                )
                 PrefArrow(
                     title = "官方网站",
                     summary = "https://johnny520.github.io/Johnny/",
@@ -975,12 +981,6 @@ private fun MiuixMessageDialog(
 private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
     WindowDialog(show = show, title = "捐赠支持", onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = "感谢您的支持！您可以通过以下方式捐赠：",
-                fontSize = 14.sp,
-                color = MiuixTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = 16.dp),
-            )
 
             Card(modifier = Modifier.fillMaxWidth(), onClick = {
                 "https://ifdian.net/a/Johnny520".toUri().openInSystem(context, true)
