@@ -178,7 +178,7 @@ object ForwardFavoriteVoices : SwitchFeature() {
                     loadState = VoiceLoadState.CONVERTING
                     val result = withContext(Dispatchers.IO) {
                         runCatching {
-                            val silkName = source.name
+                            val silkName = source.fileName?.toString() ?: "voice"
                             val baseName = silkName.substringBeforeLast('.')
                             val pcmPath = KnownPaths.moduleCache / "$baseName.pcm"
                             val mp3Path = KnownPaths.moduleCache / "$baseName.mp3"
