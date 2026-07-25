@@ -92,14 +92,14 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val joinTemplate: String = "",
         val leaveMessages: List<NotifyMessage> = emptyList(),
         val joinMessages: List<NotifyMessage> = emptyList()
-    )
+    ) : java.io.Serializable
 
     data class NotifyMessage(
         val type: MessageTypeEnum = MessageTypeEnum.TEXT,
         val content: String = "",
         val filePath: String = "",
         val duration: Int = 0
-    )
+    ) : java.io.Serializable
 
     enum class MessageTypeEnum {
         TEXT, IMAGE, VOICE, VIDEO, FILE
