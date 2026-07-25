@@ -16,7 +16,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +36,7 @@ import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.net.models.protobuf.ChatRoomDataProto
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -44,21 +44,32 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.reflection.BString
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromByteArray
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.protobuf.ProtoBuf
 
 @Feature(
     name = "进退群提示增强",
     categories = ["联系人与群组"],
-    description = "监控群成员进退群，自动发送提示消息到群里，支持自定义模板、自动获取昵称和ID"
+    description = "监控群成员进退群，自动发送提示消息到群里，支持总开关、每群独立开关、自定义多消息类型"
 )
 object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     WeDatabaseListenerApi.IUpdateListener, WeDatabaseListenerApi.IInsertListener {
 
     private const val TAG = "MonitorGroupMemberOperations"
 
+    private var globalEnabled by prefOption("group_member_notify_global_enabled", false)
     private var enableLeaveNotify by prefOption("group_member_leave_notify", true)
     private var enableJoinNotify by prefOption("group_member_join_notify", true)
     private var enableNameChangeNotify by prefOption("group_member_name_change_notify", false)
@@ -71,6 +82,42 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         "group_member_join_template",
         "欢迎 {displayName} ({wxId}) 加入群聊！希望大家相处愉快~"
     )
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    data class GroupNotifyConfig(
+        val enabled: Boolean = false,
+        val leaveEnabled: Boolean = true,
+        val joinEnabled: Boolean = true,
+        val leaveTemplate: String = "",
+        val joinTemplate: String = "",
+        val leaveMessages: List<NotifyMessage> = emptyList(),
+        val joinMessages: List<NotifyMessage> = emptyList()
+    )
+
+    data class NotifyMessage(
+        val type: MessageTypeEnum = MessageTypeEnum.TEXT,
+        val content: String = "",
+        val filePath: String = "",
+        val duration: Int = 0
+    )
+
+    enum class MessageTypeEnum {
+        TEXT, IMAGE, VOICE, VIDEO, FILE
+    }
+
+    private var groupConfigs by prefOption(
+        "group_member_notify_group_configs",
+        emptyMap<String, GroupNotifyConfig>()
+    )
+
+    private fun getGroupConfig(group: String): GroupNotifyConfig {
+        return groupConfigs[group] ?: GroupNotifyConfig()
+    }
+
+    private fun saveGroupConfig(group: String, config: GroupNotifyConfig) {
+        groupConfigs = groupConfigs + (group to config)
+    }
 
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
@@ -103,8 +150,12 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     @SuppressLint("Range")
     override fun onUpdate(table: String, values: ContentValues, whereClause: String?, whereArgs: Array<String>?, conflictAlgorithm: Int) {
         if (table != "chatroom") return
+        if (!globalEnabled) return
 
         val group = values.getAsString("chatroomname") ?: return
+        val groupConfig = getGroupConfig(group)
+        if (!groupConfig.enabled) return
+
         val newMemberCount = values.getAsInteger("memberCount")
         val newRawMembers = values.getAsString("memberlist")
         val newRoomData = values.getAsByteArray("roomdata")
@@ -127,11 +178,11 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                 val newDisplayNames = parseRoomData(newRoomData)
 
                 handleMemberChange(
-                    group, origMembers, origDisplayNames, newRawMembers, newMemberCount,
+                    group, groupConfig, origMembers, origDisplayNames, newRawMembers, newMemberCount,
                     newDisplayNames
                 )
 
-                if (enableNameChangeNotify) {
+                if (enableNameChangeNotify && groupConfig.joinEnabled) {
                     handleDisplayNameChange(group, origDisplayNames, newRoomData)
                 }
             }
@@ -139,11 +190,11 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     }
 
     override fun onInsert(table: String, values: ContentValues) {
-        // chatroom 表一般是更新，插入场景较少
     }
 
     private fun handleMemberChange(
         group: String,
+        groupConfig: GroupNotifyConfig,
         origMembers: List<String>,
         origDisplayNames: Map<String, String>,
         newRawMembers: String?,
@@ -155,19 +206,19 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val origSet = origMembers.toSet()
         val newSet = newRawMembers.split(';').toSet()
 
-        if (enableLeaveNotify) {
+        if (enableLeaveNotify && groupConfig.leaveEnabled) {
             val leavers = origSet - newSet
             leavers.forEach { wxId ->
                 val displayName = getDisplayName(wxId, origDisplayNames)
-                sendLeaveNotification(group, wxId, displayName)
+                sendLeaveNotifications(group, groupConfig, wxId, displayName)
             }
         }
 
-        if (enableJoinNotify) {
+        if (enableJoinNotify && groupConfig.joinEnabled) {
             val joiners = newSet - origSet
             joiners.forEach { wxId ->
                 val displayName = getDisplayName(wxId, newDisplayNames)
-                sendJoinNotification(group, wxId, displayName)
+                sendJoinNotifications(group, groupConfig, wxId, displayName)
             }
         }
     }
@@ -179,22 +230,68 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         return dbName.ifEmpty { wxId }
     }
 
-    private fun sendLeaveNotification(group: String, wxId: String, displayName: String) {
-        val content = leaveTemplate
-            .replace("{displayName}", displayName)
-            .replace("{wxId}", wxId)
-            .replace("{group}", group)
-
-        WeMessageApi.sendText(group, content)
+    private fun sendLeaveNotifications(group: String, config: GroupNotifyConfig, wxId: String, displayName: String) {
+        if (config.leaveMessages.isNotEmpty()) {
+            config.leaveMessages.forEach { msg ->
+                sendNotifyMessage(group, msg, wxId, displayName)
+            }
+        } else {
+            val content = if (config.leaveTemplate.isNotBlank()) config.leaveTemplate else leaveTemplate
+            val text = content
+                .replace("{displayName}", displayName)
+                .replace("{wxId}", wxId)
+                .replace("{group}", group)
+            WeMessageApi.sendText(group, text)
+        }
     }
 
-    private fun sendJoinNotification(group: String, wxId: String, displayName: String) {
-        val content = joinTemplate
+    private fun sendJoinNotifications(group: String, config: GroupNotifyConfig, wxId: String, displayName: String) {
+        if (config.joinMessages.isNotEmpty()) {
+            config.joinMessages.forEach { msg ->
+                sendNotifyMessage(group, msg, wxId, displayName)
+            }
+        } else {
+            val content = if (config.joinTemplate.isNotBlank()) config.joinTemplate else joinTemplate
+            val text = content
+                .replace("{displayName}", displayName)
+                .replace("{wxId}", wxId)
+                .replace("{group}", group)
+            WeMessageApi.sendText(group, text)
+        }
+    }
+
+    private fun sendNotifyMessage(group: String, msg: NotifyMessage, wxId: String, displayName: String) {
+        val processedContent = msg.content
             .replace("{displayName}", displayName)
             .replace("{wxId}", wxId)
             .replace("{group}", group)
 
-        WeMessageApi.sendText(group, content)
+        when (msg.type) {
+            MessageTypeEnum.TEXT -> {
+                WeMessageApi.sendText(group, processedContent)
+            }
+            MessageTypeEnum.IMAGE -> {
+                if (msg.filePath.isNotBlank()) {
+                    WeMessageApi.sendImage(group, msg.filePath)
+                }
+            }
+            MessageTypeEnum.VOICE -> {
+                if (msg.filePath.isNotBlank()) {
+                    WeMessageApi.sendVoice(group, msg.filePath, msg.duration)
+                }
+            }
+            MessageTypeEnum.VIDEO -> {
+                if (msg.filePath.isNotBlank()) {
+                    WeMessageApi.sendVideo(group, msg.filePath)
+                }
+            }
+            MessageTypeEnum.FILE -> {
+                if (msg.filePath.isNotBlank()) {
+                    val fileName = msg.filePath.substringAfterLast('/')
+                    WeMessageApi.sendFile(group, msg.filePath, fileName)
+                }
+            }
+        }
     }
 
     private fun handleDisplayNameChange(group: String, origDisplayNames: Map<String, String>, newRoomData: ByteArray?) {
@@ -236,16 +333,23 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
+            var globalEnabledState by remember { mutableStateOf(globalEnabled) }
             var leaveNotify by remember { mutableStateOf(enableLeaveNotify) }
             var joinNotify by remember { mutableStateOf(enableJoinNotify) }
             var nameNotify by remember { mutableStateOf(enableNameChangeNotify) }
+            var showGroupList by remember { mutableStateOf(false) }
             var showTemplateEdit by remember { mutableStateOf(false) }
             var editWhich by remember { mutableStateOf(0) }
 
             var leaveTemplateText by remember { mutableStateOf(leaveTemplate) }
             var joinTemplateText by remember { mutableStateOf(joinTemplate) }
 
-            if (showTemplateEdit) {
+            if (showGroupList) {
+                GroupListScreen(
+                    onDismiss = { showGroupList = false },
+                    onSave = { showToast("群聊配置已保存") }
+                )
+            } else if (showTemplateEdit) {
                 TemplateEditor(
                     title = if (editWhich == 0) "退群提示模板" else "进群提示模板",
                     template = if (editWhich == 0) leaveTemplateText else joinTemplateText,
@@ -274,12 +378,21 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                     text = {
                         DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
                             ListItem(
+                                modifier = Modifier.clickable { globalEnabledState = !globalEnabledState },
+                                trailingContent = {
+                                    Switch(checked = globalEnabledState, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("总开关") },
+                                supportingContent = { Text("关闭后所有群聊均不会发送进退群提示") }
+                            )
+
+                            ListItem(
                                 modifier = Modifier.clickable { leaveNotify = !leaveNotify },
                                 trailingContent = {
                                     Switch(checked = leaveNotify, onCheckedChange = null)
                                 },
                                 headlineContent = { Text("退群提示") },
-                                supportingContent = { Text("有人退群时发送系统消息提示（仅本地可见）") }
+                                supportingContent = { Text("有人退群时发送提示消息") }
                             )
 
                             ListItem(
@@ -288,7 +401,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                     Switch(checked = joinNotify, onCheckedChange = null)
                                 },
                                 headlineContent = { Text("进群提示") },
-                                supportingContent = { Text("有人进群时发送系统消息提示（仅本地可见）") }
+                                supportingContent = { Text("有人进群时发送提示消息") }
                             )
 
                             ListItem(
@@ -297,11 +410,11 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                     Switch(checked = nameNotify, onCheckedChange = null)
                                 },
                                 headlineContent = { Text("群昵称修改提示") },
-                                supportingContent = { Text("成员修改群昵称时发送提示") }
+                                supportingContent = { Text("成员修改群昵称时发送提示（仅本地可见）") }
                             )
 
                             Text(
-                                "提示模板",
+                                "默认提示模板",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
@@ -339,6 +452,12 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                 }
                             )
 
+                            ListItem(
+                                modifier = Modifier.clickable { showGroupList = true },
+                                headlineContent = { Text("群聊单独设置") },
+                                supportingContent = { Text("为每个群聊单独配置进退群提示") }
+                            )
+
                             Text(
                                 "可用变量: {displayName} = 群昵称/备注, {wxId} = 微信号, {group} = 群ID",
                                 style = MaterialTheme.typography.bodySmall,
@@ -347,7 +466,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                             )
 
                             Text(
-                                "提示: 所有消息仅在本地显示，不会真正发送到服务器",
+                                "提示: 消息会真实发送到群聊中，所有成员都能看到",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(top = 8.dp)
@@ -357,16 +476,62 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                     dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
                     confirmButton = {
                         Button(onClick = {
+                            globalEnabled = globalEnabledState
                             enableLeaveNotify = leaveNotify
                             enableJoinNotify = joinNotify
                             enableNameChangeNotify = nameNotify
-                            showToast("设置已保存，重启微信生效")
+                            showToast("设置已保存")
                             onDismiss()
                         }) { Text("保存") }
                     }
                 )
             }
         }
+    }
+
+    @Composable
+    private fun GroupListScreen(
+        onDismiss: () -> Unit,
+        onSave: () -> Unit
+    ) {
+        val groups = remember {
+            WeDatabaseApi.getGroups().filter { it.wxId.isNotBlank() }
+        }
+
+        AlertDialogContent(
+            title = { Text("群聊单独设置") },
+            text = {
+                DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                    if (groups.isEmpty()) {
+                        Text("暂无群聊", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        groups.forEach { group ->
+                            val config = remember { getGroupConfig(group.wxId) }
+                            var enabled by remember { mutableStateOf(config.enabled) }
+
+                            ListItem(
+                                modifier = Modifier.clickable {
+                                    enabled = !enabled
+                                    saveGroupConfig(group.wxId, config.copy(enabled = enabled))
+                                },
+                                headlineContent = { Text(group.displayName) },
+                                supportingContent = { Text(group.wxId) },
+                                trailingContent = {
+                                    Switch(checked = enabled, onCheckedChange = null)
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("返回") } },
+            confirmButton = {
+                Button(onClick = {
+                    onSave()
+                    onDismiss()
+                }) { Text("保存") }
+            }
+        )
     }
 
     @Composable
@@ -402,9 +567,5 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                 Button(onClick = { onSave(template) }) { Text("保存") }
             }
         )
-    }
-
-    private fun showToast(msg: String) {
-        com.Johnny.wcx.utils.android.showToast(msg)
     }
 }

@@ -325,6 +325,10 @@ class MainActivity : ComponentActivity() {
                             "构建提交时间",
                             formatEpoch(BuildConfig.BUILD_TIMESTAMP, true)
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        InfoItem("已适配微信版本", "8.0.43 - 8.0.72")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        InfoItem("当前微信版本", getWeChatVersion())
                     }
                 }
 
@@ -640,6 +644,16 @@ class MainActivity : ComponentActivity() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+
+    private fun getWeChatVersion(): String {
+        return try {
+            val pm = packageManager
+            val pkgInfo = pm.getPackageInfo(PackageNames.WECHAT, 0)
+            "v${pkgInfo.versionName} (${pkgInfo.longVersionCode})"
+        } catch (e: Exception) {
+            "未安装"
         }
     }
 

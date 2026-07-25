@@ -17,13 +17,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.Johnny.wcx.features.api.core.WeApi
+import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -51,7 +55,7 @@ import java.net.URL
 @Feature(
     name = "AI 自动回复",
     categories = ["聊天"],
-    description = "接入 AI 大模型自动回复消息，支持 OpenAI 兼容接口（借鉴 GodHook 设计理念）"
+    description = "接入 AI 大模型自动回复消息，支持 OpenAI 兼容接口，可选择触发条件和指定群聊"
 )
 object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
@@ -70,7 +74,17 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
     private var replyPrefix by prefOption("ai_reply_prefix", "[AI回复] ")
     private var replyDelay by prefOption("ai_reply_delay", 1000)
 
+    private var triggerMode by prefOption("ai_reply_trigger_mode", 0)
+    private var enabledGroups by prefOption("ai_reply_enabled_groups", emptySet<String>())
+    private var useWhitelist by prefOption("ai_reply_use_group_whitelist", true)
+
     private val json = Json { ignoreUnknownKeys = true }
+
+    enum class TriggerMode(val value: Int, val description: String) {
+        AT_ONLY(0, "仅被 @ 时回复"),
+        KEYWORD(1, "包含关键词时回复"),
+        ALL(2, "群内任何消息都回复")
+    }
 
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
@@ -91,99 +105,201 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             var localKeyword by remember { mutableStateOf(groupTriggerKeyword) }
             var localPrefix by remember { mutableStateOf(replyPrefix) }
             var localDelay by remember { mutableStateOf(replyDelay.toString()) }
+            var localTriggerMode by remember { mutableStateOf(triggerMode) }
+            var localUseWhitelist by remember { mutableStateOf(useWhitelist) }
+            var showGroupSelector by remember { mutableStateOf(false) }
 
-            AlertDialogContent(
-                title = { Text("AI 自动回复设置") },
-                text = {
-                    DefaultColumn(Modifier.padding(vertical = 8.dp)) {
-                        Text("API 配置", style = MaterialTheme.typography.titleSmall)
-                        OutlinedTextField(
-                            value = localApiUrl,
-                            onValueChange = { localApiUrl = it },
-                            label = { Text("API 地址") },
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = localApiKey,
-                            onValueChange = { localApiKey = it },
-                            label = { Text("API Key") },
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = localModel,
-                            onValueChange = { localModel = it },
-                            label = { Text("模型名称") },
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = localPrompt,
-                            onValueChange = { localPrompt = it },
-                            label = { Text("系统提示词") },
-                            maxLines = 3
-                        )
-
-                        Spacer(Modifier.padding(top = 12.dp))
-                        Text("回复设置", style = MaterialTheme.typography.titleSmall)
-
-                        ListItem(
-                            modifier = Modifier.clickable { localEnablePrivate = !localEnablePrivate },
-                            trailingContent = {
-                                Switch(checked = localEnablePrivate, onCheckedChange = null)
-                            },
-                            headlineContent = { Text("私聊自动回复") }
-                        )
-                        ListItem(
-                            modifier = Modifier.clickable { localEnableGroup = !localEnableGroup },
-                            trailingContent = {
-                                Switch(checked = localEnableGroup, onCheckedChange = null)
-                            },
-                            headlineContent = { Text("群聊自动回复") }
-                        )
-
-                        if (localEnableGroup) {
+            if (showGroupSelector) {
+                GroupSelectorScreen(
+                    onDismiss = { showGroupSelector = false },
+                    useWhitelist = localUseWhitelist,
+                    onSave = { groups ->
+                        enabledGroups = groups
+                        showToast("已保存 ${groups.size} 个群聊")
+                        showGroupSelector = false
+                    }
+                )
+            } else {
+                AlertDialogContent(
+                    title = { Text("AI 自动回复设置") },
+                    text = {
+                        DefaultColumn(Modifier.padding(vertical = 8.dp)) {
+                            Text("API 配置", style = MaterialTheme.typography.titleSmall)
                             OutlinedTextField(
-                                value = localKeyword,
-                                onValueChange = { localKeyword = it },
-                                label = { Text("群聊触发关键词") },
+                                value = localApiUrl,
+                                onValueChange = { localApiUrl = it },
+                                label = { Text("API 地址") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = localApiKey,
+                                onValueChange = { localApiKey = it },
+                                label = { Text("API Key") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = localModel,
+                                onValueChange = { localModel = it },
+                                label = { Text("模型名称") },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = localPrompt,
+                                onValueChange = { localPrompt = it },
+                                label = { Text("系统提示词") },
+                                maxLines = 3
+                            )
+
+                            Spacer(Modifier.padding(top = 12.dp))
+                            Text("回复设置", style = MaterialTheme.typography.titleSmall)
+
+                            ListItem(
+                                modifier = Modifier.clickable { localEnablePrivate = !localEnablePrivate },
+                                trailingContent = {
+                                    Switch(checked = localEnablePrivate, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("私聊自动回复") }
+                            )
+                            ListItem(
+                                modifier = Modifier.clickable { localEnableGroup = !localEnableGroup },
+                                trailingContent = {
+                                    Switch(checked = localEnableGroup, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("群聊自动回复") }
+                            )
+
+                            if (localEnableGroup) {
+                                Text(
+                                    "触发条件",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+
+                                TriggerMode.values().forEach { mode ->
+                                    ListItem(
+                                        modifier = Modifier.clickable { localTriggerMode = mode.value },
+                                        trailingContent = {
+                                            Text(if (localTriggerMode == mode.value) "✓" else "")
+                                        },
+                                        headlineContent = { Text(mode.description) }
+                                    )
+                                }
+
+                                if (localTriggerMode == TriggerMode.KEYWORD.value) {
+                                    OutlinedTextField(
+                                        value = localKeyword,
+                                        onValueChange = { localKeyword = it },
+                                        label = { Text("触发关键词") },
+                                        singleLine = true
+                                    )
+                                }
+
+                                ListItem(
+                                    modifier = Modifier.clickable { localUseWhitelist = !localUseWhitelist },
+                                    trailingContent = {
+                                        Switch(checked = localUseWhitelist, onCheckedChange = null)
+                                    },
+                                    headlineContent = { Text(if (localUseWhitelist) "白名单模式" else "黑名单模式") },
+                                    supportingContent = { Text(if (localUseWhitelist) "仅在选中的群聊中回复" else "在除选中群聊外的所有群聊中回复") }
+                                )
+
+                                ListItem(
+                                    modifier = Modifier.clickable { showGroupSelector = true },
+                                    headlineContent = { Text("选择群聊") },
+                                    supportingContent = { Text("当前已选 ${enabledGroups.size} 个群聊") }
+                                )
+                            }
+
+                            OutlinedTextField(
+                                value = localPrefix,
+                                onValueChange = { localPrefix = it },
+                                label = { Text("回复前缀（可留空）") },
+                                singleLine = true
+                            )
+
+                            OutlinedTextField(
+                                value = localDelay,
+                                onValueChange = { localDelay = it },
+                                label = { Text("回复延迟（毫秒）") },
                                 singleLine = true
                             )
                         }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = onDismiss) { Text("取消") }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            apiUrl = localApiUrl
+                            apiKey = localApiKey
+                            model = localModel
+                            systemPrompt = localPrompt
+                            enableForPrivate = localEnablePrivate
+                            enableForGroup = localEnableGroup
+                            groupTriggerKeyword = localKeyword
+                            replyPrefix = localPrefix
+                            replyDelay = localDelay.toIntOrNull()?.coerceIn(0, 10000) ?: 1000
+                            triggerMode = localTriggerMode
+                            useWhitelist = localUseWhitelist
+                            showToast("设置已保存")
+                            onDismiss()
+                        }) { Text("保存") }
+                    }
+                )
+            }
+        }
+    }
 
-                        OutlinedTextField(
-                            value = localPrefix,
-                            onValueChange = { localPrefix = it },
-                            label = { Text("回复前缀（可留空）") },
-                            singleLine = true
-                        )
+    @Composable
+    private fun GroupSelectorScreen(
+        onDismiss: () -> Unit,
+        useWhitelist: Boolean,
+        onSave: (Set<String>) -> Unit
+    ) {
+        val groups = remember {
+            WeDatabaseApi.getGroups().filter { it.wxId.isNotBlank() }
+        }
+        val selected = remember { enabledGroups.toMutableSet() }
 
-                        OutlinedTextField(
-                            value = localDelay,
-                            onValueChange = { localDelay = it },
-                            label = { Text("回复延迟（毫秒）") },
-                            singleLine = true
+        AlertDialogContent(
+            title = { Text("选择群聊") },
+            text = {
+                DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        if (useWhitelist) "选择需要开启 AI 自动回复的群聊" else "选择需要排除 AI 自动回复的群聊",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    groups.forEach { group ->
+                        val isSelected = remember { mutableStateOf(selected.contains(group.wxId)) }
+                        ListItem(
+                            modifier = Modifier.clickable {
+                                isSelected.value = !isSelected.value
+                                if (isSelected.value) {
+                                    selected.add(group.wxId)
+                                } else {
+                                    selected.remove(group.wxId)
+                                }
+                            },
+                            headlineContent = { Text(group.displayName) },
+                            supportingContent = { Text(group.wxId) },
+                            trailingContent = {
+                                Text(if (isSelected.value) "✓" else "")
+                            }
                         )
                     }
-                },
-                dismissButton = {
-                    TextButton(onClick = onDismiss) { Text("取消") }
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        apiUrl = localApiUrl
-                        apiKey = localApiKey
-                        model = localModel
-                        systemPrompt = localPrompt
-                        enableForPrivate = localEnablePrivate
-                        enableForGroup = localEnableGroup
-                        groupTriggerKeyword = localKeyword
-                        replyPrefix = localPrefix
-                        replyDelay = localDelay.toIntOrNull()?.coerceIn(0, 10000) ?: 1000
-                        showToast("设置已保存")
-                        onDismiss()
-                    }) { Text("保存") }
                 }
-            )
-        }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+            confirmButton = {
+                Button(onClick = {
+                    onSave(selected)
+                    onDismiss()
+                }) { Text("保存") }
+            }
+        )
     }
 
     override fun onInsert(table: String, values: ContentValues) {
@@ -200,7 +316,22 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
         if (isGroup) {
             if (!enableForGroup) return
-            if (groupTriggerKeyword.isNotBlank() && !content.contains(groupTriggerKeyword)) return
+
+            if (useWhitelist && talker !in enabledGroups) return
+            if (!useWhitelist && talker in enabledGroups) return
+
+            when (triggerMode) {
+                TriggerMode.AT_ONLY.value -> {
+                    val selfWxId = WeApi.selfWxId
+                    val atPattern = Regex("@(${selfWxId}|${WeDatabaseApi.getDisplayName(selfWxId)})", RegexOption.IGNORE_CASE)
+                    if (!atPattern.containsMatchIn(content)) return
+                }
+                TriggerMode.KEYWORD.value -> {
+                    if (groupTriggerKeyword.isNotBlank() && !content.contains(groupTriggerKeyword)) return
+                }
+                TriggerMode.ALL.value -> {
+                }
+            }
         } else {
             if (!enableForPrivate) return
         }
@@ -209,10 +340,16 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             runCatching {
                 delay(replyDelay.toLong())
 
-                val cleanContent = if (isGroup && groupTriggerKeyword.isNotBlank()) {
-                    content.replace(groupTriggerKeyword, "").trim()
-                } else {
-                    content
+                val cleanContent = when {
+                    isGroup && triggerMode == TriggerMode.AT_ONLY.value -> {
+                        val selfWxId = WeApi.selfWxId
+                        val selfName = WeDatabaseApi.getDisplayName(selfWxId)
+                        content.replace("@$selfWxId", "").replace("@$selfName", "").trim()
+                    }
+                    isGroup && groupTriggerKeyword.isNotBlank() -> {
+                        content.replace(groupTriggerKeyword, "").trim()
+                    }
+                    else -> content
                 }
 
                 if (cleanContent.isBlank()) return@runCatching

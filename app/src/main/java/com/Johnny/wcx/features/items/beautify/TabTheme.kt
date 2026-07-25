@@ -478,6 +478,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
 
     private fun pickImageForTab(activity: ComponentActivity, tabIndex: Int) {
         TransparentActivity.launch(activity) {
+            val context = this
             val launcher = registerForActivityResult(
                 ActivityResultContracts.PickVisualMedia()
             ) { uri ->
@@ -485,14 +486,13 @@ object TabTheme : ClickableFeature(), IResolveDex {
                 if (uri == null) return@registerForActivityResult
 
                 runCatching {
-                    val contentResolver = HostInfo.application.contentResolver
-                    contentResolver.takePersistableUriPermission(
+                    context.contentResolver.takePersistableUriPermission(
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION
                     )
 
                     val destFile = getTabBackgroundFile(tabIndex)
-                    contentResolver.openInputStream(uri)?.use { input ->
+                    context.contentResolver.openInputStream(uri)?.use { input ->
                         destFile.outputStream().use { output ->
                             input.copyTo(output)
                         }
@@ -506,7 +506,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
                     showToast("${tabNames[tabIndex]} 背景已设置，重启微信生效")
                 }.onFailure {
                     WeLogger.e(TAG, "failed to set tab background", it)
-                    showToast("设置失败")
+                    showToast("设置失败: ${it.message}")
                 }
             }
 
