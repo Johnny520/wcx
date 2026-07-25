@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -16,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.WeApi
@@ -33,6 +35,7 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.strings.isGroupChatWxId
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -79,7 +82,7 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
                     val isSend = msgInfo.reflekt().firstField { name = "isSend" }.get() as Int
 
                     if (isSend != 1) return@hookAfter
-                    if (!talker.isGroupChatWxId()) return@hookAfter
+                    if (!talker.isGroupChatWxId) return@hookAfter
 
                     updateReadCount(talker, msgId)
                 }
@@ -95,7 +98,7 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
             }.forEach { method ->
                 method.hookAfter {
                     val talker = args.getOrNull(0) as? String ?: return@hookAfter
-                    if (!talker.isGroupChatWxId()) return@hookAfter
+                    if (!talker.isGroupChatWxId) return@hookAfter
 
                     updateAllReadCounts(talker)
                 }
@@ -163,7 +166,7 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
         if (msgInfo.isSend == 0) return
 
         val talker = msgInfo.talker
-        if (!talker.isGroupChatWxId()) return
+        if (!talker.isGroupChatWxId) return
 
         val msgId = msgInfo.msgId
 

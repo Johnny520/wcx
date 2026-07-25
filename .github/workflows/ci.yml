@@ -177,7 +177,7 @@ jobs:
           name: wcx-mapping
           path: dist/mapping/*.txt
 
-  release-ci:
+  release:
     needs: build
     runs-on: ubuntu-latest
     if: ${{ success() && github.ref == 'refs/heads/master' }}
@@ -197,22 +197,20 @@ jobs:
           name: wcx-apk
           path: artifacts
 
-      - name: Delete existing CI release (if exists)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete CI --yes || true
-          gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/CI || true
-
-      - name: Generate update.json
+      - name: Generate version info
+        id: version
         run: |
           COMMIT_COUNT=$(git rev-list --count HEAD)
           GIT_HASH=$(git rev-parse --short HEAD)
+          VERSION_TAG="v${COMMIT_COUNT}"
+          echo "tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
+          echo "hash=${GIT_HASH}" >> $GITHUB_OUTPUT
+          echo "count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
 
           cat > artifacts/update.json <<EOF
           {
             "versionCode": ${COMMIT_COUNT},
-            "versionName": "git+${GIT_HASH}",
+            "versionName": "${VERSION_TAG}",
             "commit": "${GIT_HASH}"
           }
           EOF
@@ -220,106 +218,30 @@ jobs:
           echo "Generated update.json:"
           cat artifacts/update.json
 
-      - name: Create CI release and upload APK
+      - name: Create Release and upload APK
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: CI
-          name: CI
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: WCX ${{ steps.version.outputs.tag }}
           body: |
-            本 Release 始终包含最新的 CI 构建产物, 便于未登录 GitHub 的用户下载模块或模块内置更新器更新
-            
-            提交 SHA: `${{ github.sha }}`
+            ## WCX ${{ steps.version.outputs.tag }}
+
+            正式发行版本
+
+            提交 SHA: `${{ steps.version.outputs.hash }}`
 
             提交消息:
             ```
             ${{ github.event.head_commit.message || '手动构建' }}
             ```
+
+            ### 下载
+            - 下方 Assets 中下载对应架构的 APK
+            - update.json 供模块内置更新器使用
           files: |
             artifacts/*.apk
             artifacts/update.json
           prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-telegram:
-    needs: build
-    runs-on: ubuntu-latest
-    if: ${{ success() && github.ref == 'refs/heads/master' }}
-    services:
-      telegram-bot-api:
-        image: aiogram/telegram-bot-api:latest
-        env:
-          TELEGRAM_API_ID: "21724"
-          TELEGRAM_API_HASH: "3e0cb5efcd52300aec5994fdfc5bdc16"
-          TELEGRAM_STATISTICS: 1
-        ports:
-          - 8081:8081
-
-    steps:
-      - name: Download APK artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: wcx-apk
-          path: artifacts
-
-      - name: Wait for Telegram API
-        run: |
-          until curl -s http://localhost:8081 > /dev/null; do
-          echo "Waiting for Telegram API server..."
-          sleep 1
-          done
-
-      - name: Send APKs via Telegram API
-        env:
-          BOT_TOKEN:         ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID:           ${{ secrets.TELEGRAM_CHAT_ID }}
-          MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
-          SHA:               ${{ github.sha }}
-          COMMIT_AUTHOR:     ${{ github.event.head_commit.author.name || github.actor }}
-          REPO:              ${{ github.repository }}
-        run: |
-          caption="🎉 *检测到新的 GitHub 推送！*
-          *Commit SHA:* \`${SHA}\`
-          \`\`\`
-          ${{ github.event.head_commit.message || 'Manual Build' }}
-          \`\`\`
-          *提交者* \`${COMMIT_AUTHOR}\`
-          [查看详情](https://github.com/${REPO}/commit/${SHA})"
-          
-          apks=(artifacts/*.apk)
-          
-          echo $apks
-          
-          if [ ${#apks[@]} -eq 1 ]; then
-            # Single APK — use sendDocument (supports caption)
-            curl -s -X POST "http://localhost:8081/bot${BOT_TOKEN}/sendDocument" \
-              -F chat_id="${CHAT_ID}" \
-              -F document=@"${apks[0]}" \
-              -F caption="${caption}" \
-              -F parse_mode=Markdown
-          else
-            media_json="["
-            form_args=()
-            for i in "${!apks[@]}"; do
-              apk="${apks[$i]}"
-              name="apk${i}"
-              form_args+=(-F "${name}=@${apk}")
-          
-              if [ $i -gt 0 ]; then media_json+=","; fi
-          
-              if [ $i -eq $(( ${#apks[@]} - 1 )) ]; then
-                media_json+="{\"type\":\"document\",\"media\":\"attach://${name}\",\"caption\":\"${caption}\",\"parse_mode\":\"Markdown\"}"
-              else
-                media_json+="{\"type\":\"document\",\"media\":\"attach://${name}\"}"
-              fi
-            done
-            media_json+="]"
-          
-            echo $media_json
-          
-            curl -s -X POST "http://localhost:8081/bot${BOT_TOKEN}/sendMediaGroup" \
-              -F chat_id="${CHAT_ID}" \
-              -F message_thread_id="${MESSAGE_THREAD_ID}" \
-              -F media="${media_json}" \
-              "${form_args[@]}"
-          fi
