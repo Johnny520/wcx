@@ -1,6 +1,5 @@
 package com.Johnny.wcx.features.items.chat
 
-import android.annotation.SuppressLint
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -19,7 +18,6 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.showToast
 
-@SuppressLint("SetTextI18n")
 @Feature(name = "伪装语音时长", categories = ["聊天"], description = "预设定伪装发送语音显示的时长")
 object FakeVoiceDuration : ClickableFeature(), IResolveDex {
 
@@ -33,12 +31,13 @@ object FakeVoiceDuration : ClickableFeature(), IResolveDex {
     }
     private const val KEY_DURATION = "fake_voice_duration_seconds"
 
-    private val defaultDurationSec = 1
-    private val maxDurationSec = 60
+    private const val DEFAULT_DURATION_SEC = 1
+    private const val MAX_DURATION_SEC = 60
 
     override fun onEnable() {
         methodVoiceRecorderGetLength.hookBefore {
-            val durationSec = WePrefs.getIntOrDef(KEY_DURATION, defaultDurationSec).coerceIn(0, maxDurationSec)
+            val durationSec = WePrefs.getIntOrDef(KEY_DURATION, DEFAULT_DURATION_SEC)
+                .coerceIn(0, MAX_DURATION_SEC)
             result = durationSec * 1000L
         }
     }
@@ -46,7 +45,7 @@ object FakeVoiceDuration : ClickableFeature(), IResolveDex {
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var durationInput by remember {
-                mutableStateOf(WePrefs.getIntOrDef(KEY_DURATION, defaultDurationSec).toString())
+                mutableStateOf(WePrefs.getIntOrDef(KEY_DURATION, DEFAULT_DURATION_SEC).toString())
             }
             AlertDialogContent(
                 title = { Text("伪装语音时长") },
@@ -54,9 +53,10 @@ object FakeVoiceDuration : ClickableFeature(), IResolveDex {
                     TextField(
                         value = durationInput,
                         onValueChange = {
-                            durationInput = it.filter { c -> c.isDigit() }.take(2)
+                            durationInput = it.filter(Char::isDigit).take(2)
                         },
-                        label = { Text("语音时长 (秒，最大${maxDurationSec}秒)") })
+                        label = { Text("语音时长 (秒，最大${MAX_DURATION_SEC}秒)") }
+                    )
                 },
                 dismissButton = {
                     TextButton(onDismiss) { Text("取消") }
@@ -68,15 +68,15 @@ object FakeVoiceDuration : ClickableFeature(), IResolveDex {
                             showToast("时长格式不正确!")
                             return@Button
                         }
-                        if (durationSec < 0 || durationSec > maxDurationSec) {
-                            showToast("时长范围: 0-${maxDurationSec}秒")
+                        if (durationSec < 0 || durationSec > MAX_DURATION_SEC) {
+                            showToast("时长范围: 0-${MAX_DURATION_SEC}秒")
                             return@Button
                         }
-
                         WePrefs.putInt(KEY_DURATION, durationSec)
                         onDismiss()
                     }) { Text("确定") }
-                })
+                }
+            )
         }
     }
 }
