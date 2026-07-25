@@ -218,8 +218,35 @@ object TabTheme : ClickableFeature(), IResolveDex {
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var showThemeList by remember { mutableStateOf(false) }
+            var showSaveDialog by remember { mutableStateOf(false) }
+            var saveName by remember { mutableStateOf("我的主题") }
 
-            if (showThemeList) {
+            if (showSaveDialog) {
+                AlertDialogContent(
+                    title = { Text("保存为主题") },
+                    text = {
+                        DefaultColumn {
+                            Text("主题名称", style = MaterialTheme.typography.labelLarge)
+                            androidx.compose.material3.OutlinedTextField(
+                                value = saveName,
+                                onValueChange = { saveName = it },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { showSaveDialog = false }) { Text("取消") } },
+                    confirmButton = {
+                        Button(
+                            enabled = saveName.isNotBlank(),
+                            onClick = {
+                                saveCurrentAsTheme(saveName.trim())
+                                showToast("主题已保存: ${saveName.trim()}")
+                                showSaveDialog = false
+                            }
+                        ) { Text("保存") }
+                    }
+                )
+            } else if (showThemeList) {
                 ThemeListScreen(
                     onDismiss = { showThemeList = false },
                     onSelect = { themeName ->
@@ -242,10 +269,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
                 TabThemeSettings(
                     onDismiss = onDismiss,
                     onOpenThemeList = { showThemeList = true },
-                    onSaveAs = { name ->
-                        saveCurrentAsTheme(name)
-                        showToast("主题已保存: $name")
-                    }
+                    onSaveAs = { showSaveDialog = true }
                 )
             }
         }
@@ -255,13 +279,10 @@ object TabTheme : ClickableFeature(), IResolveDex {
     private fun TabThemeSettings(
         onDismiss: () -> Unit,
         onOpenThemeList: () -> Unit,
-        onSaveAs: (String) -> Unit
+        onSaveAs: () -> Unit
     ) {
-        val config = remember { loadConfig() }
         var enabledState by remember { mutableStateOf(tabThemeEnabled) }
         var opacityState by remember { mutableFloatStateOf(opacity) }
-        var showSaveDialog by remember { mutableStateOf(false) }
-        var saveName by remember { mutableStateOf(config.name.ifEmpty { "我的主题" }) }
 
         AlertDialogContent(
             title = { Text("四 Tab 主题背景") },
@@ -313,7 +334,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
                             modifier = Modifier.weight(1f)
                         ) { Text("主题管理") }
                         Button(
-                            onClick = { showSaveDialog = true },
+                            onClick = onSaveAs,
                             modifier = Modifier.weight(1f)
                         ) { Text("保存为主题") }
                     }
@@ -333,32 +354,6 @@ object TabTheme : ClickableFeature(), IResolveDex {
                 }) { Text("保存") }
             }
         )
-
-        if (showSaveDialog) {
-            AlertDialogContent(
-                title = { Text("保存为主题") },
-                text = {
-                    DefaultColumn {
-                        Text("主题名称", style = MaterialTheme.typography.labelLarge)
-                        androidx.compose.material3.OutlinedTextField(
-                            value = saveName,
-                            onValueChange = { saveName = it },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                dismissButton = { TextButton(onClick = { showSaveDialog = false }) { Text("取消") } },
-                confirmButton = {
-                    Button(
-                        enabled = saveName.isNotBlank(),
-                        onClick = {
-                            onSaveAs(saveName.trim())
-                            showSaveDialog = false
-                        }
-                    ) { Text("保存") }
-                }
-            )
-        }
     }
 
     @Composable
