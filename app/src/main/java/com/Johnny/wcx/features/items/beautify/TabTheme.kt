@@ -44,7 +44,6 @@ import coil3.load
 import coil3.request.crossfade
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.TransparentActivity
-import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
@@ -92,7 +91,7 @@ import kotlin.io.path.writeText
     categories = ["界面美化"],
     description = "为微信主页、通讯录、发现、我四个页面分别设置背景图片，支持主题包导入导出"
 )
-object TabTheme : ClickableFeature(), IResolveDex {
+object TabTheme : ClickableFeature() {
 
     private const val TAG = "TabTheme"
     private const val OVERLAY_TAG_PREFIX = "wcx_tab_theme_"
