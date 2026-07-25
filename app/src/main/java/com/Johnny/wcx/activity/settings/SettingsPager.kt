@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1034,8 +1036,8 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        AsyncImage(
-                            model = "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=wechat%20payment%20qr%20code%20green%20background%20official%20strongge%20Johnny&image_size=square",
+                        Image(
+                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_wechat),
                             contentDescription = "微信支付二维码",
                             modifier = Modifier.fillMaxWidth().padding(4.dp),
                             contentScale = ContentScale.Fit,
@@ -1067,8 +1069,8 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        AsyncImage(
-                            model = "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=alipay%20payment%20qr%20code%20blue%20background%20official%20wenqiang%20tech&image_size=square",
+                        Image(
+                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_alipay),
                             contentDescription = "支付宝二维码",
                             modifier = Modifier.fillMaxWidth().padding(4.dp),
                             contentScale = ContentScale.Fit,
