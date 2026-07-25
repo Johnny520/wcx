@@ -28,6 +28,22 @@ import kotlin.coroutines.resumeWithException
 data class UpdateInfo(
     val versionCode: Int,
     val versionName: String,
+    val releaseTag: String = "",
+    val releaseUrl: String = "",
+    val changelog: String = "",
+    val apkUrl: String = "",
+)
+
+/**
+ * Release 列表项，用于历史版本展示
+ */
+data class ReleaseItem(
+    val tag: String,
+    val name: String,
+    val body: String,
+    val url: String,
+    val publishedAt: String,
+    val isPrerelease: Boolean,
 )
 
 sealed interface UpdateResult {
@@ -41,32 +57,49 @@ sealed interface UpdateResult {
     data class Error(val cause: Throwable) : UpdateResult
 }
 
-// ─── ABI → APK mapping ───────────────────────────────────────────────────────
+// ─── GitHub Release API ────────────────────────────────────────────────────
 
-private const val BASE_URL =
-    "https://github.com/Johnny520/wcx/releases/download/CI"
+private const val GITHUB_API_LATEST =
+    "https://api.github.com/repos/Johnny520/wcx/releases/latest"
+private const val GITHUB_API_RELEASES =
+    "https://api.github.com/repos/Johnny520/wcx/releases?per_page=20"
+private const val RELEASES_PAGE = "https://github.com/Johnny520/wcx/releases"
 
 // APKs are published per entry-point flavor: app-<flavor>-<abi>-release.apk.
 // Stay on the same flavor the installed build was compiled for.
 private val FLAVOR = BuildConfig.FLAVOR_SLUG
+private val ABI_LIST = listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+private const val UNIVERSAL_APK_SUFFIX = "universal-release.apk"
 
-private val ABI_APK_MAP = mapOf(
-    "arm64-v8a" to "$BASE_URL/app-$FLAVOR-arm64-v8a-release.apk",
-    "armeabi-v7a" to "$BASE_URL/app-$FLAVOR-armeabi-v7a-release.apk",
-    "x86" to "$BASE_URL/app-$FLAVOR-x86-release.apk",
-    "x86_64" to "$BASE_URL/app-$FLAVOR-x86_64-release.apk",
-)
-private val UNIVERSAL_APK = "$BASE_URL/app-$FLAVOR-universal-release.apk"
-private const val UPDATE_JSON_URL = "$BASE_URL/update.json"
-
-/** Returns the best APK URL for this device. */
-private fun apkUrlForDevice(): String {
-    val supportedAbis = Build.SUPPORTED_ABIS  // ordered by preference
+/**
+ * 从 GitHub Release 的 asset 列表中选择最适合当前设备的 APK 下载地址
+ */
+private fun selectApkUrl(assets: List<GitHubAsset>): String {
+    val supportedAbis = Build.SUPPORTED_ABIS
     for (abi in supportedAbis) {
-        ABI_APK_MAP[abi]?.let { return it }
+        val expected = "app-$FLAVOR-$abi-release.apk"
+        assets.firstOrNull { it.name == expected }?.let { return it.browser_download_url }
     }
-    return UNIVERSAL_APK
+    assets.firstOrNull { it.name.endsWith(UNIVERSAL_APK_SUFFIX) }?.let { return it.browser_download_url }
+    return RELEASES_PAGE
 }
+
+@Serializable
+private data class GitHubAsset(
+    val name: String,
+    val browser_download_url: String,
+)
+
+@Serializable
+private data class GitHubRelease(
+    val tag_name: String,
+    val name: String,
+    val body: String,
+    val prerelease: Boolean,
+    val html_url: String,
+    val assets: List<GitHubAsset>,
+    val published_at: String,
+)
 
 // ─── AppUpdater ───────────────────────────────────────────────────────────────
 
@@ -98,22 +131,43 @@ object AppUpdater {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
-     * Fetches [UPDATE_JSON_URL] and compares [UpdateInfo.versionCode] with
-     * the currently installed version.
+     * 从 GitHub API 获取最新 Release 信息，检测是否有新版本
      *
-     * Must be called from a coroutine; network I/O runs on [Dispatchers.IO].
+     * 兼容 CI 构建版和正式发行版，自动适配不同的 tag 命名
      */
     suspend fun checkForUpdate(): UpdateResult = withContext(Dispatchers.IO) {
         runCatching {
-            val remoteInfo = fetchUpdateInfo()
+            val release = fetchLatestRelease()
+            val updateInfo = parseUpdateInfo(release)
             val installedCode = BuildConfig.VERSION_CODE
-            if (remoteInfo.versionCode > installedCode) {
-                UpdateResult.UpdateAvailable(remoteInfo)
+            if (updateInfo.versionCode > installedCode) {
+                UpdateResult.UpdateAvailable(updateInfo)
             } else {
                 UpdateResult.UpToDate
             }
         }.getOrElse {
             UpdateResult.Error(it)
+        }
+    }
+
+    /**
+     * 获取最近的 Release 列表（含更新说明）
+     *
+     * @return 按发布时间倒序排列的 Release 列表，最多 20 个
+     */
+    suspend fun getReleaseHistory(): Result<List<ReleaseItem>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val releases = fetchAllReleases()
+            releases.map { release ->
+                ReleaseItem(
+                    tag = release.tag_name,
+                    name = release.name,
+                    body = release.body,
+                    url = release.html_url,
+                    publishedAt = release.published_at,
+                    isPrerelease = release.prerelease,
+                )
+            }
         }
     }
 
@@ -128,7 +182,7 @@ object AppUpdater {
      * [BroadcastReceiver] on [Dispatchers.Main].
      */
     suspend fun downloadAndInstall(context: Context, info: UpdateInfo) {
-        val apkUrl = apkUrlForDevice()
+        val apkUrl = info.apkUrl.ifBlank { selectApkUrl(emptyList()) }
         val fileName = "wcx-${info.versionName}.apk"
 
         val downloadId = enqueueDownload(context, apkUrl, fileName)
@@ -139,15 +193,56 @@ object AppUpdater {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private fun fetchUpdateInfo(): UpdateInfo {
-        val request = Request.Builder().url(UPDATE_JSON_URL).build()
+    private fun fetchLatestRelease(): GitHubRelease {
+        val request = Request.Builder()
+            .url(GITHUB_API_LATEST)
+            .header("Accept", "application/vnd.github.v3+json")
+            .build()
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                error("HTTP ${response.code} fetching update info")
+                error("HTTP ${response.code} fetching latest release")
             }
             val body = response.body.string()
             return json.decodeFromString(body)
         }
+    }
+
+    private fun fetchAllReleases(): List<GitHubRelease> {
+        val request = Request.Builder()
+            .url(GITHUB_API_RELEASES)
+            .header("Accept", "application/vnd.github.v3+json")
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                error("HTTP ${response.code} fetching releases")
+            }
+            val body = response.body.string()
+            return json.decodeFromString(body)
+        }
+    }
+
+    private fun parseUpdateInfo(release: GitHubRelease): UpdateInfo {
+        val tagName = release.tag_name
+        val versionCode = extractVersionCode(tagName)
+        val apkUrl = selectApkUrl(release.assets)
+        return UpdateInfo(
+            versionCode = versionCode,
+            versionName = release.name,
+            releaseTag = tagName,
+            releaseUrl = release.html_url,
+            changelog = release.body,
+            apkUrl = apkUrl,
+        )
+    }
+
+    private fun extractVersionCode(tagName: String): Int {
+        val vPrefix = tagName.removePrefix("v")
+        vPrefix.toIntOrNull()?.let { return it }
+        val ciMatch = Regex("""CI-?(\d+)?""", RegexOption.IGNORE_CASE).find(tagName)
+        ciMatch?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
+        val hashMatch = Regex("""[0-9a-f]{7}""", RegexOption.IGNORE_CASE).find(tagName)
+        hashMatch?.let { return Int.MAX_VALUE - 1000 }
+        return Int.MAX_VALUE - 9999
     }
 
     private fun enqueueDownload(context: Context, url: String, fileName: String): Long {

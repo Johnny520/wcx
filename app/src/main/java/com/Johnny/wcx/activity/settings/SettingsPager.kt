@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,9 +16,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,9 +28,11 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
+import androidx.compose.material3.CircularProgressIndicator
 import coil3.compose.AsyncImage
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Account_circle
@@ -56,6 +62,7 @@ import com.composables.icons.materialsymbols.outlined.Contrast
 import com.composables.icons.materialsymbols.outlined.Delete_forever
 import com.composables.icons.materialsymbols.outlined.Download
 import com.composables.icons.materialsymbols.outlined.Frame_bug
+import com.composables.icons.materialsymbols.outlined.History
 import com.composables.icons.materialsymbols.outlined.Label
 import com.composables.icons.materialsymbols.outlined.License
 import com.composables.icons.materialsymbols.outlined.Lightbulb_2
@@ -83,13 +90,13 @@ import com.Johnny.wcx.features.items.debug.ResetDexCache
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.MiuixSmallTitle
 import com.Johnny.wcx.ui.utils.GitHubIcon
-import com.Johnny.wcx.ui.utils.TelegramIcon
 import com.Johnny.wcx.ui.utils.theme.AppColorSpec
 import com.Johnny.wcx.ui.utils.theme.AppPaletteStyle
 import com.Johnny.wcx.ui.utils.theme.AppThemeMode
 import com.Johnny.wcx.ui.utils.theme.ThemeSettings
 import com.Johnny.wcx.utils.AppUpdater
 import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.ReleaseItem
 import com.Johnny.wcx.utils.UpdateResult
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToastSuspend
@@ -143,10 +150,12 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
     var showClearConfirm by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<UpdateResult.UpdateAvailable?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
+    var showChangelog by remember { mutableStateOf(false) }
 
     ClearConfigDialog(show = showClearConfirm, onDismiss = { showClearConfirm = false })
     UpdateAvailableDialog(info = updateInfo, onDismiss = { updateInfo = null }, context = context)
     UpdateErrorDialog(message = updateError, onDismiss = { updateError = null })
+    ChangelogDialog(show = showChangelog, onDismiss = { showChangelog = false }, context = context)
 
     MiuixListScaffold(title = "设置") {
         // Account info card — shown at top of Settings tab.
@@ -253,6 +262,12 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
                         )
                     },
                 )
+                PrefArrow(
+                    title = "更新记录",
+                    summary = "查看历史版本更新内容",
+                    icon = MaterialSymbols.Outlined.History,
+                    onClick = { showChangelog = true },
+                )
             }
         }
 
@@ -295,11 +310,6 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
                     summary = "https://johnny520.github.io/Johnny/",
                     icon = MaterialSymbols.Outlined.Public,
                     onClick = { "https://johnny520.github.io/Johnny/".toUri().openInSystem(context, true) })
-                PrefArrow(
-                    title = "Telegram 群组",
-                    summary = "暂无群组",
-                    icon = TelegramIcon,
-                )
             }
         }
 
@@ -779,6 +789,134 @@ private fun UpdateErrorDialog(message: String?, onDismiss: () -> Unit) {
         dismissText = "关闭",
         onDismiss = onDismiss,
     )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ChangelogDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
+    var releases by remember { mutableStateOf<List<ReleaseItem>?>(null) }
+    var loadingError by remember { mutableStateOf<String?>(null) }
+    var retryTick by remember { mutableStateOf(0) }
+
+    LaunchedEffect(show, retryTick) {
+        if (!show) return@LaunchedEffect
+        releases = null
+        loadingError = null
+        AppUpdater.getReleaseHistory()
+            .onSuccess { releases = it }
+            .onFailure { loadingError = it.message ?: "未知错误" }
+    }
+
+    WindowDialog(show = show, title = "更新记录", onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            when {
+                releases == null && loadingError == null -> {
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                loadingError != null -> {
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "加载失败", color = MiuixTheme.colorScheme.error)
+                            Spacer(Modifier.height(8.dp))
+                            Text(text = loadingError!!, fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                            Spacer(Modifier.height(12.dp))
+                            TextButton(text = "重试", onClick = { retryTick++ })
+                        }
+                    }
+                }
+                releases.isNullOrEmpty() -> {
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp), contentAlignment = Alignment.Center) {
+                        Text(text = "暂无更新记录", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    }
+                }
+                else -> {
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp)) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(vertical = 4.dp),
+                        ) {
+                            items(releases!!, key = { it.tag }) { release ->
+                                ChangelogItem(release, onClick = {
+                                    release.url.toUri().openInSystem(context, true)
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            TextButton(
+                text = "关闭",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChangelogItem(release: ReleaseItem, onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = release.name,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                if (release.isPrerelease) {
+                    Text(
+                        text = "预发布",
+                        fontSize = 11.sp,
+                        color = MiuixTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MiuixTheme.colorScheme.secondaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Text(
+                text = formatReleaseDate(release.publishedAt),
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            if (release.body.isNotBlank()) {
+                Text(
+                    text = release.body.take(200).let { if (release.body.length > 200) "$it..." else it },
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun formatReleaseDate(isoDate: String): String {
+    return runCatching {
+        val input = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
+        input.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val date = input.parse(isoDate) ?: return@runCatching isoDate
+        val output = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+        output.format(date)
+    }.getOrDefault(isoDate)
 }
 
 /** Two-button (cancel / confirm) miuix dialog. */

@@ -218,6 +218,77 @@ jobs:
           echo "Generated update.json:"
           cat artifacts/update.json
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # 获取上一个release的tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            echo "prev_tag=" >> $GITHUB_OUTPUT
+            echo "changelog=首次发布" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+
+          # 获取两个tag之间的commit列表
+          COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" || echo "")
+
+          # 分类提交
+          FEATURES=""
+          FIXES=""
+          REMOVED=""
+          OTHER=""
+
+          while IFS= read -r line; do
+            msg=$(echo "$line" | sed 's/^- //')
+            if echo "$msg" | grep -qiE "^(feat|新增|添加|增加|实现)"; then
+              FEATURES="${FEATURES}- ${msg}"$'\n'
+            elif echo "$msg" | grep -qiE "^(fix|修复|bug|解决|修)"; then
+              FIXES="${FIXES}- ${msg}"$'\n'
+            elif echo "$msg" | grep -qiE "^(remove|删除|移除|去掉)"; then
+              REMOVED="${REMOVED}- ${msg}"$'\n'
+            else
+              OTHER="${OTHER}- ${msg}"$'\n'
+            fi
+          done <<< "$COMMITS"
+
+          # 生成changelog
+          CHANGELOG=""
+
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG="${CHANGELOG}### 🎉 新增功能"$'\n'
+            CHANGELOG="${CHANGELOG}${FEATURES}"$'\n'
+          fi
+
+          if [ -n "$FIXES" ]; then
+            CHANGELOG="${CHANGELOG}### 🐛 修复问题"$'\n'
+            CHANGELOG="${CHANGELOG}${FIXES}"$'\n'
+          fi
+
+          if [ -n "$REMOVED" ]; then
+            CHANGELOG="${CHANGELOG}### 🗑️ 移除功能"$'\n'
+            CHANGELOG="${CHANGELOG}${REMOVED}"$'\n'
+          fi
+
+          if [ -n "$OTHER" ]; then
+            CHANGELOG="${CHANGELOG}### 🔧 其他改进"$'\n'
+            CHANGELOG="${CHANGELOG}${OTHER}"$'\n'
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="暂无详细更新记录"
+          fi
+
+          # 写入文件用于后续步骤
+          echo "$CHANGELOG" > artifacts/CHANGELOG.md
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "Generated changelog:"
+          cat artifacts/CHANGELOG.md
+
       - name: Create Release and upload APK
         uses: softprops/action-gh-release@v3
         with:
@@ -230,17 +301,15 @@ jobs:
 
             提交 SHA: `${{ steps.version.outputs.hash }}`
 
-            提交消息:
-            ```
-            ${{ github.event.head_commit.message || '手动构建' }}
-            ```
+            ${{ steps.changelog.outputs.changelog }}
 
-            ### 下载
+            ### 📦 下载
             - 下方 Assets 中下载对应架构的 APK
             - update.json 供模块内置更新器使用
           files: |
             artifacts/*.apk
             artifacts/update.json
+            artifacts/CHANGELOG.md
           prerelease: false
           make_latest: true
         env:
