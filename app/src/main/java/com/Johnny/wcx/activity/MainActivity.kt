@@ -59,12 +59,12 @@ import com.composables.icons.materialsymbols.outlinedfilled.Warning
 import com.topjohnwu.superuser.Shell
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
+import com.Johnny.wcx.constants.WeChatVersions
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.IconButton
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.GitHubIcon
-import com.Johnny.wcx.ui.utils.TelegramIcon
 import com.Johnny.wcx.ui.utils.theme.darkScheme
 import com.Johnny.wcx.ui.utils.theme.lightScheme
 import com.Johnny.wcx.utils.android.androidUserId
@@ -326,7 +326,7 @@ class MainActivity : ComponentActivity() {
                             formatEpoch(BuildConfig.BUILD_TIMESTAMP, true)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        InfoItem("已适配微信版本", "8.0.43 - 8.0.72")
+                        InfoItem("已适配微信版本", getAdaptedWeChatVersions())
                         Spacer(modifier = Modifier.height(8.dp))
                         InfoItem("当前微信版本", getWeChatVersion())
                     }
@@ -600,12 +600,6 @@ class MainActivity : ComponentActivity() {
                     subtitle = "Johnny520/wcx",
                     onClick = { onUrlClick("https://github.com/Johnny520/wcx") }
                 )
-                LinkCard(
-                    icon = TelegramIcon,
-                    title = "Telegram",
-                    subtitle = "Telegram 超级群组",
-                    onClick = { onUrlClick("https://t.me/+7j5dJ6g16B43OWVl") }
-                )
             }
 
             if (showAboutDialog) {
@@ -654,6 +648,33 @@ class MainActivity : ComponentActivity() {
             "v${pkgInfo.versionName} (${pkgInfo.longVersionCode})"
         } catch (e: Exception) {
             "未安装"
+        }
+    }
+
+    private fun getAdaptedWeChatVersions(): String {
+        return try {
+            val versions = WeChatVersions::class.java.declaredFields
+                .mapNotNull { field ->
+                    val name = field.name
+                    if (name.startsWith("MM_")) {
+                        val parts = name.removePrefix("MM_").split("_")
+                        if (parts.size >= 3) {
+                            "${parts[0]}.${parts[1]}.${parts[2]}"
+                        } else null
+                    } else null
+                }
+                .sortedWith(compareBy(
+                    { it.split(".").getOrNull(0)?.toIntOrNull() ?: 0 },
+                    { it.split(".").getOrNull(1)?.toIntOrNull() ?: 0 },
+                    { it.split(".").getOrNull(2)?.toIntOrNull() ?: 0 }
+                ))
+            if (versions.isNotEmpty()) {
+                "${versions.first()} - ${versions.last()}"
+            } else {
+                "自适应"
+            }
+        } catch (e: Exception) {
+            "自适应"
         }
     }
 

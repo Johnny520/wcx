@@ -55,7 +55,7 @@ wcx/
 
 ## 📋 适配版本
 
-- 微信版本：8.0.43 - 8.0.72（不含测试版）
+- 微信版本：自适应（不含测试版）
 - 框架支持：LSPosed、EdXposed、Xposed
 
 ## 🔧 构建
@@ -83,4 +83,4 @@ git clone https://github.com/Johnny520/wcx.git
 
 - 官网：[https://johnny520.github.io/Johnny/](https://johnny520.github.io/Johnny/)
 - GitHub：[https://github.com/Johnny520/wcx](https://github.com/Johnny520/wcx)
-- Telegram：[https://t.me/+7j5dJ6g16B43OWVl](https://t.me/+7j5dJ6g16B43OWVl)
+- Telegram：暂无
