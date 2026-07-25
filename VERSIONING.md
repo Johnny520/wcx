@@ -1,6 +1,6 @@
 # Versioning
 
-WeKit does not use semantic versioning. The module is distributed as CI-built "nightly" artifacts
+WCX does not use semantic versioning. The module is distributed as CI-built "nightly" artifacts
 with a deterministic, git-derived version scheme. There are no manual version bumps or release
 branches.
 

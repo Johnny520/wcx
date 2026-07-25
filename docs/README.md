@@ -1,6 +1,6 @@
-# WeKit
+# WCX
 
-WeKit 是一个功能丰富的微信 Xposed 模块, 提供大量微信增强功能, 涵盖聊天体验、界面美化、隐私保护、自动化等多个方面。
+WCX 是一个功能丰富的微信 Xposed 模块, 提供大量微信增强功能, 涵盖聊天体验、界面美化、隐私保护、自动化等多个方面。
 
 [![CI 状态](https://github.com/Johnny520/wcx/actions/workflows/ci.yml/badge.svg)](https://github.com/Johnny520/wcx/actions/workflows/ci.yml)
 
