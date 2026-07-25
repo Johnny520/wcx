@@ -32,6 +32,7 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.utils.VisibilityOffIcon
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.android.showToastSuspend
 import de.robv.android.xposed.XC_MethodHook
@@ -52,11 +53,19 @@ object QuickHideConversations : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuI
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onEnable() {
-        WeHomeScreenPopupMenuApi.addProvider(this)
+        runCatching {
+            WeHomeScreenPopupMenuApi.addProvider(this)
+        }.onFailure {
+            WeLogger.e(TAG, "failed to add provider", it)
+        }
     }
 
     override fun onDisable() {
-        WeHomeScreenPopupMenuApi.removeProvider(this)
+        runCatching {
+            WeHomeScreenPopupMenuApi.removeProvider(this)
+        }.onFailure {
+            WeLogger.e(TAG, "failed to remove provider", it)
+        }
     }
 
     override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {

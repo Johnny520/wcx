@@ -23,10 +23,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -980,7 +982,12 @@ private fun MiuixMessageDialog(
 @Composable
 private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
     WindowDialog(show = show, title = "捐赠支持", onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 500.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
 
             Card(modifier = Modifier.fillMaxWidth(), onClick = {
                 "https://ifdian.net/a/Johnny520".toUri().openInSystem(context, true)

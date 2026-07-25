@@ -77,10 +77,10 @@ object ScheduledMessage : ClickableFeature() {
     @Serializable
     data class MessageSegment(
         val type: MessageType,
-        val content: String = "",    // 文本内容或链接
-        val filePath: String = "",   // 文件路径（图片/语音/视频/文件）
-        val duration: Int = 0        // 语音时长（毫秒）
-    )
+        val content: String = "",
+        val filePath: String = "",
+        val duration: Int = 0
+    ) : java.io.Serializable
 
     @Serializable
     data class ScheduleConfig(
@@ -98,7 +98,7 @@ object ScheduledMessage : ClickableFeature() {
         val oneTimeOnly: Boolean = false,
         var nextSendTime: Long = 0,
         val segments: List<MessageSegment> = emptyList()
-    )
+    ) : java.io.Serializable
 
     enum class MessageType(val description: String) {
         TEXT("文本"),

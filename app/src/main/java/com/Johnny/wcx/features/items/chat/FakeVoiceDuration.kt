@@ -1,5 +1,6 @@
 package com.Johnny.wcx.features.items.chat
 
+import android.annotation.SuppressLint
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -18,6 +19,7 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.showToast
 
+@SuppressLint("SetTextI18n")
 @Feature(name = "伪装语音时长", categories = ["聊天"], description = "预设定伪装发送语音显示的时长")
 object FakeVoiceDuration : ClickableFeature(), IResolveDex {
 
@@ -29,37 +31,49 @@ object FakeVoiceDuration : ClickableFeature(), IResolveDex {
             returnType = "long"
         }
     }
-    private const val KEY_DURATION = "fake_voice_duration"
+    private const val KEY_DURATION = "fake_voice_duration_seconds"
+
+    private val defaultDurationSec = 1
+    private val maxDurationSec = 60
 
     override fun onEnable() {
         methodVoiceRecorderGetLength.hookBefore {
-            result = WePrefs.getLongOrDef(KEY_DURATION, 0L)
+            val durationSec = WePrefs.getIntOrDef(KEY_DURATION, defaultDurationSec).coerceIn(0, maxDurationSec)
+            result = durationSec * 1000L
         }
     }
 
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
-            var durationInput by remember { mutableStateOf(WePrefs.getLongOrDef(KEY_DURATION, 0).toString()) }
+            var durationInput by remember {
+                mutableStateOf(WePrefs.getIntOrDef(KEY_DURATION, defaultDurationSec).toString())
+            }
             AlertDialogContent(
                 title = { Text("伪装语音时长") },
                 text = {
                     TextField(
                         value = durationInput,
-                        onValueChange = { durationInput = it.filter { c -> c.isDigit() } },
-                        label = { Text("语音时长 (毫秒)") })
+                        onValueChange = {
+                            durationInput = it.filter { c -> c.isDigit() }.take(2)
+                        },
+                        label = { Text("语音时长 (秒，最大${maxDurationSec}秒)") })
                 },
                 dismissButton = {
                     TextButton(onDismiss) { Text("取消") }
                 },
                 confirmButton = {
                     Button(onClick = {
-                        val durationMs = durationInput.toLongOrNull()
-                        if (durationMs == null) {
+                        val durationSec = durationInput.toIntOrNull()
+                        if (durationSec == null) {
                             showToast("时长格式不正确!")
                             return@Button
                         }
+                        if (durationSec < 0 || durationSec > maxDurationSec) {
+                            showToast("时长范围: 0-${maxDurationSec}秒")
+                            return@Button
+                        }
 
-                        WePrefs.putLong(KEY_DURATION, durationMs)
+                        WePrefs.putInt(KEY_DURATION, durationSec)
                         onDismiss()
                     }) { Text("确定") }
                 })
