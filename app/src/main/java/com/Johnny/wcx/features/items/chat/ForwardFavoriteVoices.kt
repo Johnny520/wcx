@@ -76,7 +76,14 @@ object ForwardFavoriteVoices : SwitchFeature() {
                             showToast(ctx, "已复制")
                         }) { Text("复制路径") }
                         Button({
-                            WeMessageApi.sendVoice(WeCurrentConversationApi.value, voiceFilePath, AudioUtils.getDurationMs(voiceFilePath).coerceToInt())
+                            // Apply fake voice duration if FakeVoiceDuration is active,
+                            // since sendVoice bypasses the recorder hook path.
+                            val durationMs = if (FakeVoiceDuration.isActive) {
+                                FakeVoiceDuration.getFakeDurationMs().toInt()
+                            } else {
+                                AudioUtils.getDurationMs(voiceFilePath).coerceToInt()
+                            }
+                            WeMessageApi.sendVoice(WeCurrentConversationApi.value, voiceFilePath, durationMs)
                             showToast(ctx, "已发送")
                             onDismiss()
                             getTopMostActivity()?.finish()

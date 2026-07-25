@@ -36,10 +36,20 @@ object FakeVoiceDuration : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         methodVoiceRecorderGetLength.hookBefore {
-            val durationSec = WePrefs.getIntOrDef(KEY_DURATION, DEFAULT_DURATION_SEC)
-                .coerceIn(0, MAX_DURATION_SEC)
-            result = durationSec * 1000L
+            result = getFakeDurationMs()
         }
+    }
+
+    /**
+     * Returns the faked voice duration in milliseconds.
+     * Public so other features (e.g. ForwardFavoriteVoices) that send voice via
+     * WeMessageApi.sendVoice — which bypasses the recorder hook — can apply the
+     * same fake duration for consistency.
+     */
+    fun getFakeDurationMs(): Long {
+        val durationSec = WePrefs.getIntOrDef(KEY_DURATION, DEFAULT_DURATION_SEC)
+            .coerceIn(0, MAX_DURATION_SEC)
+        return durationSec * 1000L
     }
 
     override fun onClick(context: ComponentActivity) {
