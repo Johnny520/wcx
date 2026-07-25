@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -899,7 +900,7 @@ private fun ChangelogItem(release: ReleaseItem, onClick: () -> Unit) {
                 Text(
                     text = release.body.take(200).let { if (release.body.length > 200) "$it..." else it },
                     fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariant,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     maxLines = 5,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 8.dp),
