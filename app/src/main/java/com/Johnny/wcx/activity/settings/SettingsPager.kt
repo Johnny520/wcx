@@ -42,15 +42,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.material3.CircularProgressIndicator
@@ -981,6 +983,29 @@ private fun MiuixMessageDialog(
 }
 
 
+/**
+ * Load a drawable from the module's own resources (not the host's).
+ * In Xposed environment, LocalContext uses host resources which can't resolve module resource IDs.
+ * This uses createPackageContext to access the module APK's resource table directly.
+ */
+@Composable
+private fun rememberModuleImageBitmap(resourceName: String): ImageBitmap? {
+    return remember(resourceName) {
+        runCatching {
+            val moduleCtx = HostInfo.application.createPackageContext(
+                BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY
+            )
+            val resId = moduleCtx.resources.getIdentifier(
+                resourceName, "drawable", BuildConfig.APPLICATION_ID
+            )
+            if (resId == 0) return@runCatching null
+            moduleCtx.resources.getDrawable(resId, null).toBitmap().asImageBitmap()
+        }.onFailure {
+            WeLogger.e("DonateDialog", "failed to load module drawable: $resourceName", it)
+        }.getOrNull()
+    }
+}
+
 @Composable
 private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
     WindowDialog(show = show, title = "捐赠支持", onDismissRequest = onDismiss) {
@@ -1016,6 +1041,8 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
 
             Spacer(Modifier.height(10.dp))
 
+            val wechatQr = rememberModuleImageBitmap("donate_wechat")
+
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -1036,18 +1063,22 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Image(
-                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_wechat),
-                            contentDescription = "微信支付二维码",
-                            modifier = Modifier.fillMaxWidth().padding(4.dp),
-                            contentScale = ContentScale.Fit,
-                        )
+                        if (wechatQr != null) {
+                            Image(
+                                bitmap = wechatQr,
+                                contentDescription = "微信支付二维码",
+                                modifier = Modifier.fillMaxWidth().padding(4.dp),
+                                contentScale = ContentScale.Fit,
+                            )
+                        }
                     }
                     Text(text = "截图保存后使用微信扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp).fillMaxWidth().align(Alignment.CenterHorizontally))
                 }
             }
 
             Spacer(Modifier.height(10.dp))
+
+            val alipayQr = rememberModuleImageBitmap("donate_alipay")
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -1069,12 +1100,14 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Image(
-                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_alipay),
-                            contentDescription = "支付宝二维码",
-                            modifier = Modifier.fillMaxWidth().padding(4.dp),
-                            contentScale = ContentScale.Fit,
-                        )
+                        if (alipayQr != null) {
+                            Image(
+                                bitmap = alipayQr,
+                                contentDescription = "支付宝二维码",
+                                modifier = Modifier.fillMaxWidth().padding(4.dp),
+                                contentScale = ContentScale.Fit,
+                            )
+                        }
                     }
                     Text(text = "截图保存后使用支付宝扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp).fillMaxWidth().align(Alignment.CenterHorizontally))
                 }

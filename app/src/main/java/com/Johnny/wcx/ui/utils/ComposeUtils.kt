@@ -51,6 +51,13 @@ fun showComposeDialog(
             ComposeView(context).apply {
                 setLifecycleOwner(lifecycleOwner)
 
+                // Disable view state saving to prevent NotSerializableException.
+                // Dialogs shown via showComposeDialog are ephemeral and don't need
+                // state restoration. When the host Activity's onSaveInstanceState
+                // fires, the ComposeView would try to serialize its SavedStateRegistry
+                // which may contain non-serializable Compose internal objects.
+                isSaveEnabled = false
+
                 setContent {
                     CompositionLocalProvider(LocalContext provides context) {
                         ModuleTheme {
