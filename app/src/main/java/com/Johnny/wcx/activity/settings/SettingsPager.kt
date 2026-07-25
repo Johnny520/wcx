@@ -1027,8 +1027,8 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Image(
-                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_wechat),
+                        AsyncImage(
+                            model = "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=wechat%20payment%20qr%20code%20green%20background%20official%20strongge%20Johnny&image_size=square",
                             contentDescription = "微信支付二维码",
                             modifier = Modifier.fillMaxWidth().padding(4.dp),
                             contentScale = ContentScale.Fit,
@@ -1060,8 +1060,8 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Image(
-                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_alipay),
+                        AsyncImage(
+                            model = "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=alipay%20payment%20qr%20code%20blue%20background%20official%20wenqiang%20tech&image_size=square",
                             contentDescription = "支付宝二维码",
                             modifier = Modifier.fillMaxWidth().padding(4.dp),
                             contentScale = ContentScale.Fit,

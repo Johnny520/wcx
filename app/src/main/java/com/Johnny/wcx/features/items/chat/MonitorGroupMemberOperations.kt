@@ -378,7 +378,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                 AlertDialogContent(
                     title = { Text("进退群提示增强") },
                     text = {
-                        DefaultColumn {
+                        DefaultColumn(scrollable = true) {
                             ListItem(
                                 modifier = Modifier.clickable { globalEnabledState = !globalEnabledState },
                                 trailingContent = {

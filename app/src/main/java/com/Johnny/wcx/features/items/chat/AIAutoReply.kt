@@ -181,7 +181,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                         }
                     },
                     text = {
-                        DefaultColumn(Modifier.padding(vertical = 8.dp)) {
+                        DefaultColumn(Modifier.padding(vertical = 8.dp), scrollable = true) {
                             Text("API 配置", style = MaterialTheme.typography.titleSmall)
                             OutlinedTextField(
                                 value = localApiUrl,

@@ -431,7 +431,7 @@ object ScheduledMessage : ClickableFeature() {
                 AlertDialogContent(
                     title = { Text("定时发送消息") },
                     text = {
-                        DefaultColumn {
+                        DefaultColumn(scrollable = true) {
                             if (schedules.isEmpty()) {
                                 Text(
                                     "还没有定时任务，点击下方按钮添加",
@@ -539,7 +539,7 @@ object ScheduledMessage : ClickableFeature() {
         AlertDialogContent(
             title = { Text(if (isEditing) "编辑定时任务" else "添加定时任务") },
             text = {
-                DefaultColumn {
+                DefaultColumn(scrollable = true) {
                     ListItem(
                         modifier = Modifier.clickable { showTalkerSelector = true },
                         headlineContent = { Text(if (selectedTalkerName.isNotBlank()) selectedTalkerName else "选择发送对象") },

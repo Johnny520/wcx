@@ -287,7 +287,7 @@ object TabTheme : ClickableFeature() {
         AlertDialogContent(
             title = { Text("四 Tab 主题背景") },
             text = {
-                DefaultColumn {
+                DefaultColumn(scrollable = true) {
                     ListItem(
                         modifier = Modifier.clickable { enabledState = !enabledState },
                         trailingContent = {
