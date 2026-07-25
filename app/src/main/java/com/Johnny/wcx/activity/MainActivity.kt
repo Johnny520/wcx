@@ -669,12 +669,12 @@ class MainActivity : ComponentActivity() {
                     { it.split(".").getOrNull(2)?.toIntOrNull() ?: 0 }
                 ))
             if (versions.isNotEmpty()) {
-                "8.0.43 - ${versions.last()}（后续自适应）"
+                "完整支持 8.0.69 ~ 8.0.72 · 维护 8.0.65~8.0.68 · 低版本部分功能可能失效"
             } else {
-                "8.0.43 - 后续自适应"
+                "推荐 8.0.69 ~ 8.0.72，8.0.65 以下部分功能可能失效"
             }
         } catch (e: Exception) {
-            "8.0.43 - 后续自适应"
+            "推荐 8.0.69 ~ 8.0.72，8.0.65 以下部分功能可能失效"
         }
     }
 
