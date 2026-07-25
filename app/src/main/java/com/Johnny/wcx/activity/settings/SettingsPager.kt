@@ -2,7 +2,6 @@ package com.Johnny.wcx.activity.settings
 
 
 import android.content.Context
-import android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -43,6 +42,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,6 +78,7 @@ import com.composables.icons.materialsymbols.outlined.Update
 import com.composables.icons.materialsymbols.outlined.Upload
 import com.composables.icons.materialsymbols.outlined.Volunteer_activism
 import com.composables.icons.materialsymbols.outlined.Wallpaper
+import com.composables.icons.materialsymbols.outlined.Qr_code
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.tencent.mm.ui.LauncherUI
@@ -152,11 +153,13 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
     var updateInfo by remember { mutableStateOf<UpdateResult.UpdateAvailable?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var showChangelog by remember { mutableStateOf(false) }
+    var showDonate by remember { mutableStateOf(false) }
 
     ClearConfigDialog(show = showClearConfirm, onDismiss = { showClearConfirm = false })
     UpdateAvailableDialog(info = updateInfo, onDismiss = { updateInfo = null }, context = context)
     UpdateErrorDialog(message = updateError, onDismiss = { updateError = null })
     ChangelogDialog(show = showChangelog, onDismiss = { showChangelog = false }, context = context)
+    DonateDialog(show = showDonate, onDismiss = { showDonate = false }, context = context)
 
     MiuixListScaffold(title = "设置") {
         // Account info card — shown at top of Settings tab.
@@ -287,13 +290,7 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
                     title = "捐赠",
                     summary = "支持项目开发 (模块完全开源免费, 捐赠无特权)",
                     icon = MaterialSymbols.Outlined.Volunteer_activism,
-                    onClick = {
-                        context.startActivity(Intent().apply {
-                            setClassName(HostInfo.packageName, "${PackageNames.WECHAT}.plugin.collect.reward.ui.QrRewardSelectMoneyUI")
-                            putExtra("key_qrcode_url", "m0n#Z7LGW*s4AVH!z'd(?)")
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        })
-                    },
+                    onClick = { showDonate = true },
                 )
                 PrefArrow(
                     title = "开放源代码许可",
@@ -972,6 +969,139 @@ private fun MiuixMessageDialog(
     }
 }
 
+
+@Composable
+private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
+    WindowDialog(show = show, title = "捐赠支持", onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "感谢您的支持！您可以通过以下方式捐赠：",
+                fontSize = 14.sp,
+                color = MiuixTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(bottom = 16.dp),
+            )
+
+            Card(modifier = Modifier.fillMaxWidth(), onClick = {
+                "https://ifdian.net/a/Johnny520".toUri().openInSystem(context, true)
+            }) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFFE85D04)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(text = "爱", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(text = "爱发电", fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurface)
+                            Text(text = "点击跳转至爱发电页面", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF07C160)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(text = "微", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(text = "微信支付", fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurface)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier.size(180.dp).clip(RoundedCornerShape(8.dp)).background(Color.White),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = MaterialSymbols.Outlined.Qr_code,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(64.dp),
+                                        tint = Color(0xFF07C160),
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(text = "微信支付二维码", fontSize = 12.sp, color = Color.Gray)
+                                }
+                            }
+                            Text(text = "截图保存后使用微信扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1677FF)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(text = "支", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(text = "支付宝", fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurface)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier.size(180.dp).clip(RoundedCornerShape(8.dp)).background(Color.White),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = MaterialSymbols.Outlined.Qr_code,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(64.dp),
+                                        tint = Color(0xFF1677FF),
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(text = "支付宝二维码", fontSize = 12.sp, color = Color.Gray)
+                                }
+                            }
+                            Text(text = "截图保存后使用支付宝扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            TextButton(
+                text = "关闭",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 //  Open-source license screen
