@@ -130,8 +130,12 @@ object ScheduledMessage : ClickableFeature() {
             WeLogger.e(TAG, "failed to register alarm receiver", it)
         }
 
-        schedules.filter { it.enabled }.forEach { schedule ->
-            scheduleAlarm(schedule)
+        runCatching {
+            schedules.filter { it.enabled }.forEach { schedule ->
+                scheduleAlarm(schedule)
+            }
+        }.onFailure {
+            WeLogger.e(TAG, "failed to schedule alarms", it)
         }
     }
 
@@ -162,16 +166,20 @@ object ScheduledMessage : ClickableFeature() {
         val triggerTime = calculateNextTriggerTime(schedule)
         if (triggerTime <= 0) return
 
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            triggerTime,
-            pendingIntent
-        )
+        runCatching {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerTime,
+                pendingIntent
+            )
 
-        activeAlarms[schedule.id] = pendingIntent
+            activeAlarms[schedule.id] = pendingIntent
 
-        schedule.nextSendTime = triggerTime
-        updateSchedule(schedule)
+            schedule.nextSendTime = triggerTime
+            updateSchedule(schedule)
+        }.onFailure {
+            WeLogger.e(TAG, "failed to set alarm for schedule ${schedule.id}", it)
+        }
     }
 
     private fun calculateNextTriggerTime(schedule: ScheduleConfig): Long {

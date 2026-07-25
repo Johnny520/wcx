@@ -1027,25 +1027,14 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(
-                                modifier = Modifier.size(180.dp).clip(RoundedCornerShape(8.dp)).background(Color.White),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = MaterialSymbols.Outlined.Qr_code,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(64.dp),
-                                        tint = Color(0xFF07C160),
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(text = "微信支付二维码", fontSize = 12.sp, color = Color.Gray)
-                                }
-                            }
-                            Text(text = "截图保存后使用微信扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp))
-                        }
+                        Image(
+                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_wechat),
+                            contentDescription = "微信支付二维码",
+                            modifier = Modifier.fillMaxWidth().padding(4.dp),
+                            contentScale = ContentScale.Fit,
+                        )
                     }
+                    Text(text = "截图保存后使用微信扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp).fillMaxWidth().align(Alignment.CenterHorizontally))
                 }
             }
 
@@ -1071,25 +1060,14 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(
-                                modifier = Modifier.size(180.dp).clip(RoundedCornerShape(8.dp)).background(Color.White),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = MaterialSymbols.Outlined.Qr_code,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(64.dp),
-                                        tint = Color(0xFF1677FF),
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(text = "支付宝二维码", fontSize = 12.sp, color = Color.Gray)
-                                }
-                            }
-                            Text(text = "截图保存后使用支付宝扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp))
-                        }
+                        Image(
+                            painter = painterResource(id = com.Johnny.wcx.R.drawable.donate_alipay),
+                            contentDescription = "支付宝二维码",
+                            modifier = Modifier.fillMaxWidth().padding(4.dp),
+                            contentScale = ContentScale.Fit,
+                        )
                     }
+                    Text(text = "截图保存后使用支付宝扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp).fillMaxWidth().align(Alignment.CenterHorizontally))
                 }
             }
 
