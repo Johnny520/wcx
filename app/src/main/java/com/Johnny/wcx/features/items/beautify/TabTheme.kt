@@ -45,7 +45,6 @@ import coil3.request.crossfade
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.dexkit.abc.IResolveDex
-import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
@@ -267,6 +266,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
                 )
             } else {
                 TabThemeSettings(
+                    activity = context,
                     onDismiss = onDismiss,
                     onOpenThemeList = { showThemeList = true },
                     onSaveAs = { showSaveDialog = true }
@@ -277,6 +277,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
 
     @Composable
     private fun TabThemeSettings(
+        activity: ComponentActivity,
         onDismiss: () -> Unit,
         onOpenThemeList: () -> Unit,
         onSaveAs: () -> Unit
@@ -317,6 +318,7 @@ object TabTheme : ClickableFeature(), IResolveDex {
 
                     tabNames.forEach { (index, name) ->
                         TabBackgroundItem(
+                            activity = activity,
                             tabIndex = index,
                             tabName = name,
                             hasImage = hasTabBackground(index)
@@ -357,11 +359,10 @@ object TabTheme : ClickableFeature(), IResolveDex {
     }
 
     @Composable
-    private fun TabBackgroundItem(tabIndex: Int, tabName: String, hasImage: Boolean) {
-        val context = androidx.compose.ui.platform.LocalContext.current
+    private fun TabBackgroundItem(activity: ComponentActivity, tabIndex: Int, tabName: String, hasImage: Boolean) {
         ListItem(
             modifier = Modifier.clickable {
-                pickImageForTab(context as ComponentActivity, tabIndex)
+                pickImageForTab(activity, tabIndex)
             },
             leadingContent = {
                 if (hasImage) {
@@ -686,10 +687,4 @@ object TabTheme : ClickableFeature(), IResolveDex {
         }
     }
 
-    private val methodTest by dexMethod {
-        matcher {
-            declaredClass = "com.tencent.mm.ui.LauncherUI"
-            name = "onResume"
-        }
-    }
 }
