@@ -233,8 +233,8 @@ object AddMainScreenFab : ClickableFeature() {
             val scrolledAwayState = mutableStateOf(false)
             val fabRoot = activity.rootView
             var scrollObserverAttached = false
-            val attachScrollListener = {
-                if (scrollObserverAttached) return@runCatching
+            val attachScrollListener = lambda@{
+                if (scrollObserverAttached) return@lambda
                 val list = fabRoot.findViewWhich<android.view.View> { it is WxRecyclerView }
                     ?: error("chat list not found")
                 scrollObserverAttached = true

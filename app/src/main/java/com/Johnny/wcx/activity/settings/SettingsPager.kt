@@ -1226,7 +1226,7 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
                     Text(
                         text = "本模块大量功能实现源于 wekit 模块作者，已获作者授权。",
                         fontSize = 14.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariant,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         lineHeight = 22.sp,
                     )
                 }
