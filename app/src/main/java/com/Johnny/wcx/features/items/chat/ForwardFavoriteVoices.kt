@@ -47,6 +47,7 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.AudioUtils
 import com.Johnny.wcx.utils.RuntimeConfig
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.getTopMostActivity
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.coerceToInt

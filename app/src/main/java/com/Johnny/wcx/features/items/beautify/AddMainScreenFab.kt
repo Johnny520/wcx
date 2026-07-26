@@ -238,10 +238,15 @@ object AddMainScreenFab : ClickableFeature() {
                 val list = fabRoot.findViewWhich<android.view.View> { it is WxRecyclerView }
                     ?: error("chat list not found")
                 scrollObserverAttached = true
-                var lastOffset = runCatching { list.computeVerticalScrollOffset() }.getOrDefault(0)
+                fun getScrollY(): Int {
+                    return runCatching {
+                        list.reflekt().firstMethod { name = "computeVerticalScrollOffset"; superclass() }.invoke(list) as Int
+                    }.getOrDefault(0)
+                }
+                var lastOffset = getScrollY()
                 val scrollListener = android.view.ViewTreeObserver.OnScrollChangedListener {
                     runCatching {
-                        val currentOffset = list.computeVerticalScrollOffset()
+                        val currentOffset = getScrollY()
                         val dy = currentOffset - lastOffset
                         if (dy > 20) {
                             scrolledAwayState.value = true
