@@ -97,6 +97,8 @@ import com.Johnny.wcx.ui.utils.rootView
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.ui.utils.findViewWhich
+import com.tencent.mm.view.recyclerview.WxRecyclerView
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.killHost
 import com.Johnny.wcx.utils.restartHost
@@ -226,6 +228,31 @@ object AddMainScreenFab : ClickableFeature() {
                     }
                 }
 
+            // 监听聊天列表滚动：向下滑动时隐藏 FAB，向上滑动时恢复显示
+            val scrolledAwayState = mutableStateOf(false)
+            val fabRoot = activity.rootView
+            var scrollObserverAttached = false
+            intArrayOf(0, 200, 800, 2_000).forEach { delayMs ->
+                fabRoot.postDelayed({
+                    if (scrollObserverAttached) return@postDelayed
+                    runCatching {
+                        val list = fabRoot.findViewWhich<android.view.View> { it is WxRecyclerView } ?: return@runCatching
+                        scrollObserverAttached = true
+                        var lastOffset = runCatching { list.computeVerticalScrollOffset() }.getOrDefault(0)
+                        list.viewTreeObserver.addOnScrollChangedListener {
+                            val currentOffset = runCatching { list.computeVerticalScrollOffset() }.getOrDefault(lastOffset)
+                            val dy = currentOffset - lastOffset
+                            if (dy > 20) {
+                                scrolledAwayState.value = true
+                            } else if (dy < -20) {
+                                scrolledAwayState.value = false
+                            }
+                            lastOffset = currentOffset
+                        }
+                    }.onFailure { WeLogger.w("AddMainScreenFab", "failed to attach chat list scroll observer", it) }
+                }, delayMs.toLong())
+            }
+
             val configList = loadConfig()
             val menuItems = mutableMapOf<String, Pair<ImageVector, () -> Unit>>()
 
@@ -277,9 +304,10 @@ object AddMainScreenFab : ClickableFeature() {
                             var expanded by remember { mutableStateOf(false) }
                             val currentTab by currentTabState
                             val isHomeTab = currentTab == 0
+                            val scrolledAway by scrolledAwayState
 
                             AnimatedVisibility(
-                                visible = isHomeTab,
+                                visible = isHomeTab && !scrolledAway,
                                 enter = fadeIn(animationSpec = tween(durationMillis = 150)),
                                 exit = fadeOut(animationSpec = tween(durationMillis = 150))
                             ) {

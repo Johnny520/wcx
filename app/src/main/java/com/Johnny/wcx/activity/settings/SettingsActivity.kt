@@ -174,6 +174,7 @@ private sealed interface SettingsNavTarget {
     data object Main : SettingsNavTarget
     data class Category(val name: String) : SettingsNavTarget
     data object License : SettingsNavTarget
+    data object Acknowledgements : SettingsNavTarget
 }
 
 @Composable
@@ -185,6 +186,7 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             SettingsNavTarget.Main -> MainPagerScreen(
                 onOpenCategory = { push(SettingsNavTarget.Category(it)) },
                 onOpenLicense = { push(SettingsNavTarget.License) },
+                onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
             )
 
             is SettingsNavTarget.Category -> CategoryDetailScreen(
@@ -195,6 +197,10 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             SettingsNavTarget.License -> LicenseScreen(
                 onBack = pop,
             )
+
+            SettingsNavTarget.Acknowledgements -> AcknowledgementsScreen(
+                onBack = pop,
+            )
         }
     }
 }
@@ -203,6 +209,7 @@ private fun SettingsRoot(onFinish: () -> Unit) {
 private fun MainPagerScreen(
     onOpenCategory: (String) -> Unit,
     onOpenLicense: () -> Unit,
+    onOpenAcknowledgements: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 4 })
     val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
@@ -229,7 +236,7 @@ private fun MainPagerScreen(
                     0 -> HomePager(onOpenFeatures = { scope.launch { pagerState.animateScrollToPage(1) } })
                     1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                     2 -> LogsPager()
-                    else -> SettingsPager(onOpenLicense = onOpenLicense)
+                    else -> SettingsPager(onOpenLicense = onOpenLicense, onOpenAcknowledgements = onOpenAcknowledgements)
                 }
             }
         }

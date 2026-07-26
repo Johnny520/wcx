@@ -42,8 +42,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -52,7 +50,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.material3.CircularProgressIndicator
@@ -154,7 +151,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 // ---------------------------------------------------------------------------
 
 @Composable
-fun SettingsPager(onOpenLicense: () -> Unit) {
+fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit) {
     val context = LocalComponentActivity.current
 
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -287,6 +284,12 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
         item {
             MiuixSmallTitle(text = "关于", modifier = Modifier.padding(top = 12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
+                PrefArrow(
+                    title = "鸣谢名单",
+                    summary = "感谢为本模块提供基础和灵感的项目与作者",
+                    icon = MaterialSymbols.Outlined.Volunteer_activism,
+                    onClick = onOpenAcknowledgements,
+                )
                 PrefArrow(title = "版本", summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", icon = MaterialSymbols.Outlined.Label)
                 PrefArrow(title = "构建提交时间", summary = formatEpoch(BuildConfig.BUILD_TIMESTAMP, true), icon = MaterialSymbols.Outlined.Build_circle)
                 PrefArrow(
@@ -983,37 +986,12 @@ private fun MiuixMessageDialog(
 }
 
 
-/**
- * Load a drawable from the module's own resources (not the host's).
- * In Xposed environment, LocalContext uses host resources which can't resolve module resource IDs.
- * This uses createPackageContext to access the module APK's resource table directly.
- */
-@Composable
-private fun rememberModuleImageBitmap(resourceName: String): ImageBitmap? {
-    return remember(resourceName) {
-        runCatching {
-            val moduleCtx = HostInfo.application.createPackageContext(
-                BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY
-            )
-            val resId = moduleCtx.resources.getIdentifier(
-                resourceName, "drawable", BuildConfig.APPLICATION_ID
-            )
-            if (resId == 0) return@runCatching null
-            moduleCtx.resources.getDrawable(resId, null).toBitmap().asImageBitmap()
-        }.onFailure {
-            WeLogger.e("DonateDialog", "failed to load module drawable: $resourceName", it)
-        }.getOrNull()
-    }
-}
-
 @Composable
 private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
     WindowDialog(show = show, title = "捐赠支持", onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 500.dp)
-                .verticalScroll(rememberScrollState())
         ) {
 
             Card(modifier = Modifier.fillMaxWidth(), onClick = {
@@ -1036,80 +1014,6 @@ private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context)
                             Text(text = "点击跳转至爱发电页面", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         }
                     }
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            val wechatQr = rememberModuleImageBitmap("donate_wechat")
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF07C160)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(text = "微", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(text = "微信支付", fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurface)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Box(
-                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (wechatQr != null) {
-                            Image(
-                                bitmap = wechatQr,
-                                contentDescription = "微信支付二维码",
-                                modifier = Modifier.fillMaxWidth().padding(4.dp),
-                                contentScale = ContentScale.Fit,
-                            )
-                        }
-                    }
-                    Text(text = "截图保存后使用微信扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp).fillMaxWidth().align(Alignment.CenterHorizontally))
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            val alipayQr = rememberModuleImageBitmap("donate_alipay")
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF1677FF)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(text = "支", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(text = "支付宝", fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurface)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Box(
-                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (alipayQr != null) {
-                            Image(
-                                bitmap = alipayQr,
-                                contentDescription = "支付宝二维码",
-                                modifier = Modifier.fillMaxWidth().padding(4.dp),
-                                contentScale = ContentScale.Fit,
-                            )
-                        }
-                    }
-                    Text(text = "截图保存后使用支付宝扫一扫", fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 8.dp).fillMaxWidth().align(Alignment.CenterHorizontally))
                 }
             }
 
@@ -1282,5 +1186,75 @@ private fun LibraryRow(library: Library, modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  Acknowledgements screen
+// ---------------------------------------------------------------------------
+
+@Composable
+fun AcknowledgementsScreen(onBack: () -> Unit) {
+    MiuixListScaffold(
+        title = "鸣谢",
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = MaterialSymbols.Outlined.Arrow_back,
+                    contentDescription = "返回",
+                    tint = MiuixTheme.colorScheme.onBackground,
+                )
+            }
+        },
+    ) {
+        item {
+            Spacer(Modifier.height(24.dp))
+            Text(
+                text = "鸣谢名单",
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(20.dp))
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "本模块大量功能实现源于 wekit 模块作者，已获作者授权。",
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 22.sp,
+                    )
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "首先，我想明确一点：二次创作本身是一件非常好的事情。无论是新增实用功能，还是修复原有缺陷、优化使用体验，这些贡献都能切实提升项目的实用价值，让工具变得更好用、更完善。\n\n在遵守开源精神的前提下，发挥各自的创意与技术，打磨出更优秀、更强大的作品。如果这些改进能够继续以免费的形式开放分享给社区，让更多人受益，甚至可以说，技术进步的最终意义，本就是服务更多人（请允许我在此稍作夸大其词）。\n\n在二次发布或衍生项目中，保留原项目的开源信息、作者署名及相关声明。这既是对开源社区基本规则的尊重，也是对原作者的劳动成果的一种认可。\n当然，是否保留这些信息，最终取决于每位开发者的个人判断与选择。",
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        lineHeight = 22.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "· 开源的核心在于共享与进步，愿我们共同珍惜并维护这份来之不易的开放与信任。",
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 22.sp,
+                    )
+                }
+            }
+        }
+
+        item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
     }
 }
