@@ -19,7 +19,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,6 +41,8 @@ import com.composables.icons.materialsymbols.outlined.Sports_esports
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.utils.AppUpdater
+import com.Johnny.wcx.utils.UpdateResult
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.Intent
 import com.Johnny.wcx.utils.formatEpoch
@@ -50,15 +56,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 //  Page 0 — Home
 // ---------------------------------------------------------------------------
 
-/**
- * Opens the LSPosed manager from within a hooked process, replicating the two-pronged shell
- * routine LSPosed itself documents:
- *  1. Start `com.android.shell/.BugreportWarningActivity` with the manager's
- *     `LAUNCH_MANAGER` category — LSPosed's hook on the shell app intercepts this and swaps in
- *     the manager UI.
- *  2. Broadcast the `*#*#5776733#*#*` SECRET_CODE (action differs on API >= 29) as a fallback
- *     for setups where the activity trick is unavailable.
- */
 private fun openLsposedManager(context: Context) {
     val managerPackage = "org.lsposed.manager"
     val injectedPackage = "com.android.shell"
@@ -92,6 +89,30 @@ fun HomePager(onOpenFeatures: () -> Unit) {
     }
     val totalCount = remember { FeaturesProvider.ALL_HOOK_ITEMS.size }
 
+    var latestVersion by remember { mutableStateOf<String?>(null) }
+    var isLatest by remember { mutableStateOf(true) }
+    var isChecking by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        isChecking = true
+        when (val result = AppUpdater.checkForUpdate()) {
+            is UpdateResult.UpdateAvailable -> {
+                latestVersion = result.info.releaseTag.removePrefix("v")
+                isLatest = false
+            }
+            is UpdateResult.UpToDate -> {
+                latestVersion = BuildConfig.VERSION_NAME
+                isLatest = true
+            }
+            is UpdateResult.Error -> {
+                WeLogger.e("HomePager", "Failed to check update", result.cause)
+                latestVersion = null
+                isLatest = false
+            }
+        }
+        isChecking = false
+    }
+
     MiuixListScaffold(title = "") {
         item {
             Column(
@@ -100,8 +121,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
                     .padding(top = 8.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                // ---- 标题区域 ----
-                Column(modifier = Modifier.padding(horizontal = 4.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                     Text(
                         text = "WCX",
                         fontSize = 40.sp,
@@ -112,15 +132,12 @@ fun HomePager(onOpenFeatures: () -> Unit) {
                     Text(
                         text = "微信，解锁超能力，重构你的使用体验",
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
 
-                // ---- 大状态卡片 ----
-                ActivationCard()
+                ActivationCard(latestVersion, isLatest, isChecking)
 
-                // ---- 统计卡片（两行并排） ----
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -155,7 +172,6 @@ fun HomePager(onOpenFeatures: () -> Unit) {
                     )
                 }
 
-                // ---- 设备信息 ----
                 Text(
                     text = "设备信息",
                     fontSize = 16.sp,
@@ -172,7 +188,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
 }
 
 @Composable
-private fun ActivationCard() {
+private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking: Boolean) {
     val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
     val accentColor = if (MiuixTheme.isDynamicColor) {
@@ -214,7 +230,7 @@ private fun ActivationCard() {
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = BuildConfig.VERSION_NAME,
+                        text = "v${BuildConfig.VERSION_NAME} (API ${BuildConfig.VERSION_CODE})",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -223,11 +239,11 @@ private fun ActivationCard() {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        .background(accentColor.copy(alpha = 0.1f))
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        text = "已激活",
+                        text = if (isChecking) "检查中..." else if (isLatest) "最新版本" else "有更新",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = accentColor,
@@ -240,8 +256,10 @@ private fun ActivationCard() {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TagChip(text = "API ${BuildConfig.VERSION_CODE}", color = accentColor)
-                TagChip(text = "v${BuildConfig.VERSION_NAME}", color = accentColor)
+                TagChip(text = "当前版本", color = accentColor)
+                if (latestVersion != null) {
+                    TagChip(text = "最新版本 $latestVersion", color = accentColor)
+                }
             }
         }
     }
@@ -347,6 +365,19 @@ private fun SystemInfoCard() {
                 },
                 title = "设备型号",
                 content = "${Build.MANUFACTURER} ${Build.MODEL}",
+                showDivider = true,
+            )
+            InfoRow(
+                icon = {
+                    Icon(
+                        imageVector = MaterialSymbols.Outlined.Smartphone,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                },
+                title = "系统架构",
+                content = Build.SUPPORTED_ABIS.joinToString(", "),
                 showDivider = false,
             )
         }

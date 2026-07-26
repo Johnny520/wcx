@@ -2,6 +2,7 @@ package com.Johnny.wcx.activity.settings
 
 
 import android.content.Context
+import android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -45,11 +46,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.material3.CircularProgressIndicator
@@ -1229,12 +1232,32 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         lineHeight = 22.sp,
                     )
-                    Spacer(Modifier.height(10.dp))
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "wekit",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MiuixTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            runCatching {
+                                val intent = Intent(Intent.ACTION_VIEW, "https://github.com/Ujhhgtg/WeKit".toUri())
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                LocalContext.current.startActivity(intent)
+                            }
+                        },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "https://github.com/Ujhhgtg/WeKit",
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
             }
