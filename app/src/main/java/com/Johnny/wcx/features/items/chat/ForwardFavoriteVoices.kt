@@ -66,131 +66,133 @@ object ForwardFavoriteVoices : SwitchFeature() {
     @OptIn(ExperimentalSerializationApi::class)
     override fun onEnable() {
         "com.tencent.mm.plugin.fav.ui.FavSelectUI".toClass().reflekt().firstMethod { name = "onItemClick" }.hookBefore {
-            val view = args[1] as View
+            runCatching {
+                val view = args[1] as? View ?: return@runCatching
+                val tag = view.tag ?: return@runCatching
 
-            val tag = view.tag
+                val a = tag.reflekt().firstFieldOrNull { name = "a"; superclass() }?.get() ?: return@runCatching
+                val type = a.reflekt().firstFieldOrNull { name = "field_type"; superclass() }?.get() as? Int ?: return@runCatching
 
-            val a = tag.reflekt().firstField { name = "a"; superclass() }.get()!!
+                if (type != 3) return@runCatching
 
-            val type = a.reflekt().firstField { name = "field_type"; superclass() }.get()!! as Int
+                val favPhoto = a.reflekt().firstFieldOrNull { name = "field_favProto"; superclass() }?.get() ?: return@runCatching
+                val bytes = favPhoto.reflekt().firstMethodOrNull { name = "getData"; superclass() }?.invoke() as? ByteArray ?: return@runCatching
 
-            if (type != 3) return@hookBefore
+                val favInfo = ProtoBuf.decodeFromByteArray<FavInfoProto>(bytes)
+                val voiceInfo = favInfo.voiceInfo
 
-            val favPhoto = a.reflekt().firstField { name = "field_favProto"; superclass() }.get()!!
-            val bytes = favPhoto.reflekt().firstMethod { name = "getData"; superclass() }.invoke()!! as ByteArray
+                var voiceFilePath = voiceInfo.filePath
 
-            val favInfo = ProtoBuf.decodeFromByteArray<FavInfoProto>(bytes)
-            val voiceInfo = favInfo.voiceInfo
+                if (voiceFilePath == null) {
+                    val baseStorageDir = RuntimeConfig.userDataDir
+                    val cacheName = voiceInfo.fileCacheName
+                    val bucketId = cacheName.hashCode() and 0xFF
 
-            var voiceFilePath = voiceInfo.filePath
+                    voiceFilePath = (baseStorageDir / "favorite" / bucketId.toString() / "$cacheName.${voiceInfo.fileCacheType}").absolutePathString()
+                }
 
-            if (voiceFilePath == null) {
-                val baseStorageDir = RuntimeConfig.userDataDir
-                val cacheName = voiceInfo.fileCacheName
-                val bucketId = cacheName.hashCode() and 0xFF
+                val ctx = thisObject as Activity
 
-                voiceFilePath = (baseStorageDir / "favorite" / bucketId.toString() / "$cacheName.${voiceInfo.fileCacheType}").absolutePathString()
-            }
+                showComposeDialog(ctx) {
+                    val player = remember { MediaPlayer() }
+                    var isPlaying by remember { mutableStateOf(false) }
+                    var currentPositionMs by remember { mutableLongStateOf(0L) }
+                    val totalDurationMs = remember { AudioUtils.getDurationMs(voiceFilePath).coerceAtLeast(0L) }
+                    var prepared by remember { mutableStateOf(false) }
+                    var prepareError by remember { mutableStateOf<String?>(null) }
 
-            val ctx = thisObject as Activity
-
-            showComposeDialog(ctx) {
-                val player = remember { MediaPlayer() }
-                var isPlaying by remember { mutableStateOf(false) }
-                var currentPositionMs by remember { mutableLongStateOf(0L) }
-                val totalDurationMs = remember { AudioUtils.getDurationMs(voiceFilePath).coerceAtLeast(0L) }
-                var prepared by remember { mutableStateOf(false) }
-                var prepareError by remember { mutableStateOf<String?>(null) }
-
-                LaunchedEffect(Unit) {
-                    val voiceFile = voiceFilePath.toPath()
-                    if (!voiceFile.exists()) {
-                        prepareError = "语音未缓存，请先在收藏中播放一次"
-                        return@LaunchedEffect
-                    }
-                    runCatching {
-                        player.setDataSource(voiceFilePath)
-                        player.prepare()
-                        player.setOnCompletionListener {
-                            isPlaying = false
-                            currentPositionMs = totalDurationMs
+                    LaunchedEffect(Unit) {
+                        val voiceFile = voiceFilePath.toPath()
+                        if (!voiceFile.exists()) {
+                            prepareError = "语音未缓存，请先在收藏中播放一次"
+                            return@LaunchedEffect
                         }
-                        prepared = true
-                    }.onFailure {
-                        prepareError = it.message ?: "音频加载失败"
-                    }
-                }
-
-                DisposableEffect(Unit) {
-                    onDispose {
-                        runCatching { player.release() }
-                    }
-                }
-
-                LaunchedEffect(isPlaying) {
-                    while (isPlaying && prepared) {
-                        currentPositionMs = runCatching { player.currentPosition.toLong() }
-                            .getOrDefault(currentPositionMs)
-                        delay(200.milliseconds)
-                    }
-                }
-
-                fun togglePlay() {
-                    if (!prepared || prepareError != null) return
-                    runCatching {
-                        if (player.isPlaying) {
-                            player.pause()
-                            isPlaying = false
-                        } else {
-                            if (currentPositionMs >= totalDurationMs && totalDurationMs > 0) {
-                                player.seekTo(0)
-                                currentPositionMs = 0L
+                        runCatching {
+                            player.setDataSource(voiceFilePath)
+                            player.prepare()
+                            player.setOnCompletionListener {
+                                isPlaying = false
+                                currentPositionMs = totalDurationMs
                             }
-                            player.start()
-                            isPlaying = true
+                            prepared = true
+                        }.onFailure {
+                            prepareError = it.message ?: "音频加载失败"
                         }
-                    }.onFailure {
-                        showToast(ctx, it.message ?: "播放失败")
                     }
-                }
 
-                AlertDialogContent(
-                    title = { Text("转发收藏语音") },
-                    text = {
-                        Column {
-                            VoicePreviewBar(
-                                isPlaying = isPlaying,
-                                currentPositionMs = currentPositionMs,
-                                totalDurationMs = totalDurationMs,
-                                prepareError = prepareError,
-                                onTogglePlay = ::togglePlay,
-                            )
+                    DisposableEffect(Unit) {
+                        onDispose {
+                            runCatching { player.release() }
                         }
-                    },
-                    dismissButton = {
-                        TextButton(onDismiss) { Text("取消") }
-                    },
-                    confirmButton = {
-                        Button({
-                            val voiceFile = voiceFilePath.toPath()
-                            if (!voiceFile.exists()) {
-                                showToast(ctx, "语音未缓存，请先在收藏中播放一次")
-                                return@Button
-                            }
-                            val durationMs = if (FakeVoiceDuration.isActive) {
-                                FakeVoiceDuration.getFakeDurationMs().toInt()
+                    }
+
+                    LaunchedEffect(isPlaying) {
+                        while (isPlaying && prepared) {
+                            currentPositionMs = runCatching { player.currentPosition.toLong() }
+                                .getOrDefault(currentPositionMs)
+                            delay(200.milliseconds)
+                        }
+                    }
+
+                    fun togglePlay() {
+                        if (!prepared || prepareError != null) return
+                        runCatching {
+                            if (player.isPlaying) {
+                                player.pause()
+                                isPlaying = false
                             } else {
-                                totalDurationMs.coerceToInt()
+                                if (currentPositionMs >= totalDurationMs && totalDurationMs > 0) {
+                                    player.seekTo(0)
+                                    currentPositionMs = 0L
+                                }
+                                player.start()
+                                isPlaying = true
                             }
-                            WeMessageApi.sendVoice(WeCurrentConversationApi.value, voiceFilePath, durationMs)
-                            showToast(ctx, "已发送")
-                            onDismiss()
-                            getTopMostActivity()?.finish()
-                        }) { Text("发送") }
-                    })
-            }
+                        }.onFailure {
+                            showToast(ctx, it.message ?: "播放失败")
+                        }
+                    }
 
-            result = null
+                    AlertDialogContent(
+                        title = { Text("转发收藏语音") },
+                        text = {
+                            Column {
+                                VoicePreviewBar(
+                                    isPlaying = isPlaying,
+                                    currentPositionMs = currentPositionMs,
+                                    totalDurationMs = totalDurationMs,
+                                    prepareError = prepareError,
+                                    onTogglePlay = ::togglePlay,
+                                )
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onDismiss) { Text("取消") }
+                        },
+                        confirmButton = {
+                            Button({
+                                val voiceFile = voiceFilePath.toPath()
+                                if (!voiceFile.exists()) {
+                                    showToast(ctx, "语音未缓存，请先在收藏中播放一次")
+                                    return@Button
+                                }
+                                val durationMs = if (FakeVoiceDuration.isActive) {
+                                    FakeVoiceDuration.getFakeDurationMs().toInt()
+                                } else {
+                                    totalDurationMs.coerceToInt()
+                                }
+                                WeMessageApi.sendVoice(WeCurrentConversationApi.value, voiceFilePath, durationMs)
+                                showToast(ctx, "已发送")
+                                onDismiss()
+                                getTopMostActivity()?.finish()
+                            }) { Text("发送") }
+                        })
+                }
+
+                result = null
+            }.onFailure {
+                WeLogger.e("ForwardFavoriteVoices", "onItemClick failed", it)
+            }
         }
     }
 }

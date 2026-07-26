@@ -81,94 +81,79 @@ object MarkdownRendering : ClickableFeature(), IResolveDex {
         MMNeat7extView::class.reflekt()
             .firstMethod { name = "onDraw" }
             .hookBefore {
-                val neatTextView = thisObject as View
-                if (!::markwon.isInitialized) {
-                    markwon = buildMarkwon(neatTextView.context)
-                }
-
-                var origText = (neatTextView.reflekt()
-                    .firstField {
-                        type = CharSequence::class
-                        superclass()
-                    }.get()!! as CharSequence).toString()
-                if (origText.isBlank()) return@hookBefore
-                origText = origText.replaceEmojis()
-
-                val msgInfo: Any
-
-                val tag = neatTextView.tag
-                val fMsgInfoWrapper = tag.reflekt()
-                    .firstFieldOrNull {
-                        type = classMsgInfoWrapper.clazz
-                        superclass()
+                runCatching {
+                    val neatTextView = thisObject as? View ?: return@runCatching
+                    if (!::markwon.isInitialized) {
+                        markwon = buildMarkwon(neatTextView.context)
                     }
 
-                if (fMsgInfoWrapper != null) {
-                    val msgInfoWrapper = fMsgInfoWrapper.get()!!
-                    msgInfo = MessageInfo(
-                        msgInfoWrapper.reflekt()
-                            .firstField {
+                    val origText = (neatTextView.reflekt()
+                        .firstFieldOrNull {
+                            type = CharSequence::class
+                            superclass()
+                        }?.get() as? CharSequence)?.toString() ?: return@runCatching
+                    if (origText.isBlank()) return@runCatching
+                    val processedText = origText.replaceEmojis()
+
+                    val tag = neatTextView.tag ?: return@runCatching
+                    val msgInfoObj: Any = run {
+                        val fMsgInfoWrapper = tag.reflekt()
+                            .firstFieldOrNull {
+                                type = classMsgInfoWrapper.clazz
                                 superclass()
                             }
-                            .get()!!.reflekt()
-                            .firstField { type = WeMessageApi.classMsgInfo.clazz }
-                            .get()!!)
-                } else {
-                    msgInfo = MessageInfo(
-                        tag.reflekt()
-                            .firstField {
-                                type = WeMessageApi.classMsgInfo.clazz
-                                superclass()
-                            }.get()!!
-                    )
-                }
 
-                if (!(msgInfo.type?.isText ?: false)) return@hookBefore
-                val isSelfSender = msgInfo.isSelfSender
+                        if (fMsgInfoWrapper != null) {
+                            val msgInfoWrapper = fMsgInfoWrapper.get() ?: return@runCatching
+                            msgInfoWrapper.reflekt()
+                                .firstFieldOrNull { superclass() }
+                                ?.get()
+                                ?.reflekt()
+                                ?.firstFieldOrNull { type = WeMessageApi.classMsgInfo.clazz }
+                                ?.get() ?: return@runCatching
+                        } else {
+                            tag.reflekt()
+                                .firstFieldOrNull {
+                                    type = WeMessageApi.classMsgInfo.clazz
+                                    superclass()
+                                }?.get() ?: return@runCatching
+                        }
+                    }
 
-                val canvas = args[0] as Canvas
-                val context = neatTextView.context
+                    val msgInfo = MessageInfo(msgInfoObj)
+                    if (!(msgInfo.type?.isText ?: false)) return@runCatching
+                    val isSelfSender = msgInfo.isSelfSender
 
-                val isDarkMode = context.isDarkMode
+                    val canvas = args[0] as? Canvas ?: return@runCatching
+                    val context = neatTextView.context
 
-                val textPaint = TextPaint().apply {
-                    color =
-                        if (isDarkMode && !isSelfSender) "#CDCDCD".toColorInt() else "#282828".toColorInt()
+                    val isDarkMode = context.isDarkMode
 
-                    val spSize = 17f
-                    textSize = TypedValue.applyDimension(
-                        TypedValue.COMPLEX_UNIT_SP,
-                        spSize,
-                        context.resources.displayMetrics
-                    )
+                    val textPaint = TextPaint().apply {
+                        color =
+                            if (isDarkMode && !isSelfSender) "#CDCDCD".toColorInt() else "#282828".toColorInt()
 
-                    isAntiAlias = true
-                    typeface = Typeface.DEFAULT
-                }
+                        val spSize = 17f
+                        textSize = TypedValue.applyDimension(
+                            TypedValue.COMPLEX_UNIT_SP,
+                            spSize,
+                            context.resources.displayMetrics
+                        )
 
-                // Respecting bubble constraints
-                val horizontalPadding = neatTextView.paddingLeft + neatTextView.paddingRight
-                val maxWidth = neatTextView.width - horizontalPadding + MAX_WIDTH_BUFFER
+                        isAntiAlias = true
+                        typeface = Typeface.DEFAULT
+                    }
 
-                if (maxWidth <= 0) return@hookBefore
+                    // Respecting bubble constraints
+                    val horizontalPadding = neatTextView.paddingLeft + neatTextView.paddingRight
+                    val maxWidth = neatTextView.width - horizontalPadding + MAX_WIDTH_BUFFER
 
-                if (WePrefs.getBoolOrFalse(KEY_USE_MARKWON)) {
-                    drawMarkdownWithMarkwon(
-                        canvas,
-                        origText,
-                        neatTextView.paddingLeft.toFloat(),
-                        neatTextView.paddingTop.toFloat(),
-                        maxWidth,
-                        textPaint
-                    )
-                    result = null
-                } else {
-                    val html = convertMarkdownToHtmlNative(origText)
+                    if (maxWidth <= 0) return@runCatching
 
-                    if (html != null) {
-                        drawHtmlOnCanvas(
+                    if (WePrefs.getBoolOrFalse(KEY_USE_MARKWON)) {
+                        drawMarkdownWithMarkwon(
                             canvas,
-                            html,
+                            processedText,
                             neatTextView.paddingLeft.toFloat(),
                             neatTextView.paddingTop.toFloat(),
                             maxWidth,
@@ -176,8 +161,24 @@ object MarkdownRendering : ClickableFeature(), IResolveDex {
                         )
                         result = null
                     } else {
-                        WeLogger.e(TAG, "convertMarkdownToHtmlNative returned nullptr, falling back to original rendering")
+                        val html = convertMarkdownToHtmlNative(processedText)
+
+                        if (html != null) {
+                            drawHtmlOnCanvas(
+                                canvas,
+                                html,
+                                neatTextView.paddingLeft.toFloat(),
+                                neatTextView.paddingTop.toFloat(),
+                                maxWidth,
+                                textPaint
+                            )
+                            result = null
+                        } else {
+                            WeLogger.e(TAG, "convertMarkdownToHtmlNative returned nullptr, falling back to original rendering")
+                        }
                     }
+                }.onFailure {
+                    WeLogger.e(TAG, "onDraw hook failed", it)
                 }
             }
     }

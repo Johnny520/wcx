@@ -3,6 +3,7 @@ package com.Johnny.wcx.features.items.beautify
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseIn
@@ -232,24 +233,43 @@ object AddMainScreenFab : ClickableFeature() {
             val scrolledAwayState = mutableStateOf(false)
             val fabRoot = activity.rootView
             var scrollObserverAttached = false
+            val attachScrollListener = {
+                if (scrollObserverAttached) return@runCatching
+                val list = fabRoot.findViewWhich<android.view.View> { it is WxRecyclerView }
+                    ?: error("chat list not found")
+                scrollObserverAttached = true
+                var lastOffset = runCatching { list.computeVerticalScrollOffset() }.getOrDefault(0)
+                val scrollListener = android.view.ViewTreeObserver.OnScrollChangedListener {
+                    runCatching {
+                        val currentOffset = list.computeVerticalScrollOffset()
+                        val dy = currentOffset - lastOffset
+                        if (dy > 20) {
+                            scrolledAwayState.value = true
+                        } else if (dy < -20) {
+                            scrolledAwayState.value = false
+                        }
+                        lastOffset = currentOffset
+                    }
+                }
+                list.viewTreeObserver.addOnScrollChangedListener(scrollListener)
+                // 在 Activity 销毁时移除监听器，防止内存泄漏
+                fabRoot.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) {}
+                    override fun onViewDetachedFromWindow(v: View) {
+                        runCatching {
+                            if (list.viewTreeObserver.isAlive) {
+                                list.viewTreeObserver.removeOnScrollChangedListener(scrollListener)
+                            }
+                        }
+                        fabRoot.removeOnAttachStateChangeListener(this)
+                    }
+                })
+            }
             intArrayOf(0, 200, 800, 2_000).forEach { delayMs ->
                 fabRoot.postDelayed({
                     if (scrollObserverAttached) return@postDelayed
-                    runCatching {
-                        val list = fabRoot.findViewWhich<android.view.View> { it is WxRecyclerView } ?: return@runCatching
-                        scrollObserverAttached = true
-                        var lastOffset = runCatching { list.computeVerticalScrollOffset() }.getOrDefault(0)
-                        list.viewTreeObserver.addOnScrollChangedListener {
-                            val currentOffset = runCatching { list.computeVerticalScrollOffset() }.getOrDefault(lastOffset)
-                            val dy = currentOffset - lastOffset
-                            if (dy > 20) {
-                                scrolledAwayState.value = true
-                            } else if (dy < -20) {
-                                scrolledAwayState.value = false
-                            }
-                            lastOffset = currentOffset
-                        }
-                    }.onFailure { WeLogger.w("AddMainScreenFab", "failed to attach chat list scroll observer", it) }
+                    runCatching(attachScrollListener)
+                        .onFailure { WeLogger.w("AddMainScreenFab", "failed to attach chat list scroll observer", it) }
                 }, delayMs.toLong())
             }
 
