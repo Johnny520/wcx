@@ -1198,6 +1198,7 @@ private fun LibraryRow(library: Library, modifier: Modifier = Modifier) {
 
 @Composable
 fun AcknowledgementsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     MiuixListScaffold(
         title = "鸣谢",
         navigationIcon = {
@@ -1249,7 +1250,7 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
                             runCatching {
                                 val intent = Intent(Intent.ACTION_VIEW, "https://github.com/Ujhhgtg/WeKit".toUri())
                                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                LocalContext.current.startActivity(intent)
+                                context.startActivity(intent)
                             }
                         },
                     )
