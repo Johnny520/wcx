@@ -1229,6 +1229,13 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         lineHeight = 22.sp,
                     )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "wekit",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MiuixTheme.colorScheme.primary,
+                    )
                 }
             }
         }

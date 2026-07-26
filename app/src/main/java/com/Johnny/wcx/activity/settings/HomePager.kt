@@ -8,16 +8,14 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -37,7 +35,6 @@ import com.composables.icons.materialsymbols.outlined.Sports_esports
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
-import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.Intent
 import com.Johnny.wcx.utils.formatEpoch
@@ -104,22 +101,16 @@ fun HomePager(onOpenFeatures: () -> Unit) {
                 // ---- 标题区域 ----
                 Column(modifier = Modifier.padding(horizontal = 4.dp)) {
                     Text(
-                        text = "微信，解锁超能力",
-                        fontSize = 32.sp,
+                        text = "WCX",
+                        fontSize = 40.sp,
                         fontWeight = FontWeight.Bold,
                         color = MiuixTheme.colorScheme.onSurface,
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "重构你的微信使用体验",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "Johnny520@github",
-                        fontSize = 13.sp,
+                        text = "微信，解锁超能力，重构你的使用体验",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
@@ -187,95 +178,79 @@ private fun ActivationCard() {
     } else {
         if (isDark) Color(0xFF4A90FF) else Color(0xFF2563EB)
     }
-    val cardBg = if (MiuixTheme.isDynamicColor) {
-        MiuixTheme.colorScheme.secondaryContainer
-    } else {
-        if (isDark) Color(0xFF1A2540) else Color(0xFFDBEAFE)
-    }
-    val textOnCard = MiuixTheme.colorScheme.onSecondaryContainer
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         onClick = { openLsposedManager(context) },
     ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            // 装饰性大图标
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset((-16).dp, 24.dp),
-                contentAlignment = Alignment.BottomEnd,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Icon(
-                    modifier = Modifier.size(150.dp),
-                    imageVector = MaterialSymbols.Outlined.Check_circle,
-                    tint = accentColor.copy(alpha = 0.15f),
-                    contentDescription = null,
-                )
+                Box(
+                    modifier = Modifier.size(52.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = MaterialSymbols.Outlined.Check_circle,
+                        tint = accentColor,
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp),
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "模块已激活",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = BuildConfig.VERSION_NAME,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = "已激活",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = accentColor,
+                    )
+                }
             }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = MaterialSymbols.Outlined.Check_circle,
-                            tint = accentColor,
-                            contentDescription = null,
-                            modifier = Modifier.size(44.dp),
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "模块已激活",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textOnCard,
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = BuildConfig.VERSION_NAME,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = textOnCard.copy(alpha = 0.75f),
-                        )
-                    }
-                    Box {
-                        Text(
-                            text = "已激活",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = accentColor,
-                        )
-                    }
-                }
 
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TagChip(text = "API ${HostInfo.versionCode}", color = accentColor, bgColor = accentColor.copy(alpha = 0.12f))
-                    TagChip(text = "微信 ${HostInfo.versionName}", color = accentColor, bgColor = accentColor.copy(alpha = 0.12f))
-                }
+            Spacer(Modifier.height(16.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TagChip(text = "API ${BuildConfig.VERSION_CODE}", color = accentColor)
+                TagChip(text = "v${BuildConfig.VERSION_NAME}", color = accentColor)
             }
         }
     }
 }
 
 @Composable
-private fun TagChip(text: String, color: Color, bgColor: Color) {
+private fun TagChip(text: String, color: Color) {
     Box(
         modifier = Modifier
-            .padding(0.dp),
+            .clip(RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.1f)),
     ) {
         Text(
             text = text,
@@ -285,8 +260,6 @@ private fun TagChip(text: String, color: Color, bgColor: Color) {
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
-    // Note: we use a simple Text-with-padding chip since we have a colored Card background;
-    // a separate surface would need its own composable. This keeps it lightweight.
 }
 
 @Composable
@@ -351,19 +324,6 @@ private fun SystemInfoCard() {
             InfoRow(
                 icon = {
                     Icon(
-                        imageVector = MaterialSymbols.Outlined.Smartphone,
-                        contentDescription = null,
-                        tint = MiuixTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp),
-                    )
-                },
-                title = "微信版本",
-                content = "${HostInfo.versionName} (${HostInfo.versionCode})",
-                showDivider = true,
-            )
-            InfoRow(
-                icon = {
-                    Icon(
                         imageVector = MaterialSymbols.Outlined.Phone_android,
                         contentDescription = null,
                         tint = MiuixTheme.colorScheme.primary,
@@ -377,7 +337,7 @@ private fun SystemInfoCard() {
             InfoRow(
                 icon = {
                     Icon(
-                        imageVector = MaterialSymbols.Outlined.Phone_android,
+                        imageVector = MaterialSymbols.Outlined.Smartphone,
                         contentDescription = null,
                         tint = MiuixTheme.colorScheme.primary,
                         modifier = Modifier.size(22.dp),
@@ -429,11 +389,9 @@ private fun InfoRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 54.dp)
-                    .height(0.5.dp),
-            ) {
-                // The Card handles grouping visually; we skip a divider to keep the card clean.
-                // If a visual separator is desired, use MiuixTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-            }
+                    .height(0.5.dp)
+                    .background(MiuixTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+            )
         }
     }
 }
