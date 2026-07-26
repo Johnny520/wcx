@@ -42,11 +42,9 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.Intent
 import com.Johnny.wcx.utils.formatEpoch
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 
 // ---------------------------------------------------------------------------
@@ -116,7 +114,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
                         text = "重构你的微信使用体验",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurfaceVariant,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
@@ -198,9 +196,6 @@ private fun ActivationCard() {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.defaultColors(color = cardBg),
-        showIndication = true,
-        pressFeedbackType = PressFeedbackType.Tilt,
         onClick = { openLsposedManager(context) },
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -304,8 +299,6 @@ private fun CountCard(
 ) {
     Card(
         modifier = modifier,
-        showIndication = true,
-        pressFeedbackType = PressFeedbackType.Tilt,
         onClick = onClick,
     ) {
         Column(
