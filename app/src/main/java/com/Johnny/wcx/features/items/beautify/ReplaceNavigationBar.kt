@@ -9,12 +9,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -372,13 +368,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                             Box(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                val isLauncherUiVisible by launcherUiVisibleState
-                                AnimatedVisibility(
-                                    visible = isLauncherUiVisible,
-                                    enter = fadeIn(),
-                                    exit = fadeOut()
-                                ) {
-                                    FloatingBottomBar(
+                                FloatingBottomBar(
                                     modifier = Modifier
                                         .align(Alignment.BottomCenter)
                                         .clickable(
@@ -495,7 +485,6 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                         }
                                     }
                                 }
-                                }
                             }
                         }
                     }
@@ -574,28 +563,12 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         }.hookBefore {
             if (useFloating) args[0] = false
         }
-
-        // 监听 LauncherUI 的生命周期，判断小程序面板的显示状态
-        // 当 LauncherUI 被暂停/停止时，说明小程序面板或其他页面被打开
-        // 当 LauncherUI 被恢复时，说明回到了首页
-        "com.tencent.mm.ui.LauncherUI".toClass()
-            .firstMethod { name = "onPause" }
-            .hookAfter {
-                launcherUiVisibleState.value = false
-            }
-
-        "com.tencent.mm.ui.LauncherUI".toClass()
-            .firstMethod { name = "onResume" }
-            .hookAfter {
-                launcherUiVisibleState.value = true
-            }
     }
 
     private val unreadCountState = mutableIntStateOf(0)
     private val finderUnreadCountState = mutableIntStateOf(0)
     private val showFinderDotState = mutableStateOf(false)
     private val contactUnreadCountState = mutableIntStateOf(0)
-    private val launcherUiVisibleState = mutableStateOf(true)
 
     /**
      * Non-consuming long-press modifier. Fires [block] when the pointer is held down long enough,
