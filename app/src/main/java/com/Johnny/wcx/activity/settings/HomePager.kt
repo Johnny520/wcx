@@ -227,7 +227,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
                     .fillMaxWidth()
                     .wrapContentHeight()
                     .background(MiuixTheme.colorScheme.surface)
-                    .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+                    .padding(top = 0.dp, start = 16.dp, end = 16.dp),
             ) {
                 Text(
                     text = "WCX",

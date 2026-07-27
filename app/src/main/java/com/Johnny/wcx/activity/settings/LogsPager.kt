@@ -52,7 +52,8 @@ import com.composables.icons.materialsymbols.outlined.Visibility
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.TextButton
-import com.Johnny.wcx.ui.utils.showComposeToast
+import com.Johnny.wcx.ui.content.liquid.vibrancy
+import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.crash.CrashLogsManager
@@ -496,11 +497,11 @@ private fun LogDetailPage(
                                 withContext(Dispatchers.Main) {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     clipboard.setPrimaryClip(ClipData.newPlainText("log", content))
-                                    showComposeToast("已复制到剪贴板")
+                                    showToast("已复制到剪贴板")
                                 }
                             } else {
                                 withContext(Dispatchers.Main) {
-                                    showComposeToast("复制失败")
+                                    showToast("复制失败")
                                 }
                             }
                             copyLoading = false
