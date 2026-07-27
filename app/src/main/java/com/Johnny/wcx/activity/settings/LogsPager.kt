@@ -128,18 +128,23 @@ private fun parseLogMeta(file: Path): LogFileMeta {
 fun LogsPager() {
     // Navigation state: null = list page, Path = detail page for that file
     var detailFile by remember { mutableStateOf<Path?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
 
     if (detailFile == null) {
         LogListPage(
+            refreshKey = refreshKey,
             onViewFile = { detailFile = it },
         )
     } else {
         LogDetailPage(
             file = detailFile!!,
-            onBack = { detailFile = null },
-            onDeleted = {
+            onBack = {
                 detailFile = null
-                // 刷新列表：toggle a refresh key
+                refreshKey++
+            },
+            onDeleted = {
+                refreshKey++
+                detailFile = null
             },
         )
     }
@@ -151,12 +156,12 @@ fun LogsPager() {
 
 @Composable
 private fun LogListPage(
+    refreshKey: Int,
     onViewFile: (Path) -> Unit,
 ) {
     var allFiles by remember { mutableStateOf<List<Path>>(emptyList()) }
     var fileMetas by remember { mutableStateOf<Map<String, LogFileMeta>>(emptyMap()) }
     var listed by remember { mutableStateOf(false) }
-    var refreshKey by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(refreshKey) {
         allFiles = withContext(Dispatchers.IO) {
