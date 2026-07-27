@@ -319,7 +319,7 @@ class MainActivity : ComponentActivity() {
                         }
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        InfoItem("构建提交哈希", BuildConfig.COMMIT_HASH)
+                        InfoItem("构建提交哈希", BuildConfig.COMMIT_HASH.ifEmpty { "未知" })
                         Spacer(modifier = Modifier.height(8.dp))
                         InfoItem(
                             "构建提交时间",
@@ -642,13 +642,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun getWeChatVersion(): String {
-        return try {
-            val pm = packageManager
+        return runCatching {
+            val pm = packageManager ?: return@runCatching "未安装"
             val pkgInfo = pm.getPackageInfo(PackageNames.WECHAT, 0)
-            "v${pkgInfo.versionName} (${pkgInfo.longVersionCode})"
-        } catch (e: Exception) {
-            "未安装"
-        }
+            val versionName = pkgInfo.versionName?.ifEmpty { null } ?: return@runCatching "版本未知"
+            "v$versionName (${pkgInfo.longVersionCode})"
+        }.getOrDefault("未安装")
     }
 
     private fun getAdaptedWeChatVersions(): String {
@@ -669,12 +668,12 @@ class MainActivity : ComponentActivity() {
                     { it.split(".").getOrNull(2)?.toIntOrNull() ?: 0 }
                 ))
             if (versions.isNotEmpty()) {
-                "完整支持 8.0.69 ~ 8.0.72 · 维护 8.0.65~8.0.68 · 低版本部分功能可能失效"
+                "完整支持 8.0.69 ~ 8.0.76 · 维护 8.0.65~8.0.68 · 低版本部分功能可能失效"
             } else {
-                "推荐 8.0.69 ~ 8.0.72，8.0.65 以下部分功能可能失效"
+                "推荐 8.0.69 ~ 8.0.76，8.0.65 以下部分功能可能失效"
             }
         } catch (e: Exception) {
-            "推荐 8.0.69 ~ 8.0.72，8.0.65 以下部分功能可能失效"
+            "推荐 8.0.69 ~ 8.0.76，8.0.65 以下部分功能可能失效"
         }
     }
 

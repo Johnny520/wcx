@@ -220,11 +220,13 @@ fun HomePager(onOpenFeatures: () -> Unit) {
     MiuixListScaffold(title = "") {
         // ---- 标题区域 ----
         // fillMaxWidth + wrapContentHeight 防止无限高度约束导致灰色渲染
+        // background 设置与 TopAppBar 毛玻璃相同的背景色，避免滚动时出现灰色色块
         item {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .wrapContentHeight()
+                    .background(MiuixTheme.colorScheme.surface)
                     .padding(top = 8.dp, start = 16.dp, end = 16.dp),
             ) {
                 Text(
@@ -300,7 +302,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
 
         // ---- 设备信息卡片 ----
         item {
-            SystemInfoCard(wechatVersion, lspEnvironment)
+            SystemInfoCard(wechatVersion, lspEnvironment, !safeIsHost())
         }
 
         // ---- 底部留白 ----
@@ -459,7 +461,7 @@ private fun CountCard(
 }
 
 @Composable
-private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String) {
+private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, showLspEnvironment: Boolean) {
     Card {
         Column(modifier = Modifier.fillMaxWidth()) {
             // ① 微信版本
@@ -476,20 +478,22 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String) {
                 content = wechatVersion ?: "未检测到微信",
                 showDivider = true,
             )
-            // ② 运行环境
-            InfoRow(
-                icon = {
-                    Icon(
-                        imageVector = MaterialSymbols.Outlined.Check_circle,
-                        contentDescription = null,
-                        tint = MiuixTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp),
-                    )
-                },
-                title = "运行环境",
-                content = lspEnvironment.ifEmpty { "未知" },
-                showDivider = true,
-            )
+            // ② 运行环境 — 仅在主体App进程显示，微信进程内不显示
+            if (showLspEnvironment) {
+                InfoRow(
+                    icon = {
+                        Icon(
+                            imageVector = MaterialSymbols.Outlined.Check_circle,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    },
+                    title = "运行环境",
+                    content = lspEnvironment.ifEmpty { "未知" },
+                    showDivider = true,
+                )
+            }
             // ③ 构建时间
             InfoRow(
                 icon = {
