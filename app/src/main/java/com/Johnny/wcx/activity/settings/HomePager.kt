@@ -246,13 +246,13 @@ fun HomePager(onOpenFeatures: () -> Unit) {
 
         // ---- 大状态卡片 ----
         item {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
             ActivationCard(latestVersion, isLatest, isChecking)
         }
 
         // ---- 统计卡片 ----
         item {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -290,7 +290,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
 
         // ---- 设备信息标题 ----
         item {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 text = "设备信息",
                 fontSize = 16.sp,
