@@ -378,6 +378,35 @@ private fun LogDetailPage(
                 modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
             )
 
+            // 三个操作按钮（放在内容上方）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ActionButton(
+                    text = "复制全部日志",
+                    icon = MaterialSymbols.Outlined.Content_copy,
+                    onClick = { showCopyDialog = true },
+                    modifier = Modifier.weight(1f),
+                )
+                ActionButton(
+                    text = "分享日志",
+                    icon = MaterialSymbols.Outlined.Share,
+                    onClick = { showShareDialog = true },
+                    modifier = Modifier.weight(1f),
+                )
+                ActionButton(
+                    text = "删除日志",
+                    icon = MaterialSymbols.Outlined.Delete,
+                    onClick = { showDeleteDialog = true },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             if (loading) {
                 Box(
                     modifier = Modifier.fillMaxWidth().weight(1f),
@@ -436,33 +465,6 @@ private fun LogDetailPage(
                         )
                     }
                 }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // 三个操作按钮
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ActionButton(
-                    text = "复制全部日志",
-                    icon = MaterialSymbols.Outlined.Content_copy,
-                    onClick = { showCopyDialog = true },
-                    modifier = Modifier.weight(1f),
-                )
-                ActionButton(
-                    text = "分享日志",
-                    icon = MaterialSymbols.Outlined.Share,
-                    onClick = { showShareDialog = true },
-                    modifier = Modifier.weight(1f),
-                )
-                ActionButton(
-                    text = "删除日志",
-                    icon = MaterialSymbols.Outlined.Delete,
-                    onClick = { showDeleteDialog = true },
-                    modifier = Modifier.weight(1f),
-                )
             }
         }
     }
