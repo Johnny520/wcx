@@ -54,6 +54,13 @@ import com.Johnny.wcx.utils.android.getSystemService
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.invokeOriginal
 import com.Johnny.wcx.utils.reflection.int
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.luckypray.dexkit.query.enums.MatchType
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -107,6 +114,12 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
     private var sensorManager: SensorManager? = null
     private var keepAliveTask: Runnable? = null
     private var keepAliveHandler: Handler? = null
+
+    // Bounded scope for the multi-send loop in sendMultiple(); cancelled in onDisable()
+    // so the background work can never outlive the feature (previously a raw Thread with no
+    // cancellation path, which leaked if the user toggled the feature off mid-burst).
+    private val featureScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var sendMultipleJob: Job? = null
 
     private val accelListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -254,6 +267,8 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
     }
 
     override fun onDisable() {
+        sendMultipleJob?.cancel()
+        sendMultipleJob = null
         keepAliveTask?.let { keepAliveHandler?.removeCallbacks(it) }
         keepAliveHandler?.removeCallbacksAndMessages(null)
         sensorManager?.unregisterListener(accelListener)
@@ -450,7 +465,10 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
         isDice: Boolean,
         activity: Activity
     ) {
-        Thread {
+        // Cancel any previous burst still in flight so two overlapping bursts can't race on
+        // valMorra/valDice; the scope itself is cancelled in onDisable().
+        sendMultipleJob?.cancel()
+        sendMultipleJob = featureScope.launch {
             values.forEachIndexed { index, value ->
                 try {
                     if (isDice) {
@@ -463,7 +481,7 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
 
                     // Add delay between sends (except for the last one)
                     if (index < values.size - 1) {
-                        Thread.sleep(300)
+                        delay(300)
                     }
                 } catch (e: Throwable) {
                     WeLogger.e(TAG, "failed to send at index $index", e)
@@ -476,6 +494,6 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
             activity.runOnUiThread {
                 showToast(activity, "已发送 ${values.size} 次")
             }
-        }.start()
+        }
     }
 }

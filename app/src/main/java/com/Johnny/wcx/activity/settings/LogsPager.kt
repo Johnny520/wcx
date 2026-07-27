@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,6 +96,8 @@ import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import java.io.RandomAccessFile
+import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
@@ -103,6 +106,12 @@ import kotlin.io.path.readText
 import androidx.compose.animation.core.tween as animTween
 
 private const val LOGS_TAG = "SettingsActivity"
+
+// ---- 分页读取常量 ----
+private const val PAGE_SIZE = 500
+private const val MAX_CACHED_LINES = 2000
+private const val LARGE_FILE_THRESHOLD = 20L * 1024 * 1024
+private const val MEDIUM_FILE_THRESHOLD = 5L * 1024 * 1024
 
 /** Which log kind a page is showing. */
 private enum class LogKind { RUN, CRASH }
@@ -230,7 +239,10 @@ private fun shareLogFile(context: Context, file: Path) {
         Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, f.name)
-            putExtra(Intent.EXTRA_TEXT, runCatching { file.readText() }.getOrDefault(""))
+            // 回退时仅读取末尾内容，避免大文件 OOM
+            putExtra(Intent.EXTRA_TEXT, runCatching {
+                readLogTail(file, 200).lines.joinToString("\n")
+            }.getOrDefault(""))
         }
     }
     val chooser = Intent.createChooser(sendIntent, "分享日志")
@@ -435,6 +447,9 @@ private fun LogTabContent(
     onRefreshRequested: () -> Unit,
     onCurrentFileChange: (Path?) -> Unit,
 ) {
+    val context = LocalComponentActivity.current
+    val scope = rememberCoroutineScope()
+
     // Files available for this tab, newest first.
     var files by remember(kind) { mutableStateOf<List<Path>>(emptyList()) }
     var selectedIndex by rememberSaveable(kind) { mutableIntStateOf(0) }
@@ -445,6 +460,15 @@ private fun LogTabContent(
     // Whether the file listing has completed at least once; keeps the spinner up on first open
     // until we actually know whether there are files (the selected file is null until then).
     var listed by remember(kind) { mutableStateOf(false) }
+
+    // ---- 分页状态 ----
+    var loadedLines by remember(kind) { mutableStateOf<List<String>>(emptyList()) }
+    var currentOffset by remember(kind) { mutableStateOf(Long.MAX_VALUE) }
+    var hasMore by remember(kind) { mutableStateOf(false) }
+    var isLoadingMore by remember(kind) { mutableStateOf(false) }
+    var showLargeFileDialog by remember { mutableStateOf(false) }
+    var largeFilePath by remember { mutableStateOf<Path?>(null) }
+    var fileNote by remember(kind) { mutableStateOf<String?>(null) }
 
     // (Re)list files whenever the tab is shown or a refresh is requested.
     LaunchedEffect(kind, refreshKey) {
@@ -464,18 +488,41 @@ private fun LogTabContent(
 
     // Read + parse the selected file off the main thread. refreshKey re-reads the same file;
     // `listed` gates the empty case so the spinner doesn't flash off before listing finishes.
+    // 使用分页读取：默认从文件尾部加载最新 PAGE_SIZE 行，避免大文件 OOM。
     LaunchedEffect(selectedFile, refreshKey, listed) {
         loading = true
+        fileNote = null
         if (selectedFile == null) {
             runEntries = emptyList(); crashSections = emptyList()
-            // Only settle to "not loading" once listing is done and there is genuinely no file.
+            loadedLines = emptyList()
+            currentOffset = Long.MAX_VALUE
+            hasMore = false
             if (listed) {
                 loading = false
                 onRefreshingChange(false)
             }
             return@LaunchedEffect
         }
-        val text = withContext(Dispatchers.IO) { readLog(selectedFile) }
+        val fileSize = withContext(Dispatchers.IO) {
+            runCatching { selectedFile.fileSize() }.getOrDefault(0L)
+        }
+        if (fileSize > LARGE_FILE_THRESHOLD) {
+            // 大文件：弹出对话框让用户选择查看最新内容或分享完整文件
+            largeFilePath = selectedFile
+            showLargeFileDialog = true
+            loading = false
+            onRefreshingChange(false)
+            return@LaunchedEffect
+        }
+        // 正常分页读取最后一页
+        val result = withContext(Dispatchers.IO) { readLogTail(selectedFile, PAGE_SIZE) }
+        loadedLines = result.lines
+        currentOffset = result.nextOffset
+        hasMore = result.hasMore
+        if (fileSize > MEDIUM_FILE_THRESHOLD) {
+            fileNote = "日志文件较大（${formatBytesSize(fileSize)}），已加载最新 ${result.lines.size} 行"
+        }
+        val text = result.lines.joinToString("\n")
         when (kind) {
             LogKind.RUN -> runEntries = withContext(Dispatchers.Default) { parseRunLog(text) }
             LogKind.CRASH -> crashSections = withContext(Dispatchers.Default) { parseCrashLog(text) }
@@ -521,30 +568,222 @@ private fun LogTabContent(
                 if (listed) {
                     item(key = "empty-files") { LogsEmpty(if (kind == LogKind.RUN) "暂无运行日志" else "暂无崩溃日志") }
                 }
-            } else when (kind) {
-                LogKind.RUN -> {
-                    if (runEntries.isEmpty() && !loading) {
-                        item(key = "empty-run") { LogsEmpty("此日志文件为空") }
+            } else {
+                // 文件大小提示
+                fileNote?.let { note ->
+                    item(key = "file-note") {
+                        Text(
+                            text = note,
+                            fontSize = 12.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
                     }
-                    items(runEntries.size, key = { "run-$it" }) { i -> RunLogCard(runEntries[i]) }
                 }
-
-                LogKind.CRASH -> {
-                    if (crashSections.isEmpty() && !loading) {
-                        item(key = "empty-crash") { LogsEmpty("此日志文件为空") }
+                // 加载更多按钮
+                if (hasMore && !loading) {
+                    item(key = "load-more") {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (selectedFile != null && !isLoadingMore) {
+                                        scope.launch {
+                                            isLoadingMore = true
+                                            val result = withContext(Dispatchers.IO) {
+                                                readLogTail(selectedFile, PAGE_SIZE, currentOffset)
+                                            }
+                                            val merged = (result.lines + loadedLines).takeLast(MAX_CACHED_LINES)
+                                            loadedLines = merged
+                                            currentOffset = result.nextOffset
+                                            hasMore = result.hasMore && merged.size < MAX_CACHED_LINES
+                                            val text = merged.joinToString("\n")
+                                            when (kind) {
+                                                LogKind.RUN -> runEntries = withContext(Dispatchers.Default) { parseRunLog(text) }
+                                                LogKind.CRASH -> crashSections = withContext(Dispatchers.Default) { parseCrashLog(text) }
+                                            }
+                                            isLoadingMore = false
+                                        }
+                                    }
+                                },
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = if (isLoadingMore) "加载中..." else "加载更多（向前500行）",
+                                    color = MiuixTheme.colorScheme.primary,
+                                    fontSize = 14.sp,
+                                )
+                            }
+                        }
                     }
-                    items(crashSections.size, key = { "crash-$it" }) { i -> CrashSectionCard(crashSections[i]) }
+                }
+                when (kind) {
+                    LogKind.RUN -> {
+                        if (runEntries.isEmpty() && !loading) {
+                            item(key = "empty-run") { LogsEmpty("此日志文件为空") }
+                        }
+                        items(runEntries.size, key = { "run-$it" }) { i -> RunLogCard(runEntries[i]) }
+                    }
+
+                    LogKind.CRASH -> {
+                        if (crashSections.isEmpty() && !loading) {
+                            item(key = "empty-crash") { LogsEmpty("此日志文件为空") }
+                        }
+                        items(crashSections.size, key = { "crash-$it" }) { i -> CrashSectionCard(crashSections[i]) }
+                    }
                 }
             }
 
             item(key = "bottom-inset") { Spacer(Modifier.height(LOGS_BOTTOM_INSET)) }
         }
     }
+
+    // 大文件对话框
+    if (showLargeFileDialog && largeFilePath != null) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = {
+            showLargeFileDialog = false
+            largeFilePath = null
+        }) {
+            Card(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("日志较大", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "日志文件较大，建议仅查看最新内容或直接分享完整文件。",
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clickable {
+                                    val file = largeFilePath
+                                    showLargeFileDialog = false
+                                    largeFilePath = null
+                                    if (file != null) {
+                                        scope.launch {
+                                            loading = true
+                                            val result = withContext(Dispatchers.IO) {
+                                                readLogTail(file, PAGE_SIZE)
+                                            }
+                                            loadedLines = result.lines
+                                            currentOffset = result.nextOffset
+                                            hasMore = result.hasMore
+                                            fileNote = "日志文件较大，已加载最新 ${result.lines.size} 行"
+                                            val text = result.lines.joinToString("\n")
+                                            when (kind) {
+                                                LogKind.RUN -> runEntries = withContext(Dispatchers.Default) { parseRunLog(text) }
+                                                LogKind.CRASH -> crashSections = withContext(Dispatchers.Default) { parseCrashLog(text) }
+                                            }
+                                            loading = false
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Text("查看最新500行", color = MiuixTheme.colorScheme.primary, fontSize = 14.sp)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clickable {
+                                    val file = largeFilePath
+                                    showLargeFileDialog = false
+                                    largeFilePath = null
+                                    file?.let { shareLogFile(context, it) }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Text("分享完整文件", color = MiuixTheme.colorScheme.primary, fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
-/** Reads the full log file (modern devices handle multi-MB logs fine). */
-private fun readLog(file: Path): String =
-    runCatching { file.readText() }.getOrElse { "读取日志失败: ${it.message}" }
+/** 分页读取结果：行列表 + 下次读取的字节偏移 + 是否还有更多 */
+private data class PaginatedRead(
+    val lines: List<String>,
+    val nextOffset: Long,
+    val hasMore: Boolean,
+)
+
+/**
+ * 从文件尾部向前读取 [linesToRead] 行，返回按时间正序排列的行列表。
+ * [fromByteOffset] 指定起始读取位置（从该位置向前读），默认从文件末尾开始。
+ * 使用 RandomAccessFile 分块反向读取，避免将整个文件加载到内存。
+ */
+private fun readLogTail(file: Path, linesToRead: Int, fromByteOffset: Long = Long.MAX_VALUE): PaginatedRead {
+    return runCatching {
+        val f = file.toFile()
+        val fileLength = f.length()
+        if (fileLength == 0L) return@runCatching PaginatedRead(emptyList(), 0L, false)
+
+        val startFrom = minOf(fromByteOffset, fileLength)
+        val chunkSize = 8192
+        val lines = ArrayDeque<String>()
+        var pos = startFrom
+        var hasMore = false
+
+        RandomAccessFile(f, "r").use { raf ->
+            // 处理尾部不完整行（从 fromByteOffset 开始但不是行首）
+            var pending = StringBuilder()
+
+            while (pos > 0 && lines.size < linesToRead) {
+                val readLen = minOf(chunkSize, pos).toInt()
+                pos -= readLen
+                raf.seek(pos)
+                val chunk = ByteArray(readLen)
+                raf.readFully(chunk)
+
+                // 从块末尾向前扫描换行符
+                var segmentEnd = readLen
+                for (i in (readLen - 1) downTo 0) {
+                    if (chunk[i] == '\n'.code.toByte()) {
+                        // chunk[i+1 .. segmentEnd) 是一条完整行（可能拼接 pending）
+                        val segment = String(chunk, i + 1, segmentEnd - i - 1, StandardCharsets.UTF_8)
+                        val fullLine = if (pending.isNotEmpty()) segment + pending else segment
+                        if (fullLine.isNotEmpty()) {
+                            lines.addFirst(fullLine)
+                            if (lines.size >= linesToRead) {
+                                hasMore = pos + i > 0
+                                break
+                            }
+                        }
+                        segmentEnd = i
+                        pending = StringBuilder()
+                    }
+                }
+                if (lines.size < linesToRead && segmentEnd > 0) {
+                    // 块开头到第一个换行符之间的不完整行，拼接到 pending 前面
+                    val remaining = String(chunk, 0, segmentEnd, StandardCharsets.UTF_8)
+                    pending.insert(0, remaining)
+                }
+            }
+
+            // 如果已读到文件开头，处理最后的 pending
+            if (pos == 0 && pending.isNotEmpty() && lines.size < linesToRead) {
+                lines.addFirst(pending.toString())
+            }
+            if (lines.size < linesToRead) hasMore = false
+            else if (!hasMore) hasMore = pos > 0
+        }
+
+        PaginatedRead(lines.toList(), pos, hasMore)
+    }.getOrElse {
+        WeLogger.e(LOGS_TAG, "failed to read log tail", it)
+        PaginatedRead(listOf("读取日志失败: ${it.message}"), 0L, false)
+    }
+}
 // ---------------------------------------------------------------------------
 //  File selector + cards + empty state
 // ---------------------------------------------------------------------------

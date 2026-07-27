@@ -34,6 +34,9 @@ import com.Johnny.wcx.utils.strings.replaceEmojis
 import com.Johnny.wcx.utils.strings.replaceRichContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
@@ -89,6 +92,12 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
 
     private val meAvatarPath by lazy { KnownPaths.moduleData / "me_avatar" }
 
+    // Bounded scope tied to this feature's lifetime; cancelled in onDisable() so the avatar
+    // fetch coroutine can never outlive the feature and leak.
+    private val featureScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var avatarFetchJob: Job? = null
+    private var receiverRegistered = false
+
     private val notificationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val targetWxId = intent.getStringExtra("extra_target_wxid") ?: return
@@ -135,7 +144,7 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
     private val MESSAGE_REGEX = Regex("""^(\[\d+条])?(.+?)?: (.*)$""", RegexOption.DOT_MATCHES_ALL)
 
     override fun onEnable() {
-        CoroutineScope(Dispatchers.IO).launch {
+        avatarFetchJob = featureScope.launch {
             runCatching {
                 val bitmap: Bitmap
                 if (meAvatarPath.exists()) {
@@ -163,16 +172,21 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
             }.onSuccess { meAvatarIcon = it }
         }
 
-        val filter = IntentFilter().apply {
-            addAction(ACTION_REPLY)
-            addAction(ACTION_MARK_READ)
-            addAction(ACTION_NOTIFICATION_OPENED)
-            addAction(ACTION_NOTIFICATION_DISMISSED)
+        if (!receiverRegistered) {
+            val filter = IntentFilter().apply {
+                addAction(ACTION_REPLY)
+                addAction(ACTION_MARK_READ)
+                addAction(ACTION_NOTIFICATION_OPENED)
+                addAction(ACTION_NOTIFICATION_DISMISSED)
+            }
+            runCatching {
+                ContextCompat.registerReceiver(
+                    HostInfo.application, notificationReceiver, filter,
+                    ContextCompat.RECEIVER_NOT_EXPORTED
+                )
+            }.onFailure { WeLogger.e(TAG, "failed to register notification receiver", it) }
+                .onSuccess { receiverRegistered = true }
         }
-        ContextCompat.registerReceiver(
-            HostInfo.application, notificationReceiver, filter,
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
 
         // Capture the exact talker wxid before WeChat builds the notification.
         // x.d → m0.a → e0.b → Notification.Builder.build() all run synchronously on
@@ -335,5 +349,26 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
                 builder.addAction(replyAction)
                 builder.addAction(readAction)
             }
+    }
+
+    override fun onDisable() {
+        // Cancel any in-flight avatar fetch so the coroutine can't outlive the feature.
+        avatarFetchJob?.cancel()
+        avatarFetchJob = null
+
+        // Unregister the broadcast receiver to avoid leaking it (and the Application context
+        // it captures) when the feature is toggled off.
+        if (receiverRegistered) {
+            runCatching {
+                HostInfo.application.unregisterReceiver(notificationReceiver)
+            }.onFailure { WeLogger.e(TAG, "failed to unregister notification receiver", it) }
+            receiverRegistered = false
+        }
+
+        // Drop per-conversation state so re-enabling starts from a clean slate.
+        messageHistory.clear()
+        pendingContentIntents.clear()
+        lastGroupChatSender.clear()
+        currentTalker.remove()
     }
 }

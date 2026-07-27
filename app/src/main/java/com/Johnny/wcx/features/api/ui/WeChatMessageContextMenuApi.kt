@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.drawable.Drawable
 import android.view.View
+import java.lang.ref.WeakReference
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -124,8 +125,6 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    private var currentView: View? = null
-
     private fun getChattingContextFromOnSelectHandler(thisObject: Any): ChattingContext {
         val viewOnLongClickListener = thisObject.reflekt()
             .firstField {
@@ -189,6 +188,17 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         error("could not resolve ChattingContext from multi-select handler")
     }
 
+    // Held via WeakReference so a stale View (and the Activity/window it indirectly retains)
+    // can still be garbage-collected if WeChat tears down the chat UI between menu creation and
+    // menu item selection. Null-out happens eagerly in the select handler and in onDisable().
+    private var currentView: WeakReference<View?>? = null
+
+    private fun setCurrentView(view: View?) {
+        currentView = if (view == null) null else WeakReference(view)
+    }
+
+    private fun getCurrentView(): View? = currentView?.get()
+
     @Suppress("UNCHECKED_CAST")
     private fun getSelectedMsgInfos(thisObject: Any): List<MessageInfo> {
         val list = thisObject.reflekt().firstField {
@@ -211,7 +221,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
 
             val curView = args[1] as View
             val tag = curView.tag
-            currentView = curView
+            setCurrentView(curView)
 
             val msgInfo = WeMessageApi.getMsgInfoFromTag(tag)
             val msgInfoWrapper = MessageInfo(msgInfo)
@@ -246,8 +256,12 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
 
         methodSelectMenuItem.hookBefore {
-            val curView = currentView!!
-            currentView = null
+            val curView = getCurrentView()
+            setCurrentView(null)
+            if (curView == null) {
+                WeLogger.w(TAG, "select handler fired but currentView was already collected/cleared")
+                return@hookBefore
+            }
             val tag = curView.tag
             val msgInfo = WeMessageApi.getMsgInfoFromTag(tag)
 
@@ -477,6 +491,6 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
     }
 
     override fun onDisable() {
-        currentView = null
+        setCurrentView(null)
     }
 }
