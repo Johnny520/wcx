@@ -738,8 +738,8 @@ private fun readLogTail(file: Path, linesToRead: Int, fromByteOffset: Long = Lon
             // 处理尾部不完整行（从 fromByteOffset 开始但不是行首）
             var pending = StringBuilder()
 
-            while (pos > 0 && lines.size < linesToRead) {
-                val readLen = minOf(chunkSize, pos).toInt()
+            while (pos > 0L && lines.size < linesToRead) {
+                val readLen = minOf(chunkSize.toLong(), pos).toInt()
                 pos -= readLen
                 raf.seek(pos)
                 val chunk = ByteArray(readLen)
@@ -755,7 +755,7 @@ private fun readLogTail(file: Path, linesToRead: Int, fromByteOffset: Long = Lon
                         if (fullLine.isNotEmpty()) {
                             lines.addFirst(fullLine)
                             if (lines.size >= linesToRead) {
-                                hasMore = pos + i > 0
+                                hasMore = pos + i > 0L
                                 break
                             }
                         }
@@ -771,11 +771,11 @@ private fun readLogTail(file: Path, linesToRead: Int, fromByteOffset: Long = Lon
             }
 
             // 如果已读到文件开头，处理最后的 pending
-            if (pos == 0 && pending.isNotEmpty() && lines.size < linesToRead) {
+            if (pos == 0L && pending.isNotEmpty() && lines.size < linesToRead) {
                 lines.addFirst(pending.toString())
             }
             if (lines.size < linesToRead) hasMore = false
-            else if (!hasMore) hasMore = pos > 0
+            else if (!hasMore) hasMore = pos > 0L
         }
 
         PaginatedRead(lines.toList(), pos, hasMore)
