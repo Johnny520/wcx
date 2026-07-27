@@ -578,13 +578,17 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         // 监听 LauncherUI 的生命周期，判断小程序面板的显示状态
         // 当 LauncherUI 被暂停/停止时，说明小程序面板或其他页面被打开
         // 当 LauncherUI 被恢复时，说明回到了首页
-        LauncherUI::class.hookAfterOnPause {
-            launcherUiVisibleState.value = false
-        }
+        "com.tencent.mm.ui.LauncherUI".toClass()
+            .firstMethod { name = "onPause" }
+            .hookAfter {
+                launcherUiVisibleState.value = false
+            }
 
-        LauncherUI::class.hookAfterOnResume {
-            launcherUiVisibleState.value = true
-        }
+        "com.tencent.mm.ui.LauncherUI".toClass()
+            .firstMethod { name = "onResume" }
+            .hookAfter {
+                launcherUiVisibleState.value = true
+            }
     }
 
     private val unreadCountState = mutableIntStateOf(0)
