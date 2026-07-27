@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,14 +41,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
+
 import androidx.core.content.FileProvider
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Content_copy
 import com.composables.icons.materialsymbols.outlined.Delete
 import com.composables.icons.materialsymbols.outlined.Share
-import com.composables.icons.materialsymbols.outlined.Visibility
+
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.TextButton
@@ -86,7 +86,6 @@ import kotlin.io.path.name
 
 private const val LOGS_TAG = "LogsPager"
 private const val PREVIEW_LINES = 40
-private const val COPY_LARGE_THRESHOLD = 5L * 1024 * 1024
 
 /** 从日志文件首行提取的元数据 */
 private data class LogFileMeta(
@@ -127,9 +126,6 @@ private fun parseLogMeta(file: Path): LogFileMeta {
 
 @Composable
 fun LogsPager() {
-    val context = LocalComponentActivity.current
-    val scope = rememberCoroutineScope()
-
     // Navigation state: null = list page, Path = detail page for that file
     var detailFile by remember { mutableStateOf<Path?>(null) }
 
@@ -157,9 +153,6 @@ fun LogsPager() {
 private fun LogListPage(
     onViewFile: (Path) -> Unit,
 ) {
-    val context = LocalComponentActivity.current
-    val scope = rememberCoroutineScope()
-
     var allFiles by remember { mutableStateOf<List<Path>>(emptyList()) }
     var fileMetas by remember { mutableStateOf<Map<String, LogFileMeta>>(emptyMap()) }
     var listed by remember { mutableStateOf(false) }
@@ -445,19 +438,19 @@ private fun LogDetailPage(
                         }
                     }
 
-                    // 渐变遮罩：从透明到半透明，覆盖底部（模拟"更多内容"的视觉效果）
-                    // 只在预览行数 >= PREVIEW_LINES 时显示（说明文件可能还有更多内容）
-                    if (previewLines.size >= PREVIEW_LINES) {
+                    // 渐变遮罩：200dp 从透明到半透明白，覆盖底部形成毛玻璃效果
+                    // 只在预读行数 > 40 时显示（说明文件还有更多内容）
+                    if (previewLines.size > PREVIEW_LINES) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(40.dp)
+                                .height(200.dp)
                                 .align(Alignment.BottomCenter)
                                 .background(
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            Color.Transparent,
-                                            MiuixTheme.colorScheme.background.copy(alpha = 0.85f),
+                                            Color(0x00FFFFFF),
+                                            Color(0xE6FFFFFF),
                                         ),
                                     ),
                                 ),
@@ -472,14 +465,7 @@ private fun LogDetailPage(
     if (showCopyDialog) {
         AlertDialogContent(
             title = { Text("复制全部日志") },
-            text = {
-                Text(
-                    if (fileSize > COPY_LARGE_THRESHOLD)
-                        "确定要复制全部日志内容到剪贴板吗？\n\n文件较大（${formatBytesSize(fileSize)}），将在后台复制。"
-                    else
-                        "确定要复制全部日志内容到剪贴板吗？",
-                )
-            },
+            text = { Text("确定要复制全部日志内容到剪贴板吗？") },
             dismissButton = {
                 TextButton(onClick = { showCopyDialog = false }) { Text("取消") }
             },
