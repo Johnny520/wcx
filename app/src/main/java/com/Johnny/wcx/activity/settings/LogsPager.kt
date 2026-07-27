@@ -206,8 +206,7 @@ private fun LogListPage(
                 .fillMaxSize()
                 .layerBackdrop(barBackdrop)
                 .scrollEndHaptic()
-                .overScrollVertical()
-                .padding(innerPadding),
+                .overScrollVertical(),
             contentPadding = innerPadding,
             verticalArrangement = Arrangement.spacedBy(8.dp),
             overscrollEffect = null,
