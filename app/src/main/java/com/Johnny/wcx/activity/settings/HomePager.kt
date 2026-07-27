@@ -39,6 +39,7 @@ import com.composables.icons.materialsymbols.outlined.Phone_android
 import com.composables.icons.materialsymbols.outlined.Smartphone
 import com.composables.icons.materialsymbols.outlined.Sports_esports
 import com.Johnny.wcx.BuildConfig
+import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.AppUpdater
@@ -68,7 +69,7 @@ private fun openLsposedManager(context: Context) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         )
-    }.onFailure { WeLogger.e("SettingsActivity", "failed to launch LSPosed manager activity", it) }
+    }.onFailure { WeLogger.e("HomePager", "failed to launch LSPosed manager activity", it) }
 
     runCatching {
         val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -79,110 +80,169 @@ private fun openLsposedManager(context: Context) {
         context.sendBroadcast(
             Intent(action, "android_secret_code://5776733".toUri()).setPackage("android")
         )
-    }.onFailure { WeLogger.e("SettingsActivity", "failed to broadcast LSPosed secret code", it) }
+    }.onFailure { WeLogger.e("HomePager", "failed to broadcast LSPosed secret code", it) }
+}
+
+/** 安全获取微信版本信息，未安装返回 null */
+private fun safeGetWeChatVersionInfo(context: Context): String? {
+    return runCatching {
+        val pm = context.packageManager
+        val info = pm.getPackageInfo(PackageNames.WECHAT, 0)
+        val name = info.versionName.orEmpty().ifEmpty { return null }
+        val code = info.longVersionCode
+        "微信 $name ($code)"
+    }.getOrNull()
+}
+
+/** 识别运行环境：LSPosed / LSPatch / 未知 */
+private fun detectLspEnvironment(context: Context): String {
+    val pm = context.packageManager
+    val hasLsposed = runCatching {
+        pm.getPackageInfo("org.lsposed.manager", 0) != null
+    }.getOrDefault(false)
+    if (hasLsposed) return "LSPosed"
+
+    val hasLspatch = runCatching {
+        pm.getPackageInfo("org.lspatch.manager", 0) != null
+    }.getOrDefault(false)
+    if (hasLspatch) return "LSPatch"
+
+    return "未知"
+}
+
+/** 版本字符串格式化：git+4fcbb76 (73) */
+private fun formatLocalVersion(): String {
+    val name = BuildConfig.VERSION_NAME.ifEmpty { "未知" }
+    return "$name (${BuildConfig.VERSION_CODE})"
 }
 
 @Composable
 fun HomePager(onOpenFeatures: () -> Unit) {
+    val context = LocalContext.current
     val enabledCount = remember {
         FeaturesProvider.ALL_HOOK_ITEMS.count { WePrefs.getBoolOrFalse(it.name) }
     }
     val totalCount = remember { FeaturesProvider.ALL_HOOK_ITEMS.size }
 
     var latestVersion by remember { mutableStateOf<String?>(null) }
-    var isLatest by remember { mutableStateOf(true) }
+    var isLatest by remember { mutableStateOf(false) }
     var isChecking by remember { mutableStateOf(true) }
+
+    val wechatVersion = remember { safeGetWeChatVersionInfo(context) }
+    val lspEnvironment = remember { detectLspEnvironment(context) }
 
     LaunchedEffect(Unit) {
         isChecking = true
-        when (val result = AppUpdater.checkForUpdate()) {
-            is UpdateResult.UpdateAvailable -> {
-                latestVersion = result.info.releaseTag.removePrefix("v")
-                isLatest = false
+        runCatching {
+            when (val result = AppUpdater.checkForUpdate()) {
+                is UpdateResult.UpdateAvailable -> {
+                    val tag = result.info.releaseTag.removePrefix("v").ifEmpty { null }
+                    latestVersion = tag
+                    isLatest = false
+                }
+                is UpdateResult.UpToDate -> {
+                    latestVersion = null
+                    isLatest = true
+                }
+                is UpdateResult.Error -> {
+                    WeLogger.e("HomePager", "Failed to check update", result.cause)
+                    latestVersion = null
+                    isLatest = false
+                }
             }
-            is UpdateResult.UpToDate -> {
-                latestVersion = BuildConfig.VERSION_NAME
-                isLatest = true
-            }
-            is UpdateResult.Error -> {
-                WeLogger.e("HomePager", "Failed to check update", result.cause)
-                latestVersion = null
-                isLatest = false
-            }
+        }.onFailure {
+            WeLogger.e("HomePager", "Update check exception", it)
+            latestVersion = null
+            isLatest = false
         }
         isChecking = false
     }
 
+    // Each section as a separate LazyColumn item to avoid
+    // "Vertically scrollable component infinity maximum height constraints"
     MiuixListScaffold(title = "") {
+        // ---- 标题区域 ----
         item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    Text(
-                        text = "WCX",
-                        fontSize = 40.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MiuixTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = "微信，解锁超能力，重构你的使用体验",
-                        fontSize = 14.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
-
-                ActivationCard(latestVersion, isLatest, isChecking)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    CountCard(
-                        modifier = Modifier.weight(1f),
-                        icon = {
-                            Icon(
-                                imageVector = MaterialSymbols.Outlined.Sports_esports,
-                                contentDescription = null,
-                                tint = MiuixTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp),
-                            )
-                        },
-                        value = enabledCount.toString(),
-                        label = "已启用功能",
-                        onClick = onOpenFeatures,
-                    )
-                    CountCard(
-                        modifier = Modifier.weight(1f),
-                        icon = {
-                            Icon(
-                                imageVector = MaterialSymbols.Outlined.Smartphone,
-                                contentDescription = null,
-                                tint = MiuixTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp),
-                            )
-                        },
-                        value = totalCount.toString(),
-                        label = "全部功能",
-                        onClick = onOpenFeatures,
-                    )
-                }
-
+            Column(modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp)) {
                 Text(
-                    text = "设备信息",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp),
+                    text = "WCX",
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MiuixTheme.colorScheme.onSurface,
                 )
-                SystemInfoCard()
-
-                Spacer(Modifier.height(CONTENT_BOTTOM_INSET))
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "微信，解锁超能力，重构你的使用体验",
+                    fontSize = 14.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
             }
+        }
+
+        // ---- 大状态卡片 ----
+        item {
+            Spacer(Modifier.height(16.dp))
+            ActivationCard(latestVersion, isLatest, isChecking)
+        }
+
+        // ---- 统计卡片 ----
+        item {
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CountCard(
+                    modifier = Modifier.weight(1f),
+                    icon = {
+                        Icon(
+                            imageVector = MaterialSymbols.Outlined.Sports_esports,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    },
+                    value = enabledCount.toString(),
+                    label = "已启用功能",
+                    onClick = onOpenFeatures,
+                )
+                CountCard(
+                    modifier = Modifier.weight(1f),
+                    icon = {
+                        Icon(
+                            imageVector = MaterialSymbols.Outlined.Smartphone,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    },
+                    value = totalCount.toString(),
+                    label = "全部功能",
+                    onClick = onOpenFeatures,
+                )
+            }
+        }
+
+        // ---- 设备信息标题 ----
+        item {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "设备信息",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        // ---- 设备信息卡片 ----
+        item {
+            SystemInfoCard(wechatVersion, lspEnvironment)
+        }
+
+        // ---- 底部留白 ----
+        item {
+            Spacer(Modifier.height(CONTENT_BOTTOM_INSET))
         }
     }
 }
@@ -230,7 +290,7 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "v${BuildConfig.VERSION_NAME} (API ${BuildConfig.VERSION_CODE})",
+                        text = formatLocalVersion(),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -243,7 +303,12 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        text = if (isChecking) "检查中..." else if (isLatest) "最新版本" else "有更新",
+                        text = when {
+                            isChecking -> "检查中..."
+                            isLatest -> "已是最新版本"
+                            latestVersion != null -> "有更新"
+                            else -> "检查失败"
+                        },
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = accentColor,
@@ -256,9 +321,15 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TagChip(text = "当前版本", color = accentColor)
-                if (latestVersion != null) {
-                    TagChip(text = "最新版本 $latestVersion", color = accentColor)
+                TagChip(
+                    text = "当前版本 ${formatLocalVersion()}",
+                    color = accentColor,
+                )
+                if (!isChecking && latestVersion != null) {
+                    TagChip(
+                        text = "最新版本 $latestVersion",
+                        color = accentColor,
+                    )
                 }
             }
         }
@@ -325,9 +396,38 @@ private fun CountCard(
 }
 
 @Composable
-private fun SystemInfoCard() {
+private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String) {
     Card {
         Column(modifier = Modifier.fillMaxWidth()) {
+            // ① 微信版本
+            InfoRow(
+                icon = {
+                    Icon(
+                        imageVector = MaterialSymbols.Outlined.Smartphone,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                },
+                title = "微信版本",
+                content = wechatVersion ?: "未检测到微信",
+                showDivider = true,
+            )
+            // ② 运行环境
+            InfoRow(
+                icon = {
+                    Icon(
+                        imageVector = MaterialSymbols.Outlined.Check_circle,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                },
+                title = "运行环境",
+                content = lspEnvironment,
+                showDivider = true,
+            )
+            // ③ 构建时间
             InfoRow(
                 icon = {
                     Icon(
@@ -338,9 +438,10 @@ private fun SystemInfoCard() {
                     )
                 },
                 title = "构建时间",
-                content = formatEpoch(BuildConfig.BUILD_TIMESTAMP, true),
+                content = runCatching { formatEpoch(BuildConfig.BUILD_TIMESTAMP, true) }.getOrDefault("未知"),
                 showDivider = true,
             )
+            // ④ Android 版本
             InfoRow(
                 icon = {
                     Icon(
@@ -354,6 +455,7 @@ private fun SystemInfoCard() {
                 content = "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
                 showDivider = true,
             )
+            // ⑤ 设备型号
             InfoRow(
                 icon = {
                     Icon(
@@ -367,6 +469,7 @@ private fun SystemInfoCard() {
                 content = "${Build.MANUFACTURER} ${Build.MODEL}",
                 showDivider = true,
             )
+            // ⑥ 系统架构
             InfoRow(
                 icon = {
                     Icon(

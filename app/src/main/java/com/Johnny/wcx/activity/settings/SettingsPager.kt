@@ -1240,24 +1240,37 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         item {
             Spacer(Modifier.height(12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            runCatching {
+                                val intent = Intent(Intent.ACTION_VIEW, "https://github.com/Ujhhgtg/WeKit".toUri())
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(intent)
+                            }.onFailure {
+                                WeLogger.e("Settings", "failed to open wekit url", it)
+                            }
+                        }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
                         text = "wekit",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MiuixTheme.colorScheme.primary,
-                        modifier = Modifier.clickable {
-                            runCatching {
-                                val intent = Intent(Intent.ACTION_VIEW, "https://github.com/Ujhhgtg/WeKit".toUri())
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            }
-                        },
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = ":",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
                     Text(
                         text = "https://github.com/Ujhhgtg/WeKit",
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
