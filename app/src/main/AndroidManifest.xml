@@ -4,6 +4,11 @@
 
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
+    <!-- Android 11+ package visibility: allow main app to query WeChat -->
+    <queries>
+        <package android:name="com.tencent.mm" />
+    </queries>
+
     <application
         android:name=".application.ModuleApplication"
         android:allowBackup="true"

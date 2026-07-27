@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
@@ -40,9 +41,11 @@ import com.composables.icons.materialsymbols.outlined.Smartphone
 import com.composables.icons.materialsymbols.outlined.Sports_esports
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
+import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.AppUpdater
+import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.UpdateResult
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.Intent
@@ -83,37 +86,92 @@ private fun openLsposedManager(context: Context) {
     }.onFailure { WeLogger.e("HomePager", "failed to broadcast LSPosed secret code", it) }
 }
 
-/** 安全获取微信版本信息，未安装返回 null */
+/** 安全判断当前是否运行在微信宿主进程内 */
+private fun safeIsHost(): Boolean {
+    return runCatching { HostInfo.isHost }.getOrDefault(false)
+}
+
+/**
+ * 安全获取微信版本信息。
+ * - 主体App进程：通过 PackageManager 查询（需 Android 11+ queries 声明）
+ * - 微信进程内：直接从 HostInfo 读取当前宿主版本
+ * 返回 null 表示未检测到微信。
+ */
 private fun safeGetWeChatVersionInfo(context: Context): String? {
+    // 微信进程内：直接从 HostInfo 读取
+    if (safeIsHost()) {
+        return runCatching {
+            val name = HostInfo.versionName.ifEmpty { return null }
+            val code = HostInfo.versionCode
+            "微信 $name ($code)"
+        }.getOrNull()
+    }
+
+    // 主体App进程：通过 PackageManager 查询
     return runCatching {
-        val pm = context.packageManager
+        val pm = context.packageManager ?: return null
         val info = pm.getPackageInfo(PackageNames.WECHAT, 0)
-        val name = info.versionName.orEmpty().ifEmpty { return null }
+        val name = info.versionName?.ifEmpty { null } ?: return null
         val code = info.longVersionCode
         "微信 $name ($code)"
     }.getOrNull()
 }
 
-/** 识别运行环境：LSPosed / LSPatch / 未知 */
-private fun detectLspEnvironment(context: Context): String {
-    val pm = context.packageManager
-    val hasLsposed = runCatching {
-        pm.getPackageInfo("org.lsposed.manager", 0) != null
-    }.getOrDefault(false)
-    if (hasLsposed) return "LSPosed"
+/**
+ * 识别运行环境：LSPosed / LSPatch / 未知。
+ * - 主体App进程：主动探测并缓存到 WePrefs（跨进程共享）
+ * - 微信进程内：从 WePrefs 读取缓存值，禁止在微信进程内探测
+ */
+private fun detectOrReadLspEnvironment(context: Context): String {
+    // 微信进程内：从跨进程缓存读取
+    if (safeIsHost()) {
+        return runCatching {
+            WePrefs.getStringOrDef(Preferences.CACHED_LSP_ENVIRONMENT, "未知")
+        }.getOrDefault("未知")
+    }
 
-    val hasLspatch = runCatching {
-        pm.getPackageInfo("org.lspatch.manager", 0) != null
-    }.getOrDefault(false)
-    if (hasLspatch) return "LSPatch"
+    // 主体App进程：主动探测并缓存
+    val result = runCatching {
+        val pm = context.packageManager ?: return@runCatching "未知"
 
-    return "未知"
+        val hasLsposed = runCatching {
+            pm.getPackageInfo("org.lsposed.manager", 0)
+        }.isSuccess
+        if (hasLsposed) return@runCatching "LSPosed"
+
+        val hasLspatch = runCatching {
+            pm.getPackageInfo("org.lspatch.manager", 0)
+        }.isSuccess
+        if (hasLspatch) return@runCatching "LSPatch"
+
+        "未知"
+    }.getOrDefault("未知")
+
+    // 缓存到 WePrefs 供微信进程读取
+    runCatching {
+        WePrefs.putString(Preferences.CACHED_LSP_ENVIRONMENT, result)
+    }.onFailure {
+        WeLogger.e("HomePager", "failed to cache LSP environment", it)
+    }
+
+    return result
 }
 
 /** 版本字符串格式化：git+4fcbb76 (73) */
 private fun formatLocalVersion(): String {
     val name = BuildConfig.VERSION_NAME.ifEmpty { "未知" }
     return "$name (${BuildConfig.VERSION_CODE})"
+}
+
+/** 安全打开外部链接，处理无可用浏览器场景 */
+private fun safeOpenUrl(context: Context, url: String) {
+    runCatching {
+        val intent = Intent(Intent.ACTION_VIEW, url.toUri())
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }.onFailure {
+        WeLogger.e("HomePager", "failed to open url: $url", it)
+    }
 }
 
 @Composable
@@ -128,8 +186,9 @@ fun HomePager(onOpenFeatures: () -> Unit) {
     var isLatest by remember { mutableStateOf(false) }
     var isChecking by remember { mutableStateOf(true) }
 
+    // 设备信息：微信版本和运行环境在重组间保持稳定
     val wechatVersion = remember { safeGetWeChatVersionInfo(context) }
-    val lspEnvironment = remember { detectLspEnvironment(context) }
+    val lspEnvironment = remember { detectOrReadLspEnvironment(context) }
 
     LaunchedEffect(Unit) {
         isChecking = true
@@ -158,12 +217,16 @@ fun HomePager(onOpenFeatures: () -> Unit) {
         isChecking = false
     }
 
-    // Each section as a separate LazyColumn item to avoid
-    // "Vertically scrollable component infinity maximum height constraints"
     MiuixListScaffold(title = "") {
         // ---- 标题区域 ----
+        // fillMaxWidth + wrapContentHeight 防止无限高度约束导致灰色渲染
         item {
-            Column(modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+                    .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+            ) {
                 Text(
                     text = "WCX",
                     fontSize = 40.sp,
@@ -424,7 +487,7 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String) {
                     )
                 },
                 title = "运行环境",
-                content = lspEnvironment,
+                content = lspEnvironment.ifEmpty { "未知" },
                 showDivider = true,
             )
             // ③ 构建时间
@@ -452,7 +515,7 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String) {
                     )
                 },
                 title = "Android 版本",
-                content = "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                content = "${Build.VERSION.RELEASE.orEmpty().ifEmpty { "未知" }} (API ${Build.VERSION.SDK_INT})",
                 showDivider = true,
             )
             // ⑤ 设备型号
@@ -466,7 +529,7 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String) {
                     )
                 },
                 title = "设备型号",
-                content = "${Build.MANUFACTURER} ${Build.MODEL}",
+                content = "${Build.MANUFACTURER.orEmpty()} ${Build.MODEL.orEmpty()}".trim().ifEmpty { "未知" },
                 showDivider = true,
             )
             // ⑥ 系统架构
@@ -480,7 +543,7 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String) {
                     )
                 },
                 title = "系统架构",
-                content = Build.SUPPORTED_ABIS.joinToString(", "),
+                content = Build.SUPPORTED_ABIS?.joinToString(", ")?.ifEmpty { "未知" } ?: "未知",
                 showDivider = false,
             )
         }

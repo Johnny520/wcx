@@ -19,6 +19,9 @@ object Preferences {
     const val THEME_SEED_COLOR = "settings_theme_seed_color"
     const val THEME_APPLY_TO_WECHAT = "settings_theme_apply_to_wechat"
 
+    // Cross-process cached device info (written by main app, read by WeChat process)
+    const val CACHED_LSP_ENVIRONMENT = "cached_lsp_environment"
+
     var verboseLog by prefOption(VERBOSE_LOG, false)
     var noDexResolve by prefOption(NO_DEX_RESOLVE, false)
     var showStartupToast by prefOption(SHOW_STARTUP_TOAST, false)
