@@ -321,9 +321,9 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
                     onClick = { "https://github.com/Johnny520/wcx".toUri().openInSystem(context, true) })
                 PrefArrow(
                     title = "TG 群组",
-                    summary = "暂无群组",
+                    summary = "@wcx12138",
                     icon = MaterialSymbols.Outlined.Send,
-                )
+                    onClick = { "https://t.me/wcx12138".toUri().openInSystem(context, true) })
                 PrefArrow(
                     title = "官方网站",
                     summary = "https://johnny520.github.io/Johnny/",
