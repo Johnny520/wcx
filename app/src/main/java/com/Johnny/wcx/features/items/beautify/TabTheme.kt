@@ -44,8 +44,6 @@ import coil3.compose.AsyncImage
 import coil3.load
 import coil3.request.CachePolicy
 import coil3.request.crossfade
-import coil3.request.diskCachePolicy
-import coil3.request.memoryCachePolicy
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
