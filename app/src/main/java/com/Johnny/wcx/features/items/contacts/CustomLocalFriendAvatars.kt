@@ -236,47 +236,75 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     override fun onEnable() {
         WeContactPrefsScreenApi.addProvider(this)
 
-        listOf(
-            methodConversationAvatar,
-            methodMvvmLoadAvatar1,
-            methodMvvmLoadAvatar2,
-            methodFeatureAvatarSimple1,
-            methodPluginsdkLoadAvatar
-        ).forEach {
-            it.method.hookBefore {
-                val imageView = args.getOrNull(0) as? ImageView ?: return@hookBefore
-//            var wxId = args.getOrNull(1) as? String ?: return@hookBefore
-                val wxId = args.getOrNull(1) as? String ?: return@hookBefore
+        // 清除重启可能残留的缓存状态，避免旧缓存导致头像加载异常
+        clearBitmapCaches()
+        boundAvatarViews.clear()
 
-                val redirectedId = fallbackUsernameProvider?.invoke(wxId)
-                if (redirectedId != null) {
-//                wxId = redirectedId
-                    args[1] = redirectedId
-                    return@hookBefore
-                }
+        val hookTargets = listOf(
+            "methodConversationAvatar" to methodConversationAvatar,
+            "methodMvvmLoadAvatar1" to methodMvvmLoadAvatar1,
+            "methodMvvmLoadAvatar2" to methodMvvmLoadAvatar2,
+            "methodFeatureAvatarSimple1" to methodFeatureAvatarSimple1,
+            "methodPluginsdkLoadAvatar" to methodPluginsdkLoadAvatar
+        )
 
-                if (applyCustomAvatar(imageView, wxId, roundAvatarRadiusFactor)) {
-                    result = null
+        for ((name, delegate) in hookTargets) {
+            if (delegate.isPlaceholder) {
+                WeLogger.w(TAG, "skipping hook $name: method not found (placeholder) in current WeChat version")
+                continue
+            }
+
+            try {
+                delegate.method.hookBefore {
+                    val imageView = args.getOrNull(0) as? ImageView ?: return@hookBefore
+                    val wxId = args.getOrNull(1) as? String ?: return@hookBefore
+
+                    val redirectedId = fallbackUsernameProvider?.invoke(wxId)
+                    if (redirectedId != null) {
+                        args[1] = redirectedId
+                        return@hookBefore
+                    }
+
+                    if (applyCustomAvatar(imageView, wxId, roundAvatarRadiusFactor)) {
+                        result = null
+                    }
                 }
+                WeLogger.i(TAG, "hook $name set up successfully")
+            } catch (e: Exception) {
+                WeLogger.w(TAG, "failed to hook $name, avatar loading may be affected", e)
             }
         }
 
-        methodHdGallerySetUsername.hookBefore {
-            val username = args.getOrNull(0) as? String ?: return@hookBefore
-            val gallery = thisObject
-            if (applyCustomHdAvatar(gallery, username)) {
-                result = null
-                (gallery as? View)?.let { view ->
-                    view.post { applyCustomHdAvatar(gallery, username) }
-                    view.postDelayed({ applyCustomHdAvatar(gallery, username) }, 300L)
+        if (!methodHdGallerySetUsername.isPlaceholder) {
+            try {
+                methodHdGallerySetUsername.hookBefore {
+                    val username = args.getOrNull(0) as? String ?: return@hookBefore
+                    val gallery = thisObject
+                    if (applyCustomHdAvatar(gallery, username)) {
+                        result = null
+                        (gallery as? View)?.let { view ->
+                            view.post { applyCustomHdAvatar(gallery, username) }
+                            view.postDelayed({ applyCustomHdAvatar(gallery, username) }, 300L)
+                        }
+                    }
                 }
+                WeLogger.i(TAG, "hook methodHdGallerySetUsername set up successfully")
+            } catch (e: Exception) {
+                WeLogger.w(TAG, "failed to hook methodHdGallerySetUsername", e)
             }
+        } else {
+            WeLogger.w(TAG, "skipping hook methodHdGallerySetUsername: method not found (placeholder)")
         }
+
+        WeLogger.i(TAG, "CustomLocalFriendAvatars enabled, avatarMap size=${avatarMap.size}")
     }
 
     override fun onDisable() {
         WeContactPrefsScreenApi.removeProvider(this)
         avatarMapCache = null
+        clearBitmapCaches()
+        boundAvatarViews.clear()
+        WeLogger.i(TAG, "CustomLocalFriendAvatars disabled, caches cleared")
     }
 
     override fun getContactInfoItem(activity: Activity): List<PreferenceItem> {
@@ -335,16 +363,27 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
         val tag = "$username$SEP$uri$SEP$effectiveRadiusFactor"
         imageView.setTag(VIEW_TAG_CUSTOM_AVATAR, tag)
         boundAvatarViews[imageView] = BoundAvatar(username, uri, radiusFactor)
-        loadAvatarInto(imageView, uri, effectiveRadiusFactor)
+
+        // 首次加载：若 bitmap 解码失败（如 content provider 尚未就绪），让原始方法先跑，
+        // 避免 ImageView 空白；post 回调会做二次尝试覆盖。
+        val firstAttemptOk = loadAvatarInto(imageView, uri, effectiveRadiusFactor)
         imageView.post {
             if (imageView.getTag(VIEW_TAG_CUSTOM_AVATAR) == tag) {
                 loadAvatarInto(imageView, uri, effectiveRadiusFactor)
             }
         }
-        return true
+
+        if (!firstAttemptOk) {
+            WeLogger.d(TAG, "first loadAvatarInto attempt failed for $username, allowing original method as fallback")
+        }
+        return firstAttemptOk
     }
 
-    private fun loadAvatarInto(imageView: ImageView, uri: String, radiusFactor: Float) {
+    /**
+     * 加载自定义头像到 ImageView。
+     * @return true 表示成功设置了自定义头像 bitmap，false 表示需要回退到原始加载逻辑。
+     */
+    private fun loadAvatarInto(imageView: ImageView, uri: String, radiusFactor: Float): Boolean {
         val targetSize = imageView.width
             .takeIf { it > 0 }
             ?: imageView.layoutParams?.width?.takeIf { it > 0 }
@@ -356,17 +395,21 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
             targetSize = targetSize,
             round = shouldRound,
             radiusFactor = if (shouldRound) radiusFactor else 0f
-        ) ?: run {
+        )
+
+        if (bitmap == null) {
+            WeLogger.d(TAG, "decodeAvatarBitmap failed for $uri, falling back to Coil")
             imageView.load(uri) {
                 allowHardware(false)
                 crossfade(false)
             }
-            return
+            return false
         }
 
         imageView.scaleType = ImageView.ScaleType.FIT_XY
         imageView.setImageDrawable(bitmap.toDrawable(imageView.resources))
         imageView.invalidate()
+        return true
     }
 
     private fun applyCustomHdAvatar(gallery: Any?, username: String): Boolean {
@@ -587,12 +630,17 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     }
 
     private fun loadAvatarMap(): Map<String, String> {
-        if (!avatarMapFile.exists()) return emptyMap()
+        if (!avatarMapFile.exists()) {
+            WeLogger.d(TAG, "avatar map file not found, returning empty map")
+            return emptyMap()
+        }
         return runCatching {
             val raw = avatarMapFile.readText()
-            Json.decodeFromString<Map<String, String>>(raw).filter { it.key.isNotBlank() && it.value.isNotBlank() }
+            val map = Json.decodeFromString<Map<String, String>>(raw).filter { it.key.isNotBlank() && it.value.isNotBlank() }
+            WeLogger.i(TAG, "loaded avatar map: ${map.size} entries from ${avatarMapFile.absolutePathString()}")
+            map
         }.getOrElse {
-            WeLogger.e(TAG, "failed to parse custom avatar map", it)
+            WeLogger.e(TAG, "failed to parse custom avatar map from ${avatarMapFile.absolutePathString()}", it)
             emptyMap()
         }
     }

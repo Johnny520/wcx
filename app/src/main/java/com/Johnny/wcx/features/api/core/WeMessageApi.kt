@@ -363,7 +363,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
     private val classVoiceServiceInterface by dexClass()
 
-    private val classVoiceServiceImpl by dexClass {
+    private val classVoiceServiceImpl by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.VoiceMsgAsyncSendFSC",
@@ -531,10 +531,16 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }
         }
 
-        val targetInterface = classVoiceServiceImpl.clazz.interfaces.first {
-            !it.isBuiltin && !it.name.startsWith("ki0.")
+        try {
+            val targetInterface = classVoiceServiceImpl.clazz.interfaces.first {
+                !it.isBuiltin && !it.name.startsWith("ki0.")
+            }
+            classVoiceServiceInterface.setDescriptor(targetInterface.name)
+            WeLogger.i(TAG, "VoiceServiceInterface resolved: ${targetInterface.name}")
+        } catch (e: Exception) {
+            WeLogger.w(TAG, "VoiceMsgAsyncSendFSC interface resolution failed (R8 obfuscation changed), voice sending will use SceneVoiceService fallback", e)
+            classVoiceServiceInterface.setPlaceholderDescriptor()
         }
-        classVoiceServiceInterface.setDescriptor(targetInterface.name)
     }
 
     fun convertMsgInfoInstanceFromContentValues(contentValues: ContentValues): Any {
