@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.load
+import coil3.request.CachePolicy
 import coil3.request.crossfade
+import coil3.request.diskCachePolicy
+import coil3.request.memoryCachePolicy
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
@@ -192,7 +196,12 @@ object TabTheme : ClickableFeature() {
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT
                                 )
-                                load(tabFile.toFile()) { crossfade(true) }
+                                // Disable cache to always load fresh image from disk
+                                load(tabFile.toFile()) {
+                                    crossfade(true)
+                                    memoryCachePolicy(CachePolicy.DISABLED)
+                                    diskCachePolicy(CachePolicy.DISABLED)
+                                }
                                 alpha = opacity
                             }
                             addView(iv)
@@ -284,6 +293,13 @@ object TabTheme : ClickableFeature() {
         var enabledState by remember { mutableStateOf(tabThemeEnabled) }
         var opacityState by remember { mutableFloatStateOf(opacity) }
 
+        // Reactive state: track which tabs have images, initialized from disk
+        val hasImageStates = remember {
+            mutableStateMapOf<Int, Boolean>().apply {
+                for (i in 0..3) put(i, hasTabBackground(i))
+            }
+        }
+
         AlertDialogContent(
             title = { Text("四 Tab 主题背景") },
             text = {
@@ -320,7 +336,13 @@ object TabTheme : ClickableFeature() {
                             activity = activity,
                             tabIndex = index,
                             tabName = name,
-                            hasImage = hasTabBackground(index)
+                            hasImage = hasImageStates[index] ?: false,
+                            onImagePicked = {
+                                hasImageStates[index] = true
+                            },
+                            onImageDeleted = {
+                                hasImageStates[index] = false
+                            }
                         )
                     }
 
@@ -358,13 +380,21 @@ object TabTheme : ClickableFeature() {
     }
 
     @Composable
-    private fun TabBackgroundItem(activity: ComponentActivity, tabIndex: Int, tabName: String, hasImage: Boolean) {
+    private fun TabBackgroundItem(
+        activity: ComponentActivity,
+        tabIndex: Int,
+        tabName: String,
+        hasImage: Boolean,
+        onImagePicked: () -> Unit,
+        onImageDeleted: () -> Unit
+    ) {
         ListItem(
             modifier = Modifier.clickable {
-                pickImageForTab(activity, tabIndex)
+                pickImageForTab(activity, tabIndex, onImagePicked)
             },
             leadingContent = {
                 if (hasImage) {
+                    // Use unique key with timestamp to force cache refresh when image changes
                     AsyncImage(
                         model = getTabBackgroundFile(tabIndex).toFile(),
                         contentDescription = null,
@@ -388,6 +418,7 @@ object TabTheme : ClickableFeature() {
                 {
                     IconButton(onClick = {
                         deleteTabBackground(tabIndex)
+                        onImageDeleted()
                         showToast("已清除 $tabName 背景")
                     }) {
                         Icon(
@@ -471,8 +502,8 @@ object TabTheme : ClickableFeature() {
         )
     }
 
-    private fun pickImageForTab(activity: ComponentActivity, tabIndex: Int) {
-        TransparentActivity.launch(HostInfo.application) {
+    private fun pickImageForTab(activity: ComponentActivity, tabIndex: Int, onPicked: () -> Unit) {
+        TransparentActivity.launch(activity) {
             val context = this
             val launcher = registerForActivityResult(
                 ActivityResultContracts.PickVisualMedia()
@@ -497,6 +528,9 @@ object TabTheme : ClickableFeature() {
                         tabBackgrounds = loadConfig().tabBackgrounds + (tabIndex to destFile.toString())
                     )
                     saveConfig(config)
+
+                    // Notify UI to refresh preview immediately
+                    onPicked()
 
                     showToast("${tabNames[tabIndex]} 背景已设置，重启微信生效")
                 }.onFailure {

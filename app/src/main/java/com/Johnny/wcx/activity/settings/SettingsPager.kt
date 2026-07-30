@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
@@ -1213,16 +1214,22 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         },
     ) {
         item {
-            Spacer(Modifier.height(24.dp))
-            Text(
-                text = "鸣谢名单",
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
-                color = MiuixTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(20.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+                    .background(MiuixTheme.colorScheme.surface)
+                    .padding(top = 24.dp, bottom = 20.dp),
+            ) {
+                Text(
+                    text = "鸣谢名单",
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+            }
         }
 
         item {
