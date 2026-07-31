@@ -2,23 +2,35 @@ package com.Johnny.wcx.features.items.chat
 
 import android.annotation.SuppressLint
 import android.content.ContentValues
-import android.content.Intent
+import android.graphics.Color as AndroidColor
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.TextPaint
+import android.text.style.ForegroundColorSpan
+import android.text.style.URLSpan
 import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -31,9 +43,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
@@ -44,9 +60,9 @@ import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.net.models.protobuf.ChatRoomDataProto
+import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
@@ -59,7 +75,6 @@ import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.reflection.BString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -67,74 +82,86 @@ import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
+import java.lang.reflect.Field
 
 @Feature(
-    name = "群成员行为监控",
+    name = "群成员变动提醒",
     categories = ["联系人与群组"],
-    description = "体系A：自动发送进退群消息到群内 + 体系B：仅本人可见进退群提醒，两套功能独立开关、存储隔离"
+    description = "监控群成员变动（入群/退群/改昵称/被踢），支持本地观察与群广播两种模式"
 )
 object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
-    WeDatabaseListenerApi.IUpdateListener, WeDatabaseListenerApi.IInsertListener {
+    WeDatabaseListenerApi.IUpdateListener, WeDatabaseListenerApi.IInsertListener,
+    WeChatMessageViewApi.ICreateViewListener {
 
-    private const val TAG = "GroupMemberBehaviorMonitor"
+    private const val TAG = "GroupMemberChangeNotify"
 
     // =========================================================================
-    // 体系A: 对外群内自动发送消息
+    // 持久化偏好
     // =========================================================================
-    private var systemAEnabled by prefOption("gbm_system_a_enabled", false)
+    private var masterEnabled by prefOption("gmc_master_enabled", false)
+    private var modeAEnabled by prefOption("gmc_mode_a_enabled", false)
+    private var modeBEnabled by prefOption("gmc_mode_b_enabled", false)
+    private var joinEnabled by prefOption("gmc_join_enabled", true)
+    private var leaveEnabled by prefOption("gmc_leave_enabled", true)
+    private var nickChangeEnabled by prefOption("gmc_nick_change_enabled", true)
+    private var kickEnabled by prefOption("gmc_kick_enabled", true)
+    private var kickExtraExit by prefOption("gmc_kick_extra_exit", false)
 
     @Serializable
-    data class GroupConfig(
-        val welcomeText: String = "欢迎 {nickname} 加入群聊！",
-        val atNewMember: Boolean = true,
-        val extraEnabled: Boolean = false,
-        val extraSource: String = "local",
-        val extraPath: String = "",
-        val extraType: String = "text",
-        val leaveText: String = "{nickname} 退出了群聊，祝他/她前程似锦！",
-        val delaySeconds: Int = 0
+    data class EventConfig(
+        val color: String = "#28C445",
+        val text: String = ""
     )
 
-    private var groupConfigsJson by prefOption("gbm_group_configs", "{}")
-
-    private fun getGroupConfigs(): Map<String, GroupConfig> {
-        return runCatching {
-            json.decodeFromString<Map<String, GroupConfig>>(groupConfigsJson)
-        }.getOrElse { emptyMap() }
-    }
-
-    private fun getGroupConfig(group: String): GroupConfig {
-        return getGroupConfigs()[group] ?: GroupConfig()
-    }
-
-    private fun hasGroupConfig(group: String): Boolean {
-        return group in getGroupConfigs()
-    }
-
-    private fun saveGroupConfig(group: String, config: GroupConfig) {
-        val configs = getGroupConfigs().toMutableMap()
-        configs[group] = config
-        groupConfigsJson = json.encodeToString(configs)
-    }
-
-    // =========================================================================
-    // 体系B: 仅本人可见进退群提醒
-    // =========================================================================
-    private var systemBEnabled by prefOption("gbm_system_b_enabled", false)
-
-    // =========================================================================
-    // 通用: 全局进/退群事件开关（保留兼容旧逻辑）
-    // =========================================================================
-    private var enableLeaveNotify by prefOption("group_member_leave_notify", true)
-    private var enableJoinNotify by prefOption("group_member_join_notify", true)
+    private var joinConfigJson by prefOption("gmc_join_config", "{}")
+    private var leaveConfigJson by prefOption("gmc_leave_config", "{}")
+    private var nickChangeConfigJson by prefOption("gmc_nick_change_config", "{}")
+    private var kickConfigJson by prefOption("gmc_kick_config", "{}")
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    private fun getEventConfig(eventType: String): EventConfig {
+        val jsonStr = when (eventType) {
+            "join" -> joinConfigJson
+            "leave" -> leaveConfigJson
+            "nick_change" -> nickChangeConfigJson
+            "kick" -> kickConfigJson
+            else -> "{}"
+        }
+        return runCatching {
+            json.decodeFromString<EventConfig>(jsonStr)
+        }.getOrElse { EventConfig() }
+    }
+
+    private fun getDefaultConfig(eventType: String): EventConfig = when (eventType) {
+        "join" -> EventConfig(color = "#28C445", text = "{链接昵称} 加入了群组")
+        "leave" -> EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
+        "nick_change" -> EventConfig(color = "#28C445", text = "{链接昵称} 修改群昵称：{旧昵称} → {新昵称}")
+        "kick" -> EventConfig(color = "#F23030", text = "{链接昵称} 被管理员{管理员昵称}移出群组")
+        else -> EventConfig()
+    }
+
+    private fun getEffectiveConfig(eventType: String): EventConfig {
+        val stored = getEventConfig(eventType)
+        return if (stored.text.isBlank()) getDefaultConfig(eventType) else stored
+    }
+
+    private fun saveEventConfig(eventType: String, config: EventConfig) {
+        val jsonStr = json.encodeToString(config)
+        when (eventType) {
+            "join" -> joinConfigJson = jsonStr
+            "leave" -> leaveConfigJson = jsonStr
+            "nick_change" -> nickChangeConfigJson = jsonStr
+            "kick" -> kickConfigJson = jsonStr
+        }
+    }
 
     // =========================================================================
     // 生命周期
     // =========================================================================
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
+        WeChatMessageViewApi.addListener(this)
 
         runCatching {
             methodHandleSpanClick.hookBefore {
@@ -153,6 +180,135 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
     override fun onDisable() {
         WeDatabaseListenerApi.removeListener(this)
+        WeChatMessageViewApi.removeListener(this)
+    }
+
+    // =========================================================================
+    // 消息显示 Hook — 彩色文字 + 可点击昵称
+    // =========================================================================
+    private var contentTextViewField: Field? = null
+
+    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+        if (!masterEnabled || !modeBEnabled) return
+        try {
+            val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
+            if (msgInfo.type != MessageType.TEXT) return
+            val content = msgInfo.content ?: return
+            if (!content.startsWith(GMC_PREFIX)) return
+
+            val parsed = parseGmcContent(content) ?: return
+            val tag = view.tag ?: return
+
+            val contentTv = findContentTextView(tag, view) ?: return
+            applySpans(contentTv, parsed)
+        } catch (e: Exception) {
+            WeLogger.e(TAG, "onCreateView failed", e)
+        }
+    }
+
+    private fun findContentTextView(tag: Any, rootView: View): TextView? {
+        contentTextViewField?.let {
+            return runCatching { it.get(tag) as? TextView }.getOrNull()
+        }
+        // Search for the content TextView by iterating tag fields
+        for (field in tag.javaClass.declaredFields) {
+            if (TextView::class.java.isAssignableFrom(field.type)) {
+                try {
+                    field.isAccessible = true
+                    val tv = field.get(tag) as? TextView ?: continue
+                    val text = tv.text?.toString() ?: ""
+                    if (text.startsWith(GMC_PREFIX)) {
+                        contentTextViewField = field
+                        field.isAccessible = true
+                        return tv
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        // Fallback: search view hierarchy
+        return findTextViewRecursive(rootView)
+    }
+
+    private fun findTextViewRecursive(view: View): TextView? {
+        if (view is TextView) {
+            val text = view.text?.toString() ?: ""
+            if (text.startsWith(GMC_PREFIX)) return view
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val found = findTextViewRecursive(view.getChildAt(i))
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
+    private data class GmcParsedContent(
+        val eventType: String,
+        val color: Int,
+        val plainText: String,
+        val clickableWxIds: List<Pair<String, String>> // (displayName, wxId)
+    )
+
+    companion object {
+        private const val GMC_PREFIX = "[gmc:"
+    }
+
+    private fun buildGmcContent(
+        eventType: String,
+        color: String,
+        plainText: String,
+        clickableWxIds: List<Pair<String, String>>
+    ): String {
+        val wxIdsPart = clickableWxIds.joinToString(",") { "${it.first}::${it.second}" }
+        return "$GMC_PREFIX$eventType:$color:$wxIdsPart]$plainText"
+    }
+
+    private fun parseGmcContent(content: String): GmcParsedContent? {
+        if (!content.startsWith(GMC_PREFIX)) return null
+        val endIdx = content.indexOf(']')
+        if (endIdx < 0) return null
+        val header = content.substring(GMC_PREFIX.length, endIdx)
+        val parts = header.split(":", limit = 3)
+        if (parts.size < 3) return null
+        val eventType = parts[0]
+        val color = runCatching { AndroidColor.parseColor(parts[1]) }.getOrDefault(AndroidColor.BLACK)
+        val wxIdsPart = parts[2]
+        val clickableWxIds = if (wxIdsPart.isNotEmpty()) {
+            wxIdsPart.split(",").mapNotNull {
+                val pair = it.split("::", limit = 2)
+                if (pair.size == 2) pair[0] to pair[1] else null
+            }
+        } else emptyList()
+        val plainText = content.substring(endIdx + 1)
+        return GmcParsedContent(eventType, color, plainText, clickableWxIds)
+    }
+
+    private fun applySpans(textView: TextView, parsed: GmcParsedContent) {
+        val spannable = SpannableString(parsed.plainText)
+        // Apply color to entire text
+        spannable.setSpan(
+            ForegroundColorSpan(parsed.color),
+            0, spannable.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        // Apply URL spans for clickable wxIds (uses WeChat's URLSpanHandlerSet for reliable click handling)
+        for ((displayName, wxId) in parsed.clickableWxIds) {
+            val idx = spannable.indexOf(displayName)
+            if (idx >= 0) {
+                spannable.setSpan(
+                    object : URLSpan("weixin://weixinhongbao/wekit/chatroom_userinfo/$wxId") {
+                        override fun updateDrawState(ds: TextPaint) {
+                            // Preserve the ForegroundColorSpan color, only add underline
+                            ds.isUnderlineText = true
+                        }
+                    },
+                    idx, idx + displayName.length,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+        }
+        textView.text = spannable
     }
 
     private val methodHandleSpanClick by dexMethod {
@@ -168,7 +324,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     @SuppressLint("Range")
     override fun onUpdate(table: String, values: ContentValues, whereClause: String?, whereArgs: Array<String>?, conflictAlgorithm: Int) {
         if (table != "chatroom") return
-        if (!systemAEnabled && !systemBEnabled) return
+        if (!masterEnabled) return
 
         val group = values.getAsString("chatroomname") ?: return
         val newRawMembers = values.getAsString("memberlist")
@@ -180,13 +336,13 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         )
 
         runCatching {
-            cursor.use { cursor ->
-                if (!cursor.moveToFirst()) return
-                val origRawMembers = cursor.getString(cursor.getColumnIndex("memberlist"))
+            cursor.use { c ->
+                if (!c.moveToFirst()) return
+                val origRawMembers = c.getString(c.getColumnIndex("memberlist"))
                 if (origRawMembers.isNullOrEmpty()) return
                 val origMembers = origRawMembers.split(';')
 
-                val origRoomData = cursor.getBlob(cursor.getColumnIndex("roomdata"))
+                val origRoomData = c.getBlob(c.getColumnIndex("roomdata"))
                 val origDisplayNames = parseRoomData(origRoomData)
                 val newDisplayNames = parseRoomData(newRoomData)
 
@@ -195,7 +351,30 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         }.onFailure { WeLogger.e(TAG, "failed to handle group member operations", it) }
     }
 
-    override fun onInsert(table: String, values: ContentValues) {}
+    override fun onInsert(table: String, values: ContentValues) {
+        // Detect kick events from system messages
+        if (!masterEnabled || !kickEnabled) return
+        if (table != "message") return
+        val type = values.getAsInteger("type") ?: return
+        if (type != MessageType.SYSTEM.code) return
+        val content = values.getAsString("content") ?: return
+        if (!content.contains("delchatroommember")) return
+
+        // Extract kicked member and admin from system message XML
+        val talker = values.getAsString("talker") ?: return
+        if (!talker.endsWith("@chatroom")) return
+
+        val kickedWxId = extractXmlValue(content, "delchatroommember", "username")
+        val adminWxId = extractXmlValue(content, "delchatroommember", "scenceusername")
+        if (kickedWxId.isNullOrEmpty()) return
+
+        handleKickEvent(talker, kickedWxId, adminWxId)
+    }
+
+    private fun extractXmlValue(xml: String, tag: String, subTag: String): String? {
+        val regex = Regex("<$tag>.*?<$subTag>(.*?)</$subTag>.*?</$tag>", RegexOption.DOT_MATCHES_ALL)
+        return regex.find(xml)?.groupValues?.getOrNull(1)
+    }
 
     private fun handleMemberChange(
         group: String,
@@ -212,157 +391,108 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val leavers = origSet - newSet
         val joiners = newSet - origSet
 
-        // 体系A: 对外发送消息（仅勾选的群生效）
-        if (systemAEnabled) {
-            if (hasGroupConfig(group)) {
-                val groupConfig = getGroupConfig(group)
-                handleSystemAEvents(group, groupConfig, leavers, joiners, origDisplayNames, newDisplayNames)
-            }
-        }
-
-        // 体系B: 本地提醒（全局生效，无需勾选群）
-        if (systemBEnabled) {
-            handleSystemBEvents(group, leavers, joiners, origDisplayNames, newDisplayNames)
-        }
-    }
-
-    // =========================================================================
-    // 体系A: 对外发送消息
-    // =========================================================================
-    private fun handleSystemAEvents(
-        group: String,
-        config: GroupConfig,
-        leavers: Set<String>,
-        joiners: Set<String>,
-        origDisplayNames: Map<String, String>,
-        newDisplayNames: Map<String, String>
-    ) {
-        if (enableLeaveNotify) {
-            leavers.forEach { wxId ->
-                val displayName = getDisplayName(wxId, origDisplayNames)
-                sendSystemALeaveMessage(group, config, wxId, displayName)
-            }
-        }
-
-        if (enableJoinNotify) {
+        // 入群事件
+        if (joinEnabled) {
             joiners.forEach { wxId ->
                 val displayName = getDisplayName(wxId, newDisplayNames)
-                sendSystemAJoinMessage(group, config, wxId, displayName)
+                val config = getEffectiveConfig("join")
+                val text = formatText(config.text, "join", displayName, wxId, "", "", "")
+                triggerEvent("join", group, config.color, text, listOf(displayName to wxId))
             }
         }
-    }
 
-    private fun sendSystemAJoinMessage(group: String, config: GroupConfig, wxId: String, displayName: String) {
-        val delayMs = config.delaySeconds * 1000L
-        if (delayMs > 0) {
-            CoroutineScope(Dispatchers.IO).launch {
-                delay(delayMs)
-                doSendSystemAJoinMessage(group, config, wxId, displayName)
+        // 退群事件
+        if (leaveEnabled) {
+            leavers.forEach { wxId ->
+                val displayName = getDisplayName(wxId, origDisplayNames)
+                val config = getEffectiveConfig("leave")
+                val text = formatText(config.text, "leave", displayName, wxId, "", "", "")
+                triggerEvent("leave", group, config.color, text, listOf(displayName to wxId))
             }
-        } else {
-            doSendSystemAJoinMessage(group, config, wxId, displayName)
         }
-    }
 
-    private fun doSendSystemAJoinMessage(group: String, config: GroupConfig, wxId: String, displayName: String) {
-        runCatching {
-            // 1. 发送第一条欢迎文案（可选@新人）
-            val welcomeText = config.welcomeText
-                .replace("{nickname}", displayName)
-                .replace("{displayName}", displayName)
-                .replace("{wxId}", wxId)
-                .replace("{group}", group)
-            val textToSend = if (config.atNewMember) "@$displayName $welcomeText" else welcomeText
-            WeMessageApi.sendText(group, textToSend)
-
-            // 2. 发送附加内容（如果开启且素材非空）
-            if (config.extraEnabled && config.extraPath.isNotBlank()) {
-                sendExtraContent(group, config)
-            }
-        }.onFailure {
-            WeLogger.e(TAG, "failed to send system A join message", it)
-        }
-    }
-
-    private fun sendSystemALeaveMessage(group: String, config: GroupConfig, wxId: String, displayName: String) {
-        val delayMs = config.delaySeconds * 1000L
-        if (delayMs > 0) {
-            CoroutineScope(Dispatchers.IO).launch {
-                delay(delayMs)
-                doSendSystemALeaveMessage(group, config, wxId, displayName)
-            }
-        } else {
-            doSendSystemALeaveMessage(group, config, wxId, displayName)
-        }
-    }
-
-    private fun doSendSystemALeaveMessage(group: String, config: GroupConfig, wxId: String, displayName: String) {
-        runCatching {
-            val leaveText = config.leaveText
-                .replace("{nickname}", displayName)
-                .replace("{displayName}", displayName)
-                .replace("{wxId}", wxId)
-                .replace("{group}", group)
-            WeMessageApi.sendText(group, leaveText)
-        }.onFailure {
-            WeLogger.e(TAG, "failed to send system A leave message", it)
-        }
-    }
-
-    private fun sendExtraContent(group: String, config: GroupConfig) {
-        runCatching {
-            when (config.extraType) {
-                "text" -> {
-                    if (config.extraPath.isNotBlank()) {
-                        WeMessageApi.sendText(group, config.extraPath)
-                    }
+        // 修改群昵称事件
+        if (nickChangeEnabled) {
+            val commonMembers = origSet.intersect(newSet)
+            commonMembers.forEach { wxId ->
+                val oldName = origDisplayNames[wxId] ?: ""
+                val newName = newDisplayNames[wxId] ?: ""
+                if (oldName.isNotEmpty() && newName.isNotEmpty() && oldName != newName) {
+                    val displayName = getDisplayName(wxId, newDisplayNames)
+                    val config = getEffectiveConfig("nick_change")
+                    val text = formatText(config.text, "nick_change", displayName, wxId, oldName, newName, "")
+                    triggerEvent("nick_change", group, config.color, text, listOf(displayName to wxId))
                 }
-                "image" -> WeMessageApi.sendImage(group, config.extraPath)
-                "video" -> WeMessageApi.sendVideo(group, config.extraPath)
-                "voice" -> WeMessageApi.sendVoice(group, config.extraPath, 0)
             }
-        }.onFailure {
-            WeLogger.e(TAG, "failed to send extra content", it)
         }
     }
 
-    // =========================================================================
-    // 体系B: 本地提醒（仅本人可见）
-    // =========================================================================
-    private fun handleSystemBEvents(
-        group: String,
-        leavers: Set<String>,
-        joiners: Set<String>,
-        origDisplayNames: Map<String, String>,
-        newDisplayNames: Map<String, String>
-    ) {
-        if (enableLeaveNotify) {
-            leavers.forEach { wxId ->
-                val displayName = getDisplayName(wxId, origDisplayNames)
-                val groupName = WeDatabaseApi.getDisplayName(group)
-                val content = "[本地提醒] $displayName 退出了群聊「$groupName」"
-                WeMessageApi.createSimpleMsgInfoAndInsert(
-                    type = MessageType.SYSTEM.code,
-                    talker = group,
-                    content = content,
-                    currentTime = System.currentTimeMillis()
-                )
-            }
+    private fun handleKickEvent(group: String, kickedWxId: String, adminWxId: String?) {
+        val displayName = WeDatabaseApi.getDisplayName(kickedWxId).ifEmpty { kickedWxId }
+        val adminDisplayName = if (!adminWxId.isNullOrEmpty()) {
+            WeDatabaseApi.getDisplayName(adminWxId).ifEmpty { adminWxId }
+        } else ""
+
+        val config = getEffectiveConfig("kick")
+        val text = formatText(config.text, "kick", displayName, kickedWxId, "", "", adminDisplayName)
+
+        val clickableList = mutableListOf(displayName to kickedWxId)
+        if (adminDisplayName.isNotEmpty()) {
+            clickableList.add(adminDisplayName to adminWxId!!)
         }
 
-        if (enableJoinNotify) {
-            joiners.forEach { wxId ->
-                val displayName = getDisplayName(wxId, newDisplayNames)
-                val groupName = WeDatabaseApi.getDisplayName(group)
-                val content = "[本地提醒] $displayName 加入了群聊「$groupName」"
-                WeMessageApi.createSimpleMsgInfoAndInsert(
-                    type = MessageType.SYSTEM.code,
-                    talker = group,
-                    content = content,
-                    currentTime = System.currentTimeMillis()
-                )
+        triggerEvent("kick", group, config.color, text, clickableList)
+
+        // 附加退出群组提示
+        if (kickExtraExit) {
+            val exitConfig = EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
+            val exitText = formatText(exitConfig.text, "leave", displayName, kickedWxId, "", "", "")
+            triggerEvent("kick_extra", group, exitConfig.color, exitText, listOf(displayName to kickedWxId))
+        }
+    }
+
+    private fun triggerEvent(
+        eventType: String,
+        group: String,
+        color: String,
+        plainText: String,
+        clickableWxIds: List<Pair<String, String>>
+    ) {
+        // 模式B: 本地观察
+        if (modeBEnabled) {
+            val gmcContent = buildGmcContent(eventType, color, plainText, clickableWxIds)
+            WeMessageApi.createSimpleMsgInfoAndInsert(
+                type = MessageType.TEXT.code,
+                talker = group,
+                content = gmcContent,
+                currentTime = System.currentTimeMillis()
+            )
+        }
+
+        // 模式A: 群广播（纯文本，无颜色无点击）
+        if (modeAEnabled) {
+            runCatching {
+                WeMessageApi.sendText(group, plainText)
+            }.onFailure {
+                WeLogger.e(TAG, "failed to send broadcast for $eventType", it)
             }
         }
+    }
+
+    private fun formatText(
+        template: String,
+        eventType: String,
+        displayName: String,
+        wxId: String,
+        oldNick: String,
+        newNick: String,
+        adminDisplayName: String
+    ): String {
+        return template
+            .replace("{链接昵称}", "$displayName($wxId)")
+            .replace("{管理员昵称}", if (adminDisplayName.isNotEmpty()) "$adminDisplayName($wxId)" else "")
+            .replace("{旧昵称}", oldNick)
+            .replace("{新昵称}", newNick)
     }
 
     // =========================================================================
@@ -387,473 +517,282 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     // =========================================================================
     // UI — 设置页面
     // =========================================================================
-    private fun pickExtraFile(
-        activity: ComponentActivity,
-        extraType: String,
-        onResult: (String) -> Unit
-    ) {
-        when (extraType) {
-            "image" -> {
-                TransparentActivity.launch(activity) {
-                    val launcher = registerForActivityResult(
-                        ActivityResultContracts.PickVisualMedia()
-                    ) { uri ->
-                        finish()
-                        if (uri != null) {
-                            activity.contentResolver.takePersistableUriPermission(
-                                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            )
-                            onResult(uri.toString())
-                        }
-                    }
-                    launcher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                }
-            }
-            "video" -> {
-                TransparentActivity.launch(activity) {
-                    val launcher = registerForActivityResult(
-                        ActivityResultContracts.PickVisualMedia()
-                    ) { uri ->
-                        finish()
-                        if (uri != null) {
-                            activity.contentResolver.takePersistableUriPermission(
-                                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            )
-                            onResult(uri.toString())
-                        }
-                    }
-                    launcher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-                    )
-                }
-            }
-            "voice" -> {
-                TransparentActivity.launch(activity) {
-                    val launcher = registerForActivityResult(
-                        ActivityResultContracts.OpenDocument()
-                    ) { uri ->
-                        finish()
-                        if (uri != null) {
-                            activity.contentResolver.takePersistableUriPermission(
-                                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            )
-                            onResult(uri.toString())
-                        }
-                    }
-                    launcher.launch(arrayOf("audio/*"))
-                }
-            }
-        }
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
-            var showSystemAConfig by remember { mutableStateOf(false) }
-            var showGroupDetail by remember { mutableStateOf<String?>(null) }
+            var masterEnabledState by remember { mutableStateOf(masterEnabled) }
+            var modeAState by remember { mutableStateOf(modeAEnabled) }
+            var modeBState by remember { mutableStateOf(modeBEnabled) }
+            var joinState by remember { mutableStateOf(joinEnabled) }
+            var leaveState by remember { mutableStateOf(leaveEnabled) }
+            var nickState by remember { mutableStateOf(nickChangeEnabled) }
+            var kickState by remember { mutableStateOf(kickEnabled) }
+            var kickExtraState by remember { mutableStateOf(kickExtraExit) }
 
-            var systemAEnabledState by remember { mutableStateOf(systemAEnabled) }
-            var systemBEnabledState by remember { mutableStateOf(systemBEnabled) }
+            var joinConfigState by remember { mutableStateOf(getEffectiveConfig("join")) }
+            var leaveConfigState by remember { mutableStateOf(getEffectiveConfig("leave")) }
+            var nickConfigState by remember { mutableStateOf(getEffectiveConfig("nick_change")) }
+            var kickConfigState by remember { mutableStateOf(getEffectiveConfig("kick")) }
 
-            when {
-                showGroupDetail != null -> {
-                    val groupWxId = showGroupDetail!!
-                    val currentConfig = remember(groupWxId) { getGroupConfig(groupWxId) }
-                    SystemAGroupConfigScreen(
-                        context = context,
-                        groupWxId = groupWxId,
-                        config = currentConfig,
-                        onBack = { showGroupDetail = null },
-                        onSave = { newConfig ->
-                            saveGroupConfig(groupWxId, newConfig)
-                            showGroupDetail = null
-                            showToast("群聊配置已保存")
-                        }
-                    )
-                }
-                showSystemAConfig -> {
-                    SystemAGroupListScreen(
-                        onBack = { showSystemAConfig = false },
-                        onGroupClick = { showGroupDetail = it },
-                        onSave = { showToast("群聊配置已保存") }
-                    )
-                }
-                else -> {
-                    MainSettingsScreen(
-                        systemAEnabled = systemAEnabledState,
-                        systemBEnabled = systemBEnabledState,
-                        onSystemAChange = { systemAEnabledState = it },
-                        onSystemBChange = { systemBEnabledState = it },
-                        onOpenSystemAConfig = { showSystemAConfig = true },
-                        onDismiss = onDismiss,
-                        onSave = {
-                            systemAEnabled = systemAEnabledState
-                            systemBEnabled = systemBEnabledState
-                            showToast("设置已保存")
-                            onDismiss()
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun MainSettingsScreen(
-        systemAEnabled: Boolean,
-        systemBEnabled: Boolean,
-        onSystemAChange: (Boolean) -> Unit,
-        onSystemBChange: (Boolean) -> Unit,
-        onOpenSystemAConfig: () -> Unit,
-        onDismiss: () -> Unit,
-        onSave: () -> Unit
-    ) {
-        AlertDialogContent(
-            title = { Text("群成员行为监控") },
-            text = {
-                DefaultColumn(scrollable = true) {
-                    // 体系A全局开关
-                    Text(
-                        "体系A：对外自动通知",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    ListItem(
-                        modifier = Modifier.clickable { onSystemAChange(!systemAEnabled) },
-                        trailingContent = {
-                            Switch(checked = systemAEnabled, onCheckedChange = null)
-                        },
-                        headlineContent = { Text("A组全局总开关") },
-                        supportingContent = { Text("开启后，勾选的群聊将自动发送进退群消息") }
-                    )
-
-                    if (systemAEnabled) {
-                        Spacer(Modifier.height(4.dp))
+            AlertDialogContent(
+                title = { Text("群成员变动提醒") },
+                text = {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
+                        // 总开关
                         ListItem(
-                            modifier = Modifier.clickable { onOpenSystemAConfig() },
-                            headlineContent = { Text("群聊设置") },
-                            supportingContent = { Text("选择目标群聊并配置欢迎/退群文案") }
+                            modifier = Modifier.clickable { masterEnabledState = !masterEnabledState },
+                            trailingContent = {
+                                Switch(checked = masterEnabledState, onCheckedChange = null)
+                            },
+                            headlineContent = { Text("总开关", fontWeight = FontWeight.SemiBold) },
+                            supportingContent = { Text("关闭后功能彻底停用，停止监听所有群成员变动事件") }
                         )
-                    }
 
-                    Spacer(Modifier.height(12.dp))
+                        if (masterEnabledState) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-                    // 体系B全局开关
-                    Text(
-                        "体系B：仅本人可见提醒",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    ListItem(
-                        modifier = Modifier.clickable { onSystemBChange(!systemBEnabled) },
-                        trailingContent = {
-                            Switch(checked = systemBEnabled, onCheckedChange = null)
-                        },
-                        headlineContent = { Text("B组全局总开关") },
-                        supportingContent = { Text("开启后，所有群的进退群事件都将本地提醒，仅本人可见，不会在群内发送消息") }
-                    )
+                            // 模式选择
+                            Text(
+                                "模式选择",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
 
-                    if (systemBEnabled) {
-                        Text(
-                            "功能说明：开启后全局监控所有微信群，任意成员进群、退群触发本地提醒，仅本机可见，不会往微信群发送任何消息。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
+                            // 模式B
+                            ListItem(
+                                modifier = Modifier.clickable {
+                                    modeBState = !modeBState
+                                    // 规则：关闭模式B时自动取消勾选模式A
+                                    if (!modeBState) modeAState = false
+                                },
+                                trailingContent = {
+                                    Switch(checked = modeBState, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("模式B：本地观察模式") },
+                                supportingContent = { Text("变动通知仅自己可见，不向群内发送消息") }
+                            )
 
-                    Spacer(Modifier.height(8.dp))
+                            // 模式A
+                            ListItem(
+                                modifier = Modifier.clickable {
+                                    if (modeBState) modeAState = !modeAState
+                                },
+                                enabled = modeBState,
+                                trailingContent = {
+                                    Switch(
+                                        checked = modeAState,
+                                        onCheckedChange = null,
+                                        enabled = modeBState
+                                    )
+                                },
+                                headlineContent = {
+                                    Text(
+                                        "模式A：群广播模式",
+                                        color = if (modeBState) MaterialTheme.colorScheme.onSurface
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(
+                                        "本机查看通知同时推送消息到群聊；开启模式A必须启用模式B",
+                                        color = if (modeBState) MaterialTheme.colorScheme.onSurfaceVariant
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    )
+                                }
+                            )
 
-                    // 提示
-                    Text(
-                        "提示：体系A和体系B的开关独立运行，互不影响。A组发送消息到群内，B组仅本地提醒。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-            },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-            confirmButton = {
-                Button(onClick = onSave) { Text("保存") }
-            }
-        )
-    }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun SystemAGroupListScreen(
-        onBack: () -> Unit,
-        onGroupClick: (String) -> Unit,
-        onSave: () -> Unit
-    ) {
-        val groups = remember {
-            WeDatabaseApi.getGroups().filter { it.wxId.isNotBlank() }
-        }
+                            // 四类事件
+                            Text(
+                                "事件监控开关",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
 
-        AlertDialogContent(
-            title = { Text("对外群通知设置") },
-            text = {
-                DefaultColumn {
-                    Text(
-                        "勾选需要自动发送通知的群聊，点击进入配置",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
+                            EventConfigItem(
+                                label = "主动入群提醒",
+                                enabled = joinState,
+                                onEnabledChange = { joinState = it },
+                                config = joinConfigState,
+                                onConfigChange = { joinConfigState = it },
+                                enabledColor = ComposeColor(0xFF28C445)
+                            )
 
-                    if (groups.isEmpty()) {
-                        Text("暂无群聊", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                            items(groups, key = { it.wxId }) { group ->
-                                val isSelected = remember(group.wxId) { hasGroupConfig(group.wxId) }
+                            EventConfigItem(
+                                label = "主动退群提醒",
+                                enabled = leaveState,
+                                onEnabledChange = { leaveState = it },
+                                config = leaveConfigState,
+                                onConfigChange = { leaveConfigState = it },
+                                enabledColor = ComposeColor(0xFF28C445)
+                            )
 
+                            EventConfigItem(
+                                label = "修改群昵称提醒",
+                                enabled = nickState,
+                                onEnabledChange = { nickState = it },
+                                config = nickConfigState,
+                                onConfigChange = { nickConfigState = it },
+                                enabledColor = ComposeColor(0xFF28C445)
+                            )
+
+                            EventConfigItem(
+                                label = "被管理员踢出群组提醒",
+                                enabled = kickState,
+                                onEnabledChange = { kickState = it },
+                                config = kickConfigState,
+                                onConfigChange = { kickConfigState = it },
+                                enabledColor = ComposeColor(0xFFF23030)
+                            )
+
+                            if (kickState) {
                                 ListItem(
-                                    modifier = Modifier.clickable {
-                                        onGroupClick(group.wxId)
+                                    modifier = Modifier.clickable { kickExtraState = !kickExtraState },
+                                    trailingContent = {
+                                        Checkbox(checked = kickExtraState, onCheckedChange = null)
                                     },
-                                    headlineContent = { Text(group.displayName) },
+                                    headlineContent = { Text("被踢时附带生成【退出群组】样式提示") },
                                     supportingContent = {
                                         Text(
-                                            if (isSelected) "已配置" else "点击配置",
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                            "开启：同时生成红色「被移出群组」+ 绿色「退出了群组」两条提示\n" +
+                                                    "关闭：仅展示一条「被移出群组」提示"
                                         )
-                                    },
-                                    trailingContent = {
-                                        if (isSelected) {
-                                            Text(
-                                                "✓",
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
                                     }
                                 )
                             }
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                            // 功能说明
+                            Text(
+                                "【功能说明】\n" +
+                                        "模式B：本地观察模式，变动通知仅自己可见，不向群内发消息，可独立开启。\n" +
+                                        "模式A：群广播模式，本机查看通知同时推送消息到群聊；开启模式A必须启用模式B。\n" +
+                                        "🟢默认绿色：主动入群、主动退群、修改群昵称\n" +
+                                        "🔴默认红色：成员被管理员移出群组\n" +
+                                        "⚠重要提醒：彩色文字、昵称点击跳转功能【仅你本机生效】；\n" +
+                                        "模式A发送到群内的消息为普通纯文本，其他人看不到颜色、昵称无法点击。\n" +
+                                        "四类事件独立开关自由选择，每条事件文案、本地展示颜色支持自定义调整。\n\n" +
+                                        "温馨提示：模式A自动向群发送消息存在微信风控风险，请谨慎使用",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
                         }
                     }
+                },
+                dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+                confirmButton = {
+                    Button(onClick = {
+                        masterEnabled = masterEnabledState
+                        modeAEnabled = modeAState
+                        modeBEnabled = modeBState
+                        joinEnabled = joinState
+                        leaveEnabled = leaveState
+                        nickChangeEnabled = nickState
+                        kickEnabled = kickState
+                        kickExtraExit = kickExtraState
+                        saveEventConfig("join", joinConfigState)
+                        saveEventConfig("leave", leaveConfigState)
+                        saveEventConfig("nick_change", nickConfigState)
+                        saveEventConfig("kick", kickConfigState)
+                        showToast("设置已保存")
+                        onDismiss()
+                    }) { Text("保存") }
                 }
-            },
-            dismissButton = { TextButton(onClick = onBack) { Text("返回") } },
-            confirmButton = {
-                Button(onClick = {
-                    onSave()
-                    onBack()
-                }) { Text("保存") }
-            }
-        )
+            )
+        }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun SystemAGroupConfigScreen(
-        context: ComponentActivity,
-        groupWxId: String,
-        config: GroupConfig,
-        onBack: () -> Unit,
-        onSave: (GroupConfig) -> Unit
+    private fun EventConfigItem(
+        label: String,
+        enabled: Boolean,
+        onEnabledChange: (Boolean) -> Unit,
+        config: EventConfig,
+        onConfigChange: (EventConfig) -> Unit,
+        enabledColor: ComposeColor
     ) {
-        var welcomeText by remember { mutableStateOf(config.welcomeText) }
-        var atNewMember by remember { mutableStateOf(config.atNewMember) }
-        var extraEnabled by remember { mutableStateOf(config.extraEnabled) }
-        var extraSource by remember { mutableStateOf(config.extraSource) }
-        var extraPath by remember { mutableStateOf(config.extraPath) }
-        var extraType by remember { mutableStateOf(config.extraType) }
-        var leaveText by remember { mutableStateOf(config.leaveText) }
-        var delaySeconds by remember { mutableStateOf(config.delaySeconds) }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            ListItem(
+                modifier = Modifier.clickable { onEnabledChange(!enabled) },
+                trailingContent = {
+                    Switch(checked = enabled, onCheckedChange = null)
+                },
+                headlineContent = { Text(label) }
+            )
 
-        val groupName = remember { WeDatabaseApi.getDisplayName(groupWxId) }
-
-        AlertDialogContent(
-            title = { Text("配置: $groupName") },
-            text = {
-                DefaultColumn(scrollable = true) {
-                    // 进群欢迎文案
-                    Text(
-                        "进群主欢迎文案",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    OutlinedTextField(
-                        value = welcomeText,
-                        onValueChange = { welcomeText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("支持变量 {nickname}") },
-                        minLines = 2
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // 自动@新人
-                    ListItem(
-                        modifier = Modifier.clickable { atNewMember = !atNewMember },
-                        trailingContent = {
-                            Switch(checked = atNewMember, onCheckedChange = null)
-                        },
-                        headlineContent = { Text("自动@新进群成员") },
-                        supportingContent = { Text("进群第一条消息自动@新人") }
-                    )
-
-                    // 附加内容
-                    ListItem(
-                        modifier = Modifier.clickable { extraEnabled = !extraEnabled },
-                        trailingContent = {
-                            Switch(checked = extraEnabled, onCheckedChange = null)
-                        },
-                        headlineContent = { Text("附加自动回复内容") },
-                        supportingContent = { Text("发送欢迎文案后，追加发送附加素材") }
-                    )
-
-                    if (extraEnabled) {
-                        // 素材来源
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { extraSource = "local" },
-                                modifier = Modifier.weight(1f),
-                                enabled = extraSource != "local"
-                            ) { Text("本地文件") }
-                            Button(
-                                onClick = { extraSource = "favorite" },
-                                modifier = Modifier.weight(1f),
-                                enabled = extraSource != "favorite"
-                            ) { Text("微信收藏") }
-                        }
-
-                        // 素材类型
-                        Spacer(Modifier.height(4.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            listOf("text" to "文本", "image" to "图片", "video" to "视频", "voice" to "语音").forEach { (type, label) ->
-                                Button(
-                                    onClick = { extraType = type; extraPath = "" },
-                                    modifier = Modifier.weight(1f),
-                                    enabled = extraType != type
-                                ) { Text(label, fontSize = 11.sp) }
-                            }
-                        }
-
-                        if (extraType == "text") {
-                            OutlinedTextField(
-                                value = extraPath,
-                                onValueChange = { extraPath = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp),
-                                label = { Text("附加文本内容") },
-                                minLines = 2
-                            )
-                        } else {
-                            // 素材路径显示 + 选择按钮
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = extraPath.ifEmpty { "未选择文件" },
-                                    onValueChange = {},
-                                    modifier = Modifier.weight(1f),
-                                    enabled = false,
-                                    label = { Text("素材路径") },
-                                    singleLine = true
-                                )
-                                Button(
-                                    onClick = {
-                                        pickExtraFile(context, extraType) { path ->
-                                            extraPath = path
-                                        }
-                                    }
-                                ) { Text("选择") }
-                            }
-                            if (extraSource == "favorite") {
-                                Text(
-                                    "微信收藏素材选择功能开发中，请先使用本地文件",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // 退群文案
-                    Text(
-                        "退群通知文案",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    OutlinedTextField(
-                        value = leaveText,
-                        onValueChange = { leaveText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("支持变量 {nickname}") },
-                        minLines = 2
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // 发送延迟
-                    Text(
-                        "消息发送延迟: ${delaySeconds}秒",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "0秒 = 检测到事件后立即发送",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        for (s in 0..6) {
-                            Button(
-                                onClick = { delaySeconds = s },
-                                modifier = Modifier.weight(1f),
-                                enabled = delaySeconds != s
-                            ) { Text("${s}s", fontSize = 11.sp) }
-                        }
-                    }
+            if (enabled) {
+                // 颜色配置
+                var colorText by remember(config) {
+                    mutableStateOf(TextFieldValue(config.color))
                 }
-            },
-            dismissButton = { TextButton(onClick = onBack) { Text("返回") } },
-            confirmButton = {
-                Button(onClick = {
-                    onSave(
-                        GroupConfig(
-                            welcomeText = welcomeText,
-                            atNewMember = atNewMember,
-                            extraEnabled = extraEnabled,
-                            extraSource = extraSource,
-                            extraPath = extraPath,
-                            extraType = extraType,
-                            leaveText = leaveText,
-                            delaySeconds = delaySeconds
-                        )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("颜色:", style = MaterialTheme.typography.bodySmall)
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(
+                                runCatching {
+                                    ComposeColor(AndroidColor.parseColor(config.color))
+                                }.getOrDefault(enabledColor)
+                            )
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
                     )
-                }) { Text("保存") }
+                    OutlinedTextField(
+                        value = colorText,
+                        onValueChange = { v ->
+                            colorText = v
+                            if (v.text.matches(Regex("^#[0-9A-Fa-f]{6}$"))) {
+                                onConfigChange(config.copy(color = v.text))
+                            }
+                        },
+                        modifier = Modifier.width(100.dp),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                // 文案配置
+                var textValue by remember(config) {
+                    mutableStateOf(TextFieldValue(config.text))
+                }
+                OutlinedTextField(
+                    value = textValue,
+                    onValueChange = { v ->
+                        textValue = v
+                        onConfigChange(config.copy(text = v.text))
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    label = { Text("文案模板") },
+                    supportingText = {
+                        Text(
+                            buildString {
+                                append("可用变量: {链接昵称}")
+                                if (label.contains("昵称")) append(", {旧昵称}, {新昵称}")
+                                if (label.contains("踢出")) append(", {管理员昵称}")
+                            },
+                            fontSize = 11.sp
+                        )
+                    },
+                    minLines = 2,
+                    textStyle = MaterialTheme.typography.bodySmall
+                )
             }
-        )
+        }
     }
 }

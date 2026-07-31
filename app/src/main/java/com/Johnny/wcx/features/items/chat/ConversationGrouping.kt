@@ -2,6 +2,7 @@ package com.Johnny.wcx.features.items.chat
 
 import android.content.Context
 import android.widget.ListView
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -24,20 +25,28 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,14 +74,15 @@ import com.composables.icons.materialsymbols.outlined.Add
 import com.composables.icons.materialsymbols.outlined.Check
 import com.composables.icons.materialsymbols.outlined.Delete
 import com.composables.icons.materialsymbols.outlined.Edit
+import com.composables.icons.materialsymbols.outlined.Settings
 import com.composables.icons.materialsymbols.outlined.Swap_vert
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
+import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -98,7 +108,7 @@ import kotlin.io.path.writeText
 import java.lang.reflect.Modifier as JavaModifier
 
 @Feature(name = "对话分组", categories = ["聊天"], description = "向主页顶部添加 Tab 栏, 将对话分组\n建议同时启用「界面美化/隐藏主页下滑「最近」页」")
-object ConversationGrouping : SwitchFeature(), IResolveDex {
+object ConversationGrouping : ClickableFeature(), IResolveDex {
 
     const val GROUP_PREFIX = "wekit_group_"
 
@@ -205,6 +215,104 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
                 }
             }
             convListView.addHeaderView(composeView)
+        }
+    }
+
+    // =========================================================================
+    // 设置页面 — 总开关 + 新增分组 + 分组列表(⚙)
+    // =========================================================================
+    override fun onClick(context: ComponentActivity) {
+        showComposeDialog(context) {
+            var masterEnabled by remember { mutableStateOf(isEnabled) }
+            var groups by remember { mutableStateOf(loadGroups().filter { !isAllTab(it.id) }) }
+
+            AlertDialogContent(
+                title = { Text("对话分组") },
+                text = {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
+                        // 总开关
+                        ListItem(
+                            modifier = Modifier.clickable { masterEnabled = !masterEnabled },
+                            trailingContent = {
+                                Switch(checked = masterEnabled, onCheckedChange = null)
+                            },
+                            headlineContent = { Text("总开关", fontWeight = FontWeight.SemiBold) },
+                            supportingContent = {
+                                Text("向主页顶部添加 Tab 栏，将对话分组\n建议同时启用「界面美化/隐藏主页下滑「最近」页」")
+                            }
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        // 新增自定义分组
+                        Button(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            onClick = {
+                                showCreateGroupDialog(context) {
+                                    groups = loadGroups().filter { !isAllTab(it.id) }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = MaterialSymbols.Outlined.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("新增自定义分组")
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // 已创建分组列表
+                        if (groups.isEmpty()) {
+                            Text(
+                                "暂无自定义分组",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        } else {
+                            groups.forEach { group ->
+                                ListItem(
+                                    modifier = Modifier.clickable {
+                                        showEditGroupDialog(
+                                            context = context,
+                                            group = group,
+                                            onGroupUpdated = {
+                                                groups = loadGroups().filter { !isAllTab(it.id) }
+                                            },
+                                            onGroupDeleted = {
+                                                groups = loadGroups().filter { !isAllTab(it.id) }
+                                            }
+                                        )
+                                    },
+                                    headlineContent = { Text(group.name) },
+                                    trailingContent = {
+                                        Icon(
+                                            imageVector = MaterialSymbols.Outlined.Settings,
+                                            contentDescription = "配置分组",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
+                dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                confirmButton = {
+                    Button(onClick = {
+                        isEnabled = masterEnabled
+                        showToast("设置已保存")
+                        onDismiss()
+                    }) { Text("保存") }
+                }
+            )
         }
     }
 
