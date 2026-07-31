@@ -134,10 +134,10 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     }
 
     private fun getDefaultConfig(eventType: String): EventConfig = when (eventType) {
-        "join" -> EventConfig(color = "#28C445", text = "{链接昵称} 加入了群组")
-        "leave" -> EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
-        "nick_change" -> EventConfig(color = "#28C445", text = "{链接昵称} 修改群昵称：{旧昵称} → {新昵称}")
-        "kick" -> EventConfig(color = "#F23030", text = "{链接昵称} 被管理员{管理员昵称}移出群组")
+        "join" -> EventConfig(color = "#28C445", text = "\$userName 加入了群组")
+        "leave" -> EventConfig(color = "#28C445", text = "\$userName 退出了群组")
+        "nick_change" -> EventConfig(color = "#28C445", text = "\$userName 修改群昵称：\$oldNickname → \$newNickname")
+        "kick" -> EventConfig(color = "#F23030", text = "\$userName 被管理员\$adminName移出群组")
         else -> EventConfig()
     }
 
@@ -443,7 +443,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
         // 附加退出群组提示
         if (kickExtraExit) {
-            val exitConfig = EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
+            val exitConfig = EventConfig(color = "#28C445", text = "\$userName 退出了群组")
             val exitText = formatText(exitConfig.text, "leave", displayName, kickedWxId, "", "", "")
             triggerEvent("kick_extra", group, exitConfig.color, exitText, listOf(displayName to kickedWxId))
         }
@@ -486,11 +486,13 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         newNick: String,
         adminDisplayName: String
     ): String {
+        val userNameFormatted = "$displayName($wxId)"
+        val adminNameFormatted = if (adminDisplayName.isNotEmpty()) "$adminDisplayName($wxId)" else ""
         return template
-            .replace("{链接昵称}", "$displayName($wxId)")
-            .replace("{管理员昵称}", if (adminDisplayName.isNotEmpty()) "$adminDisplayName($wxId)" else "")
-            .replace("{旧昵称}", oldNick)
-            .replace("{新昵称}", newNick)
+            .replace("\$userName", userNameFormatted)
+            .replace("\$adminName", adminNameFormatted)
+            .replace("\$oldNickname", oldNick)
+            .replace("\$newNickname", newNick)
     }
 
     // =========================================================================
@@ -665,15 +667,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
                             // 功能说明
                             Text(
-                                "【功能说明】\n" +
-                                        "模式B：本地观察模式，变动通知仅自己可见，不向群内发消息，可独立开启。\n" +
-                                        "模式A：群广播模式，本机查看通知同时推送消息到群聊；开启模式A必须启用模式B。\n" +
-                                        "🟢默认绿色：主动入群、主动退群、修改群昵称\n" +
-                                        "🔴默认红色：成员被管理员移出群组\n" +
-                                        "⚠重要提醒：彩色文字、昵称点击跳转功能【仅你本机生效】；\n" +
-                                        "模式A发送到群内的消息为普通纯文本，其他人看不到颜色、昵称无法点击。\n" +
-                                        "四类事件独立开关自由选择，每条事件文案、本地展示颜色支持自定义调整。\n\n" +
-                                        "温馨提示：模式A自动向群发送消息存在微信风控风险，请谨慎使用",
+                                "彩色文字、昵称点击跳转功能仅本机生效；\n" +
+                                        "开启群广播发送消息会自动清除所有样式，仅发送纯文本；\n" +
+                                        "群自动发消息存在微信风控风险，请谨慎使用。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -778,9 +774,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                     supportingText = {
                         Text(
                             buildString {
-                                append("可用变量: {链接昵称}")
-                                if (label.contains("昵称")) append(", {旧昵称}, {新昵称}")
-                                if (label.contains("踢出")) append(", {管理员昵称}")
+                                append("可用变量: \$userName")
+                                if (label.contains("昵称")) append(", \$oldNickname, \$newNickname")
+                                if (label.contains("踢出")) append(", \$adminName")
                             },
                             fontSize = 11.sp
                         )
