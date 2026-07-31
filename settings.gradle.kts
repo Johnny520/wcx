@@ -1,5 +1,3 @@
-enableFeaturePreview("NO_IMPLICIT_LOOKUP_IN_PARENT_PROJECTS")
-
 pluginManagement {
     repositories {
         google {
@@ -79,10 +77,6 @@ dependencyResolutionManagement {
     versionCatalogs {
         create("libs")
     }
-}
-
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
 rootProject.name = "wekit"

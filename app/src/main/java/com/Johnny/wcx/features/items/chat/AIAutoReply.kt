@@ -11,7 +11,11 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -327,18 +331,25 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             WeDatabaseApi.getGroups().filter { it.wxId.isNotBlank() }
         }
         val selected = remember { enabledGroups.toMutableSet() }
+        val listState = rememberLazyListState()
 
         AlertDialogContent(
             title = { Text("选择群聊") },
             text = {
-                DefaultColumn {
-                    Text(
-                        if (useWhitelist) "选择需要开启 AI 自动回复的群聊" else "选择需要排除 AI 自动回复的群聊",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    groups.forEach { group ->
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.heightIn(max = 400.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    item {
+                        Text(
+                            if (useWhitelist) "选择需要开启 AI 自动回复的群聊" else "选择需要排除 AI 自动回复的群聊",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    items(groups, key = { it.wxId }) { group ->
                         val isSelected = remember { mutableStateOf(selected.contains(group.wxId)) }
                         ListItem(
                             modifier = Modifier.clickable {

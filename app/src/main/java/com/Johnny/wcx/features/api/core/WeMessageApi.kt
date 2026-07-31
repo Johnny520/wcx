@@ -384,14 +384,18 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     // -------------------------------------------------------------------------------------
 
     // 基础 & 文本
-    private val getSelfAliasMethod: Method by lazy {
-        classConfigLogic.reflekt()
-            .firstMethod {
-                name { it.length <= 2 }
-                modifiers(Modifiers.STATIC)
-                parameterCount = 0
-                returnType = String::class
-            }.self
+    private val getSelfAliasMethod: Method? by lazy {
+        try {
+            classConfigLogic.reflekt()
+                .firstMethod {
+                    modifiers(Modifiers.STATIC)
+                    parameterCount = 0
+                    returnType = String::class
+                }.self
+        } catch (e: Exception) {
+            WeLogger.w(TAG, "getSelfAliasMethod: failed to resolve via signature matching, selfCustomWxId will be empty", e)
+            null
+        }
     }
 
     // 图片
@@ -1660,7 +1664,12 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
     val selfCustomWxId: String
         get() {
-            return getSelfAliasMethod.invoke(null) as? String ?: ""
+            return runCatching {
+                getSelfAliasMethod?.invoke(null) as? String ?: ""
+            }.getOrElse {
+                WeLogger.w(TAG, "selfCustomWxId resolution failed", it)
+                ""
+            }
         }
 
     fun getMsgInfoFromTag(tag: Any): Any {

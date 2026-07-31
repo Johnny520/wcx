@@ -1,7 +1,7 @@
 //! JNI entry points
 
 #![allow(clippy::not_unsafe_ptr_arg_deref, clippy::missing_safety_doc)]
-#![feature(abort_immediate)]
+
 
 mod audio_utils;
 mod crash_handler;
@@ -12,7 +12,7 @@ mod signature_verifier;
 mod telegram_sticker;
 mod utils;
 
-use std::{ffi::CString, process::abort_immediate};
+use std::{ffi::CString, process::abort};
 
 use crash_handler::{install_crash_handler, uninstall_crash_handler};
 use crash_triggerer::trigger_test_crash;
@@ -254,7 +254,7 @@ pub extern "C" fn Java_com_Johnny_wcx_utils_SignatureVerifier_nativeVerify(
     if ok {
         JNI_TRUE
     } else {
-        abort_immediate();
+        abort();
     }
 }
 

@@ -164,7 +164,7 @@ androidComponents {
 
         kotlinSources.addGeneratedSourceDirectory(
             generateMethodHashes,
-            GenerateMethodHashesTask::outputDir
+            GenerateMethodHashesTask::getOutputDir
         )
 
         val variantName = variant.name.replaceFirstChar { it.uppercase() }
@@ -184,7 +184,7 @@ androidComponents {
 
         kotlinSources.addGeneratedSourceDirectory(
             embedAboutLibraries,
-            EmbedAboutLibrariesTask::outputDir
+            EmbedAboutLibrariesTask::getOutputDir
         )
 
         val embedEruda = tasks.register<EmbedErudaTask>("embedEruda$variantName") {
@@ -198,7 +198,7 @@ androidComponents {
 
         kotlinSources.addGeneratedSourceDirectory(
             embedEruda,
-            EmbedErudaTask::outputDir
+            EmbedErudaTask::getOutputDir
         )
 
 //        val embedMonetAssets = tasks.register<EmbedMonetAssetsTask>("embedMonetAssets$variantName") {

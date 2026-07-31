@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -44,12 +45,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlined.Chat
 import com.composables.icons.materialsymbols.outlined.Open_in_new
 import com.composables.icons.materialsymbols.outlined.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Check_circle
@@ -275,7 +278,10 @@ class MainActivity : ComponentActivity() {
                     val activationState = rememberActivationState()
                     Card(
                         colors = CardDefaults.cardColors(containerColor = activationState.color),
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .shadow(4.dp, RoundedCornerShape(16.dp))
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
@@ -305,7 +311,10 @@ class MainActivity : ComponentActivity() {
                 }
 
                 ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(4.dp, RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -354,7 +363,10 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(4.dp, RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -398,7 +410,10 @@ class MainActivity : ComponentActivity() {
                                 ?: "无法打开微信 (包名: $hostPkg)"
                         }
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(4.dp, RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -595,6 +610,13 @@ class MainActivity : ComponentActivity() {
                 )
 
                 LinkCard(
+                    icon = MaterialSymbols.Outlined.Chat,
+                    title = "交流群组",
+                    subtitle = "https://t.me/wcx12138",
+                    onClick = { onUrlClick("https://t.me/wcx12138") }
+                )
+
+                LinkCard(
                     icon = GitHubIcon,
                     title = "GitHub",
                     subtitle = "Johnny520/wcx",
@@ -681,7 +703,10 @@ class MainActivity : ComponentActivity() {
     private fun LinkCard(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
         ElevatedCard(
             onClick = onClick,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(4.dp, RoundedCornerShape(16.dp)),
+            shape = RoundedCornerShape(16.dp)
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),

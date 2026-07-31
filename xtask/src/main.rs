@@ -351,6 +351,12 @@ fn task_configure() -> Result<()> {
     let android_home = find_android_home(&root)?;
     let ndk_bin_dir = find_ndk_bin_dir(&android_home)?;
 
+    // Derive the NDK sysroot from the bin dir (e.g. .../bin → .../sysroot).
+    let ndk_sysroot = Path::new(&ndk_bin_dir)
+        .parent()
+        .unwrap()
+        .join("sysroot");
+
     // On Windows the NDK ships `.cmd` wrappers for the clang binaries.
     let ext = if cfg!(target_os = "windows") {
         ".cmd"
@@ -370,14 +376,20 @@ fn task_configure() -> Result<()> {
         ));
     }
 
-    // [env] section — CC/CXX/AR vars consumed by `cc-rs` and `bindgen`.
+    // [env] section — CC/CXX/AR vars consumed by `cc-rs`, and
+    // BINDGEN_EXTRA_CLANG_ARGS for `bindgen` to use the NDK sysroot.
     out.push_str("[env]\n");
     for spec in ABI_TABLE {
         let cc = format!("{ndk_bin_dir}/{}{MIN_SDK}-clang{ext}", spec.clang_prefix);
         let cxx = format!("{ndk_bin_dir}/{}{MIN_SDK}-clang++{ext}", spec.clang_prefix);
+        let bindgen_args = format!("--sysroot={}", ndk_sysroot.display());
         out.push_str(&format!("CC_{k} = \"{cc}\"\n", k = spec.env_key));
         out.push_str(&format!("CXX_{k} = \"{cxx}\"\n", k = spec.env_key));
-        out.push_str(&format!("AR_{k} = \"{ar}\"\n\n", k = spec.env_key));
+        out.push_str(&format!("AR_{k} = \"{ar}\"\n", k = spec.env_key));
+        out.push_str(&format!(
+            "BINDGEN_EXTRA_CLANG_ARGS_{k} = \"{bindgen_args}\"\n\n",
+            k = spec.env_key
+        ));
     }
 
     let out = out.trim_end_matches('\n').to_owned() + "\n";
