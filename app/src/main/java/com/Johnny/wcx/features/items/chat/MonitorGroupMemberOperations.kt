@@ -250,9 +250,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val clickableWxIds: List<Pair<String, String>> // (displayName, wxId)
     )
 
-    companion object {
-        private const val GMC_PREFIX = "[gmc:"
-    }
+    private const val GMC_PREFIX = "[gmc:"
 
     private fun buildGmcContent(
         eventType: String,
@@ -579,12 +577,10 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                 modifier = Modifier.clickable {
                                     if (modeBState) modeAState = !modeAState
                                 },
-                                enabled = modeBState,
                                 trailingContent = {
                                     Switch(
                                         checked = modeAState,
-                                        onCheckedChange = null,
-                                        enabled = modeBState
+                                        onCheckedChange = null
                                     )
                                 },
                                 headlineContent = {
