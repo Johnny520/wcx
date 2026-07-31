@@ -134,10 +134,10 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     }
 
     private fun getDefaultConfig(eventType: String): EventConfig = when (eventType) {
-        "join" -> EventConfig(color = "#28C445", text = "\$userName 加入了群组")
-        "leave" -> EventConfig(color = "#28C445", text = "\$userName 退出了群组")
-        "nick_change" -> EventConfig(color = "#28C445", text = "\$userName 修改群昵称：\$oldNickname → \$newNickname")
-        "kick" -> EventConfig(color = "#F23030", text = "\$userName 被管理员\$adminName移出群组")
+        "join" -> EventConfig(color = "#28C445", text = "\$nickname 加入了群组")
+        "leave" -> EventConfig(color = "#28C445", text = "\$nickname 退出了群组")
+        "nick_change" -> EventConfig(color = "#28C445", text = "\$nickname 修改群昵称：{旧昵称} → {新昵称}")
+        "kick" -> EventConfig(color = "#F23030", text = "\$nickname 被管理员{管理员昵称}移出群组")
         else -> EventConfig()
     }
 
@@ -443,7 +443,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
         // 附加退出群组提示
         if (kickExtraExit) {
-            val exitConfig = EventConfig(color = "#28C445", text = "\$userName 退出了群组")
+            val exitConfig = EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
             val exitText = formatText(exitConfig.text, "leave", displayName, kickedWxId, "", "", "")
             triggerEvent("kick_extra", group, exitConfig.color, exitText, listOf(displayName to kickedWxId))
         }
@@ -489,6 +489,14 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val userNameFormatted = "$displayName($wxId)"
         val adminNameFormatted = if (adminDisplayName.isNotEmpty()) "$adminDisplayName($wxId)" else ""
         return template
+            // 原有兼容旧变量
+            .replace("{链接昵称}", userNameFormatted)
+            .replace("{管理员昵称}", adminNameFormatted)
+            .replace("{旧昵称}", oldNick)
+            .replace("{新昵称}", newNick)
+            // 旧变量别名（$nickname 与 $userName 完全等效）
+            .replace("\$nickname", userNameFormatted)
+            // 新标准变量
             .replace("\$userName", userNameFormatted)
             .replace("\$adminName", adminNameFormatted)
             .replace("\$oldNickname", oldNick)
@@ -665,7 +673,45 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
                             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                            // 功能说明
+                            // 变量说明
+                            Text(
+                                "原有兼容旧变量（可继续正常使用）",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                            Text(
+                                "{链接昵称}：发生变动的群成员，展示【昵称(wxid)】，支持点击跳转微信资料\n" +
+                                        "{管理员昵称}：执行踢人操作的管理员，展示【昵称(wxid)】，支持点击跳转微信资料\n" +
+                                        "{旧昵称}：成员修改之前的旧群昵称\n" +
+                                        "{新昵称}：成员修改之后的新群昵称\n" +
+                                        "\$nickname：发生变动的群成员，与 {链接昵称} / \$userName 完全等效通用",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "新标准变量（推荐使用）",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "\$userName：发生变动的群成员，展示【昵称(wxid)】，支持点击跳转微信资料，与 \$nickname 完全等效通用\n" +
+                                        "\$adminName：执行踢人操作的管理员，展示【昵称(wxid)】，支持点击跳转微信资料\n" +
+                                        "\$oldNickname：成员修改之前的旧群昵称\n" +
+                                        "\$newNickname：成员修改之后的新群昵称",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                            Text(
+                                "无对应数据的占位符自动隐藏，不会原样展示变量文字",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             Text(
                                 "彩色文字、昵称点击跳转功能仅本机生效；\n" +
                                         "开启群广播发送消息会自动清除所有样式，仅发送纯文本；\n" +
@@ -774,9 +820,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                     supportingText = {
                         Text(
                             buildString {
-                                append("可用变量: \$userName")
-                                if (label.contains("昵称")) append(", \$oldNickname, \$newNickname")
-                                if (label.contains("踢出")) append(", \$adminName")
+                                append("变量: \$userName / \$nickname / {链接昵称}")
+                                if (label.contains("昵称")) append(", \$oldNickname / {旧昵称}, \$newNickname / {新昵称}")
+                                if (label.contains("踢出")) append(", \$adminName / {管理员昵称}")
                             },
                             fontSize = 11.sp
                         )
