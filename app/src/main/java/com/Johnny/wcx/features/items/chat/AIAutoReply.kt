@@ -73,18 +73,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Collections
 
-// ── 调试日志（文件级，避免 Kotlin 编译器内部类可见性问题）───────────────────────
-private data class DebugLogEntry(
-    val timestamp: String,
-    val requestUrl: String,
-    val requestBody: String,
-    val responseCode: Int,
-    val responseBody: String,
-    val error: String?
-)
-
-private val debugLogs: MutableList<DebugLogEntry> = Collections.synchronizedList(mutableListOf<DebugLogEntry>())
-private const val MAX_DEBUG_LOGS = 50
+// ── AIAutoReply ─────────────────────────────────────────────────────────────────
 
 @SuppressLint("SetTextI18n")
 @Feature(
@@ -117,6 +106,19 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
     private var privateChatMode by prefOption("ai_reply_private_mode", 0) // 0=全部, 1=白名单, 2=黑名单
     private var privateEnabledContacts by prefOption("ai_reply_private_contacts", emptySet<String>())
     private var allowStrangerPrivateReply by prefOption("ai_reply_allow_stranger", false)
+
+    // ── 调试日志 ────────────────────────────────────────────────────────────────
+    private data class DebugLogEntry(
+        val timestamp: String,
+        val requestUrl: String,
+        val requestBody: String,
+        val responseCode: Int,
+        val responseBody: String,
+        val error: String?
+    )
+
+    private val debugLogs: MutableList<DebugLogEntry> = Collections.synchronizedList(mutableListOf())
+    private const val MAX_DEBUG_LOGS = 50
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -220,8 +222,6 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                                         text = { Text("从收藏中选择回复") },
                                         onClick = {
                                             showFavMenu = false
-                                            // TODO: 接入 WeMessageApi 或新增 FavApi 获取微信收藏列表
-                                            //       当前项目中没有可用的微信收藏读取 API，待后续实现
                                             showToast("暂未接入微信收藏 API")
                                         }
                                     )
@@ -559,7 +559,6 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         if (isGroup) {
             if (!enableForGroup) return
 
-            // 群聊黑白名单：白名单模式下仅已选群聊触发，黑名单模式下排除已选群聊
             if (useWhitelist && talker !in enabledGroups) return
             if (!useWhitelist && talker in enabledGroups) return
 
@@ -638,7 +637,6 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             put("temperature", 0.7)
         }
         val requestBodyStr = requestBody.toString()
-        val timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
 
         return try {
             connection.requestMethod = "POST"
@@ -670,13 +668,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                 else -> if (responseCode !in 200..299) "HTTP $responseCode" else null
             }
 
-            addDebugLog(
-                requestUrl = apiUrl,
-                requestBody = requestBodyStr,
-                responseCode = responseCode,
-                responseBody = responseBody,
-                error = errorMsg
-            )
+            addDebugLog(apiUrl, requestBodyStr, responseCode, responseBody, errorMsg)
 
             if (responseCode != 200) {
                 WeLogger.e(TAG, "AI API returned $responseCode: $errorMsg")
@@ -713,14 +705,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         error: String?
     ) {
         val timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
-        val entry = DebugLogEntry(
-            timestamp = timestamp,
-            requestUrl = requestUrl,
-            requestBody = requestBody,
-            responseCode = responseCode,
-            responseBody = responseBody,
-            error = error
-        )
+        val entry = DebugLogEntry(timestamp, requestUrl, requestBody, responseCode, responseBody, error)
         debugLogs.add(entry)
         while (debugLogs.size > MAX_DEBUG_LOGS) {
             debugLogs.removeAt(0)
@@ -743,6 +728,8 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         }
     }
 }
+
+// ── 调试日志查看器（文件级 Composable）────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
