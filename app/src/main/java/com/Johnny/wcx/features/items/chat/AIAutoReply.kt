@@ -115,7 +115,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         val error: String?
     )
 
-    private val debugLogs = Collections.synchronizedList(mutableListOf<DebugLogEntry>())
+    private val debugLogs: MutableList<DebugLogEntry> = Collections.synchronizedList(mutableListOf<DebugLogEntry>())
     private const val MAX_DEBUG_LOGS = 50
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -548,7 +548,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
     private fun DebugLogViewerScreen(
         onDismiss: () -> Unit
     ) {
-        val logs = remember { debugLogs.toList() }
+        val logs: List<DebugLogEntry> = remember { debugLogs.toList() }
         val listState = rememberLazyListState()
 
         AlertDialogContent(
@@ -563,7 +563,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(logs.size) { index ->
-                            val log = logs[index]
+                            val log: DebugLogEntry = logs[index]
                             DefaultColumn {
                                 Text(
                                     "[${log.timestamp}]",
