@@ -99,6 +99,21 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
     private var packetDelayRandomRange by WePrefs.prefOption("red_packet_delay_random_range", "300")
     private var packetAutoReply by WePrefs.prefOption("red_packet_auto_reply", "")
 
+    // ── 新增：私聊/群聊分离延迟配置 ─────────────────────────────────────────────────
+    private var packetDelayMinPrivate by WePrefs.prefOption("red_packet_delay_min_private", "200")
+    private var packetDelayMaxPrivate by WePrefs.prefOption("red_packet_delay_max_private", "500")
+    private var packetDelayMinGroup by WePrefs.prefOption("red_packet_delay_min_group", "300")
+    private var packetDelayMaxGroup by WePrefs.prefOption("red_packet_delay_max_group", "800")
+
+    // ── 极速模式 ──────────────────────────────────────────────────────────────────
+    private var packetSpeedMode by WePrefs.prefOption("red_packet_speed_mode", false)
+
+    // ── 去重与重试 ────────────────────────────────────────────────────────────────
+    private val processedSendIds = ConcurrentHashMap.newKeySet<String>()
+    private val retryCountMap = ConcurrentHashMap<String, Int>()
+    private const val MAX_RETRIES = 3
+    private const val MIN_DELAY_MS = 100L // 内置最小延迟保护
+
     private data class RedPacketInfo(
         val sendId: String,
         val nativeUrl: String,
@@ -123,10 +138,40 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                 WeLogger.e(TAG, "failed to find red packet in map (sendId=$sendId)")
                 return@hookAfter
             }
-            WeLogger.i(
-                TAG,
-                "unpack request finished, sending open request ($sendId)"
-            )
+
+            val retCode = json.optInt("retcode", -1)
+            if (retCode != 0) {
+                // 重试逻辑
+                val retries = retryCountMap.getOrDefault(sendId, 0)
+                if (retries < MAX_RETRIES) {
+                    retryCountMap[sendId] = retries + 1
+                    val retryDelay = Random.nextLong(200, 1000)
+                    WeLogger.w(TAG, "receive failed (retcode=$retCode), retry ${retries + 1}/$MAX_RETRIES after ${retryDelay}ms (sendId=$sendId)")
+                    thread(name = "RetryReceiveRedPacket") {
+                        Thread.sleep(retryDelay)
+                        try {
+                            val req = classReceiveLuckyMoney.clazz.createInstance(
+                                info.msgType, info.channelId, info.sendId, info.nativeUrl,
+                                1, "v1.0", info.talker
+                            )
+                            WeNetSceneApi.sendNetScene(req)
+                        } catch (e: Throwable) {
+                            WeLogger.e(TAG, "retry receive failed (sendId=$sendId)", e)
+                            currentRedPacketMap.remove(sendId)
+                            retryCountMap.remove(sendId)
+                            processedSendIds.remove(sendId)
+                        }
+                    }
+                } else {
+                    WeLogger.e(TAG, "receive exhausted retries (sendId=$sendId)")
+                    currentRedPacketMap.remove(sendId)
+                    retryCountMap.remove(sendId)
+                    processedSendIds.remove(sendId)
+                }
+                return@hookAfter
+            }
+
+            WeLogger.i(TAG, "unpack request finished, sending open request ($sendId)")
 
             thread(name = "OpenRedPacketThread") {
                 try {
@@ -139,6 +184,8 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                 } catch (e: Throwable) {
                     WeLogger.e(TAG, "failed to send open request", e)
                     currentRedPacketMap.remove(sendId)
+                    retryCountMap.remove(sendId)
+                    processedSendIds.remove(sendId)
                 }
             }
         }
@@ -150,6 +197,8 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
             if (sendId.isNullOrEmpty()) return@hookAfter
 
             val info = currentRedPacketMap.remove(sendId) ?: return@hookAfter
+            retryCountMap.remove(sendId)
+            processedSendIds.remove(sendId)
 
             val retCode = json.optInt("retcode", -1)
             if (retCode != 0) {
@@ -186,10 +235,41 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
         if (table != "message") return
 
         val type = values.getAsInteger("type") ?: 0
-        if (MessageType.fromCode(type)?.isRedPacket ?: false) {
-            WeLogger.i(TAG, "detected red packet message; type=$type")
+        val isKnownRedPacket = MessageType.fromCode(type)?.isRedPacket ?: false
+        val isLikelyRedPacket = !isKnownRedPacket && isContentRedPacket(values)
+
+        if (isKnownRedPacket || isLikelyRedPacket) {
+            if (isLikelyRedPacket) {
+                WeLogger.i(TAG, "detected red packet via content fallback; type=$type")
+            } else {
+                WeLogger.i(TAG, "detected red packet message; type=$type")
+            }
             handleRedPacket(values)
         }
+    }
+
+    /**
+     * Content-based red packet detection fallback for enterprise WeChat interop groups
+     * where the message type code may differ from standard red packet codes.
+     * Does NOT try to capture red packets sent directly from enterprise WeChat client.
+     */
+    private fun isContentRedPacket(values: ContentValues): Boolean {
+        val content = values.getAsString("content") ?: return false
+        if (!content.contains("nativeurl") || !content.contains("hongbao")) return false
+
+        val talker = values.getAsString("talker") ?: return false
+        if (!talker.isGroupChatWxId) return false
+
+        // Only capture red packets from WeChat users in interop groups,
+        // NOT from enterprise WeChat client users (openim_/wm_ prefix)
+        val senderPrefix = content.substringBefore(":")
+        if (senderPrefix.startsWith("openim_") || senderPrefix.startsWith("wm_")) {
+            WeLogger.i(TAG, "skipping enterprise WeChat sender in interop group: $senderPrefix")
+            return false
+        }
+
+        WeLogger.i(TAG, "interop group red packet detected via content: talker=$talker, sender=$senderPrefix")
+        return true
     }
 
     private fun handleRedPacket(values: ContentValues) {
@@ -198,6 +278,10 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
             if (msgInfo.isSelfSender && !packetSelf) return
 
             val talker = msgInfo.talker
+            val isInteropGroup = talker.endsWith("@im.chatroom")
+            if (isInteropGroup) {
+                WeLogger.i(TAG, "detected interop group message: talker=$talker")
+            }
 
             if (packetUseWhitelist) {
                 if (talker !in packetWhitelist) {
@@ -214,6 +298,12 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
             val content = msgInfo.content
             val isGroupChat = msgInfo.isInGroupChat
             val sender = msgInfo.sender
+
+            // Skip red packets sent by enterprise WeChat (企业微信) users in interop groups
+            if (isInteropGroup && (sender.startsWith("openim_") || sender.startsWith("wm_"))) {
+                WeLogger.i(TAG, "skipping enterprise WeChat sender in interop group: $sender")
+                return
+            }
 
             if (isGroupChat && !RedPacketGroupMemberFilter.shouldGrab(talker, sender)) {
                 WeLogger.i(TAG, "skipping packet from $sender in $talker per group member filter")
@@ -237,6 +327,12 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
 
             if (sendId.isEmpty()) return
 
+            // ── 去重：同一 sendId 只处理一次 ──────────────────────────────────────
+            if (!processedSendIds.add(sendId)) {
+                WeLogger.i(TAG, "skipping duplicate red packet (sendId=$sendId)")
+                return
+            }
+
             WeLogger.i(TAG, "detected red packet (sendId=$sendId)")
 
             currentRedPacketMap[sendId] = RedPacketInfo(
@@ -249,23 +345,25 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                 nickName = nickName
             )
 
-            val customDelay = packetDelayCustom.toLongOrNull() ?: 0L
-            val randomRange = (packetDelayRandomRange.toLongOrNull() ?: 300L).coerceAtLeast(0)
-
-            WeLogger.i(TAG, "config: customDelay=$customDelay, randomRange=$randomRange")
-
-            val delayTime = if (randomRange > 0) {
-                val baseDelay = if (customDelay > 0) customDelay else 1000L
-                val randomOffset = Random.nextLong(-randomRange, randomRange)
-                val finalDelay = (baseDelay + randomOffset).coerceAtLeast(0)
-                WeLogger.i(
-                    TAG,
-                    "random delay mode: baseDelay=$baseDelay, randomOffset=$randomOffset, finalDelay=$finalDelay"
-                )
-                finalDelay
+            // ── 延迟计算：私聊/群聊分离 + 极速模式 + 内置最小延迟保护 ─────────────
+            val delayTime = if (packetSpeedMode) {
+                WeLogger.i(TAG, "speed mode enabled, using min delay (${MIN_DELAY_MS}ms)")
+                MIN_DELAY_MS
             } else {
-                WeLogger.i(TAG, "fixed delay mode: finalDelay=$customDelay")
-                customDelay
+                val (minDelay, maxDelay) = if (isGroupChat) {
+                    (packetDelayMinGroup.toLongOrNull() ?: 300L) to (packetDelayMaxGroup.toLongOrNull() ?: 800L)
+                } else {
+                    (packetDelayMinPrivate.toLongOrNull() ?: 200L) to (packetDelayMaxPrivate.toLongOrNull() ?: 500L)
+                }
+                val safeMin = maxOf(minDelay, MIN_DELAY_MS)
+                val safeMax = maxOf(maxDelay, safeMin)
+                val delay = if (safeMax > safeMin) {
+                    Random.nextLong(safeMin, safeMax)
+                } else {
+                    safeMin
+                }
+                WeLogger.i(TAG, "delay: isGroup=$isGroupChat, min=$safeMin, max=$safeMax, chosen=$delay")
+                delay
             }
 
             thread(name = "ReceiveRedPacketThread") {
@@ -307,15 +405,20 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
     override fun onDisable() {
         WeDatabaseListenerApi.removeListener(this)
         currentRedPacketMap.clear()
+        processedSendIds.clear()
+        retryCountMap.clear()
     }
 
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var notification by remember { mutableStateOf(packetNotif) }
             var self by remember { mutableStateOf(packetSelf) }
-            var delayInput by remember { mutableStateOf(if (WePrefs.containsKey("red_packet_delay_custom")) packetDelayCustom else "500") }
+            var delayMinPrivateInput by remember { mutableStateOf(packetDelayMinPrivate) }
+            var delayMaxPrivateInput by remember { mutableStateOf(packetDelayMaxPrivate) }
+            var delayMinGroupInput by remember { mutableStateOf(packetDelayMinGroup) }
+            var delayMaxGroupInput by remember { mutableStateOf(packetDelayMaxGroup) }
+            var speedMode by remember { mutableStateOf(packetSpeedMode) }
             var useWhitelist by remember { mutableStateOf(packetUseWhitelist) }
-            var randomRangeInput by remember { mutableStateOf(packetDelayRandomRange) }
             var autoReplyInput by remember { mutableStateOf(packetAutoReply) }
 
             AlertDialogContent(
@@ -373,19 +476,47 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                             headlineContent = { Text("抢自己的红包") },
                         )
                         TextField(
-                            value = delayInput,
-                            onValueChange = { delayInput = it.filter { c -> c.isDigit() }.take(5) },
-                            label = { Text("基础延迟 (毫秒)") },
+                            value = delayMinPrivateInput,
+                            onValueChange = { delayMinPrivateInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("私聊最小延迟 (毫秒)") },
+                            supportingText = { Text("私聊抢红包随机延迟下限, 内置最小保护 ${MIN_DELAY_MS}ms") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
                         )
                         TextField(
-                            value = randomRangeInput,
-                            onValueChange = { randomRangeInput = it.filter { c -> c.isDigit() }.take(5) },
-                            label = { Text("随机偏移范围 (±毫秒)") },
-                            supportingText = { Text("在基础延迟上增加随机偏移, 防止风控, 设 0 固定使用基础延迟") },
+                            value = delayMaxPrivateInput,
+                            onValueChange = { delayMaxPrivateInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("私聊最大延迟 (毫秒)") },
+                            supportingText = { Text("私聊抢红包随机延迟上限, 实际在 [最小, 最大] 区间随机") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
+                        )
+                        TextField(
+                            value = delayMinGroupInput,
+                            onValueChange = { delayMinGroupInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("群聊最小延迟 (毫秒)") },
+                            supportingText = { Text("群聊抢红包随机延迟下限, 内置最小保护 ${MIN_DELAY_MS}ms") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                        )
+                        TextField(
+                            value = delayMaxGroupInput,
+                            onValueChange = { delayMaxGroupInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("群聊最大延迟 (毫秒)") },
+                            supportingText = { Text("群聊抢红包随机延迟上限, 实际在 [最小, 最大] 区间随机") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                        )
+                        ListItem(
+                            modifier = Modifier.clickable { speedMode = !speedMode },
+                            trailingContent = { Switch(checked = speedMode, onCheckedChange = { speedMode = it }) },
+                            supportingContent = {
+                                Text(
+                                    "极速模式会跳过随机延迟, 仅使用内置最小延迟 ${MIN_DELAY_MS}ms\n" +
+                                    "⚠ 极速模式会提升账号行为异常特征, 存在微信支付限制、账号封禁风险, 请谨慎使用"
+                                )
+                            },
+                            headlineContent = { Text("极速模式 (危险)") },
                         )
                         TextField(
                             value = autoReplyInput,
@@ -400,9 +531,12 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                     Button(onClick = {
                         packetNotif = notification
                         packetSelf = self
-                        packetDelayCustom = delayInput.ifBlank { "300" }
+                        packetDelayMinPrivate = delayMinPrivateInput.ifBlank { "200" }
+                        packetDelayMaxPrivate = delayMaxPrivateInput.ifBlank { "500" }
+                        packetDelayMinGroup = delayMinGroupInput.ifBlank { "300" }
+                        packetDelayMaxGroup = delayMaxGroupInput.ifBlank { "800" }
+                        packetSpeedMode = speedMode
                         packetUseWhitelist = useWhitelist
-                        packetDelayRandomRange = randomRangeInput.ifBlank { "300" }
                         packetAutoReply = autoReplyInput
                         onDismiss()
                     }) { Text("确定") }

@@ -12,7 +12,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,6 +26,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -56,9 +56,7 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.IconButton
 import com.Johnny.wcx.ui.content.TextButton
-import com.Johnny.wcx.ui.utils.InjectedUiTheme
 import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
-import com.Johnny.wcx.ui.utils.rootView
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.HostInfo
@@ -103,6 +101,7 @@ object TabTheme : ClickableFeature() {
 
     private var tabThemeEnabled by prefOption("tab_theme_enabled", false)
     private var opacity by prefOption("tab_theme_opacity", 0.15f)
+    private var transparentStatusBar by prefOption("tab_theme_transparent_status_bar", true)
 
     @Serializable
     data class TabThemeConfig(
@@ -169,54 +168,89 @@ object TabTheme : ClickableFeature() {
                 }
 
             val lifecycleOwner = LifecycleOwnerProvider.lifecycleOwner
-            val root = activity.rootView
+
+            // 沉浸式全屏渲染：将背景加到 decorView，覆盖状态栏和导航栏
+            if (transparentStatusBar) {
+                applyImmersiveStatusBar(activity)
+            }
+
+            val decor = activity.window?.decorView as? ViewGroup ?: return@hookAfter
 
             val config = loadConfig()
 
-            root.addView(
-                android.widget.FrameLayout(activity).apply {
+            // 检查是否已有背景容器，避免重复添加
+            val existingTag = "${OVERLAY_TAG_PREFIX}container"
+            var bgContainer = decor.findViewWithTag<android.widget.FrameLayout>(existingTag)
+            if (bgContainer == null) {
+                bgContainer = android.widget.FrameLayout(activity).apply {
+                    tag = existingTag
                     setLifecycleOwner(lifecycleOwner)
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
-
-                    val tabImageViews = mutableMapOf<Int, ImageView>()
-
-                    for (tabIndex in 0..3) {
-                        val tabFile = getTabBackgroundFile(tabIndex)
-                        if (tabFile.exists()) {
-                            val iv = ImageView(activity).apply {
-                                scaleType = ImageView.ScaleType.CENTER_CROP
-                                visibility = if (tabIndex == 0) View.VISIBLE else View.GONE
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                // Disable cache to always load fresh image from disk
-                                load(tabFile.toFile()) {
-                                    crossfade(true)
-                                    memoryCachePolicy(CachePolicy.DISABLED)
-                                    diskCachePolicy(CachePolicy.DISABLED)
-                                }
-                                alpha = opacity
-                            }
-                            addView(iv)
-                            tabImageViews[tabIndex] = iv
-                        }
-                    }
-
-                    tabsAdapter.reflekt()
-                        .firstMethod { name = "onPageSelected" }
-                        .hookAfter {
-                            val position = args[0] as Int
-                            tabImageViews.forEach { (idx, iv) ->
-                                iv.visibility = if (idx == position) View.VISIBLE else View.GONE
-                            }
-                        }
+                    isClickable = false
+                    isFocusable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
-            )
+                decor.addView(bgContainer)
+            }
+
+            val tabImageViews = mutableMapOf<Int, ImageView>()
+
+            for (tabIndex in 0..3) {
+                val tabFile = getTabBackgroundFile(tabIndex)
+                if (tabFile.exists()) {
+                    val iv = ImageView(activity).apply {
+                        tag = "${OVERLAY_TAG_PREFIX}tab_$tabIndex"
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        visibility = if (tabIndex == 0) View.VISIBLE else View.GONE
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        load(tabFile.toFile()) {
+                            crossfade(true)
+                            memoryCachePolicy(CachePolicy.DISABLED)
+                            diskCachePolicy(CachePolicy.DISABLED)
+                        }
+                        alpha = opacity
+                    }
+                    bgContainer.addView(iv)
+                    tabImageViews[tabIndex] = iv
+                }
+            }
+
+            tabsAdapter.reflekt()
+                .firstMethod { name = "onPageSelected" }
+                .hookAfter {
+                    val position = args[0] as Int
+                    tabImageViews.forEach { (idx, iv) ->
+                        iv.visibility = if (idx == position) View.VISIBLE else View.GONE
+                    }
+                }
+        }
+    }
+
+    private fun applyImmersiveStatusBar(activity: Activity) {
+        runCatching {
+            val window = activity.window ?: return
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                window.isStatusBarContrastEnforced = false
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false)
+            } else {
+                @Suppress("DEPRECATION")
+                val decor = window.decorView as? ViewGroup ?: return
+                decor.systemUiVisibility = decor.systemUiVisibility or
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            }
+        }.onFailure {
+            WeLogger.w(TAG, "failed to apply immersive status bar", it)
         }
     }
 
@@ -290,11 +324,18 @@ object TabTheme : ClickableFeature() {
     ) {
         var enabledState by remember { mutableStateOf(tabThemeEnabled) }
         var opacityState by remember { mutableFloatStateOf(opacity) }
+        var transparentStatusBarState by remember { mutableStateOf(transparentStatusBar) }
 
         // Reactive state: track which tabs have images, initialized from disk
         val hasImageStates = remember {
             mutableStateMapOf<Int, Boolean>().apply {
                 for (i in 0..3) put(i, hasTabBackground(i))
+            }
+        }
+        // Version counter for cache busting on preview refresh
+        val imageVersions = remember {
+            mutableStateMapOf<Int, Int>().apply {
+                for (i in 0..3) put(i, 0)
             }
         }
 
@@ -322,6 +363,17 @@ object TabTheme : ClickableFeature() {
                         valueRange = 0.05f..0.6f
                     )
 
+                    ListItem(
+                        modifier = Modifier.clickable {
+                            transparentStatusBarState = !transparentStatusBarState
+                        },
+                        trailingContent = {
+                            Switch(checked = transparentStatusBarState, onCheckedChange = null)
+                        },
+                        headlineContent = { Text("沉浸式全屏") },
+                        supportingContent = { Text("背景完整铺满屏幕，消除上下白条") }
+                    )
+
                     Text(
                         "Tab 背景设置",
                         style = MaterialTheme.typography.titleMedium,
@@ -335,11 +387,14 @@ object TabTheme : ClickableFeature() {
                             tabIndex = index,
                             tabName = name,
                             hasImage = hasImageStates[index] ?: false,
+                            imageVersion = imageVersions[index] ?: 0,
                             onImagePicked = {
                                 hasImageStates[index] = true
+                                imageVersions[index] = (imageVersions[index] ?: 0) + 1
                             },
                             onImageDeleted = {
                                 hasImageStates[index] = false
+                                imageVersions[index] = (imageVersions[index] ?: 0) + 1
                             }
                         )
                     }
@@ -366,6 +421,7 @@ object TabTheme : ClickableFeature() {
                 Button(onClick = {
                     tabThemeEnabled = enabledState
                     opacity = opacityState
+                    transparentStatusBar = transparentStatusBarState
                     if (enabledState) {
                         showToast("设置已保存，重启微信生效")
                     } else {
@@ -383,6 +439,7 @@ object TabTheme : ClickableFeature() {
         tabIndex: Int,
         tabName: String,
         hasImage: Boolean,
+        imageVersion: Int = 0,
         onImagePicked: () -> Unit,
         onImageDeleted: () -> Unit
     ) {
@@ -392,13 +449,15 @@ object TabTheme : ClickableFeature() {
             },
             leadingContent = {
                 if (hasImage) {
-                    // Use unique key with timestamp to force cache refresh when image changes
-                    AsyncImage(
-                        model = getTabBackgroundFile(tabIndex).toFile(),
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        contentScale = ContentScale.Crop
-                    )
+                    // Use key with version to force cache refresh when image changes
+                    key("tab_bg_${tabIndex}_v$imageVersion") {
+                        AsyncImage(
+                            model = getTabBackgroundFile(tabIndex).toFile(),
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                 } else {
                     Icon(
                         imageVector = MaterialSymbols.Outlined.Wallpaper,
@@ -635,9 +694,33 @@ object TabTheme : ClickableFeature() {
 
             zipDirectory(themeDir, zipFile)
             showToast("主题已导出到 ${zipFile.toAbsolutePath()}")
+
+            // 提供系统分享快捷按钮
+            shareThemeFile(context, zipFile, name)
         }.onFailure {
             WeLogger.e(TAG, "failed to export theme", it)
             showToast("导出失败: ${it.message}")
+        }
+    }
+
+    private fun shareThemeFile(context: Context, zipFile: Path, themeName: String) {
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${HostInfo.application.packageName}.fileprovider",
+                zipFile.toFile()
+            )
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "WCX主题: $themeName")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(
+                Intent.createChooser(shareIntent, "分享主题: $themeName")
+            )
+        }.onFailure {
+            WeLogger.w(TAG, "failed to share theme file", it)
         }
     }
 

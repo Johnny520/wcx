@@ -21,6 +21,7 @@ object Preferences {
 
     // Cross-process cached device info (written by main app, read by WeChat process)
     const val CACHED_LSP_ENVIRONMENT = "cached_lsp_environment"
+    const val CACHED_LSP_API_VERSION = "cached_lsp_api_version"
 
     var verboseLog by prefOption(VERBOSE_LOG, false)
     var noDexResolve by prefOption(NO_DEX_RESOLVE, false)

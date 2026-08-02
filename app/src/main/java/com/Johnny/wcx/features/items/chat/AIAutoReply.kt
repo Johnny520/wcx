@@ -69,6 +69,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Collections
 
 @SuppressLint("SetTextI18n")
 @Feature(
@@ -97,12 +100,36 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
     private var enabledGroups by prefOption("ai_reply_enabled_groups", emptySet<String>())
     private var useWhitelist by prefOption("ai_reply_use_group_whitelist", true)
 
+    // 私聊黑白名单 — 与群聊黑白名单完全独立存储
+    private var privateChatMode by prefOption("ai_reply_private_mode", 0) // 0=全部, 1=白名单, 2=黑名单
+    private var privateEnabledContacts by prefOption("ai_reply_private_contacts", emptySet<String>())
+    private var allowStrangerPrivateReply by prefOption("ai_reply_allow_stranger", false)
+
+    // ── 调试日志 ────────────────────────────────────────────────────────────────
+    private data class DebugLogEntry(
+        val timestamp: String,
+        val requestUrl: String,
+        val requestBody: String,
+        val responseCode: Int,
+        val responseBody: String,
+        val error: String?
+    )
+
+    private val debugLogs = Collections.synchronizedList(mutableListOf<DebugLogEntry>())
+    private const val MAX_DEBUG_LOGS = 50
+
     private val json = Json { ignoreUnknownKeys = true }
 
     enum class TriggerMode(val value: Int, val description: String) {
         AT_ONLY(0, "仅被 @ 时回复"),
         KEYWORD(1, "包含关键词时回复"),
         ALL(2, "群内任何消息都回复")
+    }
+
+    enum class PrivateChatMode(val value: Int, val description: String) {
+        ALL(0, "全部人员"),
+        WHITELIST(1, "白名单模式"),
+        BLACKLIST(2, "黑名单模式")
     }
 
     override fun onEnable() {
@@ -128,7 +155,11 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             var localTriggerMode by remember { mutableStateOf(triggerMode) }
             var localUseWhitelist by remember { mutableStateOf(useWhitelist) }
             var showGroupSelector by remember { mutableStateOf(false) }
+            var showPrivateContactSelector by remember { mutableStateOf(false) }
             var showFavMenu by remember { mutableStateOf(false) }
+            var localPrivateChatMode by remember { mutableStateOf(privateChatMode) }
+            var localAllowStranger by remember { mutableStateOf(allowStrangerPrivateReply) }
+            var showDebugLog by remember { mutableStateOf(false) }
 
             val delayPresets = remember {
                 listOf(
@@ -150,6 +181,20 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                         showToast("已保存 ${groups.size} 个群聊")
                         showGroupSelector = false
                     }
+                )
+            } else if (showPrivateContactSelector) {
+                PrivateContactSelectorScreen(
+                    onDismiss = { showPrivateContactSelector = false },
+                    useWhitelist = localPrivateChatMode == 1,
+                    onSave = { contacts ->
+                        privateEnabledContacts = contacts
+                        showToast("已保存 ${contacts.size} 个联系人")
+                        showPrivateContactSelector = false
+                    }
+                )
+            } else if (showDebugLog) {
+                DebugLogViewerScreen(
+                    onDismiss = { showDebugLog = false }
                 )
             } else {
                 AlertDialogContent(
@@ -187,16 +232,23 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                     text = {
                         DefaultColumn(Modifier.padding(vertical = 8.dp), scrollable = true) {
                             Text("API 配置", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "建议优先使用免费API测试模块连通性，确认功能正常后，再使用付费Token",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             OutlinedTextField(
                                 value = localApiUrl,
                                 onValueChange = { localApiUrl = it },
                                 label = { Text("API 地址") },
+                                supportingText = { Text("自动去除首尾空格和不可见字符") },
                                 singleLine = true
                             )
                             OutlinedTextField(
                                 value = localApiKey,
                                 onValueChange = { localApiKey = it },
                                 label = { Text("API Key") },
+                                supportingText = { Text("自动去除首尾空格和不可见字符") },
                                 singleLine = true
                             )
                             OutlinedTextField(
@@ -222,6 +274,51 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                                 },
                                 headlineContent = { Text("私聊自动回复") }
                             )
+
+                            if (localEnablePrivate) {
+                                Text(
+                                    "私聊模式",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                                PrivateChatMode.values().forEach { mode ->
+                                    ListItem(
+                                        modifier = Modifier.clickable { localPrivateChatMode = mode.value },
+                                        trailingContent = {
+                                            Text(if (localPrivateChatMode == mode.value) "✓" else "")
+                                        },
+                                        headlineContent = { Text(mode.description) },
+                                        supportingContent = {
+                                            Text(
+                                                when (mode) {
+                                                    PrivateChatMode.ALL -> "所有私聊正常触发回复"
+                                                    PrivateChatMode.WHITELIST -> "仅名单内好友触发私聊自动回复"
+                                                    PrivateChatMode.BLACKLIST -> "名单内好友不会触发回复，其余正常生效"
+                                                }
+                                            )
+                                        }
+                                    )
+                                }
+
+                                if (localPrivateChatMode != PrivateChatMode.ALL.value) {
+                                    val modeLabel = if (localPrivateChatMode == PrivateChatMode.WHITELIST.value) "白名单" else "黑名单"
+                                    ListItem(
+                                        modifier = Modifier.clickable { showPrivateContactSelector = true },
+                                        headlineContent = { Text("选择${modeLabel}联系人") },
+                                        supportingContent = { Text("当前已选 ${privateEnabledContacts.size} 个联系人") }
+                                    )
+                                }
+
+                                ListItem(
+                                    modifier = Modifier.clickable { localAllowStranger = !localAllowStranger },
+                                    trailingContent = {
+                                        Switch(checked = localAllowStranger, onCheckedChange = null)
+                                    },
+                                    headlineContent = { Text("允许陌生人临时私聊触发") },
+                                    supportingContent = { Text("开启后，非好友的临时会话也可触发自动回复") }
+                                )
+                            }
                             ListItem(
                                 modifier = Modifier.clickable { localEnableGroup = !localEnableGroup },
                                 trailingContent = {
@@ -293,6 +390,12 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                                     )
                                 }
                             }
+
+                            Spacer(Modifier.padding(top = 12.dp))
+                            Button(
+                                onClick = { showDebugLog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("调试日志") }
                         }
                     },
                     dismissButton = {
@@ -300,8 +403,8 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                     },
                     confirmButton = {
                         Button(onClick = {
-                            apiUrl = localApiUrl
-                            apiKey = localApiKey
+                            apiUrl = localApiUrl.trim()
+                            apiKey = localApiKey.trim()
                             model = localModel
                             systemPrompt = localPrompt
                             enableForPrivate = localEnablePrivate
@@ -311,6 +414,8 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                             replyDelay = localDelayMs.coerceIn(0, 10000)
                             triggerMode = localTriggerMode
                             useWhitelist = localUseWhitelist
+                            privateChatMode = localPrivateChatMode
+                            allowStrangerPrivateReply = localAllowStranger
                             showToast("设置已保存")
                             onDismiss()
                         }) { Text("保存") }
@@ -379,6 +484,136 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         )
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun PrivateContactSelectorScreen(
+        onDismiss: () -> Unit,
+        useWhitelist: Boolean,
+        onSave: (Set<String>) -> Unit
+    ) {
+        val contacts = remember {
+            WeDatabaseApi.getFriends().filter { it.wxId.isNotBlank() }
+        }
+        val selected = remember { privateEnabledContacts.toMutableSet() }
+        val listState = rememberLazyListState()
+
+        AlertDialogContent(
+            title = { Text("选择联系人") },
+            text = {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.heightIn(max = 400.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    item {
+                        Text(
+                            if (useWhitelist) "选择需要开启 AI 自动回复的联系人" else "选择需要排除 AI 自动回复的联系人",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    items(contacts, key = { it.wxId }) { contact ->
+                        val isSelected = remember { mutableStateOf(selected.contains(contact.wxId)) }
+                        ListItem(
+                            modifier = Modifier.clickable {
+                                isSelected.value = !isSelected.value
+                                if (isSelected.value) {
+                                    selected.add(contact.wxId)
+                                } else {
+                                    selected.remove(contact.wxId)
+                                }
+                            },
+                            headlineContent = { Text(contact.displayName) },
+                            supportingContent = { Text(contact.wxId) },
+                            trailingContent = {
+                                Text(if (isSelected.value) "✓" else "")
+                            }
+                        )
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+            confirmButton = {
+                Button(onClick = {
+                    onSave(selected)
+                    onDismiss()
+                }) { Text("保存") }
+            }
+        )}
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun DebugLogViewerScreen(
+        onDismiss: () -> Unit
+    ) {
+        val logs = remember { debugLogs.toList() }
+        val listState = rememberLazyListState()
+
+        AlertDialogContent(
+            title = { Text("调试日志 (最近 ${logs.size} 条)") },
+            text = {
+                if (logs.isEmpty()) {
+                    Text("暂无日志记录", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.heightIn(max = 400.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(logs.size) { index ->
+                            val log = logs[index]
+                            DefaultColumn {
+                                Text(
+                                    "[${log.timestamp}]",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text("URL: ${log.requestUrl}", style = MaterialTheme.typography.bodySmall)
+                                Text("Request: ${log.requestBody}", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    "Response: ${log.responseCode}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (log.responseCode == 200)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.error
+                                )
+                                if (log.responseBody.isNotBlank()) {
+                                    Text(
+                                        "Body: ${log.responseBody.take(500)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 5
+                                    )
+                                }
+                                if (log.error != null) {
+                                    Text(
+                                        "Error: ${log.error}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 3
+                                    )
+                                }
+                                Spacer(Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    debugLogs.clear()
+                    showToast("日志已清除")
+                    onDismiss()
+                }) { Text("清除日志") }
+            }
+        )
+    }
+
     override fun onInsert(table: String, values: ContentValues) {
         if (table != "message") return
         if (apiKey.isBlank()) return
@@ -390,10 +625,12 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         val talker = msgInfo.talker
         val content = msgInfo.content ?: return
         val isGroup = talker.isGroupChatWxId
+        val isStranger = !isGroup && WeDatabaseApi.getFriend(msgInfo.sender) == null
 
         if (isGroup) {
             if (!enableForGroup) return
 
+            // 群聊黑白名单：白名单模式下仅已选群聊触发，黑名单模式下排除已选群聊
             if (useWhitelist && talker !in enabledGroups) return
             if (!useWhitelist && talker in enabledGroups) return
 
@@ -411,6 +648,17 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             }
         } else {
             if (!enableForPrivate) return
+            // 私聊黑白名单过滤：陌生人不受黑白名单限制（由 allowStrangerPrivateReply 单独控制）
+            if (!isStranger && privateChatMode != PrivateChatMode.ALL.value) {
+                val senderWxId = msgInfo.sender
+                if (privateChatMode == PrivateChatMode.WHITELIST.value) {
+                    if (senderWxId !in privateEnabledContacts) return
+                } else if (privateChatMode == PrivateChatMode.BLACKLIST.value) {
+                    if (senderWxId in privateEnabledContacts) return
+                }
+            }
+            // 陌生人过滤：非好友且未开启陌生人开关时跳过
+            if (isStranger && !allowStrangerPrivateReply) return
         }
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -446,6 +694,23 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         val url = URL(apiUrl)
         val connection = url.openConnection() as HttpURLConnection
 
+        val requestBody = buildJsonObject {
+            put("model", model)
+            put("messages", kotlinx.serialization.json.buildJsonArray {
+                add(buildJsonObject {
+                    put("role", "system")
+                    put("content", systemPrompt)
+                })
+                add(buildJsonObject {
+                    put("role", "user")
+                    put("content", userMessage)
+                })
+            })
+            put("temperature", 0.7)
+        }
+        val requestBodyStr = requestBody.toString()
+        val timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
+
         return try {
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
@@ -454,39 +719,84 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             connection.connectTimeout = 30000
             connection.readTimeout = 30000
 
-            val requestBody = buildJsonObject {
-                put("model", model)
-                put("messages", kotlinx.serialization.json.buildJsonArray {
-                    add(buildJsonObject {
-                        put("role", "system")
-                        put("content", systemPrompt)
-                    })
-                    add(buildJsonObject {
-                        put("role", "user")
-                        put("content", userMessage)
-                    })
-                })
-                put("temperature", 0.7)
-            }
-
             connection.outputStream.use { os ->
-                os.write(requestBody.toString().toByteArray(Charsets.UTF_8))
+                os.write(requestBodyStr.toByteArray(Charsets.UTF_8))
             }
 
             val responseCode = connection.responseCode
+            val responseBody = if (responseCode in 200..299) {
+                connection.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                runCatching {
+                    connection.errorStream?.bufferedReader()?.use { it.readText() }
+                }.getOrNull().orEmpty()
+            }
+
+            val errorMsg = when (responseCode) {
+                401 -> "401 Unauthorized — API Key 无效或已过期"
+                404 -> "404 Not Found — API 地址不存在"
+                500 -> "500 Internal Server Error — 服务器内部错误"
+                429 -> "429 Too Many Requests — 请求频率超限"
+                403 -> "403 Forbidden — 无访问权限"
+                else -> if (responseCode !in 200..299) "HTTP $responseCode" else null
+            }
+
+            addDebugLog(
+                requestUrl = apiUrl,
+                requestBody = requestBodyStr,
+                responseCode = responseCode,
+                responseBody = responseBody,
+                error = errorMsg
+            )
+
             if (responseCode != 200) {
-                WeLogger.e(TAG, "AI API returned $responseCode")
+                WeLogger.e(TAG, "AI API returned $responseCode: $errorMsg")
                 return ""
             }
 
-            val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
             parseAIResponse(responseBody)
+        } catch (e: java.net.SocketTimeoutException) {
+            addDebugLog(apiUrl, requestBodyStr, -1, "", "Timeout — 请求超时")
+            WeLogger.e(TAG, "AI API call timeout", e)
+            ""
+        } catch (e: java.net.ConnectException) {
+            addDebugLog(apiUrl, requestBodyStr, -1, "", "ConnectException — 无法连接服务器")
+            WeLogger.e(TAG, "AI API call connect failed", e)
+            ""
+        } catch (e: java.net.UnknownHostException) {
+            addDebugLog(apiUrl, requestBodyStr, -1, "", "UnknownHostException — DNS 解析失败")
+            WeLogger.e(TAG, "AI API call unknown host", e)
+            ""
         } catch (e: Exception) {
+            addDebugLog(apiUrl, requestBodyStr, -1, "", "Exception: ${e.message}")
             WeLogger.e(TAG, "AI API call failed", e)
             ""
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun addDebugLog(
+        requestUrl: String,
+        requestBody: String,
+        responseCode: Int,
+        responseBody: String,
+        error: String?
+    ) {
+        val timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
+        val entry = DebugLogEntry(
+            timestamp = timestamp,
+            requestUrl = requestUrl,
+            requestBody = requestBody,
+            responseCode = responseCode,
+            responseBody = responseBody,
+            error = error
+        )
+        debugLogs.add(entry)
+        while (debugLogs.size > MAX_DEBUG_LOGS) {
+            debugLogs.removeAt(0)
+        }
+        WeLogger.i(TAG, "[DEBUG] $requestUrl -> $responseCode ${error ?: ""}")
     }
 
     private fun parseAIResponse(response: String): String {

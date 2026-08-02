@@ -364,32 +364,35 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         }
     }
 
+    // 使用 Int.MIN_VALUE 作为"无覆盖"标记，避免与 Color.WHITE (-1) 冲突
+    private const val NO_FOREGROUND_COLOR = Int.MIN_VALUE
+
     private fun getForegroundColor(context: Context, isSelfSender: Boolean): Int {
         val rawColor = if (isSelfSender) {
             if (context.isDarkMode) thisDark else thisLight
         } else {
             if (context.isDarkMode) thatDark else thatLight
         }
-        return parseColor(context, rawColor, label = "前景色", fallback = -1)
+        return parseColor(context, rawColor, label = "前景色", fallback = NO_FOREGROUND_COLOR)
     }
 
     private fun applyForegroundColor(view: MMNeat7extView, isSelfSender: Boolean) {
         val color = getForegroundColor(view.context, isSelfSender)
-        if (color == -1) return
+        if (color == NO_FOREGROUND_COLOR) return
 
         view.setTextColor(color)
     }
 
     private fun applyForegroundColor(view: TextView, isSelfSender: Boolean) {
         val color = getForegroundColor(view.context, isSelfSender)
-        if (color == -1) return
+        if (color == NO_FOREGROUND_COLOR) return
 
         view.setTextColor(color)
     }
 
     private fun applyForegroundColorByBackgroundColorFilter(view: View, isSelfSender: Boolean) {
         val color = getForegroundColor(view.context, isSelfSender)
-        if (color == -1) return
+        if (color == NO_FOREGROUND_COLOR) return
 
         view.background?.mutate()?.colorFilter = PorterDuffColorFilter(
             color,

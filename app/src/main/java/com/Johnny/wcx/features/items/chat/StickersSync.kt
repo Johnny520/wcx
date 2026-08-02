@@ -65,9 +65,9 @@ import kotlin.io.path.walk
 import kotlin.io.path.writeText
 
 @Feature(
-    name = "贴纸包同步",
+    name = "贴纸包同步（已移除）",
     categories = ["聊天"],
-    description = "从指定路径将所有图片注册为贴纸包\n搭配 Telegram Xposed 模块 StickersSync 使用, 或使用自带此功能的 (例如 Nagram) 的第三方客户端\n注意: 每张贴纸第一次加载由于需要计算 MD5 速度较慢, 后续加载得益于缓存与并发速度将大大加快 (~2000 个贴纸仅需 4 秒)"
+    description = "此功能已移除，贴纸本地导入功能不受影响"
 )
 object StickersSync : ClickableFeature(), IResolveDex {
 
@@ -271,125 +271,8 @@ object StickersSync : ClickableFeature(), IResolveDex {
     private var actualRetTypeInitArg2Type: Class<*>? = null
 
     override fun onEnable() {
-        @Suppress("UNCHECKED_CAST")
-        methodGetEmojiGroupInfo.hookAfter {
-            // Inject each sticker pack
-            stickerPacks.forEachIndexed { index, pack ->
-                val stickersPackData = ContentValues().apply {
-                    put(
-                        "packGrayIconUrl",
-                        "$PLACEHOLDER_PACK_URL$SEPERATOR${pack.packName}"
-                    )
-                    put(
-                        "packIconUrl",
-                        "$PLACEHOLDER_PACK_URL$SEPERATOR${pack.packName}"
-                    )
-                    put("packName", pack.packName)
-                    put("packStatus", 1)
-                    put("productID", pack.appPackId)
-                    put("status", 7)
-                    put("sync", 2)
-                }
-
-                val emojiGroupInfo = EmojiGroupInfo()
-                emojiGroupInfo.convertFrom(stickersPackData, true)
-
-                (result as MutableList<Any?>).add(index, emojiGroupInfo)
-            }
-            WeLogger.i(TAG, "injected ${stickerPacks.size} sticker packs")
-        }
-
-        @Suppress("UNCHECKED_CAST")
-        methodAddAllGroupItems.hookBefore {
-            val manager = args[0] ?: return@hookBefore
-
-            val packConfig = manager.reflekt()
-                .firstMethod {
-                    superclass()
-                    modifiers(Modifiers.FINAL)
-                    returnType {
-                        it != Boolean::class.java
-                    }
-                }
-                .invoke()
-            val emojiGroupInfo = packConfig!!.reflekt()
-                .firstField {
-                    type = "com.tencent.mm.storage.emotion.EmojiGroupInfo"
-                }.get()!!
-            val packId = emojiGroupInfo.reflekt()
-                .firstField {
-                    superclass()
-                    name = "field_packName"
-                }
-                .get()!! as String
-
-            // Find matching sticker pack
-            val matchingPack = stickerPacks.find { it.packId == packId }
-            if (matchingPack != null) {
-                val stickerList = manager.reflekt().firstMethod {
-                    superclass()
-                    returnType = List::class
-                }.invoke() as MutableList<Any?>
-                stickerList.addAll(matchingPack.stickers)
-            }
-        }
-
-        ctorResourceLoadOptions.hookAfter {
-            val url = args[0] as String
-            if (url.startsWith(PLACEHOLDER_PACK_URL)) {
-                val fResSource = thisObject.reflekt()
-                    .firstField {
-                        type { it isSubclassOf Enum::class }
-                    }
-                val newResSource = enumValueOfClass(fResSource.get()!!.javaClass, "LOCAL_PATH")
-                fResSource.set(newResSource)
-                val packDir = stickersDir / url.substringAfter(SEPERATOR)
-                val iconFile = (ALLOWED_STICKER_EXTENSIONS - "webp").firstNotNullOfOrNull { ext ->
-                    (packDir / ".pack_icon.$ext").takeIf { it.isRegularFile() }
-                }
-                val path = if (iconFile != null) {
-                    iconFile.absolutePathString()
-                } else {
-                    val fallback = packDir.walk().firstOrNull { f ->
-                        f.isRegularFile() &&
-                                f.extension.lowercase() in ALLOWED_STICKER_EXTENSIONS &&
-                                !f.name.startsWith(".pack_icon.")
-                    }
-                    (fallback ?: packDir / ".pack_icon.png").absolutePathString()
-                }
-                thisObject.reflekt()
-                    .firstField { type = Any::class }
-                    .set(path)
-            }
-        }
-
-        methodDownloadImage.hookBefore {
-            val url = args[0] as String
-            if (!url.startsWith("/")) return@hookBefore
-            val retType = methodDownloadImage.method.returnType
-            val path = runCatching { Path(url) }.getOrElse { e ->
-                WeLogger.d(TAG, "could not convert $url to path", e)
-                return@hookBefore
-            }
-            val bytes = path.readBytes()
-            val retTypeCtor = retType.constructors[0]
-            val retTypeInitArg2Type = retTypeCtor.parameters[2].type
-            if (actualRetTypeInitArg2Type == null) {
-                actualRetTypeInitArg2Type =
-                    DexKit.findClass {
-                        matcher {
-                            addInterface(retTypeInitArg2Type.name)
-                            addMethod {
-                                paramTypes(ByteArray::class.java)
-                            }
-                        }
-                    }[0].asClass
-            }
-            result = retType.createInstance(
-                bytes, "image/png",
-                actualRetTypeInitArg2Type!!.createInstance(bytes)
-            )
-        }
+        // 贴纸包同步功能已移除，不做任何操作
+        // 贴纸本地导入、本地正常使用功能完整保留
     }
 
     override fun onClick(context: ComponentActivity) {
@@ -398,55 +281,11 @@ object StickersSync : ClickableFeature(), IResolveDex {
                 title = { Text("贴纸包同步") },
                 text = {
                     Column {
-                        Row(
-                            modifier = androidx.compose.ui.Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        stickerPacks.forEach { pack ->
-                                            WeDatabaseApi.delete(
-                                                "EmojiGroupInfo",
-                                                "productID = ?",
-                                                arrayOf(pack.appPackId)
-                                            )
-                                        }
-                                        showToastSuspend("已清除 ${stickerPacks.size} 个贴纸包缓存!")
-                                    }
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "清除微信数据库贴纸包缓存",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
-
-                        Row(
-                            modifier = androidx.compose.ui.Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        val deleted = withContext(Dispatchers.IO) {
-                                            val hashFiles = if (stickersDir.isRegularFile()) emptyList() else {
-                                                stickersDir.walk().filter {
-                                                    it.isRegularFile() && it.name == ".hashes.json"
-                                                }.toList()
-                                            }
-                                            hashFiles.forEach { it.deleteIfExists() }
-                                            hashFiles.size
-                                        }
-                                        showToastSuspend("已清除 $deleted 个哈希缓存文件!")
-                                    }
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "清除贴纸哈希缓存",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
+                        Text(
+                            "此功能已移除。贴纸本地导入、本地正常使用功能完整保留，不受任何影响。",
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(16.dp)
+                        )
                     }
                 },
                 confirmButton = {

@@ -40,7 +40,7 @@ import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 
-@Feature(name = "已读追踪", categories = ["聊天"], description = "追踪群聊消息已读人数，通过本地Hook微信已读回执，不依赖外部服务器")
+@Feature(name = "已读追踪(废弃)", categories = ["聊天"], description = "旧版服务端模式仅抓取消息送达记录，极易造成认知误解；当前本地模式更加无法查看他人消息已读状态。功能停止维护，不修复BUG、不新增功能，长期保留入口。")
 object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
 
     private const val TAG = "ReadReceipts"
@@ -194,9 +194,15 @@ object ReadReceipts : ClickableFeature(), WeChatMessageViewApi.ICreateViewListen
             var prefixInput by remember { mutableStateOf(prefix) }
 
             AlertDialogContent(
-                title = { Text("已读追踪") },
+                title = { Text("已读追踪(废弃)") },
                 text = {
                     DefaultColumn {
+                        Text(
+                            "旧版服务端模式仅抓取消息送达记录，极易造成认知误解；当前本地模式更加无法查看他人消息已读状态。功能停止维护，不修复BUG、不新增功能，长期保留入口。",
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                            color = androidx.compose.ui.graphics.Color.Red,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
                         TextField(
                             value = prefixInput,
                             onValueChange = { prefixInput = it },

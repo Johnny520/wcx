@@ -82,8 +82,30 @@ object AutoCleanCache : ClickableFeature() {
             try {
                 WeLogger.d(TAG, "deleting $path")
                 if (path.exists()) {
-                    totalDeletedBytes += calculateSize(path)
-                    path.deleteRecursively()
+                    // 保留 WCX/upload 子目录，避免 REST API 上传临时文件被误删
+                    val wcxUploadDir = path / "WCX" / "upload"
+                    if (wcxUploadDir.exists()) {
+                        // 遍历删除除 WCX/upload 之外的所有内容
+                        path.toFile().listFiles()?.forEach { file ->
+                            if (file.name == "WCX") {
+                                // 对 WCX 目录，保留 upload 子目录
+                                file.listFiles()?.forEach { wcxChild ->
+                                    if (wcxChild.name != "upload") {
+                                        val childPath = wcxChild.toPath()
+                                        totalDeletedBytes += calculateSize(childPath)
+                                        childPath.deleteRecursively()
+                                    }
+                                }
+                            } else {
+                                val childPath = file.toPath()
+                                totalDeletedBytes += calculateSize(childPath)
+                                childPath.deleteRecursively()
+                            }
+                        }
+                    } else {
+                        totalDeletedBytes += calculateSize(path)
+                        path.deleteRecursively()
+                    }
                 }
             } catch (e: Exception) {
                 WeLogger.w(TAG, "exception during cleaning: ${path.fileName}, ${e.message}")

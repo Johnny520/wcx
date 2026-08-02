@@ -106,6 +106,26 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     private var nickChangeEnabled by prefOption("gmc_nick_change_enabled", true)
     private var kickEnabled by prefOption("gmc_kick_enabled", true)
     private var kickExtraExit by prefOption("gmc_kick_extra_exit", false)
+    private var fakeUserBroadcast by prefOption("gmc_fake_user_broadcast", false)
+    private var groupFilterEnabled by prefOption("gmc_group_filter_enabled", false)
+    private var selectedGroupsJson by prefOption("gmc_selected_groups", "[]")
+
+    // 事件去重缓存：key = "wxid:eventType", value = 触发时间戳
+    private val eventDebounceCache = mutableMapOf<String, Long>()
+    private const val DEBOUNCE_WINDOW_MS = 4000L // 4秒冷却窗口
+
+    // 指定群过滤：从 JSON 解析选中群列表
+    private fun getSelectedGroups(): Set<String> {
+        return runCatching {
+            json.decodeFromString<Set<String>>(selectedGroupsJson)
+        }.getOrDefault(emptySet())
+    }
+
+    private fun isGroupAllowed(groupWxId: String): Boolean {
+        if (!groupFilterEnabled) return true
+        val selected = getSelectedGroups()
+        return selected.isEmpty() || groupWxId in selected
+    }
 
     @Serializable
     data class EventConfig(
@@ -133,11 +153,12 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         }.getOrElse { EventConfig() }
     }
 
+    // 默认模板维持原有 {链接昵称} 格式，老用户配置无需重置
     private fun getDefaultConfig(eventType: String): EventConfig = when (eventType) {
-        "join" -> EventConfig(color = "#28C445", text = "\$nickname 加入了群组")
-        "leave" -> EventConfig(color = "#28C445", text = "\$nickname 退出了群组")
-        "nick_change" -> EventConfig(color = "#28C445", text = "\$nickname 修改群昵称：{旧昵称} → {新昵称}")
-        "kick" -> EventConfig(color = "#F23030", text = "\$nickname 被管理员{管理员昵称}移出群组")
+        "join" -> EventConfig(color = "#28C445", text = "{链接昵称} 加入了群组")
+        "leave" -> EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
+        "nick_change" -> EventConfig(color = "#28C445", text = "{链接昵称} 修改群昵称：{旧昵称} → {新昵称}")
+        "kick" -> EventConfig(color = "#F23030", text = "{链接昵称} 被管理员{管理员昵称}移出群组")
         else -> EventConfig()
     }
 
@@ -184,7 +205,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     }
 
     // =========================================================================
-    // 消息显示 Hook — 彩色文字 + 可点击昵称
+    // 消息显示 Hook — 彩色文字 + 可点击昵称（仅本地居中提示使用）
     // =========================================================================
     private var contentTextViewField: Field? = null
 
@@ -210,7 +231,6 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         contentTextViewField?.let {
             return runCatching { it.get(tag) as? TextView }.getOrNull()
         }
-        // Search for the content TextView by iterating tag fields
         for (field in tag.javaClass.declaredFields) {
             if (TextView::class.java.isAssignableFrom(field.type)) {
                 try {
@@ -225,7 +245,6 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                 } catch (_: Exception) {}
             }
         }
-        // Fallback: search view hierarchy
         return findTextViewRecursive(rootView)
     }
 
@@ -284,20 +303,17 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
     private fun applySpans(textView: TextView, parsed: GmcParsedContent) {
         val spannable = SpannableString(parsed.plainText)
-        // Apply color to entire text
         spannable.setSpan(
             ForegroundColorSpan(parsed.color),
             0, spannable.length,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
-        // Apply URL spans for clickable wxIds (uses WeChat's URLSpanHandlerSet for reliable click handling)
         for ((displayName, wxId) in parsed.clickableWxIds) {
             val idx = spannable.indexOf(displayName)
             if (idx >= 0) {
                 spannable.setSpan(
                     object : URLSpan("weixin://weixinhongbao/wekit/chatroom_userinfo/$wxId") {
                         override fun updateDrawState(ds: TextPaint) {
-                            // Preserve the ForegroundColorSpan color, only add underline
                             ds.isUnderlineText = true
                         }
                     },
@@ -317,6 +333,23 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     }
 
     // =========================================================================
+    // 事件去重：wxid + 事件类型，3~5秒冷却窗口
+    // =========================================================================
+    private fun shouldDebounce(wxId: String, eventType: String): Boolean {
+        val key = "$wxId:$eventType"
+        val now = System.currentTimeMillis()
+        val lastTime = eventDebounceCache[key]
+        if (lastTime != null && (now - lastTime) < DEBOUNCE_WINDOW_MS) {
+            WeLogger.d(TAG, "debounce: $key skipped (${now - lastTime}ms since last)")
+            return true
+        }
+        eventDebounceCache[key] = now
+        // 清理过期缓存（超过30秒的条目）
+        eventDebounceCache.entries.removeAll { (now - it.value) > 30000 }
+        return false
+    }
+
+    // =========================================================================
     // 数据库监听 — 检测成员进退群
     // =========================================================================
     @SuppressLint("Range")
@@ -325,6 +358,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         if (!masterEnabled) return
 
         val group = values.getAsString("chatroomname") ?: return
+        if (!isGroupAllowed(group)) return
         val newRawMembers = values.getAsString("memberlist")
         val newRoomData = values.getAsByteArray("roomdata")
 
@@ -350,7 +384,6 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     }
 
     override fun onInsert(table: String, values: ContentValues) {
-        // Detect kick events from system messages
         if (!masterEnabled || !kickEnabled) return
         if (table != "message") return
         val type = values.getAsInteger("type") ?: return
@@ -358,13 +391,16 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val content = values.getAsString("content") ?: return
         if (!content.contains("delchatroommember")) return
 
-        // Extract kicked member and admin from system message XML
         val talker = values.getAsString("talker") ?: return
         if (!talker.endsWith("@chatroom")) return
+        if (!isGroupAllowed(talker)) return
 
         val kickedWxId = extractXmlValue(content, "delchatroommember", "username")
         val adminWxId = extractXmlValue(content, "delchatroommember", "scenceusername")
         if (kickedWxId.isNullOrEmpty()) return
+
+        // 事件去重
+        if (shouldDebounce(kickedWxId, "kick")) return
 
         handleKickEvent(talker, kickedWxId, adminWxId)
     }
@@ -392,6 +428,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         // 入群事件
         if (joinEnabled) {
             joiners.forEach { wxId ->
+                if (shouldDebounce(wxId, "join")) return@forEach
                 val displayName = getDisplayName(wxId, newDisplayNames)
                 val config = getEffectiveConfig("join")
                 val text = formatText(config.text, "join", displayName, wxId, "", "", "")
@@ -402,6 +439,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         // 退群事件
         if (leaveEnabled) {
             leavers.forEach { wxId ->
+                if (shouldDebounce(wxId, "leave")) return@forEach
                 val displayName = getDisplayName(wxId, origDisplayNames)
                 val config = getEffectiveConfig("leave")
                 val text = formatText(config.text, "leave", displayName, wxId, "", "", "")
@@ -416,6 +454,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                 val oldName = origDisplayNames[wxId] ?: ""
                 val newName = newDisplayNames[wxId] ?: ""
                 if (oldName.isNotEmpty() && newName.isNotEmpty() && oldName != newName) {
+                    if (shouldDebounce(wxId, "nick_change")) return@forEach
                     val displayName = getDisplayName(wxId, newDisplayNames)
                     val config = getEffectiveConfig("nick_change")
                     val text = formatText(config.text, "nick_change", displayName, wxId, oldName, newName, "")
@@ -449,6 +488,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         }
     }
 
+    // =========================================================================
+    // 两套通知通道完全隔离，独立代码分支
+    // =========================================================================
     private fun triggerEvent(
         eventType: String,
         group: String,
@@ -456,27 +498,65 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         plainText: String,
         clickableWxIds: List<Pair<String, String>>
     ) {
-        // 模式B: 本地观察
+        // ===== 分支①：本地提醒模式（仅本机聊天界面居中系统提示） =====
         if (modeBEnabled) {
-            val gmcContent = buildGmcContent(eventType, color, plainText, clickableWxIds)
-            WeMessageApi.createSimpleMsgInfoAndInsert(
-                type = MessageType.TEXT.code,
-                talker = group,
-                content = gmcContent,
-                currentTime = System.currentTimeMillis()
-            )
+            triggerLocalNotification(eventType, group, color, plainText, clickableWxIds)
         }
 
-        // 模式A: 群广播（纯文本，无颜色无点击）
+        // ===== 分支②：群广播推送模式（以当前微信号发送普通文本消息） =====
         if (modeAEnabled) {
-            runCatching {
-                WeMessageApi.sendText(group, plainText)
-            }.onFailure {
-                WeLogger.e(TAG, "failed to send broadcast for $eventType", it)
-            }
+            triggerGroupBroadcast(group, plainText)
         }
     }
 
+    /**
+     * 本地提醒模式：仅在本机聊天列表插入居中系统样式条目
+     * 纯本地界面渲染，不向微信服务器发送任何内容
+     */
+    private fun triggerLocalNotification(
+        eventType: String,
+        group: String,
+        color: String,
+        plainText: String,
+        clickableWxIds: List<Pair<String, String>>
+    ) {
+        // 居中系统提示（带颜色、可点击）
+        val gmcContent = buildGmcContent(eventType, color, plainText, clickableWxIds)
+        WeMessageApi.createSimpleMsgInfoAndInsert(
+            type = MessageType.TEXT.code,
+            talker = group,
+            content = gmcContent,
+            currentTime = System.currentTimeMillis()
+        )
+
+        // 假用户播报：额外生成虚拟假用户发言（仅本地可见，不会发送到群内）
+        if (fakeUserBroadcast && eventType in listOf("join", "leave", "kick", "kick_extra")) {
+            // 生成一条虚拟用户消息，纯文本，不带颜色
+            WeMessageApi.createSimpleMsgInfoAndInsert(
+                type = MessageType.TEXT.code,
+                talker = group,
+                content = plainText,
+                currentTime = System.currentTimeMillis() + 1
+            )
+        }
+    }
+
+    /**
+     * 群广播推送模式：以当前登录微信号发送普通文本消息到群内
+     * 重要：仅发送纯文本，剔除所有颜色参数，规避仿系统消息风控
+     */
+    private fun triggerGroupBroadcast(group: String, plainText: String) {
+        runCatching {
+            // 仅发送纯文本，不携带任何颜色/样式信息
+            WeMessageApi.sendText(group, plainText)
+        }.onFailure {
+            WeLogger.e(TAG, "failed to send broadcast", it)
+        }
+    }
+
+    // =========================================================================
+    // 变量解析：新旧变量并行兼容，无数据变量自动隐藏
+    // =========================================================================
     private fun formatText(
         template: String,
         eventType: String,
@@ -535,6 +615,10 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             var nickState by remember { mutableStateOf(nickChangeEnabled) }
             var kickState by remember { mutableStateOf(kickEnabled) }
             var kickExtraState by remember { mutableStateOf(kickExtraExit) }
+            var fakeUserState by remember { mutableStateOf(fakeUserBroadcast) }
+            var groupFilterEnabledState by remember { mutableStateOf(groupFilterEnabled) }
+            var selectedGroupsState by remember { mutableStateOf(getSelectedGroups()) }
+            var showGroupSelector by remember { mutableStateOf(false) }
 
             var joinConfigState by remember { mutableStateOf(getEffectiveConfig("join")) }
             var leaveConfigState by remember { mutableStateOf(getEffectiveConfig("leave")) }
@@ -568,41 +652,37 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                 modifier = Modifier.padding(top = 8.dp)
                             )
 
-                            // 模式B
+                            // 模式B：本地观察
                             ListItem(
                                 modifier = Modifier.clickable {
                                     modeBState = !modeBState
-                                    // 规则：关闭模式B时自动取消勾选模式A
                                     if (!modeBState) modeAState = false
                                 },
                                 trailingContent = {
                                     Switch(checked = modeBState, onCheckedChange = null)
                                 },
-                                headlineContent = { Text("模式B：本地观察模式") },
+                                headlineContent = { Text("本地观察模式") },
                                 supportingContent = { Text("变动通知仅自己可见，不向群内发送消息") }
                             )
 
-                            // 模式A
+                            // 模式A：群广播推送
                             ListItem(
                                 modifier = Modifier.clickable {
                                     if (modeBState) modeAState = !modeAState
                                 },
                                 trailingContent = {
-                                    Switch(
-                                        checked = modeAState,
-                                        onCheckedChange = null
-                                    )
+                                    Switch(checked = modeAState, onCheckedChange = null)
                                 },
                                 headlineContent = {
                                     Text(
-                                        "模式A：群广播模式",
+                                        "群广播推送",
                                         color = if (modeBState) MaterialTheme.colorScheme.onSurface
                                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     )
                                 },
                                 supportingContent = {
                                     Text(
-                                        "本机查看通知同时推送消息到群聊；开启模式A必须启用模式B",
+                                        "本机查看通知同时以本人账号推送纯文本消息到群聊；开启广播必须启用本地观察",
                                         color = if (modeBState) MaterialTheme.colorScheme.onSurfaceVariant
                                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     )
@@ -611,7 +691,101 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-                            // 四类事件
+                            // 假用户播报开关
+                            ListItem(
+                                modifier = Modifier.clickable { fakeUserState = !fakeUserState },
+                                trailingContent = {
+                                    Checkbox(checked = fakeUserState, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("启用假用户播报") },
+                                supportingContent = {
+                                    Text(
+                                        "关闭：仅显示居中本地系统提示\n" +
+                                                "开启：居中提示保留，额外生成虚拟假用户发言（仅本地可见，不会发送到群内）\n" +
+                                                "生效范围：进群、退群、被移出群聊"
+                                    )
+                                }
+                            )
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                            // 指定群选择过滤
+                            ListItem(
+                                modifier = Modifier.clickable {
+                                    groupFilterEnabledState = !groupFilterEnabledState
+                                },
+                                trailingContent = {
+                                    Switch(checked = groupFilterEnabledState, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("仅监控指定群聊") },
+                                supportingContent = {
+                                    val count = selectedGroupsState.size
+                                    Text(
+                                        if (count > 0) "已选择 $count 个群聊，仅监控指定群"
+                                        else "关闭则监控全部群聊；开启后需选择目标群"
+                                    )
+                                }
+                            )
+
+                            if (groupFilterEnabledState) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = { showGroupSelector = true },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("选择群聊")
+                                    }
+                                    if (selectedGroupsState.isNotEmpty()) {
+                                        TextButton(
+                                            onClick = {
+                                                selectedGroupsState = emptySet()
+                                            }
+                                        ) {
+                                            Text("清空选择")
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (showGroupSelector) {
+                                // 使用 ContactsSelector 选择群聊
+                                val contacts = remember {
+                                    WeDatabaseApi.getContacts().filter { it.wxId.endsWith("@chatroom") }
+                                }
+                                val selectedIds = remember { mutableStateOf(selectedGroupsState) }
+                                AlertDialogContent(
+                                    title = { Text("选择监控群聊") },
+                                    text = {
+                                        ContactsSelector(
+                                            contacts = contacts,
+                                            selectedIds = selectedIds.value,
+                                            onSelectionChange = { selectedIds.value = it },
+                                            showSearch = true,
+                                            showSelectAll = true
+                                        )
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showGroupSelector = false }) {
+                                            Text("取消")
+                                        }
+                                    },
+                                    confirmButton = {
+                                        Button(onClick = {
+                                            selectedGroupsState = selectedIds.value
+                                            showGroupSelector = false
+                                        }) {
+                                            Text("确认")
+                                        }
+                                    }
+                                )
+                            }
+
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 "事件监控开关",
                                 style = MaterialTheme.typography.titleMedium,
@@ -673,7 +847,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
                             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                            // 变量说明
+                            // 变量说明：分区展示
                             Text(
                                 "原有兼容旧变量（可继续正常使用）",
                                 style = MaterialTheme.typography.titleSmall,
@@ -681,11 +855,11 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                 modifier = Modifier.padding(top = 8.dp)
                             )
                             Text(
-                                "{链接昵称}：发生变动的群成员，展示【昵称(wxid)】，支持点击跳转微信资料\n" +
-                                        "{管理员昵称}：执行踢人操作的管理员，展示【昵称(wxid)】，支持点击跳转微信资料\n" +
+                                "{链接昵称}：变动成员昵称，输出格式【昵称(wxid)】，完整兼容旧配置\n" +
+                                        "{管理员昵称}：执行踢人操作的管理员，展示格式【昵称(wxid)】\n" +
                                         "{旧昵称}：成员修改之前的旧群昵称\n" +
                                         "{新昵称}：成员修改之后的新群昵称\n" +
-                                        "\$nickname：发生变动的群成员，与 {链接昵称} / \$userName 完全等效通用",
+                                        "\$nickname：变动成员昵称，与 {链接昵称} / \$userName 完全等效通用",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 2.dp)
@@ -697,8 +871,8 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                "\$userName：发生变动的群成员，展示【昵称(wxid)】，支持点击跳转微信资料，与 \$nickname 完全等效通用\n" +
-                                        "\$adminName：执行踢人操作的管理员，展示【昵称(wxid)】，支持点击跳转微信资料\n" +
+                                "\$userName：发生变动的群成员，展示【昵称(wxid)】，与 {链接昵称} / \$nickname 完全等效通用\n" +
+                                        "\$adminName：执行踢人操作的管理员，展示【昵称(wxid)】\n" +
                                         "\$oldNickname：成员修改之前的旧群昵称\n" +
                                         "\$newNickname：成员修改之后的新群昵称",
                                 style = MaterialTheme.typography.bodySmall,
@@ -734,6 +908,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                         nickChangeEnabled = nickState
                         kickEnabled = kickState
                         kickExtraExit = kickExtraState
+                        fakeUserBroadcast = fakeUserState
+                        groupFilterEnabled = groupFilterEnabledState
+                        selectedGroupsJson = json.encodeToString(selectedGroupsState)
                         saveEventConfig("join", joinConfigState)
                         saveEventConfig("leave", leaveConfigState)
                         saveEventConfig("nick_change", nickConfigState)
@@ -766,7 +943,6 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             )
 
             if (enabled) {
-                // 颜色配置
                 var colorText by remember(config) {
                     mutableStateOf(TextFieldValue(config.color))
                 }
@@ -803,7 +979,6 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                     )
                 }
 
-                // 文案配置
                 var textValue by remember(config) {
                     mutableStateOf(TextFieldValue(config.text))
                 }
@@ -820,9 +995,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                     supportingText = {
                         Text(
                             buildString {
-                                append("变量: \$userName / \$nickname / {链接昵称}")
-                                if (label.contains("昵称")) append(", \$oldNickname / {旧昵称}, \$newNickname / {新昵称}")
-                                if (label.contains("踢出")) append(", \$adminName / {管理员昵称}")
+                                append("{链接昵称} / \$nickname / \$userName（三者等效通用）")
+                                if (label.contains("昵称")) append(" | \$oldNickname / {旧昵称} | \$newNickname / {新昵称}")
+                                if (label.contains("踢出")) append(" | \$adminName / {管理员昵称}")
                             },
                             fontSize = 11.sp
                         )

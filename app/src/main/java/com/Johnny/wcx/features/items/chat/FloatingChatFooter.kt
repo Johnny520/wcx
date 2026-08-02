@@ -1,5 +1,6 @@
 package com.Johnny.wcx.features.items.chat
 
+import android.app.Activity
 import android.graphics.Outline
 import android.view.View
 import android.view.ViewGroup
@@ -13,6 +14,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
+import com.tencent.mm.ui.chatting.ChattingUI
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -88,6 +90,16 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
         methodRefreshBottomHeight.hookAfter {
             applyBottomGap(thisObject as ChatFooter)
         }
+
+        // Notification jump (and other non-standard entry paths) can bypass the normal
+        // ChatFooter creation lifecycle. Re-check on every ChattingUI.onResume and re-apply
+        // the floating style if the footer exists but hasn't been styled yet.
+        ChattingUI::class.reflekt().firstMethod { name = "onResume" }.hookAfter {
+            val activity = thisObject as? ChattingUI ?: return@hookAfter
+            val footer = findChatFooter(activity) ?: return@hookAfter
+            applyDrawingStyle(footer)
+            applySideMargins(footer)
+        }
     }
 
     /** Sets the outline provider, corner clipping, and elevation — all drawing properties
@@ -144,6 +156,23 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
             lp.bottomMargin = adjusted
             footer.requestLayout()
         }
+    }
+
+    /** Walks the view hierarchy of [activity] to find the ChatFooter instance. */
+    private fun findChatFooter(activity: Activity): ChatFooter? {
+        val root = activity.window?.decorView ?: return null
+        return findChatFooterInView(root)
+    }
+
+    private fun findChatFooterInView(view: View): ChatFooter? {
+        if (view is ChatFooter) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val result = findChatFooterInView(view.getChildAt(i))
+                if (result != null) return result
+            }
+        }
+        return null
     }
 
     override fun onClick(context: ComponentActivity) {

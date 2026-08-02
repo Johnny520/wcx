@@ -482,6 +482,40 @@ object ConversationAggregation : ClickableFeature(),
     private fun hookMainUiRefresh() {
         MainUI::class.reflekt().firstMethod("onResume").hookAfter {
             syncFoldersToDatabase()
+            preloadFolderAvatars()
+        }
+    }
+
+    /**
+     * Pre-reads all folder avatar resources to warm up the content resolver cache.
+     *
+     * After a system reboot, the media store cache is reset and content URIs for custom
+     * avatars may not resolve until the owning content provider is first queried. WeChat's
+     * homepage conversation list rendering flow does not actively read group avatar files
+     * — only entering the album/avatar picker page triggers image resource loading and
+     * re-populates the media cache. By opening an input stream on each folder's avatar URI
+     * during MainUI.onResume, we force the content resolver to resolve the URI early so
+     * the folder avatars render immediately without requiring the user to visit the album
+     * page first.
+     */
+    private fun preloadFolderAvatars() {
+        val folders = loadFolders()
+        if (folders.isEmpty()) return
+        val avatarMap = CustomLocalFriendAvatars.avatarMap
+        var loaded = 0
+        var failed = 0
+        for (folder in folders) {
+            val uri = avatarMap[folder.id]?.takeIf { it.isNotBlank() } ?: continue
+            runCatching {
+                HostInfo.application.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { it.read() }
+                loaded++
+            }.onFailure {
+                failed++
+                WeLogger.d(TAG, "preload avatar failed for folder ${folder.id}: $uri")
+            }
+        }
+        if (loaded > 0 || failed > 0) {
+            WeLogger.i(TAG, "preloaded folder avatars: $loaded ok, $failed failed")
         }
     }
 

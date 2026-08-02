@@ -157,6 +157,17 @@ private fun detectOrReadLspEnvironment(context: Context): String {
     return result
 }
 
+/** 读取 LSPosed API 版本（跨进程缓存），返回显示字符串。 */
+private fun safeGetLspApiVersion(): String {
+    val apiVersion = runCatching {
+        WePrefs.getIntOrDef(Preferences.CACHED_LSP_API_VERSION, 0)
+    }.getOrDefault(0)
+    if (apiVersion <= 0) return "未知"
+
+    val hotReload = if (apiVersion >= 102) " (支持热重载)" else " (需重启)"
+    return "API $apiVersion$hotReload"
+}
+
 /** 版本字符串格式化：git+4fcbb76 (73) */
 private fun formatLocalVersion(): String {
     val name = BuildConfig.VERSION_NAME.ifEmpty { "未知" }
@@ -189,6 +200,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
     // 设备信息：微信版本和运行环境在重组间保持稳定
     val wechatVersion = remember { safeGetWeChatVersionInfo(context) }
     val lspEnvironment = remember { detectOrReadLspEnvironment(context) }
+    val lspApiVersion = remember { safeGetLspApiVersion() }
 
     LaunchedEffect(Unit) {
         isChecking = true
@@ -302,7 +314,7 @@ fun HomePager(onOpenFeatures: () -> Unit) {
 
         // ---- 设备信息卡片 ----
         item {
-            SystemInfoCard(wechatVersion, lspEnvironment, !safeIsHost())
+            SystemInfoCard(wechatVersion, lspEnvironment, lspApiVersion, !safeIsHost())
         }
 
         // ---- 底部留白 ----
@@ -393,7 +405,8 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
                 if (!isChecking && latestVersion != null) {
                     TagChip(
                         text = "最新版本 $latestVersion",
-                        color = accentColor,
+                        color = if (isDark) Color(0xFFFF6B35) else Color(0xFFE65100),
+                        textColor = Color.White,
                     )
                 }
             }
@@ -402,17 +415,17 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
 }
 
 @Composable
-private fun TagChip(text: String, color: Color) {
+private fun TagChip(text: String, color: Color, textColor: Color = color) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(color.copy(alpha = 0.1f)),
+            .background(if (textColor == color) color.copy(alpha = 0.1f) else color),
     ) {
         Text(
             text = text,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
-            color = color,
+            color = textColor,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
@@ -461,7 +474,7 @@ private fun CountCard(
 }
 
 @Composable
-private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, showLspEnvironment: Boolean) {
+private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, lspApiVersion: String, showLspEnvironment: Boolean) {
     Card {
         Column(modifier = Modifier.fillMaxWidth()) {
             // ① 微信版本
@@ -494,7 +507,23 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, showL
                     showDivider = true,
                 )
             }
-            // ③ 构建时间
+            // ③ LSPosed API 版本
+            if (showLspEnvironment && lspApiVersion != "未知") {
+                InfoRow(
+                    icon = {
+                        Icon(
+                            imageVector = MaterialSymbols.Outlined.Build_circle,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    },
+                    title = "LSPosed API",
+                    content = lspApiVersion,
+                    showDivider = true,
+                )
+            }
+            // ④ 构建时间
             InfoRow(
                 icon = {
                     Icon(
@@ -508,7 +537,7 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, showL
                 content = runCatching { formatEpoch(BuildConfig.BUILD_TIMESTAMP, true) }.getOrDefault("未知"),
                 showDivider = true,
             )
-            // ④ Android 版本
+            // ⑤ Android 版本
             InfoRow(
                 icon = {
                     Icon(
@@ -522,7 +551,7 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, showL
                 content = "${Build.VERSION.RELEASE.orEmpty().ifEmpty { "未知" }} (API ${Build.VERSION.SDK_INT})",
                 showDivider = true,
             )
-            // ⑤ 设备型号
+            // ⑥ 设备型号
             InfoRow(
                 icon = {
                     Icon(
@@ -536,7 +565,7 @@ private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, showL
                 content = "${Build.MANUFACTURER.orEmpty()} ${Build.MODEL.orEmpty()}".trim().ifEmpty { "未知" },
                 showDivider = true,
             )
-            // ⑥ 系统架构
+            // ⑦ 系统架构
             InfoRow(
                 icon = {
                     Icon(
