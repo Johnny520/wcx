@@ -543,6 +543,78 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         )}
     }
 
+    // ── 调试日志查看器 ────────────────────────────────────────────────────────
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun DebugLogViewerScreen(
+        onDismiss: () -> Unit
+    ) {
+        val logs: List<DebugLogEntry> = remember { debugLogs.toList() }
+        val listState = rememberLazyListState()
+
+        AlertDialogContent(
+            title = { Text("调试日志 (最近 ${logs.size} 条)") },
+            text = {
+                if (logs.isEmpty()) {
+                    Text("暂无日志记录", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.heightIn(max = 400.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(logs.size) { index ->
+                            val log: DebugLogEntry = logs[index]
+                            DefaultColumn {
+                                Text(
+                                    "[${log.timestamp}]",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text("URL: ${log.requestUrl}", style = MaterialTheme.typography.bodySmall)
+                                Text("Request: ${log.requestBody}", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    "Response: ${log.responseCode}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (log.responseCode == 200)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.error
+                                )
+                                if (log.responseBody.isNotBlank()) {
+                                    Text(
+                                        "Body: ${log.responseBody.take(500)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 5
+                                    )
+                                }
+                                if (log.error != null) {
+                                    Text(
+                                        "Error: ${log.error}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 3
+                                    )
+                                }
+                                Spacer(Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    debugLogs.clear()
+                    showToast("日志已清除")
+                    onDismiss()
+                }) { Text("清除日志") }
+            }
+        )
+    }
+
     override fun onInsert(table: String, values: ContentValues) {
         if (table != "message") return
         if (apiKey.isBlank()) return
@@ -729,75 +801,3 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
     }
 }
 
-// ── 调试日志查看器（文件级 Composable）────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DebugLogViewerScreen(
-    onDismiss: () -> Unit
-) {
-    val logs: List<DebugLogEntry> = remember { debugLogs.toList() }
-    val listState = rememberLazyListState()
-
-    AlertDialogContent(
-        title = { Text("调试日志 (最近 ${logs.size} 条)") },
-        text = {
-            if (logs.isEmpty()) {
-                Text("暂无日志记录", style = MaterialTheme.typography.bodyMedium)
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.heightIn(max = 400.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(logs.size) { index ->
-                        val log: DebugLogEntry = logs[index]
-                        DefaultColumn {
-                            Text(
-                                "[${log.timestamp}]",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text("URL: ${log.requestUrl}", style = MaterialTheme.typography.bodySmall)
-                            Text("Request: ${log.requestBody}", style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                "Response: ${log.responseCode}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (log.responseCode == 200)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.error
-                            )
-                            if (log.responseBody.isNotBlank()) {
-                                Text(
-                                    "Body: ${log.responseBody.take(500)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 5
-                                )
-                            }
-                            if (log.error != null) {
-                                Text(
-                                    "Error: ${log.error}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    maxLines = 3
-                                )
-                            }
-                            Spacer(Modifier.padding(top = 4.dp))
-                        }
-                    }
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-        confirmButton = {
-            Button(onClick = {
-                debugLogs.clear()
-                showToast("日志已清除")
-                onDismiss()
-            }) { Text("清除日志") }
-        }
-    )
-}
