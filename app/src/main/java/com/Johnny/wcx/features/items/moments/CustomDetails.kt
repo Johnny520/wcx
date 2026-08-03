@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -174,6 +175,7 @@ object CustomDetails : ClickableFeature(), WeMomentsContextMenuApi.IMenuItemsPro
         return getCustomTexts()[snsId.toString()]?.takeIf { it.isNotBlank() }
     }
 
+    @OptIn(ExperimentalLayoutApi::class)
     private fun showEditor(context: Context, snsId: Long) {
         showComposeDialog(context) {
             var textInput by remember { mutableStateOf(TextFieldValue(getCustomText(snsId).orEmpty())) }
