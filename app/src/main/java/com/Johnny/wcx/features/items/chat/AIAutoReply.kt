@@ -73,8 +73,6 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Collections
 
-// ── AIAutoReply ─────────────────────────────────────────────────────────────────
-
 @SuppressLint("SetTextI18n")
 @Feature(
     name = "AI 自动回复",
@@ -108,7 +106,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
     private var allowStrangerPrivateReply by prefOption("ai_reply_allow_stranger", false)
 
     // ── 调试日志 ────────────────────────────────────────────────────────────────
-    private data class DebugLogEntry(
+    data class DebugLogEntry(
         val timestamp: String,
         val requestUrl: String,
         val requestBody: String,
@@ -117,7 +115,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         val error: String?
     )
 
-    private val debugLogs: MutableList<DebugLogEntry> = Collections.synchronizedList(mutableListOf())
+    val debugLogs = Collections.synchronizedList(mutableListOf<DebugLogEntry>())
     private const val MAX_DEBUG_LOGS = 50
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -222,6 +220,8 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                                         text = { Text("从收藏中选择回复") },
                                         onClick = {
                                             showFavMenu = false
+                                            // TODO: 接入 WeMessageApi 或新增 FavApi 获取微信收藏列表
+                                            //       当前项目中没有可用的微信收藏读取 API，待后续实现
                                             showToast("暂未接入微信收藏 API")
                                         }
                                     )
@@ -481,8 +481,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                     onDismiss()
                 }) { Text("保存") }
             }
-        )
-    }
+        )}
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
@@ -541,7 +540,6 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                 }) { Text("保存") }
             }
         )}
-    }
 
     // ── 调试日志查看器 ────────────────────────────────────────────────────────
     @OptIn(ExperimentalMaterial3Api::class)
@@ -549,7 +547,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
     private fun DebugLogViewerScreen(
         onDismiss: () -> Unit
     ) {
-        val logs: List<DebugLogEntry> = remember { debugLogs.toList() }
+        val logs = remember { debugLogs.toList() }
         val listState = rememberLazyListState()
 
         AlertDialogContent(
@@ -564,7 +562,7 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(logs.size) { index ->
-                            val log: DebugLogEntry = logs[index]
+                            val log = logs[index]
                             DefaultColumn {
                                 Text(
                                     "[${log.timestamp}]",
@@ -740,7 +738,13 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
                 else -> if (responseCode !in 200..299) "HTTP $responseCode" else null
             }
 
-            addDebugLog(apiUrl, requestBodyStr, responseCode, responseBody, errorMsg)
+            addDebugLog(
+                requestUrl = apiUrl,
+                requestBody = requestBodyStr,
+                responseCode = responseCode,
+                responseBody = responseBody,
+                error = errorMsg
+            )
 
             if (responseCode != 200) {
                 WeLogger.e(TAG, "AI API returned $responseCode: $errorMsg")
@@ -777,7 +781,14 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         error: String?
     ) {
         val timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
-        val entry = DebugLogEntry(timestamp, requestUrl, requestBody, responseCode, responseBody, error)
+        val entry = DebugLogEntry(
+            timestamp = timestamp,
+            requestUrl = requestUrl,
+            requestBody = requestBody,
+            responseCode = responseCode,
+            responseBody = responseBody,
+            error = error
+        )
         debugLogs.add(entry)
         while (debugLogs.size > MAX_DEBUG_LOGS) {
             debugLogs.removeAt(0)
@@ -800,4 +811,3 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
         }
     }
 }
-
