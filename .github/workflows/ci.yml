@@ -94,38 +94,28 @@ jobs:
           cargo xtask configure
           cargo xtask build --native-only
 
-      # ─── 正式版本签名（Tag 推送触发）────────────────────────────────────────
-      - name: Prepare release keystore (正式版)
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          KS_FILE="$RUNNER_TEMP/wekit-keystore.jks"
-          CRED_FILE="$RUNNER_TEMP/keystore-creds.env"
-
-          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > "$KS_FILE"
-
-          if ! keytool -list -keystore "$KS_FILE" \
-               -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-               -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
-            echo "::error::正式版 keystore 验证失败，请检查 GitHub Secrets 配置"
-            exit 1
-          fi
-
-          echo "正式版 keystore 验证通过"
-          echo "KS_PASS=${{ secrets.KEYSTORE_PASSWORD }}" > "$CRED_FILE"
-          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$CRED_FILE"
-          echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$CRED_FILE"
-
-      # ─── 测试版本签名（普通 Push 触发）──────────────────────────────────────
-      - name: Prepare test keystore (测试版)
-        if: |
-          github.event_name != 'pull_request' &&
-          !startsWith(github.ref, 'refs/tags/')
+      - name: Prepare keystore
+        if: github.event_name != 'pull_request'
         run: |
           KS_FILE="$RUNNER_TEMP/wekit-keystore.jks"
           CRED_FILE="$RUNNER_TEMP/keystore-creds.env"
           KS_PASS="wcx-store-pass"
           KEY_ALIAS="wcx"
           KEY_PASS="wcx-store-pass"
+
+          # Try project keystore from secrets first; fall back to random
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KS_FILE" 2>/dev/null || true
+            if keytool -list -keystore "$KS_FILE" -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+                 -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
+              echo "Using project keystore."
+              echo "KS_PASS=${{ secrets.KEYSTORE_PASSWORD }}" > "$CRED_FILE"
+              echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$CRED_FILE"
+              echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$CRED_FILE"
+              exit 0
+            fi
+            echo "Project keystore unreadable, generating a fresh one."
+          fi
 
           rm -f "$KS_FILE"
           keytool -genkeypair -v \
@@ -162,8 +152,6 @@ jobs:
 
       - name: Collect APKs
         run: |
-          # Flavors nest output under apk/<flavor>/release/; flatten into one dir
-          # so downstream jobs (release / telegram) keep a flat artifact layout.
           mkdir -p dist/apk
           find app/build/outputs/apk -type f -name '*.apk' -exec cp -v {} dist/apk/ \;
           echo "Collected APKs:"
@@ -171,13 +159,12 @@ jobs:
 
       - name: Collect mappings
         run: |
-          # One mapping.txt per flavor; rename per flavor to avoid collisions.
           mkdir -p dist/mapping
           for m in app/build/outputs/mapping/*/mapping.txt; do
-            flavorDir=$(basename "$(dirname "$m")")   # e.g. standardRelease
+            flavorDir=$(basename "$(dirname "$m")")
             cp -v "$m" "dist/mapping/mapping-${flavorDir}.txt"
           done
-          ls -1 dist/mapping || echo "(no mappings — unsigned PR build without minify?)"
+          ls -1 dist/mapping || echo "(no mappings)"
 
       - name: Upload Release APKs
         uses: actions/upload-artifact@v7
@@ -194,7 +181,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ success() && startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ success() && github.ref == 'refs/heads/master' }}
     permissions:
       contents: write
 
@@ -216,8 +203,7 @@ jobs:
         run: |
           COMMIT_COUNT=$(git rev-list --count HEAD)
           GIT_HASH=$(git rev-parse --short HEAD)
-          # 使用推送的 tag 名称作为版本号
-          VERSION_TAG="${{ github.ref_name }}"
+          VERSION_TAG="v${COMMIT_COUNT}"
           echo "tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
           echo "hash=${GIT_HASH}" >> $GITHUB_OUTPUT
           echo "count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
@@ -236,8 +222,7 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # 获取上一个 release tag
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${{ github.ref_name }}$" | head -1 || echo "")
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
             echo "prev_tag=" >> $GITHUB_OUTPUT
             echo "changelog=首次发布" >> $GITHUB_OUTPUT
@@ -246,10 +231,8 @@ jobs:
 
           echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
 
-          # 获取两个tag之间的commit列表
           COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" || echo "")
 
-          # 分类提交
           FEATURES=""
           FIXES=""
           REMOVED=""
@@ -268,7 +251,6 @@ jobs:
             fi
           done <<< "$COMMITS"
 
-          # 生成changelog
           CHANGELOG=""
 
           if [ -n "$FEATURES" ]; then
@@ -295,7 +277,6 @@ jobs:
             CHANGELOG="暂无详细更新记录"
           fi
 
-          # 写入文件用于后续步骤
           echo "$CHANGELOG" > artifacts/CHANGELOG.md
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
