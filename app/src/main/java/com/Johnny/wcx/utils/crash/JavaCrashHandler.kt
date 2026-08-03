@@ -63,7 +63,7 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
         } catch (e: Throwable) {
             WeLogger.e(TAG, "error while handling crash", e)
         } finally {
-            isHandling = false
+            isHandling.set(false)
 
             // 调用默认处理器，让应用正常崩溃
             if (defaultHandler != null) {
