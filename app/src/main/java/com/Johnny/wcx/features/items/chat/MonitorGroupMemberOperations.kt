@@ -221,9 +221,27 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             val parsed = parseGmcContent(content) ?: return
             val tag = view.tag ?: return
 
-            val contentTv = findContentTextView(tag, view) ?: return
-            applySpans(contentTv, parsed)
+            val contentTv = findContentTextView(tag, view)
+            if (contentTv != null) {
+                applySpans(contentTv, parsed)
+            } else {
+                // 兜底：若无法定位 TextView，尝试递归查找并移除 GMC 前缀，避免显示原始协议字符
+                val fallbackTv = findTextViewRecursive(view)
+                fallbackTv?.text = parsed.plainText
+            }
         } catch (e: Exception) {
+            // 失败时尝试兜底：移除 GMC 前缀，至少显示纯文本而非原始协议字符
+            try {
+                val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
+                val content = msgInfo.content ?: return
+                if (content.startsWith(GMC_PREFIX)) {
+                    val plainText = content.substringAfter(']')
+                    if (plainText.isNotEmpty()) {
+                        val fallbackTv = findTextViewRecursive(view)
+                        fallbackTv?.text = plainText
+                    }
+                }
+            } catch (_: Exception) {}
             WeLogger.e(TAG, "onCreateView failed", e)
         }
     }
@@ -472,7 +490,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         } else ""
 
         val config = getEffectiveConfig("kick")
-        val text = formatText(config.text, "kick", displayName, kickedWxId, "", "", adminDisplayName)
+        val text = formatText(config.text, "kick", displayName, kickedWxId, "", "", adminDisplayName, adminWxId ?: "")
 
         val clickableList = mutableListOf(displayName to kickedWxId)
         if (adminDisplayName.isNotEmpty()) {
@@ -484,7 +502,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         // 附加退出群组提示
         if (kickExtraExit) {
             val exitConfig = EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
-            val exitText = formatText(exitConfig.text, "leave", displayName, kickedWxId, "", "", "")
+            val exitText = formatText(exitConfig.text, "leave", displayName, kickedWxId, "", "", "", "")
             triggerEvent("kick_extra", group, exitConfig.color, exitText, listOf(displayName to kickedWxId))
         }
     }
@@ -559,8 +577,15 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             .replace(Regex("""\(wxid_[a-zA-Z0-9_]+\)"""), "")
             // 移除 (@chatroom) 后缀
             .replace(Regex("""\(@chatroom\)"""), "")
-            // 清理多余空格
-            .replace(Regex("""\s+"""), " ")
+            // 移除独立的 wxid 字符串（非括号包裹的原始 wxid 格式）
+            .replace(Regex("""\bwxid_[a-zA-Z0-9_]+"""), "")
+            // 移除 @chatroom 后缀（无括号版本）
+            .replace(Regex("""@chatroom"""), "")
+            // 清理多余空格和标点残留
+            .replace(Regex("""\s{2,}"""), " ")
+            .replace(Regex("""\(\s*\)"""), "")
+            .replace(Regex("""，\s*，"""), "，")
+            .replace(Regex("""。\s*。"""), "。")
             .trim()
     }
 
@@ -587,10 +612,11 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         wxId: String,
         oldNick: String,
         newNick: String,
-        adminDisplayName: String
+        adminDisplayName: String,
+        adminWxId: String = ""
     ): String {
         val userNameFormatted = "$displayName($wxId)"
-        val adminNameFormatted = if (adminDisplayName.isNotEmpty()) "$adminDisplayName($wxId)" else ""
+        val adminNameFormatted = if (adminDisplayName.isNotEmpty()) "$adminDisplayName($adminWxId)" else ""
         return template
             // 原有兼容旧变量
             .replace("{链接昵称}", userNameFormatted)
