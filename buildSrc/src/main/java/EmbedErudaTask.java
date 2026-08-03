@@ -5,9 +5,11 @@ import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.file.Files;
 
@@ -73,14 +75,78 @@ public abstract class EmbedErudaTask extends DefaultTask {
         }
     }
 
+    private byte[] loadFromNpm() throws IOException {
+        try {
+            File tmpDir = Files.createTempDirectory("eruda-npm-").toFile();
+            tmpDir.deleteOnExit();
+            ProcessBuilder pb = new ProcessBuilder("npm", "pack", "eruda@3.4.3");
+            pb.directory(tmpDir);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String output;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+                output = sb.toString();
+            }
+            int exitCode = p.waitFor();
+            if (exitCode != 0) {
+                throw new IOException("npm pack failed: " + output);
+            }
+            String tgzName = null;
+            for (String line : output.split("\n")) {
+                line = line.trim();
+                if (line.endsWith(".tgz")) {
+                    tgzName = line;
+                    break;
+                }
+            }
+            if (tgzName == null) {
+                throw new IOException("Could not find .tgz in npm output: " + output);
+            }
+            File tgz = new File(tmpDir, tgzName);
+            ProcessBuilder tarPb = new ProcessBuilder("tar", "xzf", tgz.getAbsolutePath());
+            tarPb.directory(tmpDir);
+            tarPb.redirectErrorStream(true);
+            int tarExit = tarPb.start().waitFor();
+            if (tarExit != 0) {
+                throw new IOException("tar extract failed");
+            }
+            File jsFile = new File(tmpDir, "package/eruda.js");
+            if (!jsFile.exists()) {
+                throw new IOException("eruda.js not found in npm package");
+            }
+            System.err.println("Loaded eruda.js from npm package");
+            byte[] data = Files.readAllBytes(jsFile.toPath());
+            // Clean up temp directory
+            jsFile.delete();
+            new File(tmpDir, "package").delete();
+            tgz.delete();
+            tmpDir.delete();
+            return data;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted during npm install", e);
+        }
+    }
+
     @TaskAction
     public void generate() throws IOException {
         byte[] jsBytes;
         try {
             jsBytes = loadFromClasspath();
         } catch (IOException e) {
-            System.err.println("Classpath load failed: " + e.getMessage() + ", falling back to network download");
-            jsBytes = downloadWithRetry(getUrl().get());
+            System.err.println("Classpath load failed: " + e.getMessage());
+            try {
+                System.err.println("Trying npm pack...");
+                jsBytes = loadFromNpm();
+            } catch (IOException e2) {
+                System.err.println("npm pack failed: " + e2.getMessage() + ", falling back to network download");
+                jsBytes = downloadWithRetry(getUrl().get());
+            }
         }
         String jsContent = new String(jsBytes);
         String pkg = getNamespace().get();
