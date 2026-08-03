@@ -63,9 +63,26 @@ public abstract class EmbedErudaTask extends DefaultTask {
         throw new IOException("Failed to download from all URLs after " + (urls.length * MAX_RETRIES) + " total attempts", lastException);
     }
 
+    private byte[] loadFromClasspath() throws IOException {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream("eruda.js")) {
+            if (is == null) {
+                throw new IOException("eruda.js not found in classpath");
+            }
+            System.err.println("Loaded eruda.js from classpath resource");
+            return is.readAllBytes();
+        }
+    }
+
     @TaskAction
     public void generate() throws IOException {
-        String jsContent = new String(downloadWithRetry(getUrl().get()));
+        byte[] jsBytes;
+        try {
+            jsBytes = loadFromClasspath();
+        } catch (IOException e) {
+            System.err.println("Classpath load failed: " + e.getMessage() + ", falling back to network download");
+            jsBytes = downloadWithRetry(getUrl().get());
+        }
+        String jsContent = new String(jsBytes);
         String pkg = getNamespace().get();
         File outDir = getOutputDir().get().getAsFile();
         File outputFile = new File(outDir, pkg.replace(".", "/") + "/eruda/ErudaProvider.kt");
