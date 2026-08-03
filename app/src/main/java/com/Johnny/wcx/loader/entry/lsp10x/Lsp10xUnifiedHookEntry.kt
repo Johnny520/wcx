@@ -44,7 +44,9 @@ class Lsp10xUnifiedHookEntry : XposedModule() {
     }
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
-        detectedApiVersion = param.apiVersion
+        detectedApiVersion = runCatching {
+            param.javaClass.getDeclaredField("apiVersion").apply { isAccessible = true }.getInt(param)
+        }.getOrDefault(API_102)
         isHotReloadSupported = detectedApiVersion >= API_102
 
         WeLogger.i(TAG, "module loaded, detected API version: $detectedApiVersion, hot-reload: $isHotReloadSupported")

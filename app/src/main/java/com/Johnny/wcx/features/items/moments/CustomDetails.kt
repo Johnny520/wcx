@@ -317,7 +317,6 @@ object CustomDetails : ClickableFeature(), WeMomentsContextMenuApi.IMenuItemsPro
                 val child = itemView.getChildAt(i)
                 val tag = child.tag
                 if (tag is Long) return tag
-                if (tag is java.lang.Long) return tag
             }
         }
         return null

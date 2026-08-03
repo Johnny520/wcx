@@ -49,7 +49,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import java.lang.reflect.Modifier
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.Path
@@ -241,7 +240,7 @@ object StickersSync : ClickableFeature(), IResolveDex {
     private val ctorResourceLoadOptions by dexConstructor {
         matcher {
             declaredClass {
-                modifiers = Modifier.FINAL
+                modifiers = Modifiers.FINAL
                 addFieldForType(Any::class.java)
                 addField {
                     type {
