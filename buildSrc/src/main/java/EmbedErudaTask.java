@@ -14,8 +14,14 @@ import java.nio.file.Files;
 public abstract class EmbedErudaTask extends DefaultTask {
 
     private static final int MAX_PART_LENGTH = 64000;
-    private static final int MAX_RETRIES = 5;
-    private static final long RETRY_DELAY_MS = 3000;
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 5000;
+
+    private static final String[] FALLBACK_URLS = {
+        "https://cdn.jsdelivr.net/npm/eruda@3.4.3/eruda.min.js",
+        "https://unpkg.com/eruda@3.4.3/eruda.min.js",
+        "https://raw.githubusercontent.com/liriliri/eruda/master/eruda.min.js",
+    };
 
     @Input
     public abstract Property<String> getUrl();
@@ -26,27 +32,35 @@ public abstract class EmbedErudaTask extends DefaultTask {
     @Input
     public abstract Property<String> getNamespace();
 
-    private byte[] downloadWithRetry(String url) throws IOException {
+    private byte[] downloadWithRetry(String primaryUrl) throws IOException {
+        String[] urls = new String[FALLBACK_URLS.length + 1];
+        urls[0] = primaryUrl;
+        System.arraycopy(FALLBACK_URLS, 0, urls, 1, FALLBACK_URLS.length);
+
         IOException lastException = null;
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                try (InputStream is = URI.create(url).toURL().openStream()) {
-                    return is.readAllBytes();
-                }
-            } catch (IOException e) {
-                lastException = e;
-                if (attempt < MAX_RETRIES) {
-                    System.err.println("Download attempt " + attempt + " failed, retrying in " + RETRY_DELAY_MS + "ms: " + e.getMessage());
-                    try {
-                        Thread.sleep(RETRY_DELAY_MS);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new IOException("Interrupted during retry", ie);
+        for (String url : urls) {
+            for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    try (InputStream is = URI.create(url).toURL().openStream()) {
+                        System.err.println("Successfully downloaded from " + url);
+                        return is.readAllBytes();
+                    }
+                } catch (IOException e) {
+                    lastException = e;
+                    if (attempt < MAX_RETRIES) {
+                        System.err.println("Download attempt " + attempt + " from " + url + " failed, retrying in " + RETRY_DELAY_MS + "ms: " + e.getMessage());
+                        try {
+                            Thread.sleep(RETRY_DELAY_MS);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException("Interrupted during retry", ie);
+                        }
                     }
                 }
             }
+            System.err.println("All attempts failed for " + url + ", trying next URL...");
         }
-        throw new IOException("Failed to download after " + MAX_RETRIES + " attempts", lastException);
+        throw new IOException("Failed to download from all URLs after " + (urls.length * MAX_RETRIES) + " total attempts", lastException);
     }
 
     @TaskAction
