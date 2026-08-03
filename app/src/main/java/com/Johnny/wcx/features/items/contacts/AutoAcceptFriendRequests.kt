@@ -97,7 +97,7 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
 
     // 好友验证接受方法：NetSceneVerifyUser / NetSceneAddFriend 等
     // 在 WeChat 中，接受好友验证的典型方法是 VerifyUserTask 或 NetSceneVerifyUser
-    private val methodVerifyAccept by dexMethod {
+    private val methodVerifyAccept by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.NetSceneVerifyUser",
@@ -108,7 +108,7 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
 
     // 好友验证页面的 initView — 用于检测用户手动进入验证页面时提取信息
     // 备用：如果 NetScene 方法无法匹配，通过验证页面输入来触发
-    private val methodVerifyOkClick by dexMethod {
+    private val methodVerifyOkClick by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.VerifyUserUtil",
@@ -118,12 +118,25 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
     }
 
     override fun resolveDex(dexKit: DexKitBridge) {
+        // 尝试新版特征（WeChat 8.0.76+）
         methodVerifyAccept.find(dexKit, allowFailure = true) {
             matcher {
                 usingEqStrings(
                     "MicroMsg.NetSceneVerifyUser",
                     "summerverify opcode[%s], verifyContent[%s], verifyScene[%s]"
                 )
+            }
+        }
+
+        // 如果新版特征未匹配，尝试旧版特征（NetSceneAddFriend）
+        if (methodVerifyAccept.isPlaceholder) {
+            methodVerifyAccept.find(dexKit, allowFailure = true) {
+                matcher {
+                    usingEqStrings(
+                        "MicroMsg.NetSceneAddFriend",
+                        "verify ok clicked"
+                    )
+                }
             }
         }
 
@@ -141,6 +154,19 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
 
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
+
+        // 检查 DexKit 方法是否成功解析
+        val verifyUnavailable = methodVerifyAccept.isPlaceholder
+        val verifyOkUnavailable = methodVerifyOkClick.isPlaceholder
+
+        if (verifyUnavailable && verifyOkUnavailable) {
+            WeLogger.w(TAG, "当前微信版本暂不支持自动同意好友申请 — DexKit 方法均未匹配")
+            runCatching {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    showToast("当前微信版本暂不支持自动同意好友申请")
+                }
+            }
+        }
 
         // 钩住好友验证接受方法，在微信内部接受好友请求时触发后续逻辑
         runCatching {

@@ -5,6 +5,7 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.crash.CrashInfoCollector.collectCrashInfo
 import com.Johnny.wcx.utils.polyfills.getThreadId
 import kotlin.system.exitProcess
+import java.util.concurrent.atomic.AtomicBoolean
 
 object JavaCrashHandler : Thread.UncaughtExceptionHandler {
 
@@ -13,7 +14,7 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
     private val defaultHandler: Thread.UncaughtExceptionHandler? =
         Thread.getDefaultUncaughtExceptionHandler()
 
-    private var isHandling = false
+    private val isHandling = AtomicBoolean(false)
 
     fun install() {
         Thread.setDefaultUncaughtExceptionHandler(this)
@@ -26,7 +27,7 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
     }
 
     override fun uncaughtException(thread: Thread, throwable: Throwable) {
-        if (isHandling) {
+        if (!isHandling.compareAndSet(false, true)) {
             WeLogger.e(
                 TAG,
                 "recursive crash detected, delegating to default handler"
@@ -35,8 +36,6 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
             defaultHandler?.uncaughtException(thread, throwable)
             return
         }
-
-        isHandling = true
 
         try {
             WeLogger.e(TAG, "========================================")

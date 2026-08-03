@@ -82,6 +82,24 @@ android {
 
     var foundKeystore = false
 
+    // ─── 签名配置 ──────────────────────────────────────────────────────────
+    // 签名信息通过环境变量传入，禁止在源码中硬编码密钥。
+    //
+    // 环境变量（CI 自动注入，本地开发需手动设置）：
+    //   WEKIT_KEYSTORE_FILE      = keystore 文件路径
+    //   WEKIT_KEYSTORE_PASSWORD  = keystore 密码
+    //   WEKIT_KEY_ALIAS          = 密钥别名
+    //   WEKIT_KEY_PASSWORD       = 密钥密码
+    //
+    // 构建规则：
+    //   - 环境变量存在 → 使用指定签名（正式版 / 本地测试版）
+    //   - 环境变量缺失 → 回退 Android 默认 debug keystore
+    //
+    // CI 流程（.github/workflows/ci.yml）：
+    //   - Tag 推送 (v*) → 读取 GitHub Secrets，使用固定正式签名
+    //   - 普通 Push     → 随机生成临时 keystore（测试包）
+    //   - Pull Request  → 无签名（debug 回退）
+    // ────────────────────────────────────────────────────────────────────────
     @Suppress("LocalVariableName")
     signingConfigs {
         val _storeFile = System.getenv("WEKIT_KEYSTORE_FILE")

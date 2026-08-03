@@ -28,7 +28,7 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
     private var disableOutCall by prefOption("voip_disable_ringtone_out_call", true)
     private var disableInCall by prefOption("voip_disable_ringtone_in_call", false)
 
-    private val methodPlaySound by dexMethod {
+    private val methodPlaySound by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.BaseSceneSetting", "playSound Failed Throwable t = ")
         }

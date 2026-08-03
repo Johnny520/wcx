@@ -5,6 +5,8 @@ on:
     branches:
       - master
       - dev
+    tags:
+      - 'v*'
     paths-ignore:
       - '**/*.md'
       - '**/*.txt'
@@ -34,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' || 
+      startsWith(github.ref, 'refs/tags/') ||
       (
         !startsWith(github.event.head_commit.message, '[skip ci]') && 
         (
@@ -91,29 +94,38 @@ jobs:
           cargo xtask configure
           cargo xtask build --native-only
 
-      - name: Prepare keystore
-        if: github.event_name != 'pull_request'
+      # ─── 正式版本签名（Tag 推送触发）────────────────────────────────────────
+      - name: Prepare release keystore (正式版)
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          # Try the project keystore first; fall back to a freshly generated one
-          # if the stored keystore is missing or incompatible with the CI JDK.
+          KS_FILE="$RUNNER_TEMP/wekit-keystore.jks"
+          CRED_FILE="$RUNNER_TEMP/keystore-creds.env"
+
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > "$KS_FILE"
+
+          if ! keytool -list -keystore "$KS_FILE" \
+               -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+               -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
+            echo "::error::正式版 keystore 验证失败，请检查 GitHub Secrets 配置"
+            exit 1
+          fi
+
+          echo "正式版 keystore 验证通过"
+          echo "KS_PASS=${{ secrets.KEYSTORE_PASSWORD }}" > "$CRED_FILE"
+          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$CRED_FILE"
+          echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$CRED_FILE"
+
+      # ─── 测试版本签名（普通 Push 触发）──────────────────────────────────────
+      - name: Prepare test keystore (测试版)
+        if: |
+          github.event_name != 'pull_request' &&
+          !startsWith(github.ref, 'refs/tags/')
+        run: |
           KS_FILE="$RUNNER_TEMP/wekit-keystore.jks"
           CRED_FILE="$RUNNER_TEMP/keystore-creds.env"
           KS_PASS="wcx-store-pass"
           KEY_ALIAS="wcx"
           KEY_PASS="wcx-store-pass"
-
-          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KS_FILE" 2>/dev/null || true
-            if keytool -list -keystore "$KS_FILE" -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-                 -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
-              echo "Using project keystore."
-              echo "KS_PASS=${{ secrets.KEYSTORE_PASSWORD }}" > "$CRED_FILE"
-              echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$CRED_FILE"
-              echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$CRED_FILE"
-              exit 0
-            fi
-            echo "Project keystore unreadable, generating a fresh one."
-          fi
 
           rm -f "$KS_FILE"
           keytool -genkeypair -v \
@@ -182,7 +194,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ success() && github.ref == 'refs/heads/master' }}
+    if: ${{ success() && startsWith(github.ref, 'refs/tags/') }}
     permissions:
       contents: write
 
@@ -204,7 +216,8 @@ jobs:
         run: |
           COMMIT_COUNT=$(git rev-list --count HEAD)
           GIT_HASH=$(git rev-parse --short HEAD)
-          VERSION_TAG="v${COMMIT_COUNT}"
+          # 使用推送的 tag 名称作为版本号
+          VERSION_TAG="${{ github.ref_name }}"
           echo "tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
           echo "hash=${GIT_HASH}" >> $GITHUB_OUTPUT
           echo "count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
@@ -223,8 +236,8 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # 获取上一个release的tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          # 获取上一个 release tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${{ github.ref_name }}$" | head -1 || echo "")
           if [ -z "$PREV_TAG" ]; then
             echo "prev_tag=" >> $GITHUB_OUTPUT
             echo "changelog=首次发布" >> $GITHUB_OUTPUT
