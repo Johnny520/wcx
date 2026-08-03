@@ -753,34 +753,17 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                             }
 
                             if (showGroupSelector) {
-                                // 使用 ContactsSelector 选择群聊
                                 val contacts = remember {
                                     WeDatabaseApi.getContacts().filter { it.wxId.endsWith("@chatroom") }
                                 }
-                                val selectedIds = remember { mutableStateOf(selectedGroupsState) }
-                                AlertDialogContent(
-                                    title = { Text("选择监控群聊") },
-                                    text = {
-                                        ContactsSelector(
-                                            contacts = contacts,
-                                            selectedIds = selectedIds.value,
-                                            onSelectionChange = { selectedIds.value = it },
-                                            showSearch = true,
-                                            showSelectAll = true
-                                        )
-                                    },
-                                    dismissButton = {
-                                        TextButton(onClick = { showGroupSelector = false }) {
-                                            Text("取消")
-                                        }
-                                    },
-                                    confirmButton = {
-                                        Button(onClick = {
-                                            selectedGroupsState = selectedIds.value
-                                            showGroupSelector = false
-                                        }) {
-                                            Text("确认")
-                                        }
+                                ContactsSelector(
+                                    title = "选择监控群聊",
+                                    contacts = contacts,
+                                    initialSelectedWxIds = selectedGroupsState,
+                                    onDismiss = { showGroupSelector = false },
+                                    onConfirm = { newSelection ->
+                                        selectedGroupsState = newSelection
+                                        showGroupSelector = false
                                     }
                                 )
                             }

@@ -4,40 +4,16 @@ package com.Johnny.wcx.loader.entry.lxp
 
 import androidx.annotation.Keep
 import com.Johnny.wcx.constants.PackageNames
-import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.loader.entry.common.ModuleLoader
-import com.Johnny.wcx.preferences.WePrefs
-import com.Johnny.wcx.utils.WeLogger
 import io.github.libxposed.api.XposedModule
-import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
-import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 
 @Keep
 class LxpHookEntry : XposedModule() {
 
-    companion object {
-        private const val TAG = "LxpHookEntry"
-        private const val API_102 = 102
-
-        @Volatile
-        var isHotReloadSupported: Boolean = false
-            private set
-    }
-
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         LxpHookImpl.init(this)
-        isHotReloadSupported = param.apiVersion >= API_102
-
-        WeLogger.i(TAG, "module loaded, API version: ${param.apiVersion}, hot-reload: $isHotReloadSupported")
-
-        // Cache the API version for cross-process reading
-        runCatching {
-            WePrefs.putInt(Preferences.CACHED_LSP_API_VERSION, param.apiVersion)
-        }.onFailure {
-            WeLogger.e(TAG, "failed to cache LSP API version", it)
-        }
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
@@ -58,26 +34,5 @@ class LxpHookEntry : XposedModule() {
                 )
             }
         }
-    }
-
-    override fun onHotReloading(param: HotReloadingParam): Boolean {
-        if (!isHotReloadSupported) {
-            WeLogger.w(TAG, "hot-reload requested but API version does not support it")
-            return false
-        }
-        WeLogger.i(TAG, "hot-reload requested, allowing...")
-        return true
-    }
-
-    override fun onHotReloaded(param: HotReloadedParam) {
-        if (!isHotReloadSupported) {
-            WeLogger.w(TAG, "hot-reload completed but API version does not support it — ignoring")
-            return
-        }
-        WeLogger.i(TAG, "hot-reload completed, re-initializing...")
-
-        LxpHookImpl.init(this)
-        param.oldHookHandles.forEach { it.unhook() }
-        ModuleLoader.hotReload()
     }
 }

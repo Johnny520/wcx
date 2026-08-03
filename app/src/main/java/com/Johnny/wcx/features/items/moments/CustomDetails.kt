@@ -262,18 +262,18 @@ object CustomDetails : ClickableFeature(), WeMomentsContextMenuApi.IMenuItemsPro
             root.postDelayed({
                 runCatching {
                     val recycler = root.findViewWhich<WxRecyclerView> { it is WxRecyclerView } ?: return@runCatching
-                    val adapter = recycler.adapter ?: return@runCatching
+                    val adapter = recycler.reflekt().getField("adapter") ?: return@runCatching
 
                     // Hook adapter.onBindViewHolder to intercept time display
                     adapter.reflekt()
                         .firstMethod { name = "onBindViewHolder" }
-                        .hookAfter { param ->
+                        .hookAfter {
                             if (!preciseTimeEnabled) return@hookAfter
-                            val holder = param.args[0]
+                            val holder = args[0]
                             runCatching {
                                 val itemView = holder.reflekt()
                                     .firstField { name = "itemView" }
-                                    .get() as? View ?: return@runCatching
+                                    .get(holder) as? View ?: return@runCatching
                                 processNotifyItemView(itemView)
                             }
                         }
