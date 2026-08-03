@@ -159,7 +159,17 @@ object MarkdownRendering : ClickableFeature(), IResolveDex {
                             maxWidth,
                             textPaint
                         )
-                        result = null
+                        try {
+                            // 仅当原方法返回 void 时才设置 result = null
+                            if (method is java.lang.reflect.Method) {
+                                val returnType = (method as java.lang.reflect.Method).returnType
+                                if (returnType == Void.TYPE) {
+                                    result = null
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                        }
                     } else {
                         val html = convertMarkdownToHtmlNative(processedText)
 
@@ -172,7 +182,17 @@ object MarkdownRendering : ClickableFeature(), IResolveDex {
                                 maxWidth,
                                 textPaint
                             )
-                            result = null
+                            try {
+                                // 仅当原方法返回 void 时才设置 result = null
+                                if (method is java.lang.reflect.Method) {
+                                    val returnType = (method as java.lang.reflect.Method).returnType
+                                    if (returnType == Void.TYPE) {
+                                        result = null
+                                    }
+                                }
+                            } catch (e: Throwable) {
+                                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                            }
                         } else {
                             WeLogger.e(TAG, "convertMarkdownToHtmlNative returned nullptr, falling back to original rendering")
                         }

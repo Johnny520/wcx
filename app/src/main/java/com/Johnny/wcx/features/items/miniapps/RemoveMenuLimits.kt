@@ -25,8 +25,16 @@ object RemoveMenuLimits : SwitchFeature(), IResolveDex {
                         val returnType = methodGetMenuItemVisibility1.method.returnType
                         showAndClickableEnumValue = enumValueOfClass(returnType, "SHOW_CLICKABLE")
                     }
-                    result = showAndClickableEnumValue
-                } catch (_: Throwable) {}
+                    // 仅当返回值类型匹配时才设置 result，避免类型不匹配造成 ClassCastException
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType.isInstance(showAndClickableEnumValue)) {
+                            result = showAndClickableEnumValue
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                }
             }
         }
     }

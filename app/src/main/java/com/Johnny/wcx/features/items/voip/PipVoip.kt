@@ -422,14 +422,34 @@ object PipVoip : SwitchFeature(), IResolveDex {
             val activity = fieldFlutterVoipActivity.field.get(thisObject) as VideoActivity
             sessions.getValue(activity).enterPip()
             methodFlutterCallbackInvoke.method.invoke(args[3], true)
-            result = null
+            try {
+                // 仅当原方法返回 void 时才设置 result = null
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         methodVoipMinimize.hookBefore {
             val session = sessions.values.filterIsInstance<SingleSession>()
                 .first { it.manager === thisObject }
             session.enterPip()
-            result = true
+            try {
+                // 仅当原方法返回 boolean 时才设置 result = true
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = true
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         VideoActivity::class.reflekt().firstMethod {
@@ -461,7 +481,17 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
         methodMultiTalkMinimize.hookBefore {
             sessions.getValue(thisObject as MultiTalkMainUI).enterPip()
-            result = null
+            try {
+                // 仅当原方法返回 void 时才设置 result = null
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         Activity::class.reflekt().firstMethod { name = "onUserLeaveHint" }.hookBefore {

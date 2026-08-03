@@ -17,8 +17,18 @@ object RemoveMomentsAds : SwitchFeature() {
                 parameters(String::class)
             }
             .hookBefore {
-                WeLogger.i(TAG, "blocked ad")
-                result = null
+                try {
+                    WeLogger.i(TAG, "blocked ad")
+                    // 构造函数返回 void，设置 result = null 阻断构造
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            result = null
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                }
             }
     }
 }

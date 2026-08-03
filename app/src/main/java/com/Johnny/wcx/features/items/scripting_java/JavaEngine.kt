@@ -164,7 +164,17 @@ object JavaEngine {
                     val ifIntercept = invoke(arrayOf(text), plugin.interpreter)
                     WeLogger.i(TAG, "onClickSendBtn executed for script ${plugin.name}; ifIntercept=${ifIntercept}")
                     if (ifIntercept == true) {
-                        param.result = null
+                        try {
+                            // 仅当原方法返回 void 时才设置 result = null
+                            if (param.method is java.lang.reflect.Method) {
+                                val returnType = (param.method as java.lang.reflect.Method).returnType
+                                if (returnType == Void.TYPE) {
+                                    param.result = null
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                        }
                     }
                 }
             } catch (e: Exception) {

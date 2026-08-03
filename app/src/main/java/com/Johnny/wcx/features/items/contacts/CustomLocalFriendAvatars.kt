@@ -267,7 +267,17 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                     }
 
                     if (applyCustomAvatar(imageView, wxId, roundAvatarRadiusFactor)) {
-                        result = null
+                        try {
+                            // 仅当原方法返回 void 时才设置 result = null
+                            if (method is java.lang.reflect.Method) {
+                                val returnType = (method as java.lang.reflect.Method).returnType
+                                if (returnType == Void.TYPE) {
+                                    result = null
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                        }
                     }
                 }
                 WeLogger.i(TAG, "hook $name set up successfully")
@@ -282,7 +292,17 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                     val username = args.getOrNull(0) as? String ?: return@hookBefore
                     val gallery = thisObject
                     if (applyCustomHdAvatar(gallery, username)) {
-                        result = null
+                        try {
+                            // 仅当原方法返回 void 时才设置 result = null
+                            if (method is java.lang.reflect.Method) {
+                                val returnType = (method as java.lang.reflect.Method).returnType
+                                if (returnType == Void.TYPE) {
+                                    result = null
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                        }
                         (gallery as? View)?.let { view ->
                             view.post { applyCustomHdAvatar(gallery, username) }
                             view.postDelayed({ applyCustomHdAvatar(gallery, username) }, 300L)

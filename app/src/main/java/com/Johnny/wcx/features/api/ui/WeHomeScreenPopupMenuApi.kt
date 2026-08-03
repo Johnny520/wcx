@@ -123,10 +123,20 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                     unhook = ImageView::class.reflekt().firstMethod {
                         name = "setImageResource"
                     }.hookBeforeDirectly {
-                        val fakeResId = args[0] as Int
-                        val imageView = thisObject as ImageView
-                        imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
-                        result = null
+                        try {
+                            val fakeResId = args[0] as Int
+                            val imageView = thisObject as ImageView
+                            imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
+                            // setImageResource 返回 void，设置 result = null 阻断原方法
+                            if (method is java.lang.reflect.Method) {
+                                val returnType = (method as java.lang.reflect.Method).returnType
+                                if (returnType == Void.TYPE) {
+                                    result = null
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                        }
                     }
                 }
 

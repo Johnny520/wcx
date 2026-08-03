@@ -248,7 +248,17 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
             val activity = ((args[0] as View).context as ContextThemeWrapper).baseContext as Activity
 
             if (stealthMode) {
-                this.result = null
+                try {
+                    // 仅当原方法返回 void 时才设置 result = null
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            this.result = null
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                }
                 ensureSensorAlive(10000L)
 
                 val (ax, ay, az) = latestAccel.let { Triple(it[0], it[1], it[2]) }
@@ -300,7 +310,17 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
     }
 
     private fun showSelectDialog(param: XC_MethodHook.MethodHookParam, isDice: Boolean, activity: Activity) {
-        param.result = null
+        try {
+            // 仅当原方法返回 void 时才设置 result = null
+            if (param.method is java.lang.reflect.Method) {
+                val returnType = (param.method as java.lang.reflect.Method).returnType
+                if (returnType == Void.TYPE) {
+                    param.result = null
+                }
+            }
+        } catch (e: Throwable) {
+            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+        }
 
         showComposeDialog(activity) {
             EmojiGameDialogContent(

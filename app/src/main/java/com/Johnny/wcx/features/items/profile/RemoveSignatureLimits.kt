@@ -30,10 +30,18 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
                                 name = "setFilters"
                             }.hookBeforeDirectly {
                                 try {
-                                    result = null
-                                } catch (_: Throwable) {}
+                                    // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
+                                    if (method is java.lang.reflect.Method) {
+                                        val returnType = (method as java.lang.reflect.Method).returnType
+                                        if (returnType == Void.TYPE) {
+                                            result = null
+                                        }
+                                    }
+                                } catch (e: Throwable) {
+                                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                                }
                             }
-                    } catch (_: Throwable) {}
+                    } catch (e: Throwable) {}
                 }
 
                 hookAfter {
@@ -43,14 +51,22 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
                         (activity.reflekt()
                             .firstField { type = TextView::class }
                             .get()!! as TextView).visibility = View.GONE
-                    } catch (_: Throwable) {}
+                    } catch (e: Throwable) {}
                 }
             }
 
         methodTextWatcherAfterTextChanged.hookBefore {
             try {
-                result = null
-            } catch (_: Throwable) {}
+                // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         methodConfirmButtonOnClickListenerOnClick.apply {
@@ -60,16 +76,24 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
                         .firstMethod { name = "matches" }
                         .hookBeforeDirectly {
                             try {
-                                result = false
-                            } catch (_: Throwable) {}
+                                // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+                                if (method is java.lang.reflect.Method) {
+                                    val returnType = (method as java.lang.reflect.Method).returnType
+                                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                                        result = false
+                                    }
+                                }
+                            } catch (e: Throwable) {
+                                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                            }
                         }
-                } catch (_: Throwable) {}
+                } catch (e: Throwable) {}
             }
             hookAfter {
                 try {
                     stringMatchesMethodUnhook.unhook()
                     setFiltersUnhook.unhook()
-                } catch (_: Throwable) {}
+                } catch (e: Throwable) {}
             }
         }
     }

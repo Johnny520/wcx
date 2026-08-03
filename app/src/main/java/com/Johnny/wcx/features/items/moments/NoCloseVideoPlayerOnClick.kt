@@ -63,8 +63,16 @@ object NoCloseVideoPlayerOnClick : SwitchFeature(), IResolveDex {
                 }
 
                 // always consume
-                result = false
-            } catch (_: Throwable) {}
+                // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = false
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
     }
 

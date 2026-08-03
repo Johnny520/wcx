@@ -343,7 +343,16 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             val wxId = String(args[5] as ByteArray)
             if (!temporarilyShown && wxId in hiddenContacts) {
                 pendingVoipUser = wxId
-                result = null
+                try {
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            result = null
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获
+                }
             }
         }
 
@@ -354,7 +363,16 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
                 val callerWxId = args[0].reflekt().firstField { type = BString }.get()!! as String
                 if (!temporarilyShown && callerWxId in hiddenContacts) {
                     pendingVoipUser = callerWxId
-                    result = null
+                    try {
+                        if (method is java.lang.reflect.Method) {
+                            val returnType = (method as java.lang.reflect.Method).returnType
+                            if (returnType == Void.TYPE) {
+                                result = null
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        // 兜底异常捕获
+                    }
                 }
             }
         }
@@ -363,7 +381,16 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             val wxId = args[5] as? String? ?: return@hookBefore
             if (!temporarilyShown && wxId in hiddenContacts) {
                 pendingVoipUser = wxId
-                result = null
+                try {
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            result = null
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获
+                }
             }
         }
 

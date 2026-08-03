@@ -522,13 +522,31 @@ object ConversationAggregation : ClickableFeature(),
     private fun hookOpenFolder() {
         LauncherUI::class.reflekt().firstMethod("startChatting").hookBefore {
             interceptFolderChatOpen(args.firstOrNull() as? String, thisObject) {
-                result = null
+                try {
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            result = null
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获
+                }
             }
         }
 
         BaseConversationUI::class.reflekt().firstMethod("startChatting").hookBefore {
             interceptFolderChatOpen(args.firstOrNull() as? String, thisObject) {
-                result = null
+                try {
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            result = null
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获
+                }
             }
         }
     }
@@ -631,7 +649,16 @@ object ConversationAggregation : ClickableFeature(),
             val context = thisObject as? Context ?: return@hookBefore
 
             // Cancel forwarding to the folder row itself — it has no real chat thread.
-            result = null
+            try {
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
 
             // Capture the hook param so the dialog callback can re-run the ORIGINAL doClickUser
             // (bypassing this hook, so no recursion) with the chosen member's username.
@@ -676,7 +703,16 @@ object ConversationAggregation : ClickableFeature(),
         val folder = folderById(folderId) ?: return
 
         // Cancel the tap on the folder row itself — it has no real chat thread.
-        param.result = null
+        try {
+            if (param.method is java.lang.reflect.Method) {
+                val returnType = (param.method as java.lang.reflect.Method).returnType
+                if (returnType == Void.TYPE) {
+                    param.result = null
+                }
+            }
+        } catch (e: Throwable) {
+            // 兜底异常捕获
+        }
 
         showFolderMemberPicker(itemView.context, folder) { selectedWxId ->
             runCatching {
@@ -819,7 +855,18 @@ object ConversationAggregation : ClickableFeature(),
         if (methodConversationStorageUpdateUnreadByTalker.isPlaceholder) return
         methodConversationStorageUpdateUnreadByTalker.hookBefore {
             val username = args.firstOrNull() as? String ?: return@hookBefore
-            if (isFolderId(username)) result = true
+            if (isFolderId(username)) {
+            try {
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = true
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
+        }
         }
     }
 

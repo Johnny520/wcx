@@ -273,14 +273,26 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     val applicableItems = menuItems.values.flatten()
                         .filter { it.isSupported(msgInfoWrapper) }
                     showMergedMenuDialog(curView, context, msgInfoWrapper, applicableItems)
-                    result = null
+                    // 仅当原方法返回 void 时才设置 result = null
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            result = null
+                        }
+                    }
                     return@hookBefore
                 }
 
                 for (item in menuItems.values.flatten()) {
                     if (item.id == menuItem.itemId) {
                         item.onClick(curView, context, msgInfoWrapper)
-                        result = null
+                        // 仅当原方法返回 void 时才设置 result = null
+                        if (method is java.lang.reflect.Method) {
+                            val returnType = (method as java.lang.reflect.Method).returnType
+                            if (returnType == Void.TYPE) {
+                                result = null
+                            }
+                        }
                         return@hookBefore
                     }
                 }
@@ -330,7 +342,13 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                 val view = getViewFromMultiSelectHandler(thisObject)
 
                 showMultiSelectMenuDialog(view, chattingContext, msgInfos)
-                result = null
+                // 仅当原方法返回 void 时才设置 result = null
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
             } catch (ex: Throwable) {
                 WeLogger.e(
                     TAG,

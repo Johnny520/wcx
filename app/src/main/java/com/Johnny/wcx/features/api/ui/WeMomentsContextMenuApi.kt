@@ -187,7 +187,13 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
             try {
                 if (item.id == clickedId) {
                     item.onClick(context)
-                    param.result = null
+                    // 仅当原方法返回 void 时才设置 result = null
+                    if (param.method is java.lang.reflect.Method) {
+                        val returnType = (param.method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            param.result = null
+                        }
+                    }
                     return
                 }
             } catch (e: Throwable) {

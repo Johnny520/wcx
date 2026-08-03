@@ -33,28 +33,60 @@ object RemoveSplashAds : SwitchFeature(), IResolveDex {
     override fun onEnable() {
         methodIsAdContact.hookBefore {
             try {
-                result = false
-            } catch (_: Throwable) {}
+                // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = false
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         methodAdDataCallback.hookBefore {
             try {
-                result = null
-            } catch (_: Throwable) {}
+                // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         methodCheckCanShowAd.hookBefore {
             try {
-                result = false
-            } catch (_: Throwable) {}
+                // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = false
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         AppBrandAdUI::class.java.hookBeforeOnCreate {
             try {
                 val activity = thisObject as Activity
                 activity.finish()
-                result = null
-            } catch (_: Throwable) {}
+                // onCreate 方法返回 void，仅当返回类型匹配时才设置 result
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
     }
 }
