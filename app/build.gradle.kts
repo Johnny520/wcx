@@ -133,7 +133,9 @@ android {
         }
 
         release {
-            optimization.enable = true
+            isMinifyEnabled = false
+            isShrinkResources = false
+            optimization.enable = false
             signingConfig = signingConfigs.getByName(if (foundKeystore) "release" else "debug")
         }
     }

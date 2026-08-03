@@ -153,7 +153,9 @@ public abstract class EmbedErudaTask extends DefaultTask {
         File outDir = getOutputDir().get().getAsFile();
         File outputFile = new File(outDir, pkg.replace(".", "/") + "/eruda/ErudaProvider.kt");
 
-        String escaped = jsContent.replace("$", "${'$'}");
+        // Use \u0024 (Unicode escape for $) instead of ${'$'}
+        // to avoid template expression parsing issues in Kotlin raw strings
+        String escaped = jsContent.replace("$", "\\u0024");
 
         int partCount = (escaped.length() + MAX_PART_LENGTH - 1) / MAX_PART_LENGTH;
 
