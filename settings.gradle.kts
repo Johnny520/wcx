@@ -16,33 +16,11 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-//        maven {
-//            url = uri("$rootDir/local-maven")
-//            content {
-//                includeModule("androidx.compose.ui", "ui")
-//                includeModule("androidx.compose.ui", "ui-android")
-//                includeModule("androidx.compose.ui", "ui-jvmstubs")
-//                includeModule("androidx.compose.ui", "ui-linuxx64stubs")
-//                includeModule("androidx.compose.material3", "material3")
-//                includeModule("androidx.compose.material3", "material3-android")
-//                includeModule("androidx.compose.material3", "material3-jvmstubs")
-//                includeModule("androidx.compose.material3", "material3-linuxx64stubs")
-//            }
-//        }
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("com\\.google.*")
                 includeGroupByRegex("androidx.*")
-
-//                excludeModule("androidx.compose.ui", "ui")
-//                excludeModule("androidx.compose.ui", "ui-android")
-//                excludeModule("androidx.compose.ui", "ui-jvmstubs")
-//                excludeModule("androidx.compose.ui", "ui-linuxx64stubs")
-//                excludeModule("androidx.compose.material3", "material3")
-//                excludeModule("androidx.compose.material3", "material3-android")
-//                excludeModule("androidx.compose.material3", "material3-jvmstubs")
-//                excludeModule("androidx.compose.material3", "material3-linuxx64stubs")
             }
         }
         maven("https://jitpack.io") {

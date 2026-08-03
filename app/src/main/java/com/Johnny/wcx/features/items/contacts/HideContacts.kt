@@ -321,19 +321,19 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             name = "rawQueryWithFactory"
             parameters(SQLiteDatabase.CursorFactory::class, BString, Array<Any>::class, BString)
         }.hookBefore {
-            if (temporarilyShown) return@hookBefore
+            try {
+                if (temporarilyShown) return@hookBefore
 
-            val sql = args[1] as String
-            if (FTS_SQL_REGEX.containsMatchIn(sql) || sql.startsWith(SQL_SELECT_MESSAGE) || sql.startsWith(SQL_SELECT_MESSAGES_BY_KEYWORD)) {
-                val hideValueText = hiddenContacts.joinToString(",") { "\"$it\"" }
+                val sql = args[1] as String
+                val hidden = hiddenContacts
+                if (hidden.isEmpty()) return@hookBefore
 
-                val newSql = if (sql.endsWith(";")) {
-                    sql.dropLast(1)
-                } else {
-                    sql
-                }.let { "SELECT * FROM ($it) AS a WHERE aux_index NOT IN ($hideValueText);" }
-
-                args[1] = newSql
+                val rewritten = rewriteFtsSql(sql, hidden)
+                if (rewritten != null) {
+                    args[1] = rewritten
+                }
+            } catch (e: Exception) {
+                WeLogger.w(TAG, "FTS hook error", e)
             }
         }
 
@@ -569,9 +569,19 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             return
         }
         methodSqliteWrapperRawQuery.hookBefore {
-            val sql = args.firstOrNull() as? String ?: return@hookBefore
-            (rewriteConversationListSql(sql) ?: rewriteContactSelectorSql(sql))
-                ?.let { args[0] = it }
+            try {
+                val sql = args.firstOrNull() as? String ?: return@hookBefore
+                (rewriteConversationListSql(sql)
+                    ?: rewriteContactSelectorSql(sql)
+                    ?: rewriteNewFriendsSql(sql)
+                    ?: rewriteUnreadCountSql(sql)
+                    ?: rewriteGroupCountSql(sql)
+                    ?: rewriteExdeviceRankSql(sql)
+                    ?: rewriteMomentsCommentsSql(sql))
+                    ?.let { args[0] = it }
+            } catch (e: Exception) {
+                WeLogger.w(TAG, "SQL wrapper hook error", e)
+            }
         }
     }
 
@@ -636,6 +646,158 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
         return lower.contains("pyinitial") || lower.contains("quanpin")
     }
 
+    // --- Additional SQL rewrite rules from wuyu reference ---
+
+    // Rewrites new-friends queries (fmessage_conversation) to exclude hidden contacts.
+    private fun rewriteNewFriendsSql(sql: String): String? {
+        if (temporarilyShown) return null
+
+        val hidden = hiddenContacts
+        if (hidden.isEmpty()) return null
+
+        if (!looksLikeNewFriendsQuery(sql)) return null
+
+        val condition = "talker NOT IN (" +
+                hidden.joinToString(",") { "'${it.replace("'", "''")}'" } + ")"
+        return injectCondition(sql, condition)
+    }
+
+    private fun looksLikeNewFriendsQuery(sql: String): Boolean {
+        val lower = sql.lowercase()
+        return lower.contains("select") &&
+                lower.contains("from fmessage_conversation") &&
+                !lower.contains("encrypttalker=")
+    }
+
+    // Rewrites unread-count queries to exclude hidden contacts from badge counts.
+    private fun rewriteUnreadCountSql(sql: String): String? {
+        if (temporarilyShown) return null
+
+        val hidden = hiddenContacts
+        if (hidden.isEmpty()) return null
+
+        if (!looksLikeUnreadCountQuery(sql)) return null
+
+        val condition = "rconversation.username NOT IN (" +
+                hidden.joinToString(",") { "'${it.replace("'", "''")}'" } + ")"
+        return injectCondition(sql, condition)
+    }
+
+    private fun looksLikeUnreadCountQuery(sql: String): Boolean {
+        val lower = sql.lowercase()
+        return lower.contains("select") &&
+                lower.contains("rconversation") &&
+                lower.contains("unreadcount > 0")
+    }
+
+    // Rewrites group-count queries to exclude hidden contacts from group count badges.
+    private const val GROUP_COUNT_PREFIX =
+        "select count(username) from rcontact where type & 1 !=0 and type & 32 =0 and type & 8 =0 and verifyflag & 8 = 0"
+    private const val CONTACT_COUNT_BARE_OR_TAIL = "or username = 'weixin'"
+
+    private fun rewriteGroupCountSql(sql: String): String? {
+        if (temporarilyShown) return null
+
+        val hidden = hiddenContacts
+        if (hidden.isEmpty()) return null
+
+        if (!looksLikeGroupCountQuery(sql)) return null
+
+        val condition = "rcontact.username NOT IN (" +
+                hidden.joinToString(",") { "'${it.replace("'", "''")}'" } + ")"
+        return injectCondition(sql, condition)
+    }
+
+    private fun looksLikeGroupCountQuery(sql: String): Boolean {
+        val lower = sql.lowercase()
+        return lower.startsWith(GROUP_COUNT_PREFIX) && !lower.contains(CONTACT_COUNT_BARE_OR_TAIL)
+    }
+
+    // Rewrites exdevice-rank queries to exclude hidden contacts from device ranking.
+    private fun rewriteExdeviceRankSql(sql: String): String? {
+        if (temporarilyShown) return null
+
+        val hidden = hiddenContacts
+        if (hidden.isEmpty()) return null
+
+        if (!looksLikeExdeviceRankQuery(sql)) return null
+
+        val condition = "username NOT IN (" +
+                hidden.joinToString(",") { "'${it.replace("'", "''")}'" } + ")"
+        return injectCondition(sql, condition)
+    }
+
+    private fun looksLikeExdeviceRankQuery(sql: String): Boolean {
+        val lower = sql.lowercase()
+        return lower.startsWith("select *, rowid from harddevicerankinfo") &&
+                lower.contains("order by score")
+    }
+
+    // Rewrites moments-comments queries (snscomment) to exclude hidden contacts' comments.
+    private fun rewriteMomentsCommentsSql(sql: String): String? {
+        if (temporarilyShown) return null
+
+        val hidden = hiddenContacts
+        if (hidden.isEmpty()) return null
+
+        if (!looksLikeMomentsCommentsQuery(sql)) return null
+
+        val condition = "talker NOT IN (" +
+                hidden.joinToString(",") { "'${it.replace("'", "''")}'" } + ")"
+        return injectCondition(sql, condition)
+    }
+
+    private fun looksLikeMomentsCommentsQuery(sql: String): Boolean {
+        return sql.lowercase().contains("from snscomment")
+    }
+
+    // --- FTS SQL rewriting ---
+
+    // Rewrites FTS (Full-Text Search) queries to exclude hidden contacts.
+    // Handles multiple FTS table patterns and chatroom members queries.
+    private fun rewriteFtsSql(sql: String, hidden: Set<String>): String? {
+        // Service notify queries use "talker" column
+        if (sql.startsWith(SQL_SELECT_SERVICE_NOTIFY)) {
+            return wrapWithNotIn(sql, "talker", hidden)
+        }
+        // Chatroom members queries need special handling
+        val chatroomRewritten = rewriteChatroomMembersSql(sql, hidden)
+        if (chatroomRewritten != null) return chatroomRewritten
+        // Main FTS queries: skip pinned queries (aux_index = ?) to avoid breaking pinned chats
+        val matchesFts = FTS_SQL_REGEX.containsMatchIn(sql) ||
+                sql.startsWith(SQL_SELECT_MESSAGE) ||
+                sql.startsWith(SQL_SELECT_MESSAGES_BY_KEYWORD) ||
+                sql.startsWith(SQL_SELECT_CHATROOM_BY_INDEX)
+        if (matchesFts && !AUX_INDEX_PINNED_REGEX.containsMatchIn(sql)) {
+            return wrapWithNotIn(sql, "aux_index", hidden)
+        }
+        return null
+    }
+
+    // Rewrites chatroom members SQL queries (FTS5ChatRoomMembers) to exclude hidden contacts
+    // from both the chatroom and member columns.
+    private const val CHATROOM_MEMBERS_JOIN = "FTS5ChatRoomMembers ON (aux_index = chatroom)"
+    private const val CHATROOM_MEMBERS_CROSS_JOIN = "FROM FTS5ChatRoomMembers, "
+
+    private fun rewriteChatroomMembersSql(sql: String, hidden: Set<String>): String? {
+        if (!sql.contains("FTS5ChatRoomMembers")) return null
+        val list = hidden.joinToString(",") { "'${it.replace("'", "''")}'" }
+        val filter = "chatroom NOT IN ($list) AND member NOT IN ($list)"
+        return when {
+            sql.contains(CHATROOM_MEMBERS_JOIN) ->
+                sql.replace(CHATROOM_MEMBERS_JOIN, "FTS5ChatRoomMembers ON (aux_index = chatroom AND $filter)")
+            sql.contains(CHATROOM_MEMBERS_CROSS_JOIN) && !sql.contains(";") ->
+                injectCondition(sql, filter)
+            else -> null
+        }
+    }
+
+    // Wraps a SQL query with a subquery that filters by column NOT IN the hidden set.
+    private fun wrapWithNotIn(sql: String, column: String, hidden: Set<String>): String {
+        val list = hidden.joinToString(",") { "'${it.replace("'", "''")}'" }
+        return "SELECT * FROM (${sql.removeSuffix(";")}) AS a WHERE $column NOT IN ($list);"
+    }
+
     // Insert an extra WHERE predicate before any ORDER BY / GROUP BY / LIMIT tail, joining with the
     // existing WHERE when present. Mirrors ConversationGrouping.injectCondition.
     private fun injectCondition(sql: String, condition: String): String {
@@ -694,8 +856,16 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
     private const val SQL_SELECT_MESSAGES_BY_KEYWORD =
         "SELECT FTS5MetaMessage.docid, type, subtype, entity_id, aux_index, timestamp, talker FROM FTS5MetaMessage"
 
+    private const val SQL_SELECT_SERVICE_NOTIFY =
+        "SELECT FTS5MetaServiceNotify.docid, type, subtype, entity_id, aux_index,"
+
+    private const val SQL_SELECT_CHATROOM_BY_INDEX =
+        "SELECT aux_index FROM FTS5IndexChatroomMember"
+
     private val FTS_SQL_REGEX =
-        Regex("^SELECT (FTS5MetaContact|FTS5MetaTopHits|FTS5MetaKefuContact|FTS5MetaFeature|FTS5MetaWeApp|FTS5MetaFinderFollow|FTS5MetaFavorite)\\.docid, type, subtype, entity_id, aux_index,.*")
+        Regex("^SELECT (FTS5MetaContact|FTS5MetaTopHits|FTS5MetaKefuContact|FTS5MetaFeature|FTS5MetaWeApp|FTS5MetaFinderFollow|FTS5MetaFavorite|FTS5MetaChatroomMember|FTS5MetaAIHistory|FTS5MetaAIHistoryChat)\\.docid, type, subtype, entity_id, aux_index,.*")
+
+    private val AUX_INDEX_PINNED_REGEX = Regex("aux_index\\s*=\\s*[?']", RegexOption.IGNORE_CASE)
 
     private val hiddenPositions = mutableIntSetOf()
 

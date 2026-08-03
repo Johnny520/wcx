@@ -53,7 +53,7 @@ compileSdk = "37"
 # noinspection UnusedVersionCatalogEntry
 compileSdkMinor = "0"
 # noinspection UnusedVersionCatalogEntry
-jdk = "21"
+jdk = "17"
 # noinspection UnusedVersionCatalogEntry
 ndk = "30.0.14904198"
 
