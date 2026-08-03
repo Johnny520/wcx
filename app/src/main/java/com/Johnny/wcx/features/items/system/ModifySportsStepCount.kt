@@ -50,12 +50,14 @@ object ModifySportsStepCount : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         methodGetSteps.hookAfter {
-            val value = passiveValue
-            if (value < 0) return@hookAfter
-            result = when (passiveMode) {
-                PassiveMode.FIXED -> value
-                PassiveMode.MULTIPLIER -> (result as Long) * value
-            }
+            try {
+                val value = passiveValue
+                if (value < 0) return@hookAfter
+                result = when (passiveMode) {
+                    PassiveMode.FIXED -> value
+                    PassiveMode.MULTIPLIER -> (result as Long) * value
+                }
+            } catch (_: Throwable) {}
         }
     }
 

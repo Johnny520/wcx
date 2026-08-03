@@ -24,11 +24,15 @@ object DisableWebViewSafetyWarnings : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodGetIsInterceptEnabled.hookBefore {
-            result = false
+            try {
+                result = false
+            } catch (_: Throwable) {}
         }
 
         methodGetIsUrlSafe.hookBefore {
-            result = true
+            try {
+                result = true
+            } catch (_: Throwable) {}
         }
     }
 }

@@ -20,11 +20,13 @@ object RemoveMenuLimits : SwitchFeature(), IResolveDex {
             methodGetMenuItemVisibility2
         ).forEach {
             it.hookBefore {
-                if (!::showAndClickableEnumValue.isInitialized) {
-                    val returnType = methodGetMenuItemVisibility1.method.returnType
-                    showAndClickableEnumValue = enumValueOfClass(returnType, "SHOW_CLICKABLE")
-                }
-                result = showAndClickableEnumValue
+                try {
+                    if (!::showAndClickableEnumValue.isInitialized) {
+                        val returnType = methodGetMenuItemVisibility1.method.returnType
+                        showAndClickableEnumValue = enumValueOfClass(returnType, "SHOW_CLICKABLE")
+                    }
+                    result = showAndClickableEnumValue
+                } catch (_: Throwable) {}
             }
         }
     }

@@ -36,7 +36,17 @@ object DisableHostHotUpdates : SwitchFeature() {
             }
             .forEach {
                 it.hookBefore {
-                    result = false
+                    try {
+                        // isTinkerEnabled 系列方法返回 boolean，仅当返回类型匹配时才设置 result
+                        if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                            result = false
+                        }
+                    }
+                    } catch (e: Throwable) {
+                        // 兜底异常捕获
+                    }
                 }
             }
 

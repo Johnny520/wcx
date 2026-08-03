@@ -17,7 +17,9 @@ object DisableShareScreenshotToast : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodDisplayToast.hookBefore {
-            result = null
+            try {
+                result = null
+            } catch (_: Throwable) {}
         }
     }
 }

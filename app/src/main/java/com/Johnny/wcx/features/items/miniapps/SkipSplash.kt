@@ -27,6 +27,10 @@ object SkipSplash : SwitchFeature(), IResolveDex {
     override val shouldLoadInCurrentProcess get() = TargetProcesses.isInMain || TargetProcesses.currentType == TargetProcesses.PROC_APPBRAND
 
     override fun onEnable() {
-        methodShowSplash.hookBefore { result = null }
+        methodShowSplash.hookBefore {
+            try {
+                result = null
+            } catch (_: Throwable) {}
+        }
     }
 }

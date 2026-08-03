@@ -521,25 +521,47 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         plainText: String,
         clickableWxIds: List<Pair<String, String>>
     ) {
-        // 居中系统提示（带颜色、可点击）
-        val gmcContent = buildGmcContent(eventType, color, plainText, clickableWxIds)
-        WeMessageApi.createSimpleMsgInfoAndInsert(
-            type = MessageType.TEXT.code,
-            talker = group,
-            content = gmcContent,
-            currentTime = System.currentTimeMillis()
-        )
-
-        // 假用户播报：额外生成虚拟假用户发言（仅本地可见，不会发送到群内）
-        if (fakeUserBroadcast && eventType in listOf("join", "leave", "kick", "kick_extra")) {
-            // 生成一条虚拟用户消息，纯文本，不带颜色
+        try {
+            // 居中系统提示（带颜色、可点击）—— 始终插入，不受假用户播报开关影响
+            val gmcContent = buildGmcContent(eventType, color, plainText, clickableWxIds)
             WeMessageApi.createSimpleMsgInfoAndInsert(
                 type = MessageType.TEXT.code,
                 talker = group,
-                content = plainText,
-                currentTime = System.currentTimeMillis() + 1
+                content = gmcContent,
+                currentTime = System.currentTimeMillis()
             )
+
+            // 假用户播报：仅开关开启时，额外生成虚拟假用户发言（纯文本，无 wxId，仅本地可见）
+            if (fakeUserBroadcast && eventType in listOf("join", "leave", "kick", "kick_extra")) {
+                // 使用干净文本：剔除 (wxId) 等协议原始标记，仅保留纯昵称
+                val cleanText = cleanProtocolMarkers(plainText)
+                WeMessageApi.createSimpleMsgInfoAndInsert(
+                    type = MessageType.TEXT.code,
+                    talker = group,
+                    content = cleanText,
+                    currentTime = System.currentTimeMillis() + 1
+                )
+            }
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "triggerLocalNotification failed", e)
         }
+    }
+
+    /**
+     * 清理文本中的协议格式标记，用于假用户播报
+     * 将 "昵称(wxid_xxx)" 还原为 "昵称"，同时移除 GMC 协议前缀等多余字符
+     */
+    private fun cleanProtocolMarkers(text: String): String {
+        return text
+            // 移除 GMC 协议头部（若意外泄漏）
+            .replace(Regex("""\[gmc:[^\]]*]"""), "")
+            // 移除 (wxid_xxx) 格式的协议标识
+            .replace(Regex("""\(wxid_[a-zA-Z0-9_]+\)"""), "")
+            // 移除 (@chatroom) 后缀
+            .replace(Regex("""\(@chatroom\)"""), "")
+            // 清理多余空格
+            .replace(Regex("""\s+"""), " ")
+            .trim()
     }
 
     /**

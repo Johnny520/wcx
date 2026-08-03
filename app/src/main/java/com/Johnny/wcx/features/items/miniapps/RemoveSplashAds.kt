@@ -32,21 +32,29 @@ object RemoveSplashAds : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodIsAdContact.hookBefore {
-            result = false
+            try {
+                result = false
+            } catch (_: Throwable) {}
         }
 
         methodAdDataCallback.hookBefore {
-            result = null
+            try {
+                result = null
+            } catch (_: Throwable) {}
         }
 
         methodCheckCanShowAd.hookBefore {
-            result = false
+            try {
+                result = false
+            } catch (_: Throwable) {}
         }
 
         AppBrandAdUI::class.java.hookBeforeOnCreate {
-            val activity = thisObject as Activity
-            activity.finish()
-            result = null
+            try {
+                val activity = thisObject as Activity
+                activity.finish()
+                result = null
+            } catch (_: Throwable) {}
         }
     }
 }

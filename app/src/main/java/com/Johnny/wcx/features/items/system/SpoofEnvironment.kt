@@ -16,9 +16,13 @@ object SpoofEnvironment : SwitchFeature(), IResolveDex {
                 name = "getInt"
                 parameterCount = 3
             }.hookBefore {
-                val name = args[1] as? String? ?: return@hookBefore
-                if (name == "adb_enabled")
-                    result = 0
+                try {
+                    val name = args[1] as? String? ?: return@hookBefore
+                    if (name == "adb_enabled")
+                        result = 0
+                } catch (e: Throwable) {
+                    // 兜底异常捕获
+                }
             }
 
         Settings.Secure::class.reflekt()
@@ -26,13 +30,27 @@ object SpoofEnvironment : SwitchFeature(), IResolveDex {
                 name = "getInt"
                 parameterCount = 3
             }.hookBefore {
-                val name = args[1] as? String? ?: return@hookBefore
-                if (name == "development_settings_enabled")
-                    result = 0
+                try {
+                    val name = args[1] as? String? ?: return@hookBefore
+                    if (name == "development_settings_enabled")
+                        result = 0
+                } catch (e: Throwable) {
+                    // 兜底异常捕获
+                }
             }
 
         methodIsVpnEnabled.hookBefore {
-            result = false
+            try {
+                // 仅当原方法返回 boolean 时才设置 result = false
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = false
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
         }
     }
 

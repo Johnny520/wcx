@@ -13,13 +13,21 @@ object PowerSaver : SwitchFeature() {
             methods {
                 name = "acquire"
             }.forEach {
-                it.hookBefore { result = null }
+                it.hookBefore {
+                    try {
+                        result = null
+                    } catch (_: Throwable) {}
+                }
             }
 
             firstMethod {
                 name = "release"
                 parameterCount = 1
-            }.hookBefore { result = null }
+            }.hookBefore {
+                try {
+                    result = null
+                } catch (_: Throwable) {}
+            }
         }
     }
 }

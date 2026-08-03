@@ -20,7 +20,17 @@ object NerfBackgroundProcessChecker : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodPerformProcessCheck.hookBefore {
-            result = null
+            try {
+                // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                val returnType = (method as java.lang.reflect.Method).returnType
+                if (returnType == Void.TYPE) {
+                    result = null
+                }
+            }
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
         }
     }
 }

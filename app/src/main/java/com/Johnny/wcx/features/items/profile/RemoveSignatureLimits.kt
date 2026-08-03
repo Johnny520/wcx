@@ -24,36 +24,52 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
         EditSignatureUI::class.reflekt()
             .firstMethod { name = "initView" }.apply {
                 hookBefore {
-                    setFiltersUnhook = "${PackageNames.WECHAT}.ui.widget.MMEditText".toClass().reflekt()
-                        .firstMethod {
-                            name = "setFilters"
-                        }.hookBeforeDirectly {
-                            result = null
-                        }
+                    try {
+                        setFiltersUnhook = "${PackageNames.WECHAT}.ui.widget.MMEditText".toClass().reflekt()
+                            .firstMethod {
+                                name = "setFilters"
+                            }.hookBeforeDirectly {
+                                try {
+                                    result = null
+                                } catch (_: Throwable) {}
+                            }
+                    } catch (_: Throwable) {}
                 }
 
                 hookAfter {
-                    val activity = thisObject as EditSignatureUI
-                    activity.enableOptionMenu(true)
-                    (activity.reflekt()
-                        .firstField { type = TextView::class }
-                        .get()!! as TextView).visibility = View.GONE
+                    try {
+                        val activity = thisObject as EditSignatureUI
+                        activity.enableOptionMenu(true)
+                        (activity.reflekt()
+                            .firstField { type = TextView::class }
+                            .get()!! as TextView).visibility = View.GONE
+                    } catch (_: Throwable) {}
                 }
             }
 
         methodTextWatcherAfterTextChanged.hookBefore {
-            result = null
+            try {
+                result = null
+            } catch (_: Throwable) {}
         }
 
         methodConfirmButtonOnClickListenerOnClick.apply {
             hookBefore {
-                stringMatchesMethodUnhook = String::class.java.reflekt()
-                    .firstMethod { name = "matches" }
-                    .hookBeforeDirectly { result = false }
+                try {
+                    stringMatchesMethodUnhook = String::class.java.reflekt()
+                        .firstMethod { name = "matches" }
+                        .hookBeforeDirectly {
+                            try {
+                                result = false
+                            } catch (_: Throwable) {}
+                        }
+                } catch (_: Throwable) {}
             }
             hookAfter {
-                stringMatchesMethodUnhook.unhook()
-                setFiltersUnhook.unhook()
+                try {
+                    stringMatchesMethodUnhook.unhook()
+                    setFiltersUnhook.unhook()
+                } catch (_: Throwable) {}
             }
         }
     }

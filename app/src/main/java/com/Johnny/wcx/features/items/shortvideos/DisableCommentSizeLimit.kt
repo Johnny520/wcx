@@ -13,19 +13,25 @@ object DisableCommentSizeLimit : SwitchFeature() {
             .reflekt().apply {
                 firstMethod { name = "getCommentTextLimit" }
                     .hookBefore {
-                        result = 9999
+                        try {
+                            result = 9999
+                        } catch (_: Throwable) {}
                     }
 
                 runCatching {
                     firstMethod { name = "getCommentTextLimitStart" }
                         .hookBefore {
-                            result = 9999
+                            try {
+                                result = 9999
+                            } catch (_: Throwable) {}
                         }
                 }
 
                 firstMethod { name = "getCommentTextLineLimit" }
                     .hookBefore {
-                        result = 9999
+                        try {
+                            result = 9999
+                        } catch (_: Throwable) {}
                     }
             }
     }

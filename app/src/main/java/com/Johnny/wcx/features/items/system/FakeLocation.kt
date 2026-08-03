@@ -177,11 +177,15 @@ object FakeLocation : ClickableFeature(), IResolveDex {
         if (!hookedLocationClasses.add(locationClass)) return
 
         getLatitudeMethod.hookBefore {
-            result = latitude.toDouble()
+            try {
+                result = latitude.toDouble()
+            } catch (_: Throwable) {}
         }
 
         getLongitudeMethod.hookBefore {
-            result = longitude.toDouble()
+            try {
+                result = longitude.toDouble()
+            } catch (_: Throwable) {}
         }
     }
 

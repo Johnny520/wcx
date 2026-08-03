@@ -33,20 +33,22 @@ object PreventModuleDataDeletion : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodNativeFileSystemEntryDelete.hookBefore {
-            val relPath = args[0] as String
-            if (!::basePathField.isInitialized) {
-                basePathField = thisObject.reflekt()
-                    .firstField {
-                        type = String::class
-                        modifiers(Modifiers.FINAL)
-                    }.self
-            }
-            val basePath = basePathField.get(thisObject) as String
+            try {
+                val relPath = args[0] as String
+                if (!::basePathField.isInitialized) {
+                    basePathField = thisObject.reflekt()
+                        .firstField {
+                            type = String::class
+                            modifiers(Modifiers.FINAL)
+                        }.self
+                }
+                val basePath = basePathField.get(thisObject) as String
 
-            val path = "$basePath/$relPath"
-            if (path.contains(BuildConfig.TAG) || path.contains("Layout Inspect")) {
-                result = true
-            }
+                val path = "$basePath/$relPath"
+                if (path.contains(BuildConfig.TAG) || path.contains("Layout Inspect")) {
+                    result = true
+                }
+            } catch (_: Throwable) {}
         }
     }
 }
