@@ -100,23 +100,53 @@ jobs:
         run: |
           KS_FILE="$RUNNER_TEMP/wekit-keystore.jks"
           CRED_FILE="$RUNNER_TEMP/keystore-creds.env"
-          KS_PASS="wcx-store-pass"
-          KEY_ALIAS="wcx"
-          KEY_PASS="wcx-store-pass"
 
-          # Try project keystore from secrets first; fall back to random
+          # ── Decode project keystore from GitHub Secrets ──────────────────
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KS_FILE" 2>/dev/null || true
-            if keytool -list -keystore "$KS_FILE" -storepass "${{ secrets.STORE_PASSWORD }}" \
-                 -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
-              echo "Using project keystore."
+            echo "::group::Decoding project keystore from Secrets"
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KS_FILE"
+            KS_SIZE=$(stat -c%s "$KS_FILE" 2>/dev/null || echo 0)
+            echo "Keystore file size: ${KS_SIZE} bytes"
+
+            if [ "$KS_SIZE" -lt 100 ]; then
+              echo "::error::Decoded keystore is too small (${KS_SIZE} bytes) — Base64 decode may have failed"
+              exit 1
+            fi
+
+            # Try PKCS12 first, then JKS
+            KS_LOADED=false
+            for STORE_TYPE in PKCS12 JKS; do
+              if keytool -list -keystore "$KS_FILE" \
+                   -storetype "$STORE_TYPE" \
+                   -storepass "${{ secrets.STORE_PASSWORD }}" \
+                   -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
+                echo "Keystore loaded successfully (type=${STORE_TYPE})"
+                KS_LOADED=true
+                break
+              fi
+            done
+
+            if [ "$KS_LOADED" = true ]; then
+              echo "Using project keystore from GitHub Secrets."
               echo "KS_PASS=${{ secrets.STORE_PASSWORD }}" > "$CRED_FILE"
               echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$CRED_FILE"
               echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$CRED_FILE"
+              keytool -list -keystore "$KS_FILE" \
+                -storepass "${{ secrets.STORE_PASSWORD }}" \
+                -alias "${{ secrets.KEY_ALIAS }}" 2>&1 | head -5
+              echo "::endgroup::"
               exit 0
             fi
-            echo "Project keystore unreadable, generating a fresh one."
+
+            echo "::warning::Project keystore present but unreadable — check STORE_PASSWORD / KEY_ALIAS"
+            echo "::endgroup::"
           fi
+
+          # ── Fallback: generate temporary CI keystore ─────────────────────
+          echo "::group::Generating temporary CI keystore"
+          KS_PASS="wcx-store-pass"
+          KEY_ALIAS="wcx"
+          KEY_PASS="wcx-store-pass"
 
           rm -f "$KS_FILE"
           keytool -genkeypair -v \
@@ -127,11 +157,12 @@ jobs:
             -validity 10000 \
             -storepass "$KS_PASS" \
             -keypass "$KEY_PASS" \
-            -dname "CN=wcx, OU=CI, O=Johnny520, L=CI, S=CI, C=CN"
+            -dname "CN=WCX CI, OU=CI, O=Johnny520, L=CI, S=CI, C=CN"
           echo "KS_PASS=$KS_PASS" > "$CRED_FILE"
           echo "KEY_ALIAS=$KEY_ALIAS" >> "$CRED_FILE"
           echo "KEY_PASS=$KEY_PASS" >> "$CRED_FILE"
           keytool -list -keystore "$KS_FILE" -storepass "$KS_PASS" -alias "$KEY_ALIAS"
+          echo "::endgroup::"
 
       - name: Build Release (Signed)
         if: github.event_name != 'pull_request'

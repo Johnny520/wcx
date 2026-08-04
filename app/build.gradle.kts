@@ -119,7 +119,7 @@ android {
                 keyAlias = _keyAlias
                 keyPassword = _keyPassword
 
-                enableV1Signing = false
+                enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
                 enableV4Signing = true
