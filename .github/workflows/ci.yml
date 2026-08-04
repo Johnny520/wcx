@@ -107,10 +107,10 @@ jobs:
           # Try project keystore from secrets first; fall back to random
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KS_FILE" 2>/dev/null || true
-            if keytool -list -keystore "$KS_FILE" -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            if keytool -list -keystore "$KS_FILE" -storepass "${{ secrets.STORE_PASSWORD }}" \
                  -alias "${{ secrets.KEY_ALIAS }}" >/dev/null 2>&1; then
               echo "Using project keystore."
-              echo "KS_PASS=${{ secrets.KEYSTORE_PASSWORD }}" > "$CRED_FILE"
+              echo "KS_PASS=${{ secrets.STORE_PASSWORD }}" > "$CRED_FILE"
               echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$CRED_FILE"
               echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$CRED_FILE"
               exit 0
