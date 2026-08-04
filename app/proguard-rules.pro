@@ -1,23 +1,29 @@
-# ─── Xposed Module ────────────────────────────────────────────────
-# Keep Xposed framework entry points
+# ─── Xposed Module Entry Points ────────────────────────────────────
+# These MUST be kept with original names — Xposed framework loads them
 -keep class de.robv.android.xposed.** { *; }
 -keep class io.github.libxposed.** { *; }
 -keep class com.Johnny.wcx.entry.** { *; }
 -keep class com.Johnny.wcx.application.** { *; }
 
-# Keep assets/xposed_init entry
--keepattributes *Annotation*
+# ─── Feature / Hook Classes ─────────────────────────────────────────
+# Keep class structure (for reflection/Xposed callback) but allow obfuscation
+-keep,allowobfuscation class com.Johnny.wcx.features.** { *; }
+-keep,allowobfuscation class com.Johnny.wcx.hooks.** { *; }
+-keep,allowobfuscation class com.Johnny.wcx.datas.** { *; }
+
+# Keep annotation-annotated members (used by compile-time processors)
+-keepclassmembers,allowobfuscation class * {
+    @com.Johnny.wcx.annotations.* *;
+}
 
 # ─── Kotlin ────────────────────────────────────────────────────────
 -keep class kotlin.Metadata { *; }
 -keep class kotlin.coroutines.Continuation { *; }
 -dontwarn kotlinx.coroutines.**
--keep class kotlinx.coroutines.** { *; }
--keepnames class kotlinx.** { *; }
 
 # ─── Serialization ──────────────────────────────────────────────────
--keep class kotlinx.serialization.** { *; }
 -keepattributes *Annotation*, InnerClasses
+-keep class kotlinx.serialization.** { *; }
 -dontnote kotlinx.serialization.AnnotationsKt
 -keepclassmembers class kotlinx.serialization.json.** {
     *** Companion;
@@ -37,52 +43,44 @@
 -keep class * extends androidx.room.RoomDatabase
 -keep @androidx.room.Entity class *
 -dontwarn androidx.room.paging.**
--keep class androidx.room.** { *; }
 
 # ─── Compose ────────────────────────────────────────────────────────
 -keep class androidx.compose.** { *; }
 -dontwarn androidx.compose.**
 
-# ─── Reflection ─────────────────────────────────────────────────────
--keep class com.Johnny.wcx.features.** { *; }
--keep class com.Johnny.wcx.hooks.** { *; }
--keep class com.Johnny.wcx.datas.** { *; }
--keepclassmembers class * {
-    @com.Johnny.wcx.annotations.* *;
-}
-
-# ─── Dependencies ───────────────────────────────────────────────────
+# ─── Third-party (dontwarn only, allow R8 optimization) ──────────────
 -dontwarn com.alibaba.fastjson2.**
--keep class com.alibaba.fastjson2.** { *; }
 -dontwarn io.netty.**
--keep class io.netty.** { *; }
 -dontwarn com.google.protobuf.**
--keep class com.google.protobuf.** { *; }
 -dontwarn com.tencent.wcdb.**
 -dontwarn org.slf4j.**
--keep class org.mozilla.javascript.** { *; }
 -dontwarn org.mozilla.javascript.**
-
-# ─── OkHttp / Ktor ──────────────────────────────────────────────────
 -dontwarn okhttp3.**
 -dontwarn okio.**
--keep class okhttp3.** { *; }
--keep class okio.** { *; }
 -dontwarn io.ktor.**
--keep class io.ktor.** { *; }
-
-# ─── MiuiX / MaterialKolor ──────────────────────────────────────────
 -dontwarn com.materialkolor.**
--keep class com.materialkolor.** { *; }
 -dontwarn miuix.**
--keep class miuix.** { *; }
+-dontwarn javax.**
+-dontwarn java.lang.invoke.**
 
-# ─── General ────────────────────────────────────────────────────────
+# ─── WeChat Stubs ───────────────────────────────────────────────────
+-keep class com.tencent.mm.** { *; }
+
+# ─── Obfuscation Enhancements ───────────────────────────────────────
+-repackageclasses
+-allowaccessmodification
+-overloadaggressively
+-useuniqueclassmembernames
+
+# ─── Attributes ─────────────────────────────────────────────────────
 -keepattributes Signature
 -keepattributes *Annotation*
 -keepattributes EnclosingMethod
 -keepattributes InnerClasses
 -keepattributes Exceptions
--dontwarn javax.**
--dontwarn java.lang.invoke.**
--keep class com.tencent.mm.** { *; }
+-keepattributes SourceFile,LineNumberTable
+
+# ─── Keep resource names used in code ───────────────────────────────
+-keepclassmembers class **.R$* {
+    public static <fields>;
+}
