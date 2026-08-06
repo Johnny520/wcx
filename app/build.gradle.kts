@@ -174,6 +174,11 @@ android {
     }
 }
 
+// Disable aboutLibraries network fetching for offline builds
+aboutLibraries {
+    offlineMode = true
+}
+
 tasks.withType<KotlinCompile> {
     compilerOptions {
         jvmTarget.set(JvmTarget.fromTarget(libs.versions.jdk.get()))

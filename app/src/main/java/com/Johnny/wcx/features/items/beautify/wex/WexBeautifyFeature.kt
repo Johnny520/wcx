@@ -38,6 +38,9 @@ object WexBeautifyFeature : ClickableFeature() {
     private const val TAG = "WexBeautify"
     private const val PREFS_NAME = "wex_beautify_prefs"
 
+    /** 每日一图默认API地址 */
+    const val DEFAULT_IMAGE_API = "https://api.03c3.cn/api/zb"
+
     /** 独立 SharedPreferences，不与 WCX 其他功能配置混用 */
     @Volatile
     lateinit var wexPrefs: SharedPreferences
@@ -106,6 +109,15 @@ object WexBeautifyFeature : ClickableFeature() {
     var floatLyricEnabled: Boolean
         get() = wexPrefs.getBoolean("float_lyric_enabled", false)
         set(value) = wexPrefs.edit().putBoolean("float_lyric_enabled", value).apply()
+
+    // 每日一图配置
+    var imageApiUrl: String
+        get() = wexPrefs.getString("image_api_url", DEFAULT_IMAGE_API) ?: DEFAULT_IMAGE_API
+        set(value) = wexPrefs.edit().putString("image_api_url", value).apply()
+
+    var imageRefreshInterval: Int
+        get() = wexPrefs.getInt("image_refresh_interval", 3600)
+        set(value) = wexPrefs.edit().putInt("image_refresh_interval", value).apply()
 
     var logEnabled: Boolean
         get() = wexPrefs.getBoolean("log_enabled", true)

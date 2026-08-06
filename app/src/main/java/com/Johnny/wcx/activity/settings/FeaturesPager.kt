@@ -216,9 +216,11 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
 //  Recent Updates section — collapsible, between search bar and category list
 // ---------------------------------------------------------------------------
 
+private const val KEY_RECENT_UPDATES_EXPANDED = "recent_updates_expanded"
+
 @Composable
 private fun RecentUpdatesSection(onItemClick: (featureKey: String) -> Unit) {
-    var expanded by remember { mutableStateOf(true) }
+    var expanded by remember { mutableStateOf(WePrefs.getBoolOrFalse(KEY_RECENT_UPDATES_EXPANDED)) }
 
     Card(
         modifier = Modifier
@@ -247,7 +249,10 @@ private fun RecentUpdatesSection(onItemClick: (featureKey: String) -> Unit) {
                     color = MiuixTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = { expanded = !expanded }) {
+                IconButton(onClick = {
+                    expanded = !expanded
+                    WePrefs.putBool(KEY_RECENT_UPDATES_EXPANDED, expanded)
+                }) {
                     Icon(
                         imageVector = if (expanded) MaterialSymbols.Outlined.Expand_less
                         else MaterialSymbols.Outlined.Expand_more,

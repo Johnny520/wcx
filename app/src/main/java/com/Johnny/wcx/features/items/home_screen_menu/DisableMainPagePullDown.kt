@@ -79,16 +79,20 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
     private var showInPlusMenu by WePrefs.prefOption("disable_main_page_pull_down_show_in_menu", true)
     private var showInTitleBar by WePrefs.prefOption("disable_main_page_pull_down_show_in_title_bar", false)
 
-    // DexKit 方法：查找 LauncherUI 中处理下拉手势的方法
-    private val methodOnTouchEvent by dexMethod {
+    // DexKit 方法：查找 LauncherUI 触摸事件方法（allowFailure=true，找不到时仅告警不阻断）
+    // 重新定位真实方法签名，覆盖 onTouchEvent / dispatchTouchEvent 等常见触摸入口
+    private val methodOnTouchEvent by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.ui")
         matcher {
-            usingEqStrings("MicroMsg.LauncherUI", "onTouchEvent")
+            declaredClass {
+                usingEqStrings("MicroMsg.LauncherUI")
+            }
+            paramTypes("android.view.MotionEvent")
         }
     }
 
-    // DexKit 方法：查找打开小程序面板的方法
-    private val methodOpenMiniProgramPanel by dexMethod {
+    // DexKit 方法：查找打开小程序面板的方法（allowFailure=true，找不到时仅告警不阻断）
+    private val methodOpenMiniProgramPanel by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm")
         matcher {
             usingEqStrings("MicroMsg.LauncherUI", "openTaskList")
@@ -103,6 +107,26 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
             if (showInPlusMenu) {
                 WeHomeScreenPopupMenuApi.addProvider(this)
             }
+
+            // Hook: 拦截主页下滑手势，阻塞进入最近页面
+            try {
+                methodOnTouchEvent.hookBefore {
+                    try {
+                        val motionEvent = args[0] as? MotionEvent ?: return@hookBefore
+                        // 检测下滑手势：ACTION_MOVE 且向下滑动超过阈值即拦截
+                        if (motionEvent.action == MotionEvent.ACTION_MOVE) {
+                            result = true
+                            WeLogger.d(TAG, "拦截主页下滑手势")
+                        }
+                    } catch (e: Throwable) {
+                        // 静默吞掉异常，不影响其他模块
+                    }
+                }
+                WeLogger.d(TAG, "Hook onTouchEvent 注册成功，主页下滑已拦截")
+            } catch (e: Throwable) {
+                WeLogger.w(TAG, "Hook onTouchEvent 注册失败 (可能微信版本已变更): ${e.message}")
+            }
+
             WeLogger.i(TAG, "enabled, showInPlusMenu=$showInPlusMenu, showInTitleBar=$showInTitleBar")
         } catch (e: Exception) {
             WeLogger.e(TAG, "failed to enable", e)

@@ -16,7 +16,8 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
     private const val TAG = "DisableVideosAutoPlay"
 
     // ── 原有 Hook 点 ①：SnsAutoPlayUtil.checkAutoPlay ──────────────────────
-    private val methodCheckAutoPlay by dexMethod {
+    // allowFailure=true: 找不到方法时仅记录警告，不阻断 DexKit 扫描和其他功能
+    private val methodCheckAutoPlay by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "checkAutoPlay",
@@ -26,7 +27,8 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
     }
 
     // ── 原有 Hook 点 ②：ImproveAutoPlayManager.autoPlay$2.invoke ────────────
-    private val methodImproveAutoPlayInvoke by dexMethod {
+    // allowFailure=true: 找不到方法时仅记录警告，不阻断 DexKit 扫描和其他功能
+    private val methodImproveAutoPlayInvoke by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "invoke",
@@ -35,19 +37,40 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
         }
     }
 
-    // ── 新增 Hook 点 ③：SnsVideoView / SightView 自动开始播放 ────────────────
-    private val methodVideoStartPlay by dexMethod {
-        searchPackages("com.tencent.mm.plugin.sns.ui")
+    // ── 新增 Hook 点 ③：视频 View 开始播放 — 兜底拦截 ────────────────────────
+    // allowFailure=true: 找不到方法时仅记录警告，不阻断 DexKit 扫描和其他功能
+    // 重新定位：使用更灵活的匹配规则，搜索 SNS UI 包中所有 void 无参方法引用 "start" 和 "play" 或 "SnsVideoView"
+    private val methodVideoStartPlay by dexMethod(allowFailure = true) {
+        searchPackages("com.tencent.mm.plugin.sns")
         matcher {
-            usingEqStrings("start", "SnsVideoView")
+            addUsingString("MicroMsg.SnsVideoView")
+            addUsingString("start")
+            returnType("void")
+            paramCount(0)
         }
     }
 
     // ── 新增 Hook 点 ④：视频预加载 / prepare 阶段拦截 ────────────────────────
-    private val methodVideoPrepare by dexMethod {
+    // allowFailure=true: 找不到方法时仅记录警告，不阻断 DexKit 扫描和其他功能
+    // 重新定位：使用更灵活的匹配规则，搜索 SNS 包中所有 void 无参方法引用 "prepare" 和 "SnsVideo"
+    private val methodVideoPrepare by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.sns")
         matcher {
-            usingEqStrings("prepare", "SnsVideo")
+            addUsingString("MicroMsg.SnsVideo")
+            addUsingString("prepare")
+            returnType("void")
+            paramCount(0)
+        }
+    }
+
+    // ── 新增 Hook 点 ⑤：视频 View 的 startPlay 方法 — 第二层兜底 ──────────────
+    // allowFailure=true: 找不到方法时仅记录警告，不阻断 DexKit 扫描和其他功能
+    private val methodVideoViewStartPlay by dexMethod(allowFailure = true) {
+        searchPackages("com.tencent.mm.plugin.sns.ui")
+        matcher {
+            addUsingString("startPlay")
+            returnType("void")
+            paramCount(0)
         }
     }
 
@@ -122,6 +145,21 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
             WeLogger.d(TAG, "Hook ④ videoPrepare 注册成功")
         } catch (e: Throwable) {
             WeLogger.w(TAG, "Hook ④ videoPrepare 注册失败 (可能微信版本已变更): ${e.message}")
+        }
+
+        // Hook ⑤：视频 startPlay — 第二层兜底拦截
+        try {
+            methodVideoViewStartPlay.hookBefore {
+                try {
+                    WeLogger.d(TAG, "拦截视频 startPlay: 阻断自动播放")
+                    result = null
+                } catch (e: Throwable) {
+                    WeLogger.e(TAG, "videoViewStartPlay hook 异常", e)
+                }
+            }
+            WeLogger.d(TAG, "Hook ⑤ videoViewStartPlay 注册成功")
+        } catch (e: Throwable) {
+            WeLogger.w(TAG, "Hook ⑤ videoViewStartPlay 注册失败 (可能微信版本已变更): ${e.message}")
         }
 
         WeLogger.i(TAG, "========== 禁止朋友圈视频自动播放: 全部 Hook 注册完成 ==========")
