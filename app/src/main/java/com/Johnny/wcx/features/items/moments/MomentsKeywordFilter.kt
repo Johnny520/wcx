@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -389,7 +390,7 @@ object MomentsKeywordFilter : ClickableFeature() {
                     title = "选择白名单好友",
                     onDismiss = { showWhitelistSelector = false },
                     onSave = { selectedFriends ->
-                        localWhitelist = selectedFriends
+                        localWhitelist = selectedFriends.toMutableSet()
                         showWhitelistSelector = false
                     }
                 )
@@ -718,7 +719,7 @@ object MomentsKeywordFilter : ClickableFeature() {
             if (searchQuery.isBlank()) friends
             else friends.filter { friend ->
                 friend.nickname.contains(searchQuery, ignoreCase = true) ||
-                        (friend.remark?.contains(searchQuery, ignoreCase = true) == true) ||
+                        (friend.remarkName?.contains(searchQuery, ignoreCase = true) == true) ||
                         friend.wxId.contains(searchQuery, ignoreCase = true)
             }
         }
@@ -761,11 +762,11 @@ object MomentsKeywordFilter : ClickableFeature() {
                                         }
                                     },
                                     headlineContent = {
-                                        Text(friend.remark?.takeIf { it.isNotBlank() } ?: friend.nickname)
+                                        Text(friend.remarkName?.takeIf { it.isNotBlank() } ?: friend.nickname)
                                     },
                                     supportingContent = {
                                         Text(
-                                            if (friend.remark?.takeIf { it.isNotBlank() } != null) "昵称: ${friend.nickname} · ${friend.wxId}"
+                                            if (friend.remarkName?.takeIf { it.isNotBlank() } != null) "昵称: ${friend.nickname} · ${friend.wxId}"
                                             else friend.wxId
                                         )
                                     },
@@ -853,14 +854,4 @@ object MomentsKeywordFilter : ClickableFeature() {
 }
 
 // 辅助方法，用于在 ViewGroup 中查找指定类型的子 View
-private fun ViewGroup.findViewWhich(predicate: (View) -> Boolean): View? {
-    for (i in 0 until childCount) {
-        val child = getChildAt(i)
-        if (predicate(child)) return child
-        if (child is ViewGroup) {
-            val found = child.findViewWhich(predicate)
-            if (found != null) return found
-        }
-    }
-    return null
-}
+// 使用 ViewUtils.findViewWhich 代替，已导入

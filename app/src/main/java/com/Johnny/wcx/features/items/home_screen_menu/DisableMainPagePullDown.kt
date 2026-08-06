@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.toArgb
 import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlined.Package_2
 import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 
