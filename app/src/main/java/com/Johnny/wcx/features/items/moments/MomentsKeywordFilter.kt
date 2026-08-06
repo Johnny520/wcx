@@ -47,6 +47,7 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.ui.utils.findViewWhich
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.composables.icons.materialsymbols.MaterialSymbols

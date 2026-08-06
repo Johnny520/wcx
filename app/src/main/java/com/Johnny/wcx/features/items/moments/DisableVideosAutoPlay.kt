@@ -11,7 +11,7 @@ import com.Johnny.wcx.utils.WeLogger
     categories = ["朋友圈"],
     description = "禁止朋友圈中的视频自动播放"
 )
-object DisableVideosAutoPlay : SwitchFeature(), IResolveDEX {
+object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
 
     private const val TAG = "DisableVideosAutoPlay"
 

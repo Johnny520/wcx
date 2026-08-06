@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.toArgb
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
@@ -50,19 +51,19 @@ object MiniProgramIcon : Drawable() {
 
     override fun draw(canvas: android.graphics.Canvas) {
         val bounds = bounds
-        canvas.withSave {
-            val scaleX = bounds.width() / 960f
-            val scaleY = bounds.height() / 960f
-            translate(bounds.left.toFloat(), bounds.top.toFloat())
-            scale(scaleX, scaleY)
-            drawPath(path, paint)
-        }
+        canvas.save()
+        val scaleX = bounds.width() / 960f
+        val scaleY = bounds.height() / 960f
+        canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+        canvas.scale(scaleX, scaleY)
+        canvas.drawPath(path, paint)
+        canvas.restore()
     }
 
     override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
     override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter; invalidateSelf() }
-    override fun getIntrinsicWidth(): Int = 24.dp.toPx()
-    override fun getIntrinsicHeight(): Int = 24.dp.toPx()
+    override fun getIntrinsicWidth(): Int = (24 * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
+    override fun getIntrinsicHeight(): Int = (24 * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
     override fun isAutoMirrored(): Boolean = true
     @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
@@ -251,7 +252,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
                     gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-                    marginEnd = 8.dp.toPx()
+                    marginEnd = (8 * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
                 }
                 titleBar.addView(composeView, params)
                 titleBarIconView = composeView

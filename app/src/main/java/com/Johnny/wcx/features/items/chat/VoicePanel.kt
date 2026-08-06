@@ -46,11 +46,14 @@ import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.deleteIfExists
+import com.Johnny.wcx.utils.WeLogger
 import kotlin.io.path.div
 import kotlin.io.path.extension
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 import kotlin.io.path.writeBytes
+
+private const val TAG = "VoicePanel"
 
 internal val EDGE_TTS_VOICES = listOf(
     "zh-CN-XiaoxiaoNeural" to "晓晓 (女, 温柔)",
