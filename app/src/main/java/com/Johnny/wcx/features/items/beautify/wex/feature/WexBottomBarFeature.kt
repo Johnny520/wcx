@@ -21,9 +21,9 @@ object WexBottomBarFeature {
             // Hook Activity.onResume，在 LauncherUI 恢复时应用底栏美化
             Activity::class.reflekt()
                 .firstMethod { name = "onResume" }
-                .hookAfter {
+                .hookAfter { param ->
                     try {
-                        val act = thisObject as? Activity ?: return@hookAfter
+                        val act = param.thisObject as? Activity ?: return@hookAfter
                         if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
                         if (!WexBeautifyFeature.bottomBarEnabled) return@hookAfter
                         applyBottomBar(act)

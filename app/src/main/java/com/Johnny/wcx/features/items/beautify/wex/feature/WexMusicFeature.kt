@@ -33,9 +33,9 @@ object WexMusicFeature {
         try {
             Activity::class.reflekt()
                 .firstMethod { name = "onResume" }
-                .hookAfter {
+                .hookAfter { param ->
                     try {
-                        val act = thisObject as? Activity ?: return@hookAfter
+                        val act = param.thisObject as? Activity ?: return@hookAfter
                         if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
                         if (!WexBeautifyFeature.floatLyricEnabled) return@hookAfter
                         showFloatLyric(act)
