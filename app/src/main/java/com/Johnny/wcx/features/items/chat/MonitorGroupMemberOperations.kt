@@ -110,6 +110,10 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     private var fakeUserBroadcast by prefOption("gmc_fake_user_broadcast", false)
     private var groupFilterEnabled by prefOption("gmc_group_filter_enabled", false)
     private var selectedGroupsJson by prefOption("gmc_selected_groups", "[]")
+    private var configMigrationDone by prefOption("gmc_config_migration_v2_done", false)
+    private var showWxId by prefOption("gmc_show_wxid", false)
+    private var groupWelcomeConfigsJson by prefOption("gmc_group_welcome_configs", "{}")
+    private var autoAtNewMember by prefOption("gmc_auto_at_new_member", true)
 
     // 事件去重缓存：key = "wxid:eventType", value = 触发时间戳
     private val eventDebounceCache = mutableMapOf<String, Long>()
@@ -134,6 +138,46 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val text: String = ""
     )
 
+    @Serializable
+    data class GroupWelcomeConfig(
+        val text: String = "",
+        val enabled: Boolean = true
+    )
+
+    private fun getGroupWelcomeConfigs(): Map<String, GroupWelcomeConfig> {
+        return runCatching {
+            json.decodeFromString<Map<String, GroupWelcomeConfig>>(groupWelcomeConfigsJson)
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun saveGroupWelcomeConfigs(configs: Map<String, GroupWelcomeConfig>) {
+        groupWelcomeConfigsJson = json.encodeToString(configs)
+    }
+
+    /**
+     * 获取指定群的入群欢迎文案，优先使用单群专属配置，否则回退到全局模板
+     * @return Pair<文案来源, 欢迎文案>：来源 "单群专属" 或 "全局默认"
+     */
+    private fun getWelcomeTextForGroup(groupWxId: String): Pair<String, String> {
+        val configs = getGroupWelcomeConfigs()
+        val config = configs[groupWxId]
+        if (config != null && config.text.isNotBlank()) {
+            return "单群专属" to config.text
+        }
+        return "全局默认" to getEffectiveConfig("join").text
+    }
+
+    /**
+     * 检查指定群是否启用了入群欢迎（单群开关优先，否则回退到全局 joinEnabled）
+     */
+    private fun isGroupWelcomeEnabled(groupWxId: String): Boolean {
+        if (!joinEnabled) return false
+        val configs = getGroupWelcomeConfigs()
+        val config = configs[groupWxId]
+        // 如果该群有专属配置，使用其 enabled 状态；否则使用全局 joinEnabled
+        return config?.enabled ?: true
+    }
+
     private var joinConfigJson by prefOption("gmc_join_config", "{}")
     private var leaveConfigJson by prefOption("gmc_leave_config", "{}")
     private var nickChangeConfigJson by prefOption("gmc_nick_change_config", "{}")
@@ -154,12 +198,12 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         }.getOrElse { EventConfig() }
     }
 
-    // 默认模板维持原有 {链接昵称} 格式，老用户配置无需重置
+    // 默认模板使用 $nickname 标准变量
     private fun getDefaultConfig(eventType: String): EventConfig = when (eventType) {
-        "join" -> EventConfig(color = "#28C445", text = "{链接昵称} 加入了群组")
-        "leave" -> EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
-        "nick_change" -> EventConfig(color = "#28C445", text = "{链接昵称} 修改群昵称：{旧昵称} → {新昵称}")
-        "kick" -> EventConfig(color = "#F23030", text = "{链接昵称} 被管理员{管理员昵称}移出群组")
+        "join" -> EventConfig(color = "#28C445", text = "\$nickname 加入了群组")
+        "leave" -> EventConfig(color = "#28C445", text = "\$nickname 退出了群组")
+        "nick_change" -> EventConfig(color = "#28C445", text = "\$nickname 修改群昵称：\$oldNickname → \$newNickname")
+        "kick" -> EventConfig(color = "#F23030", text = "\$nickname 被管理员\$adminName移出群组")
         else -> EventConfig()
     }
 
@@ -178,10 +222,37 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         }
     }
 
+    /**
+     * 配置迁移：将旧模板中的 {链接昵称} 替换为标准变量 $nickname
+     * 仅执行一次，迁移后标记完成，避免重复处理
+     */
+    private fun migrateOldConfigs() {
+        if (configMigrationDone) return
+        runCatching {
+            var migrated = false
+            listOf("join", "leave", "nick_change", "kick").forEach { eventType ->
+                val config = getEventConfig(eventType)
+                if (config.text.contains("{链接昵称}")) {
+                    val newText = config.text.replace("{链接昵称}", "\$nickname")
+                    saveEventConfig(eventType, config.copy(text = newText))
+                    WeLogger.d(TAG, "migrated old config: $eventType, old_text='${config.text}', new_text='$newText'")
+                    migrated = true
+                }
+            }
+            if (migrated) {
+                WeLogger.i(TAG, "config migration completed: {链接昵称} -> \$nickname")
+            }
+        }.onFailure {
+            WeLogger.e(TAG, "config migration failed", it)
+        }
+        configMigrationDone = true
+    }
+
     // =========================================================================
     // 生命周期
     // =========================================================================
     override fun onEnable() {
+        migrateOldConfigs()
         WeDatabaseListenerApi.addListener(this)
         WeChatMessageViewApi.addListener(this)
 
@@ -448,10 +519,23 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         if (joinEnabled) {
             joiners.forEach { wxId ->
                 if (shouldDebounce(wxId, "join")) return@forEach
+                if (!isGroupWelcomeEnabled(group)) {
+                    WeLogger.d(TAG, "join welcome disabled for group: $group, skip")
+                    return@forEach
+                }
                 val displayName = getDisplayName(wxId, newDisplayNames)
+                val (source, welcomeText) = getWelcomeTextForGroup(group)
+                var text = formatText(welcomeText, "join", displayName, wxId, "", "", "")
+
+                // 自动 @新人：仅入群欢迎场景，前置拼接 @昵称
+                if (autoAtNewMember && text.isNotEmpty()) {
+                    text = "@$displayName $text"
+                    WeLogger.d(TAG, "auto @ applied: group=$group, member=$displayName, source=$source")
+                }
+
                 val config = getEffectiveConfig("join")
-                val text = formatText(config.text, "join", displayName, wxId, "", "", "")
                 triggerEvent("join", group, config.color, text, listOf(displayName to wxId))
+                WeLogger.i(TAG, "join event: group=$group, member=$displayName, source=$source, autoAt=$autoAtNewMember")
             }
         }
 
@@ -501,7 +585,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
         // 附加退出群组提示
         if (kickExtraExit) {
-            val exitConfig = EventConfig(color = "#28C445", text = "{链接昵称} 退出了群组")
+            val exitConfig = EventConfig(color = "#28C445", text = "\$nickname 退出了群组")
             val exitText = formatText(exitConfig.text, "leave", displayName, kickedWxId, "", "", "", "")
             triggerEvent("kick_extra", group, exitConfig.color, exitText, listOf(displayName to kickedWxId))
         }
@@ -615,17 +699,18 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         adminDisplayName: String,
         adminWxId: String = ""
     ): String {
-        val userNameFormatted = "$displayName($wxId)"
-        val adminNameFormatted = if (adminDisplayName.isNotEmpty()) "$adminDisplayName($adminWxId)" else ""
+        // 根据开关决定是否包含 wxid：关闭时仅显示昵称，开启时显示 昵称(wxid)
+        val userNameFormatted = if (showWxId) "$displayName($wxId)" else displayName
+        val adminNameFormatted = if (adminDisplayName.isNotEmpty()) {
+            if (showWxId) "$adminDisplayName($adminWxId)" else adminDisplayName
+        } else ""
         return template
-            // 原有兼容旧变量
-            .replace("{链接昵称}", userNameFormatted)
+            // 旧变量（已废弃，不再解析 {链接昵称}，用户手动输入会原样输出）
             .replace("{管理员昵称}", adminNameFormatted)
             .replace("{旧昵称}", oldNick)
             .replace("{新昵称}", newNick)
-            // 旧变量别名（$nickname 与 $userName 完全等效）
+            // 标准变量
             .replace("\$nickname", userNameFormatted)
-            // 新标准变量
             .replace("\$userName", userNameFormatted)
             .replace("\$adminName", adminNameFormatted)
             .replace("\$oldNickname", oldNick)
@@ -668,6 +753,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             var groupFilterEnabledState by remember { mutableStateOf(groupFilterEnabled) }
             var selectedGroupsState by remember { mutableStateOf(getSelectedGroups()) }
             var showGroupSelector by remember { mutableStateOf(false) }
+            var showWxIdState by remember { mutableStateOf(showWxId) }
+            var autoAtNewMemberState by remember { mutableStateOf(autoAtNewMember) }
+            var groupWelcomeConfigsState by remember { mutableStateOf(getGroupWelcomeConfigs()) }
 
             var joinConfigState by remember { mutableStateOf(getEffectiveConfig("join")) }
             var leaveConfigState by remember { mutableStateOf(getEffectiveConfig("leave")) }
@@ -817,6 +905,86 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                 )
                             }
 
+                            // 分群独立欢迎语配置
+                            if (groupFilterEnabledState && selectedGroupsState.isNotEmpty()) {
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                Text(
+                                    "分群独立欢迎语配置",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                )
+                                Text(
+                                    "单群专属欢迎语优先于全局模板；未配置的群沿用全局默认文案",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                                Spacer(Modifier.height(4.dp))
+
+                                selectedGroupsState.forEach { groupWxId ->
+                                    var editDialogVisible by remember { mutableStateOf(false) }
+                                    val config = groupWelcomeConfigsState[groupWxId] ?: GroupWelcomeConfig()
+                                    val groupName = remember(groupWxId) {
+                                        WeDatabaseApi.getDisplayName(groupWxId).ifEmpty { groupWxId }
+                                    }
+
+                                    ListItem(
+                                        modifier = Modifier.clickable { editDialogVisible = true },
+                                        headlineContent = { Text(groupName, fontSize = 14.sp) },
+                                        supportingContent = {
+                                            val preview = config.text.ifBlank { "（使用全局模板）" }
+                                            val status = if (config.enabled) "已启用" else "已关闭"
+                                            Text("$status | $preview", fontSize = 12.sp)
+                                        }
+                                    )
+
+                                    if (editDialogVisible) {
+                                        var editText by remember { mutableStateOf(TextFieldValue(config.text)) }
+                                        var editEnabled by remember { mutableStateOf(config.enabled) }
+                                        AlertDialogContent(
+                                            title = { Text("编辑 $groupName 欢迎语") },
+                                            text = {
+                                                Column {
+                                                    ListItem(
+                                                        modifier = Modifier.clickable { editEnabled = !editEnabled },
+                                                        trailingContent = {
+                                                            Switch(checked = editEnabled, onCheckedChange = null)
+                                                        },
+                                                        headlineContent = { Text("启用本群独立欢迎语") },
+                                                        supportingContent = {
+                                                            Text("关闭后本群入群不发送欢迎消息，不影响其他群")
+                                                        }
+                                                    )
+                                                    OutlinedTextField(
+                                                        value = editText,
+                                                        onValueChange = { editText = it },
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 16.dp),
+                                                        label = { Text("欢迎文案（留空则使用全局模板）") },
+                                                        supportingText = {
+                                                            Text("\$nickname / \$userName 可用", fontSize = 11.sp)
+                                                        },
+                                                        minLines = 2,
+                                                        textStyle = MaterialTheme.typography.bodySmall
+                                                    )
+                                                }
+                                            },
+                                            dismissButton = { TextButton(onClick = { editDialogVisible = false }) { Text("取消") } },
+                                            confirmButton = {
+                                                Button(onClick = {
+                                                    groupWelcomeConfigsState = groupWelcomeConfigsState.toMutableMap().apply {
+                                                        put(groupWxId, GroupWelcomeConfig(text = editText.text, enabled = editEnabled))
+                                                    }
+                                                    editDialogVisible = false
+                                                }) { Text("保存") }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 "事件监控开关",
@@ -877,38 +1045,60 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                 )
                             }
 
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                            // 群事件提示显示wxid 开关
+                            ListItem(
+                                modifier = Modifier.clickable { showWxIdState = !showWxIdState },
+                                trailingContent = {
+                                    Switch(checked = showWxIdState, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("群事件提示显示wxid") },
+                                supportingContent = {
+                                    Text(
+                                        if (showWxIdState) "开启：提示气泡显示完整 昵称(wxid)、颜色标记"
+                                        else "关闭：提示气泡仅显示昵称，隐藏 wxid、颜色码"
+                                    )
+                                }
+                            }
+
+                            // 自动@新人开关
+                            ListItem(
+                                modifier = Modifier.clickable { autoAtNewMemberState = !autoAtNewMemberState },
+                                trailingContent = {
+                                    Switch(checked = autoAtNewMemberState, onCheckedChange = null)
+                                },
+                                headlineContent = { Text("入群欢迎自动@新人") },
+                                supportingContent = {
+                                    Text(
+                                        if (autoAtNewMemberState) "开启：入群欢迎消息自动前置 @昵称，可点击跳转用户主页"
+                                        else "关闭：入群欢迎消息不附加 @ 前缀"
+                                    )
+                                }
+                            )
+
                             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                             // 变量说明：分区展示
                             Text(
-                                "原有兼容旧变量（可继续正常使用）",
+                                "可用变量说明",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(top = 8.dp)
                             )
                             Text(
-                                "{链接昵称}：变动成员昵称，输出格式【昵称(wxid)】，完整兼容旧配置\n" +
-                                        "{管理员昵称}：执行踢人操作的管理员，展示格式【昵称(wxid)】\n" +
-                                        "{旧昵称}：成员修改之前的旧群昵称\n" +
-                                        "{新昵称}：成员修改之后的新群昵称\n" +
-                                        "\$nickname：变动成员昵称，与 {链接昵称} / \$userName 完全等效通用",
+                                "\$nickname / \$userName：变动成员昵称，输出格式【昵称(wxid)】，两者等效通用\n" +
+                                        "{管理员昵称} / \$adminName：执行踢人操作的管理员，展示格式【昵称(wxid)】\n" +
+                                        "{旧昵称} / \$oldNickname：成员修改之前的旧群昵称\n" +
+                                        "{新昵称} / \$newNickname：成员修改之后的新群昵称",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
-                            Spacer(Modifier.height(6.dp))
                             Text(
-                                "新标准变量（推荐使用）",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                "\$userName：发生变动的群成员，展示【昵称(wxid)】，与 {链接昵称} / \$nickname 完全等效通用\n" +
-                                        "\$adminName：执行踢人操作的管理员，展示【昵称(wxid)】\n" +
-                                        "\$oldNickname：成员修改之前的旧群昵称\n" +
-                                        "\$newNickname：成员修改之后的新群昵称",
+                                "{链接昵称} 已彻底移除，升级后旧配置自动迁移为 \$nickname",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
                             Text(
@@ -942,6 +1132,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                         kickExtraExit = kickExtraState
                         fakeUserBroadcast = fakeUserState
                         groupFilterEnabled = groupFilterEnabledState
+                        showWxId = showWxIdState
+                        autoAtNewMember = autoAtNewMemberState
+                        saveGroupWelcomeConfigs(groupWelcomeConfigsState)
                         selectedGroupsJson = json.encodeToString(selectedGroupsState)
                         saveEventConfig("join", joinConfigState)
                         saveEventConfig("leave", leaveConfigState)
@@ -1027,7 +1220,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                     supportingText = {
                         Text(
                             buildString {
-                                append("{链接昵称} / \$nickname / \$userName（三者等效通用）")
+                                append("\$nickname / \$userName（两者等效通用）")
                                 if (label.contains("昵称")) append(" | \$oldNickname / {旧昵称} | \$newNickname / {新昵称}")
                                 if (label.contains("踢出")) append(" | \$adminName / {管理员昵称}")
                             },

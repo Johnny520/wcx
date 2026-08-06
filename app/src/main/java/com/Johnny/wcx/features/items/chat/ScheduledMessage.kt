@@ -12,9 +12,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -528,6 +532,7 @@ object ScheduledMessage : ClickableFeature() {
         var repeatDaily by remember { mutableStateOf(existing?.repeatDaily ?: true) }
         var enabled by remember { mutableStateOf(existing?.enabled ?: true) }
         var showTalkerSelector by remember { mutableStateOf(false) }
+        var talkerSearchQuery by remember { mutableStateOf("") }
         var showSegmentTypeDialog by remember { mutableStateOf(false) }
         var pendingSegmentType by remember { mutableStateOf<MessageType?>(null) }
         var showSegmentEditDialog by remember { mutableStateOf(false) }
@@ -643,25 +648,58 @@ object ScheduledMessage : ClickableFeature() {
         )
 
         if (showTalkerSelector) {
+            val filteredContacts = remember(talkerSearchQuery, contacts) {
+                if (talkerSearchQuery.isBlank()) contacts
+                else contacts.filter { (wxId, name) ->
+                    name.contains(talkerSearchQuery, ignoreCase = true) ||
+                            wxId.contains(talkerSearchQuery, ignoreCase = true)
+                }
+            }
             AlertDialogContent(
                 title = { Text("选择发送对象") },
                 text = {
                     DefaultColumn {
-                        contacts.forEach { (wxId, name) ->
-                            ListItem(
-                                modifier = Modifier.clickable {
-                                    selectedTalker = wxId
-                                    selectedTalkerName = name
-                                    showTalkerSelector = false
-                                },
-                                headlineContent = { Text(name) },
-                                supportingContent = { Text(wxId) },
-                                trailingContent = { Text(if (selectedTalker == wxId) "✓" else "") }
+                        OutlinedTextField(
+                            value = talkerSearchQuery,
+                            onValueChange = { talkerSearchQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("搜索昵称或微信号") },
+                            singleLine = true
+                        )
+                        if (filteredContacts.isEmpty()) {
+                            Text(
+                                "无匹配的联系人",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 16.dp)
                             )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 400.dp),
+                                verticalArrangement = Arrangement.spacedBy(0.dp)
+                            ) {
+                                items(filteredContacts, key = { it.first }) { (wxId, name) ->
+                                    ListItem(
+                                        modifier = Modifier.clickable {
+                                            selectedTalker = wxId
+                                            selectedTalkerName = name
+                                            showTalkerSelector = false
+                                            talkerSearchQuery = ""
+                                        },
+                                        headlineContent = { Text(name) },
+                                        supportingContent = { Text(wxId) },
+                                        trailingContent = { Text(if (selectedTalker == wxId) "✓" else "") }
+                                    )
+                                }
+                            }
                         }
                     }
                 },
-                dismissButton = { TextButton(onClick = { showTalkerSelector = false }) { Text("取消") } },
+                dismissButton = { TextButton(onClick = {
+                    showTalkerSelector = false
+                    talkerSearchQuery = ""
+                }) { Text("取消") } },
                 confirmButton = {}
             )
         }

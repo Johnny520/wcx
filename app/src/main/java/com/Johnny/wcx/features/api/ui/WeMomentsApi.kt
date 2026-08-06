@@ -925,6 +925,17 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     fun getOwnerWxId(context: WeMomentsContextMenuApi.MomentsContext): String? =
         getOwnerWxId(context.snsInfo)
 
+    /**
+     * 判断 SnsInfo 是否为广告。
+     * 供 RemoveMomentsAds 等模块使用，支持数据源层和 View 层双重过滤。
+     */
+    fun isAd(snsInfo: Any?): Boolean {
+        if (snsInfo == null) return false
+        return runCatching {
+            snsInfo.reflekt().firstMethodOrNull { name = "isAd"; parameters(); superclass() }?.invoke() as? Boolean == true
+        }.getOrElse { false }
+    }
+
     fun getSnsInfoBySnsId(snsId: Long): Any? {
         if (snsId == 0L) return null
         return runCatching {

@@ -278,11 +278,22 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
                     item.durationMs.takeIf { it > 0 }
                         ?: AudioUtils.getDurationMs(resolvedPath).coerceAtLeast(0L)
                 }
+
+                // 应用伪装语音时长配置
+                val finalDurationMs = if (FakeVoiceDuration.isEnabled) {
+                    val fakeMs = FakeVoiceDuration.getFakeDurationMs()
+                    val fakeDuration = if (fakeMs <= 0) 1000L else fakeMs
+                    WeLogger.d(TAG, "语音面板发送: 原始时长=${durationMs}ms, 伪装时长=${fakeDuration}ms, 开关=开启")
+                    fakeDuration
+                } else {
+                    WeLogger.d(TAG, "语音面板发送: 原始时长=${durationMs}ms, 开关=关闭, 使用真实时长")
+                    durationMs
+                }
                 val silkSource = source.extension.equals("silk", true) || source.extension.equals("amr", true)
                 val silkPath = if (silkSource) source else PanelPaths.panelCacheDir / "send-${UUID.randomUUID()}.silk"
                 try {
                     if (!silkSource) require(AudioUtils.anyToSilk(resolvedPath, silkPath.absolutePathString())) { "音频转 SILK 失败" }
-                    check(WeMessageApi.sendVoice(talker, silkPath.absolutePathString(), durationMs.coerceToInt())) { "语音发送失败" }
+                    check(WeMessageApi.sendVoice(talker, silkPath.absolutePathString(), finalDurationMs.coerceToInt())) { "语音发送失败" }
                     if (recordUsage) VoicePanelRepository.recordSent(item)
                     Unit
                 } finally {

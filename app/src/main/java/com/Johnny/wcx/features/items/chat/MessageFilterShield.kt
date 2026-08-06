@@ -17,12 +17,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -30,15 +27,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
 import com.Johnny.wcx.features.api.core.models.MessageInfo
@@ -46,17 +40,15 @@ import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.strings.isGroupChatWxId
-import com.composables.icons.materialsymbols.MaterialSymbols
-import com.composables.icons.materialsymbols.outlined.Delete
 import de.robv.android.xposed.XC_MethodHook
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -66,7 +58,7 @@ import kotlinx.serialization.json.Json
 @Feature(
     name = "消息类型过滤屏蔽",
     categories = ["聊天"],
-    description = "按消息类型过滤屏蔽，支持私聊/群聊/公众号独立规则，模板管理，黑/白名单，拦截日志"
+    description = "按消息类型过滤屏蔽，支持私聊/群聊/公众号独立规则，生效范围控制，模板管理，黑/白名单，拦截日志"
 )
 object MessageFilterShield : ClickableFeature(),
     WeDatabaseListenerApi.IInsertListener,
@@ -91,13 +83,24 @@ object MessageFilterShield : ClickableFeature(),
     // 拦截日志（仅内存，不持久化，重启后清空）
     private val shieldLog = mutableListOf<ShieldLogEntry>()
 
-    // 需要被丢弃的消息 msgSvrId 集合（用于 IQueryListener 过滤）
+    // 需要被丢弃的消息 msgSvrId 集合
     private val discardMsgIds = mutableSetOf<Long>()
+
+    // ==================== 数据模型 ====================
+
+    /** 屏蔽规则生效范围 */
+    enum class ShieldScope(val value: Int, val description: String) {
+        ALL_CHATS(0, "全部会话"),
+        SELECTED_CHATS(1, "仅选中群聊"),
+        EXCLUDED_CHATS(2, "排除选中群聊")
+    }
 
     @Serializable
     data class ShieldRuleSet(
         val enabled: Boolean = false,
-        val blockedTypes: Set<Int> = emptySet() // MessageType code
+        val blockedTypes: Set<Int> = emptySet(),
+        val scope: Int = ShieldScope.ALL_CHATS.value,
+        val scopeChats: Set<String> = emptySet()
     )
 
     @Serializable
@@ -106,7 +109,9 @@ object MessageFilterShield : ClickableFeature(),
         val talker: String = "",
         val sender: String = "",
         val typeName: String = "",
-        val strategy: String = ""
+        val strategy: String = "",
+        val scope: String = "",
+        val hit: Boolean = false
     )
 
     enum class FilterStrategy(val value: Int, val description: String) {
@@ -186,10 +191,13 @@ object MessageFilterShield : ClickableFeature(),
         val talker = msgInfo.talker
         val typeCode = msgInfo.typeCode
 
-        if (shouldIntercept(talker, typeCode)) {
+        val (intercepted, ruleScope) = shouldInterceptWithScope(talker, typeCode)
+        if (intercepted) {
             discardMsgIds.add(msgInfo.serverId)
-            logShield(msgInfo, "丢弃")
-            WeLogger.i(TAG, "discarded message: talker=$talker, type=$typeCode, msgSvrId=${msgInfo.serverId}")
+            logShield(msgInfo, "丢弃", ruleScope, true)
+            WeLogger.i(TAG, "discarded message: talker=$talker, type=$typeCode, scope=$ruleScope, msgSvrId=${msgInfo.serverId}")
+        } else {
+            logShield(msgInfo, "放过", ruleScope, false)
         }
     }
 
@@ -206,51 +214,78 @@ object MessageFilterShield : ClickableFeature(),
             val talker = msgInfo.talker
             val typeCode = msgInfo.typeCode
 
-            if (shouldIntercept(talker, typeCode)) {
+            val (intercepted, ruleScope) = shouldInterceptWithScope(talker, typeCode)
+            if (intercepted) {
                 view.visibility = View.GONE
                 view.layoutParams?.let { lp ->
                     lp.height = 0
                     lp.width = 0
                 }
-                logShield(msgInfo, "隐藏")
-                WeLogger.d(TAG, "hidden message: talker=$talker, type=$typeCode")
+                logShield(msgInfo, "隐藏", ruleScope, true)
+                WeLogger.d(TAG, "hidden message: talker=$talker, type=$typeCode, scope=$ruleScope")
+            } else {
+                logShield(msgInfo, "放过", ruleScope, false)
             }
         }.onFailure { e ->
             WeLogger.e(TAG, "onCreateView failed", e)
         }
     }
 
-    private fun shouldIntercept(talker: String, typeCode: Int): Boolean {
-        // 确定适用的规则集
-        val rules = when {
-            talker.isGroupChatWxId -> getGroupRules()
-            talker.startsWith("gh_") -> getOaRules()
-            else -> getPrivateRules()
-        }
+    /** 返回 (是否拦截, 生效范围描述) */
+    private fun shouldInterceptWithScope(talker: String, typeCode: Int): Pair<Boolean, String> {
+        return runCatching {
+            val rules = when {
+                talker.isGroupChatWxId -> getGroupRules()
+                talker.startsWith("gh_") -> getOaRules()
+                else -> getPrivateRules()
+            }
 
-        if (!rules.enabled) return false
-        if (typeCode !in rules.blockedTypes) return false
+            if (!rules.enabled) return Pair(false, "规则集未启用")
 
-        // 名单过滤
-        val targetList = getTargetList()
-        if (targetList.isNotEmpty()) {
-            val inList = talker in targetList
-            when (listMode) {
-                ListType.BLACKLIST.value -> {
-                    // 黑名单模式：名单中的会话不拦截
-                    if (inList) return false
+            if (typeCode !in rules.blockedTypes) return Pair(false, "类型不在屏蔽列表")
+
+            // === 生效范围检查 ===
+            val scope = ShieldScope.entries.find { it.value == rules.scope } ?: ShieldScope.ALL_CHATS
+            when (scope) {
+                ShieldScope.SELECTED_CHATS -> {
+                    if (talker !in rules.scopeChats) {
+                        WeLogger.d(TAG, "scope skip: talker=$talker not in SELECTED_CHATS, scopeChats=${rules.scopeChats}")
+                        return Pair(false, "不在选中群聊范围内")
+                    }
                 }
-                ListType.WHITELIST.value -> {
-                    // 白名单模式：仅拦截名单中的会话
-                    if (!inList) return false
+                ShieldScope.EXCLUDED_CHATS -> {
+                    if (talker in rules.scopeChats) {
+                        WeLogger.d(TAG, "scope skip: talker=$talker in EXCLUDED_CHATS, scopeChats=${rules.scopeChats}")
+                        return Pair(false, "在排除群聊范围内")
+                    }
+                }
+                ShieldScope.ALL_CHATS -> { /* 不过滤 */ }
+            }
+
+            // === 全局名单过滤 ===
+            val targetList = getTargetList()
+            if (targetList.isNotEmpty()) {
+                val inList = talker in targetList
+                when (listMode) {
+                    ListType.BLACKLIST.value -> {
+                        if (inList) return Pair(false, "在黑名单中")
+                    }
+                    ListType.WHITELIST.value -> {
+                        if (!inList) return Pair(false, "不在白名单中")
+                    }
                 }
             }
-        }
 
-        return true
+            Pair(true, scope.description)
+        }.getOrDefault(Pair(false, "异常"))
     }
 
-    private fun logShield(msgInfo: MessageInfo, strategyName: String) {
+    /** 兼容旧接口 */
+    private fun shouldIntercept(talker: String, typeCode: Int): Boolean {
+        return shouldInterceptWithScope(talker, typeCode).first
+    }
+
+    private fun logShield(msgInfo: MessageInfo, action: String, scope: String, hit: Boolean) {
         if (!enableLog) return
         val typeName = MessageType.fromCode(msgInfo.typeCode)?.displayName ?: "未知(${msgInfo.typeCode})"
         shieldLog.add(
@@ -259,10 +294,11 @@ object MessageFilterShield : ClickableFeature(),
                 talker = msgInfo.talker,
                 sender = msgInfo.sender,
                 typeName = typeName,
-                strategy = strategyName
+                strategy = action,
+                scope = scope,
+                hit = hit
             )
         )
-        // 限制日志数量
         if (shieldLog.size > 500) {
             shieldLog.removeAt(0)
         }
@@ -285,7 +321,21 @@ object MessageFilterShield : ClickableFeature(),
             var showTargetSelector by remember { mutableStateOf(false) }
             var showShieldLog by remember { mutableStateOf(false) }
 
-            if (showTargetSelector) {
+            // 用于 RuleSetEditor 的 scope 聊天选择
+            var showScopeChatSelector by remember { mutableStateOf(false) }
+            var scopeChatSelectorForRules by remember { mutableStateOf<ShieldRuleSet?>(null) }
+            var scopeChatSelectorOnSave by remember { mutableStateOf<((Set<String>) -> Unit)?>(null) }
+
+            if (showScopeChatSelector && scopeChatSelectorForRules != null) {
+                ScopeChatSelectorScreen(
+                    rules = scopeChatSelectorForRules!!,
+                    onDismiss = { showScopeChatSelector = false },
+                    onSave = { selectedChats ->
+                        scopeChatSelectorOnSave?.invoke(selectedChats)
+                        showScopeChatSelector = false
+                    }
+                )
+            } else if (showTargetSelector) {
                 TargetSelectorScreen(
                     onDismiss = { showTargetSelector = false },
                     onSave = { targets ->
@@ -363,7 +413,12 @@ object MessageFilterShield : ClickableFeature(),
                                 Text("私聊规则", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                                 RuleSetEditor(
                                     rules = localPrivateRules,
-                                    onRulesChanged = { localPrivateRules = it }
+                                    onRulesChanged = { localPrivateRules = it },
+                                    onOpenScopeChatSelector = { rules, onSaveCb ->
+                                        scopeChatSelectorForRules = rules
+                                        scopeChatSelectorOnSave = onSaveCb
+                                        showScopeChatSelector = true
+                                    }
                                 )
 
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -372,7 +427,12 @@ object MessageFilterShield : ClickableFeature(),
                                 Text("群聊规则", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                                 RuleSetEditor(
                                     rules = localGroupRules,
-                                    onRulesChanged = { localGroupRules = it }
+                                    onRulesChanged = { localGroupRules = it },
+                                    onOpenScopeChatSelector = { rules, onSaveCb ->
+                                        scopeChatSelectorForRules = rules
+                                        scopeChatSelectorOnSave = onSaveCb
+                                        showScopeChatSelector = true
+                                    }
                                 )
 
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -381,7 +441,12 @@ object MessageFilterShield : ClickableFeature(),
                                 Text("公众号规则", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                                 RuleSetEditor(
                                     rules = localOaRules,
-                                    onRulesChanged = { localOaRules = it }
+                                    onRulesChanged = { localOaRules = it },
+                                    onOpenScopeChatSelector = { rules, onSaveCb ->
+                                        scopeChatSelectorForRules = rules
+                                        scopeChatSelectorOnSave = onSaveCb
+                                        showScopeChatSelector = true
+                                    }
                                 )
 
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -432,10 +497,13 @@ object MessageFilterShield : ClickableFeature(),
     @Composable
     private fun RuleSetEditor(
         rules: ShieldRuleSet,
-        onRulesChanged: (ShieldRuleSet) -> Unit
+        onRulesChanged: (ShieldRuleSet) -> Unit,
+        onOpenScopeChatSelector: (ShieldRuleSet, (Set<String>) -> Unit) -> Unit
     ) {
         var localEnabled by remember(rules) { mutableStateOf(rules.enabled) }
         var localBlockedTypes by remember(rules) { mutableStateOf(rules.blockedTypes.toMutableSet()) }
+        var localScope by remember(rules) { mutableStateOf(rules.scope) }
+        var localScopeChats by remember(rules) { mutableStateOf(rules.scopeChats.toMutableSet()) }
 
         Column(modifier = Modifier.fillMaxWidth()) {
             ListItem(
@@ -450,6 +518,65 @@ object MessageFilterShield : ClickableFeature(),
             )
 
             if (localEnabled) {
+                // === 生效范围 ===
+                Text(
+                    "生效范围",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+                ShieldScope.entries.forEach { scope ->
+                    ListItem(
+                        modifier = Modifier.clickable {
+                            localScope = scope.value
+                            onRulesChanged(rules.copy(enabled = true, scope = localScope))
+                        },
+                        trailingContent = {
+                            Text(if (localScope == scope.value) "✓" else "")
+                        },
+                        headlineContent = { Text(scope.description) },
+                        supportingContent = {
+                            Text(
+                                when (scope) {
+                                    ShieldScope.ALL_CHATS -> "所有会话均生效"
+                                    ShieldScope.SELECTED_CHATS -> "仅对选中群聊生效，已选 ${localScopeChats.size} 个群"
+                                    ShieldScope.EXCLUDED_CHATS -> "排除选中群聊，已选 ${localScopeChats.size} 个群"
+                                }
+                            )
+                        }
+                    )
+                }
+
+                // 选中/排除群聊的管理按钮
+                if (localScope == ShieldScope.SELECTED_CHATS.value || localScope == ShieldScope.EXCLUDED_CHATS.value) {
+                    ListItem(
+                        modifier = Modifier.clickable {
+                            onOpenScopeChatSelector(
+                                rules.copy(scope = localScope, scopeChats = localScopeChats)
+                            ) { selectedChats ->
+                                localScopeChats = selectedChats.toMutableSet()
+                                onRulesChanged(
+                                    rules.copy(
+                                        enabled = true,
+                                        scope = localScope,
+                                        scopeChats = localScopeChats
+                                    )
+                                )
+                            }
+                        },
+                        headlineContent = {
+                            Text(
+                                if (localScope == ShieldScope.SELECTED_CHATS.value) "选择生效群聊"
+                                else "选择排除群聊"
+                            )
+                        },
+                        supportingContent = { Text("当前已选 ${localScopeChats.size} 个群聊") }
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                // === 消息类型选择 ===
                 Text(
                     "选择要屏蔽的消息类型",
                     style = MaterialTheme.typography.bodySmall,
@@ -473,7 +600,14 @@ object MessageFilterShield : ClickableFeature(),
                                     onClick = {
                                         if (checked) localBlockedTypes.remove(type.code)
                                         else localBlockedTypes.add(type.code)
-                                        onRulesChanged(rules.copy(enabled = true, blockedTypes = localBlockedTypes))
+                                        onRulesChanged(
+                                            rules.copy(
+                                                enabled = true,
+                                                blockedTypes = localBlockedTypes,
+                                                scope = localScope,
+                                                scopeChats = localScopeChats
+                                            )
+                                        )
                                     },
                                     label = { Text(name) },
                                     modifier = Modifier.padding(end = 4.dp, bottom = 4.dp)
@@ -484,6 +618,87 @@ object MessageFilterShield : ClickableFeature(),
                 }
             }
         }
+    }
+
+    /** 选择生效范围群聊的弹窗（带搜索） */
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun ScopeChatSelectorScreen(
+        rules: ShieldRuleSet,
+        onDismiss: () -> Unit,
+        onSave: (Set<String>) -> Unit
+    ) {
+        val groups = remember {
+            WeDatabaseApi.getContacts().filter { it.wxId.isGroupChatWxId }
+        }
+        val selected = remember(rules) { rules.scopeChats.toMutableSet() }
+        val listState = rememberLazyListState()
+        var searchQuery by remember { mutableStateOf("") }
+
+        val filteredGroups = remember(searchQuery, groups) {
+            if (searchQuery.isBlank()) groups
+            else groups.filter { contact ->
+                contact.displayName.contains(searchQuery, ignoreCase = true) ||
+                        contact.wxId.contains(searchQuery, ignoreCase = true)
+            }
+        }
+
+        val title = if (rules.scope == ShieldScope.SELECTED_CHATS.value) "选择生效群聊" else "选择排除群聊"
+
+        AlertDialogContent(
+            title = { Text(title) },
+            text = {
+                DefaultColumn {
+                    // 搜索框
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("搜索群名或群ID") },
+                        singleLine = true
+                    )
+
+                    if (filteredGroups.isEmpty()) {
+                        Text(
+                            "无匹配的群聊",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        )
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.heightIn(max = 400.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(filteredGroups, key = { it.wxId }) { contact ->
+                                val isSelected = remember(selected) { mutableStateOf(selected.contains(contact.wxId)) }
+                                ListItem(
+                                    modifier = Modifier.clickable {
+                                        isSelected.value = !isSelected.value
+                                        if (isSelected.value) {
+                                            selected.add(contact.wxId)
+                                        } else {
+                                            selected.remove(contact.wxId)
+                                        }
+                                    },
+                                    headlineContent = { Text(contact.displayName) },
+                                    supportingContent = { Text(contact.wxId) },
+                                    trailingContent = {
+                                        Text(if (isSelected.value) "✓" else "")
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+            confirmButton = {
+                Button(onClick = {
+                    onSave(selected)
+                }) { Text("保存") }
+            }
+        )
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -497,40 +712,67 @@ object MessageFilterShield : ClickableFeature(),
         }
         val selected = remember { getTargetList().toMutableSet() }
         val listState = rememberLazyListState()
+        var searchQuery by remember { mutableStateOf("") }
+
+        val filteredContacts = remember(searchQuery, contacts) {
+            if (searchQuery.isBlank()) contacts
+            else contacts.filter { contact ->
+                contact.displayName.contains(searchQuery, ignoreCase = true) ||
+                        contact.wxId.contains(searchQuery, ignoreCase = true)
+            }
+        }
 
         AlertDialogContent(
             title = { Text("选择名单会话") },
             text = {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.heightIn(max = 400.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    item {
+                DefaultColumn {
+                    // 搜索框
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("搜索群名/昵称/微信号") },
+                        singleLine = true
+                    )
+
+                    Text(
+                        if (listMode == ListType.BLACKLIST.value) "选择不拦截的会话" else "选择需要拦截的会话",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+
+                    if (filteredContacts.isEmpty()) {
                         Text(
-                            if (listMode == ListType.BLACKLIST.value) "选择不拦截的会话" else "选择需要拦截的会话",
-                            style = MaterialTheme.typography.bodySmall,
+                            "无匹配的会话",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.dp)
+                            modifier = Modifier.padding(vertical = 16.dp)
                         )
-                    }
-                    items(contacts, key = { it.wxId }) { contact ->
-                        val isSelected = remember { mutableStateOf(selected.contains(contact.wxId)) }
-                        ListItem(
-                            modifier = Modifier.clickable {
-                                isSelected.value = !isSelected.value
-                                if (isSelected.value) {
-                                    selected.add(contact.wxId)
-                                } else {
-                                    selected.remove(contact.wxId)
-                                }
-                            },
-                            headlineContent = { Text(contact.displayName) },
-                            supportingContent = { Text(contact.wxId) },
-                            trailingContent = {
-                                Text(if (isSelected.value) "✓" else "")
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.heightIn(max = 400.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(filteredContacts, key = { it.wxId }) { contact ->
+                                val isSelected = remember(selected) { mutableStateOf(selected.contains(contact.wxId)) }
+                                ListItem(
+                                    modifier = Modifier.clickable {
+                                        isSelected.value = !isSelected.value
+                                        if (isSelected.value) {
+                                            selected.add(contact.wxId)
+                                        } else {
+                                            selected.remove(contact.wxId)
+                                        }
+                                    },
+                                    headlineContent = { Text(contact.displayName) },
+                                    supportingContent = { Text(contact.wxId) },
+                                    trailingContent = {
+                                        Text(if (isSelected.value) "✓" else "")
+                                    }
+                                )
                             }
-                        )
+                        }
                     }
                 }
             },
@@ -538,7 +780,6 @@ object MessageFilterShield : ClickableFeature(),
             confirmButton = {
                 Button(onClick = {
                     onSave(selected)
-                    onDismiss()
                 }) { Text("保存") }
             }
         )
@@ -563,16 +804,18 @@ object MessageFilterShield : ClickableFeature(),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(shieldLog.reversed(), key = { "${it.time}-${it.talker}" }) { entry ->
+                            val hitLabel = if (entry.hit) "已拦截" else "放过"
                             ListItem(
                                 headlineContent = {
                                     Text(
-                                        "${entry.typeName} - ${entry.strategy}",
+                                        "${entry.typeName} - ${entry.strategy} ($hitLabel)",
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 },
                                 supportingContent = {
                                     Text(
-                                        "会话: ${entry.talker}\n发送者: ${entry.sender}\n时间: ${
+                                        "会话: ${entry.talker}\n发送者: ${entry.sender}\n" +
+                                                "生效范围: ${entry.scope}\n时间: ${
                                             java.text.SimpleDateFormat(
                                                 "MM-dd HH:mm:ss",
                                                 java.util.Locale.getDefault()
