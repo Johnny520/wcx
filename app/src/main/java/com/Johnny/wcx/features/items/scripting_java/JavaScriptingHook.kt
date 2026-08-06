@@ -53,6 +53,7 @@ import me.hd.wauxv.data.bean.MsgInfoBean
 import me.hd.wauxv.data.bean.PayMsgBean
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.div
 import kotlin.io.path.exists
@@ -176,7 +177,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
         val result = runCatching {
             val isNew = !dir.exists()
             dir.createDirectories()
-            WeLogger.d(TAG, "scripts_java 目录已就绪: ${dir.absolutePathString()}")
+            WeLogger.d(TAG, "scripts_java 目录已就绪: ${dir.toAbsolutePath().toString()}")
 
             // 首次创建目录时，自动生成示例脚本
             if (isNew) {
@@ -195,7 +196,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
             }
         }
         if (result.isFailure) {
-            WeLogger.e(TAG, "无法创建 scripts_java 目录: ${dir.absolutePathString()}", result.exceptionOrNull())
+            WeLogger.e(TAG, "无法创建 scripts_java 目录: ${dir.toAbsolutePath().toString()}", result.exceptionOrNull())
         }
         dir
     }
@@ -245,19 +246,19 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
 
         CoroutineScope(Dispatchers.IO).launch {
             WeLogger.d(TAG, "========== 开始扫描 Java 脚本 ==========")
-            WeLogger.d(TAG, "脚本目录: ${SCRIPTS_DIR.absolutePathString()}")
+            WeLogger.d(TAG, "脚本目录: ${SCRIPTS_DIR.toAbsolutePath().toString()}")
 
             // 确保目录存在
             val dirReady = runCatching {
                 if (!SCRIPTS_DIR.exists()) {
                     SCRIPTS_DIR.createDirectories()
-                    WeLogger.d(TAG, "目录不存在，已自动创建: ${SCRIPTS_DIR.absolutePathString()}")
+                    WeLogger.d(TAG, "目录不存在，已自动创建: ${SCRIPTS_DIR.toAbsolutePath().toString()}")
                 }
                 SCRIPTS_DIR.exists()
             }.getOrDefault(false)
 
             if (!dirReady) {
-                val errMsg = "脚本目录不可用: ${SCRIPTS_DIR.absolutePathString()}，请检查文件权限"
+                val errMsg = "脚本目录不可用: ${SCRIPTS_DIR.toAbsolutePath().toString()}，请检查文件权限"
                 WeLogger.e(TAG, errMsg)
                 lastScanError = errMsg
                 lastScanCount = 0
@@ -290,8 +291,8 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                     continue
                 }
 
-                WeLogger.d(TAG, "'$dirName': main.java=${mainFile.absolutePathString()} (${mainFile.toFile().length()} bytes)")
-                WeLogger.d(TAG, "'$dirName': info.prop=${infoFile.absolutePathString()} (${infoFile.toFile().length()} bytes)")
+                WeLogger.d(TAG, "'$dirName': main.java=${mainFile.toAbsolutePath().toString()} (${mainFile.toFile().length()} bytes)")
+                WeLogger.d(TAG, "'$dirName': info.prop=${infoFile.toAbsolutePath().toString()} (${infoFile.toFile().length()} bytes)")
 
                 val content = runCatching { mainFile.readText() }.getOrElse { e ->
                     WeLogger.e(TAG, "读取 main.java 失败 '$dirName'", e)
@@ -363,7 +364,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                     Text(
-                                        "请确保模块已获取存储权限，或手动创建目录：\n${SCRIPTS_DIR.absolutePathString()}",
+                                        "请确保模块已获取存储权限，或手动创建目录：\n${SCRIPTS_DIR.toAbsolutePath().toString()}",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.padding(top = 4.dp)
@@ -373,7 +374,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                     if (count == 0) {
                                         Text("暂无脚本，点击下方「使用说明」了解如何添加脚本")
                                         Text(
-                                            "脚本目录: ${SCRIPTS_DIR.absolutePathString()}",
+                                            "脚本目录: ${SCRIPTS_DIR.toAbsolutePath().toString()}",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             style = MaterialTheme.typography.bodySmall,
                                             modifier = Modifier.padding(top = 4.dp)
@@ -532,7 +533,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
             context.startActivity(intent)
         }.onFailure {
             WeLogger.w(TAG, "无法通过 SAF 打开脚本目录", it)
-            com.Johnny.wcx.utils.android.showToast("请手动打开: ${SCRIPTS_DIR.absolutePathString()}")
+            com.Johnny.wcx.utils.android.showToast("请手动打开: ${SCRIPTS_DIR.toAbsolutePath().toString()}")
         }
     }
 
@@ -540,7 +541,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
     private fun safeListScriptDirs(): List<Path> = runCatching {
         SCRIPTS_DIR.listDirectoryEntries().filter { it.isDirectory() }
     }.getOrElse { e ->
-        WeLogger.e(TAG, "列出脚本目录失败: ${SCRIPTS_DIR.absolutePathString()}", e)
+        WeLogger.e(TAG, "列出脚本目录失败: ${SCRIPTS_DIR.toAbsolutePath().toString()}", e)
         lastScanError = "无法读取脚本目录: ${e.message}"
         emptyList()
     }
