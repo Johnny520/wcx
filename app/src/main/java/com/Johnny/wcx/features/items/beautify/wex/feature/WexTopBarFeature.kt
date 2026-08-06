@@ -14,6 +14,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.Johnny.wcx.features.items.beautify.wex.WexBeautifyFeature
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.hookAfterDirectly
+import com.Johnny.wcx.utils.hookBeforeDirectly
 import dev.ujhhgtg.reflekt.reflekt
 import java.io.File
 
@@ -36,11 +38,11 @@ object WexTopBarFeature {
             // Hook Activity.onResume
             Activity::class.reflekt()
                 .firstMethod { name = "onResume" }
-                .hookAfter {
+                .hookAfterDirectly {
                     try {
-                        val act = thisObject as? Activity ?: return@hookAfter
-                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
-                        if (!WexBeautifyFeature.masterEnabled) return@hookAfter
+                        val act = thisObject as? Activity ?: return@hookAfterDirectly
+                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfterDirectly
+                        if (!WexBeautifyFeature.masterEnabled) return@hookAfterDirectly
                         applyTopBar(act)
                     } catch (e: Throwable) {
                         WeLogger.e(TAG, "顶栏美化异常", e)
@@ -51,11 +53,11 @@ object WexTopBarFeature {
             // Hook TextView.setText 替换标题
             TextView::class.reflekt()
                 .firstMethod { name = "setText"; parameters(CharSequence::class) }
-                .hookBefore {
+                .hookBeforeDirectly {
                     try {
-                        val cs = args[0] as? CharSequence ?: return@hookBefore
-                        if (cs.toString() != "微信") return@hookBefore
-                        if (!WexBeautifyFeature.topProfileEnabled) return@hookBefore
+                        val cs = args[0] as? CharSequence ?: return@hookBeforeDirectly
+                        if (cs.toString() != "微信") return@hookBeforeDirectly
+                        if (!WexBeautifyFeature.topProfileEnabled) return@hookBeforeDirectly
                         val custom = WexBeautifyFeature.topTitle
                         if (custom.isNotEmpty()) args[0] = custom
                     } catch (e: Throwable) {

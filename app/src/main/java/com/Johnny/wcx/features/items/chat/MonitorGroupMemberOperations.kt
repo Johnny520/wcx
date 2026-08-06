@@ -85,6 +85,18 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import java.lang.reflect.Field
 
+@Serializable
+data class EventConfig(
+    val color: String = "#28C445",
+    val text: String = ""
+)
+
+@Serializable
+data class GroupWelcomeConfig(
+    val text: String = "",
+    val enabled: Boolean = true
+)
+
 @Feature(
     name = "群成员变动提醒",
     categories = ["联系人与群组"],
@@ -131,18 +143,6 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         val selected = getSelectedGroups()
         return selected.isEmpty() || groupWxId in selected
     }
-
-    @Serializable
-    data class EventConfig(
-        val color: String = "#28C445",
-        val text: String = ""
-    )
-
-    @Serializable
-    data class GroupWelcomeConfig(
-        val text: String = "",
-        val enabled: Boolean = true
-    )
 
     private fun getGroupWelcomeConfigs(): Map<String, GroupWelcomeConfig> {
         return runCatching {

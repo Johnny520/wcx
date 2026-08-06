@@ -9,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.Johnny.wcx.features.items.beautify.wex.WexBeautifyFeature
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.hookAfterDirectly
 import dev.ujhhgtg.reflekt.reflekt
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -27,11 +28,11 @@ object WexHomeCardsFeature {
         try {
             Activity::class.reflekt()
                 .firstMethod { name = "onResume" }
-                .hookAfter {
+                .hookAfterDirectly {
                     try {
-                        val act = thisObject as? Activity ?: return@hookAfter
-                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
-                        if (!WexBeautifyFeature.masterEnabled) return@hookAfter
+                        val act = thisObject as? Activity ?: return@hookAfterDirectly
+                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfterDirectly
+                        if (!WexBeautifyFeature.masterEnabled) return@hookAfterDirectly
                         insertCards(act)
                     } catch (e: Throwable) {
                         WeLogger.e(TAG, "首页卡片异常", e)

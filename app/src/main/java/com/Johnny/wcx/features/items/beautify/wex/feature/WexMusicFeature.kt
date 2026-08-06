@@ -5,6 +5,7 @@ import android.view.View
 import android.view.ViewGroup
 import com.Johnny.wcx.features.items.beautify.wex.WexBeautifyFeature
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.hookAfterDirectly
 import dev.ujhhgtg.reflekt.reflekt
 
 /**
@@ -33,11 +34,11 @@ object WexMusicFeature {
         try {
             Activity::class.reflekt()
                 .firstMethod { name = "onResume" }
-                .hookAfter {
+                .hookAfterDirectly {
                     try {
-                        val act = thisObject as? Activity ?: return@hookAfter
-                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
-                        if (!WexBeautifyFeature.floatLyricEnabled) return@hookAfter
+                        val act = thisObject as? Activity ?: return@hookAfterDirectly
+                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfterDirectly
+                        if (!WexBeautifyFeature.floatLyricEnabled) return@hookAfterDirectly
                         showFloatLyric(act)
                     } catch (e: Throwable) {
                         WeLogger.e(TAG, "悬浮歌词异常", e)
