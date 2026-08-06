@@ -1060,7 +1060,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                                         else "关闭：提示气泡仅显示昵称，隐藏 wxid、颜色码"
                                     )
                                 }
-                            }
+                            )
 
                             // 自动@新人开关
                             ListItem(
