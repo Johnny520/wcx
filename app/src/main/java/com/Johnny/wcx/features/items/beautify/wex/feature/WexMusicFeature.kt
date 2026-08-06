@@ -56,7 +56,7 @@ object WexMusicFeature {
             try {
                 // 悬浮歌词实现：在 decor 上添加一个悬浮的歌词 TextView
                 // 简化实现：显示一个小的歌词提示
-                if (decor.findViewWithTag<View>("wex_float_lyric") != null) return
+                if (decor.findViewWithTag<View>("wex_float_lyric") != null) return@post
                 val lyric = android.widget.TextView(act).apply {
                     tag = "wex_float_lyric"
                     text = "♪ 未检测到音乐播放"
