@@ -27,9 +27,9 @@ object WexHomeCardsFeature {
         try {
             Activity::class.reflekt()
                 .firstMethod { name = "onResume" }
-                .hookAfter { param ->
+                .hookAfter {
                     try {
-                        val act = param.thisObject as? Activity ?: return@hookAfter
+                        val act = thisObject as? Activity ?: return@hookAfter
                         if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
                         if (!WexBeautifyFeature.masterEnabled) return@hookAfter
                         insertCards(act)
