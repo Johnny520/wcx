@@ -55,7 +55,7 @@ val RECENT_UPDATES = listOf(
     ),
     RecentUpdateItem(
         name = "移除旧变量{链接昵称}",
-        description = "彻底移除{链接昵称}，自动迁移旧配置到$nickname",
+        description = "彻底移除{链接昵称}，自动迁移旧配置到\$nickname",
         featureKey = "群成员行为监控"
     ),
     RecentUpdateItem(

@@ -70,7 +70,7 @@ object JavaScriptingHook : ClickableFeature(), IResolveDex, WeDatabaseListenerAp
     private const val DISABLED_FLAG = "disabled.flag"
 
     // ── 示例脚本内容（首次创建目录时自动生成，用户删除后不再自动恢复） ──
-    private const val DEMO_SCRIPT_CONTENT = """
+    private val DEMO_SCRIPT_CONTENT = """
 import com.Johnny.wcx.utils.WeLogger;
 
 /**
@@ -196,7 +196,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
             }
         }
         if (result.isFailure) {
-            WeLogger.e(TAG, "无法创建 scripts_java 目录: ${dir.toAbsolutePath().toString()}", result.exceptionOrNull())
+            WeLogger.e(TAG, "无法创建 scripts_java 目录: ${dir.toAbsolutePath().toString()}", result.exceptionOrNull()!!)
         }
         dir
     }
