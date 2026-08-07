@@ -262,22 +262,21 @@ object TabTheme : ClickableFeature() {
                     android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
                     android.content.res.Configuration.UI_MODE_NIGHT_YES
 
+            val decor = window.decorView as? ViewGroup ?: return
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
-                window.insetsController?.isAppearanceLightStatusBars = !isDark
             } else {
                 @Suppress("DEPRECATION")
-                val decor = window.decorView as? ViewGroup ?: return
                 var flags = decor.systemUiVisibility
                 flags = flags or
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                         View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                if (!isDark) {
-                    flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                } else {
-                    flags = flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-                }
                 decor.systemUiVisibility = flags
+            }
+
+            // Use WindowInsetsControllerCompat for consistent behavior across API levels
+            androidx.core.view.WindowInsetsControllerCompat(window, decor).apply {
+                isAppearanceLightStatusBars = !isDark
             }
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
