@@ -420,7 +420,7 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
     @Suppress("NOTHING_TO_INLINE")
     fun openSettingsDialog(context: Context) {
-        context.startActivity(Intent(context, SettingsActivity::class.java))
+        context.startActivity(Intent(context, SettingsActivity::class.java).setPackage(PackageNames.MODULE))
     }
 
 //    private class SettingsMenuItemClickListener(val context: Context) :

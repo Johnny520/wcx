@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.view.View
+import com.Johnny.wcx.constants.PackageNames
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseIn
@@ -304,6 +305,7 @@ object AddMainScreenFab : ClickableFeature() {
                             try {
                                 activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
                                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    setPackage(PackageNames.MODULE)
                                 })
                             } catch (e: Exception) {
                                 WeLogger.e(TAG, "启动模块设置失败", e)

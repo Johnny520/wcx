@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import com.Johnny.wcx.constants.PackageNames
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -977,7 +978,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     SidePanelFeatureItem(icon = MaterialSymbols.Outlined.Settings, name = "WCX设置",
                         desc = "模块设置与功能管理", textColor = textColor, subTextColor = subTextColor, accentColor = accentColor,
                         onClick = {
-                            act.startActivity(Intent(act, SettingsActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                            act.startActivity(Intent(act, SettingsActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); setPackage(PackageNames.MODULE) })
                         })
                 }
                 customFeatures.forEach { feature ->
