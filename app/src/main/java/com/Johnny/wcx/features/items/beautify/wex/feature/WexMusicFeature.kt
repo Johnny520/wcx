@@ -9,8 +9,13 @@ import com.Johnny.wcx.utils.hookAfterDirectly
 import dev.ujhhgtg.reflekt.reflekt
 
 /**
- * 音乐播放器 — 移植自 Wex
- * 在微信首页显示音乐播放控制
+ * 音乐播放器 — 移植自 Wex（无 Activity.onResume Hook 版本）
+ *
+ * 策略：
+ * - 不 Hook Activity.onResume
+ * - Hook ViewGroup.addView 检测 LauncherUI 内容视图创建
+ * - 当检测到 LauncherUI 的装饰视图添加内容时，添加悬浮歌词
+ * - 仅表面级修改：只添加悬浮视图，不拦截页面初始化
  */
 object WexMusicFeature {
 
@@ -32,22 +37,49 @@ object WexMusicFeature {
 
     private fun installFloatLyric() {
         try {
-            Activity::class.reflekt()
-                .firstMethod { name = "onResume" }
+            // Hook ViewGroup.addView — 检测 LauncherUI 内容视图创建
+            ViewGroup::class.reflekt()
+                .firstMethod { name = "addView"; parameters(View::class, Int::class, ViewGroup.LayoutParams::class) }
                 .hookAfterDirectly {
                     try {
-                        val act = thisObject as? Activity ?: return@hookAfterDirectly
-                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfterDirectly
+                        val child = args[0] as? View ?: return@hookAfterDirectly
                         if (!WexBeautifyFeature.floatLyricEnabled) return@hookAfterDirectly
-                        showFloatLyric(act)
+
+                        // 确认父级位于 LauncherUI 视图层级中
+                        val parent = thisObject as? ViewGroup ?: return@hookAfterDirectly
+                        val act = findLauncherActivity(parent) ?: return@hookAfterDirectly
+
+                        // 延迟添加悬浮歌词，等待布局完成
+                        parent.post {
+                            try {
+                                showFloatLyric(act)
+                            } catch (e: Throwable) {
+                                WeLogger.e(TAG, "悬浮歌词添加异常", e)
+                            }
+                        }
                     } catch (e: Throwable) {
-                        WeLogger.e(TAG, "悬浮歌词异常", e)
+                        WeLogger.e(TAG, "悬浮歌词 addView hook 异常", e)
                     }
                 }
-            WeLogger.d(TAG, "悬浮歌词 Hook 已注册")
+            WeLogger.d(TAG, "悬浮歌词 Hook 已注册（无 onResume 版本）")
         } catch (e: Throwable) {
             WeLogger.e(TAG, "悬浮歌词 Hook 注册失败", e)
         }
+    }
+
+    /**
+     * 判断 ViewGroup 是否位于 LauncherUI 视图层级中，并返回 Activity。
+     */
+    private fun findLauncherActivity(view: View): Activity? {
+        var current: View? = view
+        while (current != null) {
+            val ctx = current.context
+            if (ctx is Activity && ctx.javaClass.name == "com.tencent.mm.ui.LauncherUI") {
+                return ctx
+            }
+            current = if (current.parent is View) current.parent as View else null
+        }
+        return null
     }
 
     private fun showFloatLyric(act: Activity) {

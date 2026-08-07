@@ -6,9 +6,11 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Outline
 import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -18,12 +20,17 @@ import com.Johnny.wcx.utils.hookAfterDirectly
 import com.Johnny.wcx.utils.hookBeforeDirectly
 import dev.ujhhgtg.reflekt.reflekt
 import java.io.File
+import java.lang.ref.WeakReference
 
 /**
- * 顶栏美化 — 移植自 Wex
- * - 替换原生搜索按钮为自定义搜索框卡片
- * - 自定义标题（替换"微信"文字）
- * - 头像 + 昵称 + 状态
+ * 顶栏美化 — 移植自 Wex（无 Activity.onResume Hook 版本）
+ *
+ * 策略：
+ * - 不 Hook Activity.onResume
+ * - Hook LayoutInflater.inflate 检测 LauncherUI 布局创建
+ * - Hook TextView.setText 替换标题文字
+ * - 使用 ViewTreeObserver.OnGlobalLayoutListener 检测布局就绪
+ * - 仅表面级修改：只修改视图外观，不拦截页面初始化
  */
 object WexTopBarFeature {
 
@@ -32,25 +39,28 @@ object WexTopBarFeature {
     private const val TAG_PROFILE = "wex_top_profile"
 
     private var searchBtn: View? = null
+    private var lastActivityRef = WeakReference<Activity>(null)
 
     fun install() {
         try {
-            // Hook Activity.onResume
-            Activity::class.reflekt()
-                .firstMethod { name = "onResume" }
-                .hookAfterDirectly {
-                    try {
-                        val act = thisObject as? Activity ?: return@hookAfterDirectly
-                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfterDirectly
-                        if (!WexBeautifyFeature.masterEnabled) return@hookAfterDirectly
-                        applyTopBar(act)
-                    } catch (e: Throwable) {
-                        WeLogger.e(TAG, "顶栏美化异常", e)
-                    }
-                }
-            WeLogger.d(TAG, "顶栏美化 Hook 已注册")
+            // Hook TextView.setText — 替换标题文字
+            hookTitleReplacement()
 
-            // Hook TextView.setText 替换标题
+            // Hook LayoutInflater.inflate — 检测 LauncherUI 布局创建
+            hookLayoutInflater()
+
+            WeLogger.d(TAG, "顶栏美化 Hook 已注册（无 onResume 版本）")
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "顶栏美化 Hook 注册失败", e)
+        }
+    }
+
+    /**
+     * Hook TextView.setText 替换标题"微信"。
+     * 仅修改 setText 参数，不拦截任何其他逻辑。
+     */
+    private fun hookTitleReplacement() {
+        try {
             TextView::class.reflekt()
                 .firstMethod { name = "setText"; parameters(CharSequence::class) }
                 .hookBeforeDirectly {
@@ -66,29 +76,94 @@ object WexTopBarFeature {
                 }
             WeLogger.d(TAG, "标题替换 Hook 已注册")
         } catch (e: Throwable) {
-            WeLogger.e(TAG, "顶栏美化 Hook 注册失败", e)
+            WeLogger.e(TAG, "标题替换 Hook 注册失败", e)
         }
     }
 
-    private fun applyTopBar(act: Activity) {
-        val decor = act.window?.decorView as? ViewGroup ?: return
-        decor.post {
-            try {
-                if (WexBeautifyFeature.topSearchBarEnabled) {
-                    applySearchBar(act, decor)
+    /**
+     * Hook LayoutInflater.inflate，检测 LauncherUI 布局创建。
+     * 当检测到 LauncherUI 的布局被加载时，注册 GlobalLayoutListener 等待布局就绪。
+     */
+    private fun hookLayoutInflater() {
+        try {
+            LayoutInflater::class.reflekt()
+                .firstMethod { name = "inflate"; parameters(Int::class, ViewGroup::class, Boolean::class) }
+                .hookAfterDirectly {
+                    try {
+                        val root = result as? ViewGroup ?: return@hookAfterDirectly
+                        // 检查是否是 LauncherUI 的布局
+                        if (!isLauncherUIView(root)) return@hookAfterDirectly
+
+                        WeLogger.d(TAG, "检测到 LauncherUI 布局创建，注册 GlobalLayoutListener")
+
+                        // 注册 GlobalLayoutListener 等待布局就绪
+                        root.viewTreeObserver.addOnGlobalLayoutListener(
+                            object : ViewTreeObserver.OnGlobalLayoutListener {
+                                private var applied = false
+
+                                override fun onGlobalLayout() {
+                                    if (applied) return
+                                    if (!WexBeautifyFeature.masterEnabled) return
+                                    if (root.width <= 0 || root.height <= 0) return
+
+                                    applied = true
+                                    root.post {
+                                        // 移除监听器（兼容旧 API）
+                                        try {
+                                            root.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                                        } catch (_: Throwable) {}
+
+                                        applyTopBar(root)
+                                    }
+                                }
+                            }
+                        )
+                    } catch (e: Throwable) {
+                        WeLogger.e(TAG, "LayoutInflater hook 异常", e)
+                    }
                 }
-                if (WexBeautifyFeature.topProfileEnabled) {
-                    applyProfile(act, decor)
-                }
-            } catch (e: Throwable) {
-                WeLogger.e(TAG, "顶栏美化应用失败", e)
+            WeLogger.d(TAG, "LayoutInflater inflate Hook 已注册")
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "LayoutInflater hook 注册失败", e)
+        }
+    }
+
+    /**
+     * 判断 View 是否属于 LauncherUI。
+     * 简单检查：根布局的 context 是否为 LauncherUI Activity。
+     */
+    private fun isLauncherUIView(view: ViewGroup): Boolean {
+        try {
+            val context = view.context
+            return context is Activity && context.javaClass.name == "com.tencent.mm.ui.LauncherUI"
+        } catch (e: Throwable) {
+            return false
+        }
+    }
+
+    /**
+     * 应用顶栏美化（在布局就绪后调用）。
+     * 仅修改视图外观，不拦截页面初始化。
+     */
+    private fun applyTopBar(root: ViewGroup) {
+        try {
+            if (WexBeautifyFeature.topSearchBarEnabled) {
+                applySearchBar(root)
             }
+            if (WexBeautifyFeature.topProfileEnabled) {
+                applyProfile(root)
+            }
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "顶栏美化应用失败", e)
         }
     }
 
-    private fun applySearchBar(act: Activity, decor: ViewGroup) {
+    /**
+     * 应用搜索框美化：隐藏原生搜索按钮，插入自定义搜索框。
+     */
+    private fun applySearchBar(root: ViewGroup) {
         // 隐藏原生搜索按钮
-        val btn = findViewByDesc(decor, "搜索")
+        val btn = findViewByDesc(root, "搜索")
         if (btn != null) {
             searchBtn = btn
             btn.visibility = View.GONE
@@ -96,10 +171,10 @@ object WexTopBarFeature {
         }
 
         // 防重复
-        if (decor.findViewWithTag<View>(TAG_SEARCH) != null) return
+        if (root.findViewWithTag<View>(TAG_SEARCH) != null) return
 
-        val listView = findListView(decor) ?: return
-        val bar = buildSearchBar(act)
+        val listView = findListView(root) ?: return
+        val bar = buildSearchBar(root.context)
         try {
             listView.javaClass.getMethod(
                 "addHeaderView", View::class.java, Any::class.java, Boolean::class.javaPrimitiveType
@@ -110,18 +185,18 @@ object WexTopBarFeature {
         }
     }
 
-    private fun buildSearchBar(act: Activity): View {
-        val d = act.resources.displayMetrics.density
+    private fun buildSearchBar(context: android.content.Context): View {
+        val d = context.resources.displayMetrics.density
         fun dp(v: Float) = (v * d).toInt()
 
-        val wrapper = LinearLayout(act).apply {
+        val wrapper = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             tag = TAG_SEARCH
             setPadding(dp(16f), dp(8f), dp(16f), dp(8f))
         }
 
-        val box = LinearLayout(act).apply {
+        val box = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dp(14f), dp(9f), dp(14f), dp(9f))
@@ -139,7 +214,7 @@ object WexTopBarFeature {
             setOnClickListener { searchBtn?.performClick() }
         }
 
-        box.addView(TextView(act).apply {
+        box.addView(TextView(context).apply {
             text = WexBeautifyFeature.topSearchHint.ifEmpty { "搜索" }
             textSize = 14f
             setTextColor(Color.parseColor("#666666"))
@@ -152,8 +227,11 @@ object WexTopBarFeature {
         return wrapper
     }
 
-    private fun applyProfile(act: Activity, decor: ViewGroup) {
-        val toolbar = findViewByClassName(decor, "Toolbar") as? ViewGroup ?: return
+    /**
+     * 应用头像昵称美化：在顶栏 Toolbar 中插入头像+昵称+状态指示器。
+     */
+    private fun applyProfile(root: ViewGroup) {
+        val toolbar = findViewByClassName(root, "Toolbar") as? ViewGroup ?: return
         if (toolbar.findViewWithTag<View>(TAG_PROFILE) != null) return
 
         var container: ViewGroup = toolbar
@@ -162,7 +240,8 @@ object WexTopBarFeature {
             if (c is android.widget.RelativeLayout) { container = c; break }
         }
 
-        val profile = buildProfile(act) ?: return
+        val context = root.context
+        val profile = buildProfile(context) ?: return
         if (container is android.widget.RelativeLayout) {
             profile.layoutParams = android.widget.RelativeLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -175,8 +254,8 @@ object WexTopBarFeature {
         WeLogger.d(TAG, "头像昵称已插入顶栏")
     }
 
-    private fun buildProfile(act: Activity): View? {
-        val d = act.resources.displayMetrics.density
+    private fun buildProfile(context: android.content.Context): View? {
+        val d = context.resources.displayMetrics.density
         fun dp(v: Float) = (v * d).toInt()
 
         val nickname = WexBeautifyFeature.topNickname
@@ -186,7 +265,7 @@ object WexTopBarFeature {
 
         if (avatarBmp == null && nickname.isEmpty() && status.isEmpty()) return null
 
-        val row = LinearLayout(act).apply {
+        val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             tag = TAG_PROFILE
@@ -195,7 +274,7 @@ object WexTopBarFeature {
 
         if (avatarBmp != null) {
             val avatarSize = dp(44f)
-            row.addView(ImageView(act).apply {
+            row.addView(ImageView(context).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 clipToOutline = true
                 outlineProvider = object : ViewOutlineProvider() {
@@ -209,13 +288,13 @@ object WexTopBarFeature {
         }
 
         if (nickname.isNotEmpty() || status.isNotEmpty()) {
-            val textCol = LinearLayout(act).apply {
+            val textCol = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(6f), 0, 0, 0)
             }
             if (nickname.isNotEmpty()) {
-                textCol.addView(TextView(act).apply {
+                textCol.addView(TextView(context).apply {
                     text = nickname
                     textSize = 13f
                     setTextColor(Color.parseColor("#1A1A1A"))
@@ -224,18 +303,18 @@ object WexTopBarFeature {
                 })
             }
             if (status.isNotEmpty()) {
-                val statusRow = LinearLayout(act).apply {
+                val statusRow = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                 }
-                statusRow.addView(View(act).apply {
+                statusRow.addView(View(context).apply {
                     background = android.graphics.drawable.GradientDrawable().apply {
                         shape = android.graphics.drawable.GradientDrawable.OVAL
                         setColor(Color.parseColor(if (dotRed) "#F44336" else "#4CAF50"))
                     }
                     layoutParams = LinearLayout.LayoutParams(dp(6f), dp(6f))
                 })
-                statusRow.addView(TextView(act).apply {
+                statusRow.addView(TextView(context).apply {
                     text = status
                     textSize = 10f
                     setTextColor(Color.parseColor("#999999"))

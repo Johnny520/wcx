@@ -38,8 +38,13 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 /**
- * 首页三卡 — 移植自 Wex（深色模式适配 + 每日一图交互增强）
- * 在聊天列表顶部插入日历、图片、音乐卡片
+ * 首页三卡 — 移植自 Wex（无 Activity.onResume Hook 版本）
+ *
+ * 策略：
+ * - 不 Hook Activity.onResume
+ * - Hook ViewGroup.addView 检测 ListView 被添加到 LauncherUI 视图树
+ * - 当检测到 ListView 且父级在 LauncherUI 层级中时，插入三卡作为 Header
+ * - 仅表面级修改：只修改视图外观，不拦截页面初始化
  */
 object WexHomeCardsFeature {
 
@@ -54,71 +59,115 @@ object WexHomeCardsFeature {
 
     fun install() {
         try {
-            Activity::class.reflekt()
-                .firstMethod { name = "onResume" }
+            // Hook ViewGroup.addView — 检测 ListView 被添加到 LauncherUI 视图树
+            ViewGroup::class.reflekt()
+                .firstMethod { name = "addView"; parameters(View::class, Int::class, ViewGroup.LayoutParams::class) }
                 .hookAfterDirectly {
                     try {
-                        val act = thisObject as? Activity ?: return@hookAfterDirectly
-                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfterDirectly
+                        val child = args[0] as? View ?: return@hookAfterDirectly
                         if (!WexBeautifyFeature.masterEnabled) return@hookAfterDirectly
-                        insertCards(act)
+
+                        // 检测子 View 是否为 ListView/RecyclerView
+                        if (!child.javaClass.name.contains("ListView") &&
+                            !child.javaClass.name.contains("RecyclerView")) return@hookAfterDirectly
+
+                        // 确认父级位于 LauncherUI 视图层级中
+                        val parent = thisObject as? ViewGroup ?: return@hookAfterDirectly
+                        if (!isInLauncherUIHierarchy(parent)) return@hookAfterDirectly
+
+                        // 查找包含该 View 的 Activity
+                        val act = findActivityFromView(parent) ?: return@hookAfterDirectly
+                        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfterDirectly
+
+                        // 延迟插入卡片，等待布局完成
+                        parent.post {
+                            try {
+                                insertCards(act, child)
+                            } catch (e: Throwable) {
+                                WeLogger.e(TAG, "首页卡片插入异常", e)
+                            }
+                        }
                     } catch (e: Throwable) {
-                        WeLogger.e(TAG, "首页卡片异常", e)
+                        WeLogger.e(TAG, "首页卡片 addView hook 异常", e)
                     }
                 }
-            WeLogger.d(TAG, "首页卡片 Hook 已注册")
+            WeLogger.d(TAG, "首页卡片 Hook 已注册（无 onResume 版本）")
         } catch (e: Throwable) {
             WeLogger.e(TAG, "首页卡片 Hook 注册失败", e)
         }
     }
 
-    private fun insertCards(act: Activity) {
-        val decor = act.window?.decorView as? ViewGroup ?: return
-        decor.post {
-            try {
-                val listView = findListView(decor) ?: return@post
-                if ((listView.tag as? String) == TAG_INSERTED) return@post
-
-                val d = act.resources.displayMetrics.density
-                val root = LinearLayout(act).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding((8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt())
-                }
-
-                var added = 0
-                if (WexBeautifyFeature.homeCalendarCardEnabled) {
-                    val card = buildCalendarCard(act, d)
-                    root.addView(card, LinearLayout.LayoutParams(-1, -2))
-                    added++
-                }
-                if (WexBeautifyFeature.homeImageCardEnabled) {
-                    val card = buildImageCard(act, d)
-                    val lp = LinearLayout.LayoutParams(-1, -2)
-                    if (added > 0) lp.topMargin = (10 * d).toInt()
-                    root.addView(card, lp)
-                    added++
-                }
-                if (WexBeautifyFeature.homeMusicCardEnabled) {
-                    val card = buildMusicCard(act, d)
-                    val lp = LinearLayout.LayoutParams(-1, -2)
-                    if (added > 0) lp.topMargin = (10 * d).toInt()
-                    root.addView(card, lp)
-                    added++
-                }
-
-                if (root.childCount == 0) {
-                    listView.tag = null
-                    return@post
-                }
-
-                listView.javaClass.getMethod(
-                    "addHeaderView", View::class.java, Any::class.java, Boolean::class.javaPrimitiveType
-                ).invoke(listView, root, null, false)
-                listView.tag = TAG_INSERTED
-                WeLogger.d(TAG, "首页卡片插入成功 (${root.childCount}张)")
-            } catch (e: Throwable) {
-                WeLogger.e(TAG, "首页卡片插入失败", e)
+    /**
+     * 判断 ViewGroup 是否位于 LauncherUI 视图层级中。
+     * 递归向上查找，检查是否有 View 的 context 为 LauncherUI Activity。
+     */
+    private fun isInLauncherUIHierarchy(view: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            val ctx = current.context
+            if (ctx is Activity && ctx.javaClass.name == "com.tencent.mm.ui.LauncherUI") {
+                return true
             }
+            current = if (current.parent is View) current.parent as View else null
+        }
+        return false
+    }
+
+    /**
+     * 从 View 查找所属的 Activity。
+     */
+    private fun findActivityFromView(view: View): Activity? {
+        var current: View? = view
+        while (current != null) {
+            val ctx = current.context
+            if (ctx is Activity) return ctx
+            current = if (current.parent is View) current.parent as View else null
+        }
+        return null
+    }
+
+    private fun insertCards(act: Activity, listView: View) {
+        if ((listView.tag as? String) == TAG_INSERTED) return
+        try {
+            val d = act.resources.displayMetrics.density
+            val root = LinearLayout(act).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding((8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt())
+            }
+
+            var added = 0
+            if (WexBeautifyFeature.homeCalendarCardEnabled) {
+                val card = buildCalendarCard(act, d)
+                root.addView(card, LinearLayout.LayoutParams(-1, -2))
+                added++
+            }
+            if (WexBeautifyFeature.homeImageCardEnabled) {
+                val card = buildImageCard(act, d)
+                val lp = LinearLayout.LayoutParams(-1, -2)
+                if (added > 0) lp.topMargin = (10 * d).toInt()
+                root.addView(card, lp)
+                added++
+            }
+            if (WexBeautifyFeature.homeMusicCardEnabled) {
+                val card = buildMusicCard(act, d)
+                val lp = LinearLayout.LayoutParams(-1, -2)
+                if (added > 0) lp.topMargin = (10 * d).toInt()
+                root.addView(card, lp)
+                added++
+            }
+
+            if (root.childCount == 0) {
+                listView.tag = null
+                return
+            }
+
+            listView.javaClass.getMethod(
+                "addHeaderView", View::class.java, Any::class.java, Boolean::class.javaPrimitiveType
+            ).invoke(listView, root, null, false)
+            listView.tag = TAG_INSERTED
+            WeLogger.d(TAG, "首页卡片插入成功 (${root.childCount}张)")
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "首页卡片插入失败", e)
         }
     }
 
@@ -681,22 +730,5 @@ object WexHomeCardsFeature {
                 gravity = Gravity.CENTER
             })
         }
-    }
-
-    // ==================== 工具方法 ====================
-
-    private fun findListView(root: View): View? {
-        val queue = ArrayDeque<View>()
-        queue.add(root)
-        while (queue.isNotEmpty()) {
-            val v = queue.removeFirst()
-            if (v.javaClass.name.contains("ListView")) return v
-            if (v is ViewGroup) {
-                for (i in 0 until v.childCount) {
-                    v.getChildAt(i)?.let { queue.add(it) }
-                }
-            }
-        }
-        return null
     }
 }
