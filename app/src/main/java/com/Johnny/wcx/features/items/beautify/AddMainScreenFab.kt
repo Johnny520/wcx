@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.view.View
-import com.Johnny.wcx.constants.PackageNames
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseIn
@@ -193,15 +192,11 @@ object AddMainScreenFab : ClickableFeature() {
     }
 
     private fun startActivityByName(context: Context, className: String) {
-        try {
-            val intent = Intent().apply {
-                setClassName(context.packageName, className)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            WeLogger.e(TAG, "启动 Activity 失败: $className", e)
+        val intent = Intent().apply {
+            setClassName(context.packageName, className)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        context.startActivity(intent)
     }
 
     override fun onEnable() {
@@ -302,15 +297,9 @@ object AddMainScreenFab : ClickableFeature() {
 
                     FabType.MODULE_SETTINGS -> {
                         {
-                            try {
-                                activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    setPackage(PackageNames.MODULE)
-                                })
-                            } catch (e: Exception) {
-                                WeLogger.e(TAG, "启动模块设置失败", e)
-                                showToast("无法打开模块设置")
-                            }
+                            activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            })
                         }
                     }
 

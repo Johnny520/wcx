@@ -109,7 +109,6 @@ import com.composables.icons.materialsymbols.outlinedfilled.More_vert
 import com.composables.icons.materialsymbols.outlinedfilled.Person
 import com.composables.icons.materialsymbols.outlinedfilled.Refresh
 import com.Johnny.wcx.BuildConfig
-import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.models.SelfProfileField
@@ -972,13 +971,6 @@ object HomeSidePanelFeature : ClickableFeature() {
                                 apiClass.getDeclaredMethod("markAllAsRead").invoke(null)
                                 showToast("已清空全部未读消息")
                             } catch (e: Exception) { WeLogger.e(TAG, "清空未读失败", e); showToast("清空未读失败") }
-                        })
-                }
-                if (wcxSettingsEnabled) {
-                    SidePanelFeatureItem(icon = MaterialSymbols.Outlined.Settings, name = "WCX设置",
-                        desc = "模块设置与功能管理", textColor = textColor, subTextColor = subTextColor, accentColor = accentColor,
-                        onClick = {
-                            act.startActivity(Intent(act, SettingsActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); setPackage(PackageNames.MODULE) })
                         })
                 }
                 customFeatures.forEach { feature ->

@@ -1286,62 +1286,6 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
             }
         }
 
-        // Wex 美化项目
-        item {
-            Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            runCatching {
-                                val intent = Intent(Intent.ACTION_VIEW, "https://github.com/Ql1121/Wex".toUri())
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            }.onFailure {
-                                WeLogger.e("Settings", "failed to open wex url", it)
-                            }
-                        }
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "Wex",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MiuixTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = ":",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    Text(
-                        text = "https://github.com/Ql1121/Wex",
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        textDecoration = TextDecoration.Underline,
-                    )
-                }
-            }
-        }
-
-        item {
-            Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "本美化功能移植自该开源项目，属于二次修改集成。",
-                        fontSize = 14.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        lineHeight = 22.sp,
-                    )
-                }
-            }
-        }
-
         item {
             Spacer(Modifier.height(12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
