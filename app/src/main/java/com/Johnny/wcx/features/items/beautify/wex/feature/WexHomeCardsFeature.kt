@@ -319,8 +319,9 @@ object WexHomeCardsFeature {
 
                 // 从网络加载
                 val apiUrl = WexBeautifyFeature.imageApiUrl
+                val apiKey = WexBeautifyFeature.imageApiKey
                 WeLogger.d(TAG, "每日一图开始网络请求: $apiUrl")
-                val bitmap = fetchImageFromUrl(apiUrl)
+                val bitmap = fetchImageFromUrl(apiUrl, apiKey)
 
                 if (bitmap != null) {
                     currentDailyBitmap = bitmap
@@ -340,7 +341,7 @@ object WexHomeCardsFeature {
         }
     }
 
-    private fun fetchImageFromUrl(urlStr: String): Bitmap? {
+    private fun fetchImageFromUrl(urlStr: String, apiKey: String = ""): Bitmap? {
         var connection: HttpURLConnection? = null
         var input: InputStream? = null
         try {
@@ -350,6 +351,10 @@ object WexHomeCardsFeature {
             connection.readTimeout = 15000
             connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+            if (apiKey.isNotBlank()) {
+                connection.setRequestProperty("X-API-Key", apiKey)
+                connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            }
             connection.connect()
 
             if (connection.responseCode != HttpURLConnection.HTTP_OK) {
@@ -531,6 +536,28 @@ object WexHomeCardsFeature {
         }
         root.addView(apiInput, LinearLayout.LayoutParams(-1, -2))
 
+        // API Key 输入框
+        root.addView(TextView(act).apply {
+            text = "API Key (可选)"
+            textSize = 14f
+            setTextColor(titleTextColor(act))
+            setPadding(0, dp(12f), 0, dp(4f))
+        })
+        val apiKeyInput = EditText(act).apply {
+            setText(WexBeautifyFeature.imageApiKey)
+            setTextColor(titleTextColor(act))
+            setHintTextColor(subtitleTextColor(act))
+            hint = "输入API Key"
+            textSize = 14f
+            setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+            background = GradientDrawable().apply {
+                setColor(cardBgColor(act))
+                cornerRadius = dp(8f).toFloat()
+                setStroke(1, dividerColor(act))
+            }
+        }
+        root.addView(apiKeyInput, LinearLayout.LayoutParams(-1, -2))
+
         // 刷新间隔
         root.addView(TextView(act).apply {
             text = "刷新间隔（秒）"
@@ -563,6 +590,7 @@ object WexHomeCardsFeature {
             setPadding(0, dp(16f), 0, dp(8f))
             setOnClickListener {
                 apiInput.setText(WexBeautifyFeature.DEFAULT_IMAGE_API)
+                apiKeyInput.setText("")
                 intervalInput.setText("3600")
             }
         }
@@ -577,9 +605,11 @@ object WexHomeCardsFeature {
             .setPositiveButton("保存") { dlg, _ ->
                 try {
                     val newApi = apiInput.text.toString().trim()
+                    val newApiKey = apiKeyInput.text.toString().trim()
                     val newInterval = intervalInput.text.toString().trim().toIntOrNull() ?: 3600
 
                     WexBeautifyFeature.imageApiUrl = newApi
+                    WexBeautifyFeature.imageApiKey = newApiKey
                     WexBeautifyFeature.imageRefreshInterval = newInterval
 
                     WeLogger.i(TAG, "每日一图配置已更新: api=$newApi, interval=$newInterval")

@@ -115,6 +115,10 @@ object WexBeautifyFeature : ClickableFeature() {
         get() = wexPrefs.getString("image_api_url", DEFAULT_IMAGE_API) ?: DEFAULT_IMAGE_API
         set(value) = wexPrefs.edit().putString("image_api_url", value).apply()
 
+    var imageApiKey: String
+        get() = wexPrefs.getString("image_api_key", "") ?: ""
+        set(value) = wexPrefs.edit().putString("image_api_key", value).apply()
+
     var imageRefreshInterval: Int
         get() = wexPrefs.getInt("image_refresh_interval", 3600)
         set(value) = wexPrefs.edit().putInt("image_refresh_interval", value).apply()

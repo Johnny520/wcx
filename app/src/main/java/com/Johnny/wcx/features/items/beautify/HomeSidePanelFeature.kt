@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -35,15 +36,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -109,6 +113,8 @@ import com.composables.icons.materialsymbols.outlinedfilled.More_vert
 import com.composables.icons.materialsymbols.outlinedfilled.Person
 import com.composables.icons.materialsymbols.outlinedfilled.Refresh
 import com.Johnny.wcx.activity.settings.SettingsActivity
+import com.Johnny.wcx.features.api.core.WeApi
+import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.preferences.WePrefs
@@ -142,6 +148,7 @@ import java.util.UUID
 
 private const val TAG = "HomeSidePanel"
 private const val PREFS_PREFIX = "home_side_panel_"
+private const val AVATAR_CACHE_DIR = "home_side_panel_avatar"
 
 /**
  * 微信主页侧滑侧边栏功能
@@ -178,17 +185,20 @@ object HomeSidePanelFeature : ClickableFeature() {
     // 语录配置
     var useSignature by WePrefs.prefOption("${PREFS_PREFIX}use_signature", false)
     var quoteApiUrl by WePrefs.prefOption("${PREFS_PREFIX}quote_api_url", "https://api.03c3.cn/api/yl")
+    var quoteApiKey by WePrefs.prefOption("${PREFS_PREFIX}quote_api_key", "")
     var quoteRefreshInterval by WePrefs.prefOption("${PREFS_PREFIX}quote_refresh_interval", 3600)
     var quoteFallback by WePrefs.prefOption("${PREFS_PREFIX}quote_fallback", "每一天都是新的开始")
 
     // 天气配置
     var weatherCity by WePrefs.prefOption("${PREFS_PREFIX}weather_city", "北京")
     var weatherApiUrl by WePrefs.prefOption("${PREFS_PREFIX}weather_api_url", "https://api.03c3.cn/api/weather")
+    var weatherApiKey by WePrefs.prefOption("${PREFS_PREFIX}weather_api_key", "")
     var weatherRefreshInterval by WePrefs.prefOption("${PREFS_PREFIX}weather_refresh_interval", 1800)
     var weatherFallbackCity by WePrefs.prefOption("${PREFS_PREFIX}weather_fallback_city", "北京")
 
     // 每日一言配置
     var dailyQuoteApiUrl by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_api_url", "https://api.03c3.cn/api/yl")
+    var dailyQuoteApiKey by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_api_key", "")
     var dailyQuoteRefreshInterval by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_refresh_interval", 3600)
     var dailyQuoteFallback by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_fallback", "生活不止眼前的苟且，还有诗和远方")
 
@@ -351,6 +361,9 @@ object HomeSidePanelFeature : ClickableFeature() {
                 val composeView = ComposeView(act).apply {
                     tag = "home_side_panel_overlay"
                     setLifecycleOwner(lifecycleOwner)
+                    // 关键：默认不拦截触摸事件，只有面板展开时才拦截
+                    isClickable = false
+                    isFocusable = false
                     setContent {
                         InjectedUiTheme {
                             SidePanelOverlay(act)
@@ -388,70 +401,29 @@ object HomeSidePanelFeature : ClickableFeature() {
         val subTextColor = if (isDark) Color(0xFFAAAAAA) else Color(0xFF999999)
         val accentColor = if (isDark) Color(0xFF64B5F6) else Color(0xFF1976D2)
 
-        // 面板宽度动画
-        val panelOffset by animateFloatAsState(
-            targetValue = if (isPanelOpen) 0f else -1f,
-            animationSpec = tween(300),
-            label = "panelOffset"
-        )
-
         // 唤起按钮位置（左上角避让逻辑）
         val triggerX = remember { mutableIntStateOf(16) }
         val triggerY = remember { mutableIntStateOf(80) }
 
-        Box(modifier = Modifier.fillMaxSize()) {
-            // 避免遮挡事件传递到下层
-            if (!isPanelOpen) {
-                // 唤起按钮
-                Surface(
-                    modifier = Modifier
-                        .padding(start = triggerX.intValue.dp, top = triggerY.intValue.dp)
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            isPanelOpen = true
-                        },
-                    color = cardBgColor.copy(alpha = 0.9f),
-                    shape = CircleShape,
-                    shadowElevation = 4.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = MaterialSymbols.OutlinedFilled.Menu,
-                            contentDescription = "打开侧边栏",
-                            tint = accentColor,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-            }
-
-            // 遮罩层
-            AnimatedVisibility(
-                visible = isPanelOpen,
-                enter = fadeIn(tween(200)),
-                exit = fadeOut(tween(200))
-            ) {
+        // ====== 关键修复：收起时不填充全屏，避免拦截触摸事件 ======
+        if (isPanelOpen) {
+            // 面板展开状态：全屏遮罩 + 侧边栏
+            Box(modifier = Modifier.fillMaxSize()) {
+                // 遮罩层（点击关闭）
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.4f))
                         .clickable { isPanelOpen = false }
                 )
-            }
 
-            // 侧边栏面板
-            AnimatedVisibility(
-                visible = isPanelOpen,
-                enter = slideInHorizontally(tween(300)) { -it },
-                exit = slideOutHorizontally(tween(300)) { -it }
-            ) {
+                // 侧边栏面板（左侧固定宽度）
                 Surface(
                     modifier = Modifier
                         .fillMaxHeight()
                         .widthIn(max = 320.dp)
                         .fillMaxWidth(0.78f)
-                        .systemBarsPadding(),
+                        .windowInsetsPadding(WindowInsets.statusBars),
                     color = bgColor,
                     shadowElevation = 16.dp
                 ) {
@@ -526,6 +498,30 @@ object HomeSidePanelFeature : ClickableFeature() {
                     }
                 }
             }
+        } else {
+            // ====== 面板收起状态：仅渲染唤起按钮，不填充屏幕 ======
+            // 不拦截任何触摸事件，原生会话列表正常渲染
+            Surface(
+                modifier = Modifier
+                    .padding(start = triggerX.intValue.dp, top = triggerY.intValue.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        isPanelOpen = true
+                    },
+                color = cardBgColor.copy(alpha = 0.9f),
+                shape = CircleShape,
+                shadowElevation = 4.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = MaterialSymbols.OutlinedFilled.Menu,
+                        contentDescription = "打开侧边栏",
+                        tint = accentColor,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
         }
 
         // 设置弹窗
@@ -557,6 +553,17 @@ object HomeSidePanelFeature : ClickableFeature() {
         var showStatusConfig by remember { mutableStateOf(false) }
         var showQuoteConfig by remember { mutableStateOf(false) }
 
+        // 头像状态：支持手动刷新
+        var avatarBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var avatarLoaded by remember { mutableStateOf(false) }
+
+        LaunchedEffect(Unit) {
+            if (!avatarLoaded) {
+                avatarBitmap = loadWeChatAvatar(act)
+                avatarLoaded = true
+            }
+        }
+
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -573,7 +580,6 @@ object HomeSidePanelFeature : ClickableFeature() {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     // 头像
-                    val avatarBitmap = remember { loadWeChatAvatar(act) }
                     Box(
                         modifier = Modifier
                             .size(56.dp)
@@ -582,7 +588,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     ) {
                         if (avatarBitmap != null) {
                             androidx.compose.foundation.Image(
-                                bitmap = avatarBitmap.asImageBitmap(),
+                                bitmap = avatarBitmap!!.asImageBitmap(),
                                 contentDescription = "头像",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -637,6 +643,21 @@ object HomeSidePanelFeature : ClickableFeature() {
                         Text(timeStr, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = textColor)
                         Text(dateStr, fontSize = 12.sp, color = subTextColor)
                     }
+
+                    // 手动刷新头像按钮
+                    IconButton(
+                        onClick = {
+                            avatarBitmap = refreshAvatar(act)
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            MaterialSymbols.OutlinedFilled.Refresh,
+                            contentDescription = "刷新头像",
+                            tint = subTextColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -689,6 +710,7 @@ object HomeSidePanelFeature : ClickableFeature() {
         if (showQuoteConfig) {
             var localUseSignature by remember { mutableStateOf(useSignature) }
             var localApiUrl by remember { mutableStateOf(quoteApiUrl) }
+            var localApiKey by remember { mutableStateOf(quoteApiKey) }
             var localInterval by remember { mutableStateOf(quoteRefreshInterval.toString()) }
             var localFallback by remember { mutableStateOf(quoteFallback) }
 
@@ -706,6 +728,13 @@ object HomeSidePanelFeature : ClickableFeature() {
                                 value = localApiUrl,
                                 onValueChange = { localApiUrl = it },
                                 label = { Text("API地址") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = localApiKey,
+                                onValueChange = { localApiKey = it },
+                                label = { Text("API Key (可选)") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true
                             )
@@ -730,6 +759,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     TextButton(onClick = {
                         useSignature = localUseSignature
                         quoteApiUrl = localApiUrl
+                        quoteApiKey = localApiKey
                         quoteRefreshInterval = localInterval.toIntOrNull() ?: 3600
                         quoteFallback = localFallback
                         showQuoteConfig = false
@@ -740,6 +770,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     TextButton(onClick = {
                         useSignature = false
                         quoteApiUrl = "https://api.03c3.cn/api/yl"
+                        quoteApiKey = ""
                         quoteRefreshInterval = 3600
                         quoteFallback = "每一天都是新的开始"
                         showQuoteConfig = false
@@ -1161,6 +1192,7 @@ object HomeSidePanelFeature : ClickableFeature() {
 
         if (showConfig) {
             var localApi by remember { mutableStateOf(dailyQuoteApiUrl) }
+            var localApiKey by remember { mutableStateOf(dailyQuoteApiKey) }
             var localInterval by remember { mutableStateOf(dailyQuoteRefreshInterval.toString()) }
             var localFallback by remember { mutableStateOf(dailyQuoteFallback) }
 
@@ -1173,6 +1205,13 @@ object HomeSidePanelFeature : ClickableFeature() {
                             value = localApi,
                             onValueChange = { localApi = it },
                             label = { Text("API地址") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = localApiKey,
+                            onValueChange = { localApiKey = it },
+                            label = { Text("API Key (可选)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
@@ -1195,6 +1234,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 confirmButton = {
                     TextButton(onClick = {
                         dailyQuoteApiUrl = localApi
+                        dailyQuoteApiKey = localApiKey
                         dailyQuoteRefreshInterval = localInterval.toIntOrNull() ?: 3600
                         dailyQuoteFallback = localFallback
                         showConfig = false
@@ -1203,6 +1243,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 dismissButton = {
                     TextButton(onClick = {
                         dailyQuoteApiUrl = "https://api.03c3.cn/api/yl"
+                        dailyQuoteApiKey = ""
                         dailyQuoteRefreshInterval = 3600
                         dailyQuoteFallback = "生活不止眼前的苟且，还有诗和远方"
                         showConfig = false
@@ -1425,6 +1466,7 @@ object HomeSidePanelFeature : ClickableFeature() {
     private fun WeatherSettingsDialog(act: Activity, onDismiss: () -> Unit) {
         var localCity by remember { mutableStateOf(weatherCity) }
         var localApi by remember { mutableStateOf(weatherApiUrl) }
+        var localApiKey by remember { mutableStateOf(weatherApiKey) }
         var localInterval by remember { mutableStateOf(weatherRefreshInterval.toString()) }
         var localFallbackCity by remember { mutableStateOf(weatherFallbackCity) }
         var searchCity by remember { mutableStateOf("") }
@@ -1505,6 +1547,13 @@ object HomeSidePanelFeature : ClickableFeature() {
                         singleLine = true
                     )
                     OutlinedTextField(
+                        value = localApiKey,
+                        onValueChange = { localApiKey = it },
+                        label = { Text("API Key (可选)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
                         value = localInterval,
                         onValueChange = { localInterval = it },
                         label = { Text("刷新间隔(秒)") },
@@ -1524,6 +1573,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 TextButton(onClick = {
                     weatherCity = localCity
                     weatherApiUrl = localApi
+                    weatherApiKey = localApiKey
                     weatherRefreshInterval = localInterval.toIntOrNull() ?: 1800
                     weatherFallbackCity = localFallbackCity
                     cachedWeather = null
@@ -1547,8 +1597,14 @@ object HomeSidePanelFeature : ClickableFeature() {
 
         return try {
             val city = weatherCity.ifBlank { weatherFallbackCity }
-            val url = "${weatherApiUrl}?city=${URLEncoder.encode(city, "UTF-8")}"
-            val json = httpGet(url) ?: return null
+            val url = buildString {
+                append(weatherApiUrl)
+                append("?city=${URLEncoder.encode(city, "UTF-8")}")
+                if (weatherApiKey.isNotBlank()) {
+                    append("&key=${URLEncoder.encode(weatherApiKey, "UTF-8")}")
+                }
+            }
+            val json = httpGet(url, weatherApiKey) ?: return null
             val obj = JSONObject(json)
             val data = obj.optJSONObject("data") ?: return null
 
@@ -1585,7 +1641,7 @@ object HomeSidePanelFeature : ClickableFeature() {
         }
 
         return try {
-            val json = httpGet(quoteApiUrl) ?: return quoteFallback
+            val json = httpGet(quoteApiUrl, quoteApiKey) ?: return quoteFallback
             JSONObject(json).optString("data", quoteFallback)
         } catch (e: Exception) {
             WeLogger.e(TAG, "获取语录失败", e)
@@ -1595,7 +1651,7 @@ object HomeSidePanelFeature : ClickableFeature() {
 
     private fun fetchDailyQuote(): String {
         return try {
-            val json = httpGet(dailyQuoteApiUrl) ?: return dailyQuoteFallback
+            val json = httpGet(dailyQuoteApiUrl, dailyQuoteApiKey) ?: return dailyQuoteFallback
             JSONObject(json).optString("data", dailyQuoteFallback)
         } catch (e: Exception) {
             WeLogger.e(TAG, "获取每日一言失败", e)
@@ -1603,7 +1659,7 @@ object HomeSidePanelFeature : ClickableFeature() {
         }
     }
 
-    private fun httpGet(urlStr: String): String? {
+    private fun httpGet(urlStr: String, apiKey: String = ""): String? {
         var connection: HttpURLConnection? = null
         var input: InputStream? = null
         return try {
@@ -1613,6 +1669,10 @@ object HomeSidePanelFeature : ClickableFeature() {
             connection.readTimeout = 10000
             connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+            if (apiKey.isNotBlank()) {
+                connection.setRequestProperty("X-API-Key", apiKey)
+                connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            }
             connection.connect()
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
             input = connection.inputStream
@@ -1625,27 +1685,186 @@ object HomeSidePanelFeature : ClickableFeature() {
         }
     }
 
+    // ==================== 头像加载（多策略 + 缓存） ====================
+
+    private fun getAvatarCacheFile(act: Activity): File {
+        val dir = File(act.cacheDir, AVATAR_CACHE_DIR)
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "avatar_cache.png")
+    }
+
     private fun loadWeChatAvatar(act: Activity): Bitmap? {
-        return try {
-            val avatarPath = try {
+        // 1. 优先读取本地缓存
+        val cacheFile = getAvatarCacheFile(act)
+        if (cacheFile.exists() && cacheFile.length() > 0) {
+            try {
+                val cached = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                if (cached != null) {
+                    WeLogger.d(TAG, "头像: 从缓存加载成功")
+                    return cached
+                }
+            } catch (e: Throwable) {
+                WeLogger.w(TAG, "头像: 缓存读取失败，尝试重新获取", e)
+            }
+        }
+
+        var avatar: Bitmap? = null
+        var failureReason = ""
+
+        // 2. 策略A：通过 WeDatabaseApi 获取头像 URL 并下载
+        try {
+            val selfWxId = WeApi.selfWxId
+            if (selfWxId.isNotEmpty()) {
+                val avatarUrl = WeDatabaseApi.getAvatarUrl(selfWxId)
+                if (avatarUrl.isNotEmpty()) {
+                    WeLogger.d(TAG, "头像: 获取到CDN URL, 尝试下载")
+                    avatar = downloadBitmap(avatarUrl)
+                    if (avatar != null) {
+                        WeLogger.d(TAG, "头像: 策略A (CDN) 成功")
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            failureReason += "策略A失败: ${e.message}; "
+            WeLogger.w(TAG, "头像: 策略A (CDN URL) 失败", e)
+        }
+
+        // 3. 策略B：通过反射读取 MultiUserInfo.avatar 字段（本地文件路径）
+        if (avatar == null) {
+            try {
                 val userInfo = act.reflekt()
                     .firstField { type = "com.tencent.mm.model.MultiUserInfo" }
                     .get()
-                userInfo?.reflekt()
-                    ?.firstField { name = "avatar" }
-                    ?.get() as? String
-            } catch (e: Exception) {
-                null
+                if (userInfo != null) {
+                    // 尝试多种字段名兼容不同微信版本
+                    val avatarPath = listOf("avatar", "avatarFile", "headImgPath", "avatarPath")
+                        .firstNotNullOfOrNull { fieldName ->
+                            try {
+                                userInfo.reflekt()
+                                    ?.firstField { name = fieldName }
+                                    ?.get() as? String
+                            } catch (_: Throwable) { null }
+                        }
+                    if (!avatarPath.isNullOrBlank()) {
+                        val f = File(avatarPath)
+                        if (f.exists()) {
+                            avatar = BitmapFactory.decodeFile(avatarPath)
+                            if (avatar != null) {
+                                WeLogger.d(TAG, "头像: 策略B (MultiUserInfo文件) 成功, path=$avatarPath")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                failureReason += "策略B失败: ${e.message}; "
+                WeLogger.w(TAG, "头像: 策略B (MultiUserInfo) 失败", e)
             }
+        }
 
-            if (!avatarPath.isNullOrBlank()) {
-                val file = File(avatarPath)
-                if (file.exists()) {
-                    BitmapFactory.decodeFile(avatarPath)
-                } else null
-            } else null
-        } catch (e: Exception) {
+        // 4. 策略C：遍历视图树查找 ImageView 头像（兜底）
+        if (avatar == null) {
+            try {
+                val root = act.rootView
+                val avatarView = findAvatarInViewTree(root)
+                if (avatarView != null) {
+                    avatar = viewToBitmap(avatarView)
+                    if (avatar != null) {
+                        WeLogger.d(TAG, "头像: 策略C (视图树) 成功")
+                    }
+                }
+            } catch (e: Throwable) {
+                failureReason += "策略C失败: ${e.message}; "
+                WeLogger.w(TAG, "头像: 策略C (视图树) 失败", e)
+            }
+        }
+
+        // 5. 缓存到本地
+        if (avatar != null) {
+            try {
+                val fos = java.io.FileOutputStream(cacheFile)
+                avatar.compress(Bitmap.CompressFormat.PNG, 90, fos)
+                fos.close()
+                WeLogger.d(TAG, "头像: 已缓存到 ${cacheFile.absolutePath}")
+            } catch (e: Throwable) {
+                WeLogger.w(TAG, "头像: 缓存写入失败", e)
+            }
+        } else {
+            WeLogger.w(TAG, "头像: 全部策略失败 — $failureReason")
+        }
+
+        return avatar
+    }
+
+    /** 手动刷新头像（清除缓存后重新获取） */
+    private fun refreshAvatar(act: Activity): Bitmap? {
+        val cacheFile = getAvatarCacheFile(act)
+        if (cacheFile.exists()) cacheFile.delete()
+        WeLogger.d(TAG, "头像: 手动刷新，缓存已清除")
+        return loadWeChatAvatar(act)
+    }
+
+    /** 从视图树中查找头像 ImageView */
+    private fun findAvatarInViewTree(root: View): ImageView? {
+        val queue = ArrayDeque<View>()
+        queue.add(root)
+        val candidates = mutableListOf<ImageView>()
+        while (queue.isNotEmpty()) {
+            val v = queue.removeFirst()
+            if (v is ImageView && v.isVisible && v.drawable != null) {
+                // 头像通常是圆形或较小尺寸
+                val w = v.width
+                val h = v.height
+                if (w in 48..200 && h in 48..200) {
+                    candidates.add(v)
+                }
+            }
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) {
+                    v.getChildAt(i)?.let { queue.add(it) }
+                }
+            }
+        }
+        // 返回可见区域最大的 ImageView（最可能是头像）
+        return candidates.maxByOrNull { it.visibleArea() }
+    }
+
+    private fun View.visibleArea(): Int {
+        if (!isVisible) return 0
+        val r = Rect()
+        return if (getGlobalVisibleRect(r)) r.width() * r.height() else 0
+    }
+
+    private val View.isVisible: Boolean
+        get() = visibility == View.VISIBLE && width > 0 && height > 0
+
+    private fun viewToBitmap(view: View): Bitmap? {
+        return try {
+            val bmp = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            view.draw(canvas)
+            bmp
+        } catch (e: Throwable) { null }
+    }
+
+    private fun downloadBitmap(urlStr: String): Bitmap? {
+        var connection: java.net.HttpURLConnection? = null
+        var input: java.io.InputStream? = null
+        return try {
+            val url = java.net.URL(urlStr)
+            connection = url.openConnection() as java.net.HttpURLConnection
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+            connection.connect()
+            if (connection.responseCode != java.net.HttpURLConnection.HTTP_OK) return null
+            input = connection.inputStream
+            BitmapFactory.decodeStream(input)
+        } catch (e: Throwable) {
             null
+        } finally {
+            try { input?.close() } catch (_: Throwable) {}
+            try { connection?.disconnect() } catch (_: Throwable) {}
         }
     }
 
