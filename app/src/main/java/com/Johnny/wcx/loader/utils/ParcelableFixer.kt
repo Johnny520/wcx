@@ -39,7 +39,7 @@ object ParcelableFixer {
     private fun isTargetIntent(intent: Intent?): Boolean {
         intent ?: return false
         val className = intent.component?.className ?: return false
-        return ActivityProxy.ActProxyMgr.isModuleProxyActivity(className)
+        return ActivityLauncher.isModuleActivity(className)
     }
 
     private fun hookIntentMethods() {

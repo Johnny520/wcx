@@ -95,18 +95,34 @@ class DexClassDelegate internal constructor(
         multipleIndex: Int = 0,
         block: FindClass.() -> Unit
     ): Boolean {
-        val results = dexKit.findClass(block)
-
-        if (results.isEmpty()) {
-            if (!allowFailure) error("DexKit: No class found for key: $key")
-            setPlaceholderDescriptor()
+        val results = try {
+            dexKit.findClass(block)
+        } catch (e: Exception) {
+            WeLogger.w("DexClassDelegate", "DexKit findClass failed for key: $key, error: ${e.message}")
+            if (!allowFailure) setPlaceholderDescriptor()
             return false
         }
-        if (results.size > 1 && !allowMultiple)
+
+        if (results.isEmpty()) {
+            if (!allowFailure) {
+                WeLogger.w("DexClassDelegate", "DexKit: No class found for key: $key")
+                setPlaceholderDescriptor()
+            } else {
+                setPlaceholderDescriptor()
+            }
+            return false
+        }
+        if (results.size > 1 && !allowMultiple) {
+            if (allowFailure) {
+                WeLogger.w("DexClassDelegate", "DexKit: Multiple classes found for key: $key, count: ${results.size}, using first match")
+                setDescriptor(results[0].name)
+                return true
+            }
             error(
                 "DexKit: Multiple classes found for key: $key, count: ${results.size}, classes: ${
                 results.joinToString(",") { it.name }
             }")
+        }
 
         setDescriptor(results[multipleIndex].name)
         return true
@@ -174,19 +190,33 @@ class DexFieldDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindField.() -> Unit
     ): Boolean {
-        val results = dexKit.findField(block)
-
-        if (results.isEmpty()) {
-            if (!allowFailure) error("DexKit: No field found for key: $key")
+        val results = try {
+            dexKit.findField(block)
+        } catch (e: Exception) {
+            WeLogger.w("DexFieldDelegate", "DexKit findField failed for key: $key, error: ${e.message}")
             setPlaceholderDescriptor()
             return false
         }
-        if (results.size > 1 && !allowMultiple)
+
+        if (results.isEmpty()) {
+            if (!allowFailure) {
+                WeLogger.w("DexFieldDelegate", "DexKit: No field found for key: $key")
+            }
+            setPlaceholderDescriptor()
+            return false
+        }
+        if (results.size > 1 && !allowMultiple) {
+            if (allowFailure) {
+                WeLogger.w("DexFieldDelegate", "DexKit: Multiple fields found for key: $key, count: ${results.size}, using first match")
+                setDescriptor(results[0].descriptor)
+                return true
+            }
             error(
                 "DexKit: Multiple fields found for key: $key, count: ${results.size}, fields:${
                     results.map { "${it.className}::${it.fieldName}" }
                 }"
             )
+        }
 
         setDescriptor(results[resultIndex].descriptor)
         return true
@@ -285,14 +315,28 @@ class DexMethodDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindMethod.() -> Unit
     ): Boolean {
-        val results = dexKit.findMethod(block)
-
-        if (results.isEmpty()) {
-            if (!allowFailure) error("DexKit: No method found for key: $key")
+        val results = try {
+            dexKit.findMethod(block)
+        } catch (e: Exception) {
+            WeLogger.w("DexMethodDelegate", "DexKit findMethod failed for key: $key, error: ${e.message}")
             setPlaceholderDescriptor()
             return false
         }
-        if (results.size > 1 && !allowMultiple)
+
+        if (results.isEmpty()) {
+            if (!allowFailure) {
+                WeLogger.w("DexMethodDelegate", "DexKit: No method found for key: $key")
+            }
+            setPlaceholderDescriptor()
+            return false
+        }
+        if (results.size > 1 && !allowMultiple) {
+            if (allowFailure) {
+                WeLogger.w("DexMethodDelegate", "DexKit: Multiple methods found for key: $key, count: ${results.size}, using first match: ${results[0].className}::${results[0].methodName}")
+                val m = results[0]
+                setDescriptor(DexMethodDescriptor(m.className, m.methodName, m.methodSign))
+                return true
+            }
             error(
                 "DexKit: Multiple methods found for key: $key, count: ${results.size}, methods:${
                     results.map {
@@ -300,6 +344,7 @@ class DexMethodDelegate internal constructor(
                     }
                 }"
             )
+        }
 
         val m = results[resultIndex]
         setDescriptor(DexMethodDescriptor(m.className, m.methodName, m.methodSign))
@@ -371,18 +416,34 @@ class DexConstructorDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindMethod.() -> Unit
     ): Boolean {
-        val results = dexKit.findMethod {
-            block()
-            if (matcher == null) matcher { name = "<init>" }
-            else matcher!!.name = "<init>"
+        val results = try {
+            dexKit.findMethod {
+                block()
+                if (matcher == null) matcher { name = "<init>" }
+                else matcher!!.name = "<init>"
+            }
+        } catch (e: Exception) {
+            WeLogger.w("DexConstructorDelegate", "DexKit findConstructor failed for key: $key, error: ${e.message}")
+            setPlaceholderDescriptor()
+            return false
         }
 
         if (results.isEmpty()) {
-            if (throwOnFailure) error("DexKit: No constructor found for key: $key")
+            if (!throwOnFailure) {
+                WeLogger.w("DexConstructorDelegate", "DexKit: No constructor found for key: $key")
+                setPlaceholderDescriptor()
+            }
             return false
         }
-        if (results.size > 1 && !allowMultiple)
+        if (results.size > 1 && !allowMultiple) {
+            if (!throwOnFailure) {
+                WeLogger.w("DexConstructorDelegate", "DexKit: Multiple constructors found for key: $key, count: ${results.size}, using first match")
+                val m = results[0]
+                setDescriptor(DexMethodDescriptor(m.className, "<init>", m.methodSign))
+                return true
+            }
             error("DexKit: Multiple constructors found for key: $key, count: ${results.size}")
+        }
 
         val m = results[resultIndex]
         setDescriptor(DexMethodDescriptor(m.className, "<init>", m.methodSign))
