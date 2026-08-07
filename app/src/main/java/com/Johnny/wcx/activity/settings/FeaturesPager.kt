@@ -16,9 +16,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +51,11 @@ import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.features.items.easter_egg.AprilFools
 import com.Johnny.wcx.features.items.easter_egg.isAprilFools
 import com.Johnny.wcx.features.items.system.RECENT_UPDATES
+import com.Johnny.wcx.features.items.system.isNewVersionUpgrade
+import com.Johnny.wcx.features.items.system.markUpgradeDialogShown
+import com.Johnny.wcx.features.items.system.recordCurrentVersion
+import com.Johnny.wcx.features.items.system.shouldShowUpgradeDialog
+import com.Johnny.wcx.features.items.system.upgradeDialogEnabled
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.android.showToastSuspend
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +78,17 @@ import java.time.LocalDate
 @Composable
 fun FeaturesPager(onOpenCategory: (String) -> Unit) {
     val showAprilFools = remember { LocalDate.now().isAprilFools }
+
+    // 版本升级检测 + 弹窗
+    var showUpgradeDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (isNewVersionUpgrade()) {
+            recordCurrentVersion()
+            if (shouldShowUpgradeDialog()) {
+                showUpgradeDialog = true
+            }
+        }
+    }
 
     val queryState = rememberTextFieldState()
     val query = queryState.text.toString()
@@ -209,6 +230,59 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
         }
 
         item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
+    }
+
+    // 首次升级弹窗
+    if (showUpgradeDialog) {
+        val changelog = com.Johnny.wcx.features.items.system.getCurrentVersionChangelog()
+        val versionTag = com.Johnny.wcx.features.items.system.getChangelogForVersion(
+            com.Johnny.wcx.features.items.system.currentModuleVersionCode()
+        )?.versionTag ?: "新版本"
+
+        AlertDialog(
+            onDismissRequest = {
+                showUpgradeDialog = false
+                markUpgradeDialogShown()
+            },
+            title = { androidx.compose.material3.Text("$versionTag 更新日志") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    if (changelog.isNotEmpty()) {
+                        changelog.forEach { entry ->
+                            val prefix = when (entry.type) {
+                                com.Johnny.wcx.features.items.system.ChangelogType.NEW -> "新增"
+                                com.Johnny.wcx.features.items.system.ChangelogType.FIX -> "修复"
+                                com.Johnny.wcx.features.items.system.ChangelogType.OPTIMIZE -> "优化"
+                            }
+                            androidx.compose.material3.Text(
+                                "[$prefix] ${entry.summary}",
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else {
+                        androidx.compose.material3.Text("当前版本暂无更新说明")
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Text("新版本自动弹窗", modifier = Modifier.weight(1f), fontSize = 13.sp)
+                        Switch(
+                            checked = upgradeDialogEnabled,
+                            onCheckedChange = {
+                                upgradeDialogEnabled = it
+                                com.Johnny.wcx.features.items.system.upgradeDialogEnabled = it
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUpgradeDialog = false
+                    markUpgradeDialogShown()
+                }) { androidx.compose.material3.Text("知道了") }
+            }
+        )
     }
 }
 

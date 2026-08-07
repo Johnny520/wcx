@@ -1,5 +1,6 @@
 package com.Johnny.wcx.features.items.beautify
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -7,18 +8,21 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color as AndroidColor
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -115,6 +119,7 @@ import com.composables.icons.materialsymbols.outlinedfilled.Refresh
 import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
+import com.Johnny.wcx.features.api.core.models.SelfProfileField
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.preferences.WePrefs
@@ -153,6 +158,11 @@ private const val AVATAR_CACHE_DIR = "home_side_panel_avatar"
 /**
  * 微信主页侧滑侧边栏功能
  * 在微信首页左侧添加侧滑面板，包含天气、快捷按钮、功能跳转等
+ *
+ * 视图策略：
+ * - 触发按钮：独立 View，始终在视图树中（收起时可见），仅拦截自身区域触摸
+ * - 面板 ComposeView：收起时 visibility=GONE（彻底移出视图树），展开时 visibility=VISIBLE
+ * - 禁止修改微信原生根布局 clipChildren/layoutParams/层级等属性
  */
 @Feature(
     name = "微信主页侧滑侧边栏",
@@ -163,6 +173,13 @@ object HomeSidePanelFeature : ClickableFeature() {
 
     override val alwaysEnabled = false
     override val noSwitchWidget = false
+
+    // ==================== 视图引用 ====================
+
+    @Volatile
+    private var panelComposeView: ComposeView? = null
+    @Volatile
+    private var triggerView: View? = null
 
     // ==================== 配置属性 ====================
 
@@ -340,7 +357,8 @@ object HomeSidePanelFeature : ClickableFeature() {
                         val act = thisObject as? Activity ?: return@hookAfter
                         if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
                         if (!masterEnabled) return@hookAfter
-                        ensureOverlay(act)
+                        // 延迟初始化：等待 ConversationListUI 加载完毕再注入
+                        ensureOverlayDelayed(act)
                     } catch (e: Throwable) {
                         WeLogger.e(TAG, "侧边栏叠加异常", e)
                     }
@@ -351,48 +369,156 @@ object HomeSidePanelFeature : ClickableFeature() {
         }
     }
 
+    /**
+     * 延迟创建侧边栏视图，等待微信首页会话容器加载完毕
+     * 适配重启阶段：禁止提前创建悬浮 View
+     */
+    private fun ensureOverlayDelayed(act: Activity) {
+        val root = act.rootView
+        // 延迟 800ms，确保 ConversationListUI 渲染完成
+        root.postDelayed({
+            try {
+                ensureOverlay(act)
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "延迟创建侧边栏失败", e)
+            }
+        }, 800)
+    }
+
+    /**
+     * 创建侧边栏视图：
+     * - 触发按钮：独立 View，始终在视图树
+     * - 面板 ComposeView：收起时 GONE，展开时 VISIBLE
+     * 禁止修改微信原生根布局参数
+     */
+    @SuppressLint("ClickableViewAccessibility")
     private fun ensureOverlay(act: Activity) {
         val root = act.rootView
-        root.post {
-            try {
-                if (root.findViewWithTag<View>("home_side_panel_overlay") != null) return@post
 
-                val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(act)
-                val composeView = ComposeView(act).apply {
-                    tag = "home_side_panel_overlay"
-                    setLifecycleOwner(lifecycleOwner)
-                    // 关键：默认不拦截触摸事件，只有面板展开时才拦截
-                    isClickable = false
-                    isFocusable = false
-                    setContent {
-                        InjectedUiTheme {
-                            SidePanelOverlay(act)
-                        }
-                    }
-                }
+        // 已创建则跳过
+        if (root.findViewWithTag<View>("home_side_panel_trigger") != null) return
 
-                root.addView(
-                    composeView,
-                    FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                )
-                WeLogger.d(TAG, "侧边栏叠加层已创建")
-            } catch (e: Throwable) {
-                WeLogger.e(TAG, "侧边栏叠加层创建失败", e)
+        val d = act.resources.displayMetrics.density
+        val statusBarH = getStatusBarHeight(act)
+        val screenWidth = act.resources.displayMetrics.widthPixels
+
+        val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(act)
+
+        // ====== 1. 创建触发按钮（独立 View，收起时可见） ======
+        val trigger = createTriggerButton(act, d, statusBarH).also { triggerView = it }
+        root.addView(
+            trigger,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                // 左上角避让位置（后续可动态调整）
+                topMargin = statusBarH + (8 * d).toInt()
+                leftMargin = (16 * d).toInt()
             }
+        )
+
+        // ====== 2. 创建面板 ComposeView（收起时 GONE） ======
+        val composeView = ComposeView(act).apply {
+            tag = "home_side_panel_overlay"
+            setLifecycleOwner(lifecycleOwner)
+            visibility = View.GONE
+            isClickable = false
+            isFocusable = false
+            setContent {
+                InjectedUiTheme {
+                    SidePanelOverlay(act)
+                }
+            }
+        }.also { panelComposeView = it }
+
+        root.addView(
+            composeView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        WeLogger.d(TAG, "侧边栏视图已创建 (触发按钮+面板, 延迟初始化)")
+    }
+
+    /** 创建触发按钮 */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun createTriggerButton(act: Activity, d: Float, statusBarH: Int): View {
+        val size = (40 * d).toInt()
+        val isDark = (act.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        val bgColor = if (isDark) AndroidColor.parseColor("#2C2C2C") else AndroidColor.WHITE
+        val accentColor = if (isDark) AndroidColor.parseColor("#64B5F6") else AndroidColor.parseColor("#1976D2")
+
+        return FrameLayout(act).apply {
+            tag = "home_side_panel_trigger"
+            layoutParams = FrameLayout.LayoutParams(size, size)
+            background = GradientDrawable().apply {
+                setColor(bgColor)
+                alpha = 230 // 0.9f * 255
+                shape = GradientDrawable.OVAL
+            }
+            elevation = 4f * d
+            // 仅拦截自身区域触摸，不消费外部事件
+            setOnClickListener {
+                showPanel()
+            }
+            // 添加菜单图标
+            addView(ImageView(act).apply {
+                setColorFilter(accentColor, PorterDuff.Mode.SRC_IN)
+                // 使用简单的 drawable 作为菜单图标
+                val drawable = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setColor(accentColor)
+                    setSize((16 * d).toInt(), (2 * d).toInt())
+                }
+                setImageDrawable(drawable)
+                layoutParams = FrameLayout.LayoutParams(
+                    (22 * d).toInt(),
+                    (22 * d).toInt(),
+                    Gravity.CENTER
+                )
+            })
+        }
+    }
+
+    /** 展开面板 */
+    private fun showPanel() {
+        triggerView?.visibility = View.GONE
+        panelComposeView?.visibility = View.VISIBLE
+        WeLogger.d(TAG, "侧边栏面板已展开")
+    }
+
+    /** 收起面板 */
+    private fun hidePanel() {
+        panelComposeView?.visibility = View.GONE
+        triggerView?.visibility = View.VISIBLE
+        WeLogger.d(TAG, "侧边栏面板已收起")
+    }
+
+    /** 获取真实状态栏高度 */
+    private fun getStatusBarHeight(act: Activity): Int {
+        return try {
+            val resourceId = act.resources.getIdentifier("status_bar_height", "dimen", "android")
+            if (resourceId > 0) act.resources.getDimensionPixelSize(resourceId) else 0
+        } catch (e: Throwable) {
+            WeLogger.w(TAG, "获取状态栏高度失败", e)
+            0
         }
     }
 
     // ==================== 侧边栏主界面 ====================
 
+    /**
+     * 侧边栏面板 Compose UI
+     * 仅在展开状态渲染（ComposeView visibility=VISIBLE 时）
+     * 收起时 ComposeView 设为 GONE，此 Composable 不执行
+     */
     @Composable
     private fun SidePanelOverlay(act: Activity) {
-        var isPanelOpen by remember { mutableStateOf(false) }
         var showSettings by remember { mutableStateOf(false) }
         var showWeatherSettings by remember { mutableStateOf(false) }
-        val context = LocalContext.current
         val isDark = isSystemInDarkTheme()
 
         val bgColor = if (isDark) Color(0xFF1E1E1E) else Color(0xFFF5F5F5)
@@ -401,47 +527,42 @@ object HomeSidePanelFeature : ClickableFeature() {
         val subTextColor = if (isDark) Color(0xFFAAAAAA) else Color(0xFF999999)
         val accentColor = if (isDark) Color(0xFF64B5F6) else Color(0xFF1976D2)
 
-        // 唤起按钮位置（左上角避让逻辑）
-        val triggerX = remember { mutableIntStateOf(16) }
-        val triggerY = remember { mutableIntStateOf(80) }
+        // 全屏遮罩 + 侧边栏面板
+        Box(modifier = Modifier.fillMaxSize()) {
+            // 遮罩层（点击关闭面板）
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable { hidePanel() }
+            )
 
-        // ====== 关键修复：收起时不填充全屏，避免拦截触摸事件 ======
-        if (isPanelOpen) {
-            // 面板展开状态：全屏遮罩 + 侧边栏
-            Box(modifier = Modifier.fillMaxSize()) {
-                // 遮罩层（点击关闭）
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f))
-                        .clickable { isPanelOpen = false }
-                )
-
-                // 侧边栏面板（左侧固定宽度）
-                Surface(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .widthIn(max = 320.dp)
-                        .fillMaxWidth(0.78f)
-                        .windowInsetsPadding(WindowInsets.statusBars),
-                    color = bgColor,
-                    shadowElevation = 16.dp
-                ) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // 顶部设置栏
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "侧边栏",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor
-                            )
+            // 侧边栏面板 — 左侧固定宽度，最大 65% 屏幕
+            Surface(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.65f)
+                    .widthIn(max = 320.dp)
+                    .padding(top = 0.dp), // topMargin=0，紧贴顶部
+                color = bgColor,
+                shadowElevation = 16.dp
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // 顶部栏：关闭按钮 + 设置
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "侧边栏",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                        Row {
                             IconButton(onClick = { showSettings = true }) {
                                 Icon(
                                     MaterialSymbols.Outlined.Settings,
@@ -449,77 +570,60 @@ object HomeSidePanelFeature : ClickableFeature() {
                                     tint = accentColor
                                 )
                             }
-                        }
-
-                        HorizontalDivider(color = if (isDark) Color(0xFF3A3A3A) else Color(0xFFE0E0E0))
-
-                        // 可滚动内容区域
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .padding(horizontal = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // 头部区域
-                            if (headerEnabled) {
-                                item { SidePanelHeader(act, cardBgColor, textColor, subTextColor, accentColor) }
-                            }
-
-                            // 天气卡片
-                            if (weatherEnabled) {
-                                item {
-                                    SidePanelWeatherCard(
-                                        act, cardBgColor, textColor, subTextColor, accentColor,
-                                        onLongClick = { showWeatherSettings = true }
-                                    )
-                                }
-                            }
-
-                            // 快捷按钮
-                            if (quickButtonsEnabled) {
-                                item { SidePanelQuickButtons(act, cardBgColor, textColor, accentColor, subTextColor) }
-                            }
-
-                            // 功能列表
-                            item {
-                                SidePanelFeatureList(
-                                    act, cardBgColor, textColor, subTextColor, accentColor, isDark
+                            IconButton(onClick = { hidePanel() }) {
+                                Icon(
+                                    MaterialSymbols.OutlinedFilled.Menu_open,
+                                    contentDescription = "关闭",
+                                    tint = subTextColor
                                 )
                             }
-
-                            // 每日一言
-                            if (dailyQuoteEnabled) {
-                                item { SidePanelDailyQuote(cardBgColor, textColor, subTextColor, accentColor) }
-                            }
-
-                            item { Spacer(modifier = Modifier.height(16.dp)) }
                         }
                     }
-                }
-            }
-        } else {
-            // ====== 面板收起状态：仅渲染唤起按钮，不填充屏幕 ======
-            // 不拦截任何触摸事件，原生会话列表正常渲染
-            Surface(
-                modifier = Modifier
-                    .padding(start = triggerX.intValue.dp, top = triggerY.intValue.dp)
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .clickable {
-                        isPanelOpen = true
-                    },
-                color = cardBgColor.copy(alpha = 0.9f),
-                shape = CircleShape,
-                shadowElevation = 4.dp
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = MaterialSymbols.OutlinedFilled.Menu,
-                        contentDescription = "打开侧边栏",
-                        tint = accentColor,
-                        modifier = Modifier.size(22.dp)
-                    )
+
+                    HorizontalDivider(color = if (isDark) Color(0xFF3A3A3A) else Color(0xFFE0E0E0))
+
+                    // 可滚动内容区域
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // 头部区域
+                        if (headerEnabled) {
+                            item { SidePanelHeader(act, cardBgColor, textColor, subTextColor, accentColor) }
+                        }
+
+                        // 天气卡片
+                        if (weatherEnabled) {
+                            item {
+                                SidePanelWeatherCard(
+                                    act, cardBgColor, textColor, subTextColor, accentColor,
+                                    onLongClick = { showWeatherSettings = true }
+                                )
+                            }
+                        }
+
+                        // 快捷按钮
+                        if (quickButtonsEnabled) {
+                            item { SidePanelQuickButtons(act, cardBgColor, textColor, accentColor, subTextColor) }
+                        }
+
+                        // 功能列表
+                        item {
+                            SidePanelFeatureList(
+                                act, cardBgColor, textColor, subTextColor, accentColor, isDark
+                            )
+                        }
+
+                        // 每日一言
+                        if (dailyQuoteEnabled) {
+                            item { SidePanelDailyQuote(cardBgColor, textColor, subTextColor, accentColor) }
+                        }
+
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
+                    }
                 }
             }
         }
@@ -553,13 +657,15 @@ object HomeSidePanelFeature : ClickableFeature() {
         var showStatusConfig by remember { mutableStateOf(false) }
         var showQuoteConfig by remember { mutableStateOf(false) }
 
-        // 头像状态：支持手动刷新
+        // 头像与昵称状态：支持手动刷新
         var avatarBitmap by remember { mutableStateOf<Bitmap?>(null) }
         var avatarLoaded by remember { mutableStateOf(false) }
+        var nickname by remember { mutableStateOf("") }
 
         LaunchedEffect(Unit) {
             if (!avatarLoaded) {
                 avatarBitmap = loadWeChatAvatar(act)
+                nickname = loadWeChatNickname(act)
                 avatarLoaded = true
             }
         }
@@ -633,6 +739,19 @@ object HomeSidePanelFeature : ClickableFeature() {
 
                         Spacer(modifier = Modifier.height(4.dp))
 
+                        // 昵称
+                        if (nickname.isNotBlank()) {
+                            Text(
+                                nickname,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = textColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                        }
+
                         // 时间日期
                         val timeStr = remember {
                             SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
@@ -648,6 +767,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     IconButton(
                         onClick = {
                             avatarBitmap = refreshAvatar(act)
+                            nickname = loadWeChatNickname(act)
                         },
                         modifier = Modifier.size(32.dp)
                     ) {
@@ -1801,6 +1921,46 @@ object HomeSidePanelFeature : ClickableFeature() {
         if (cacheFile.exists()) cacheFile.delete()
         WeLogger.d(TAG, "头像: 手动刷新，缓存已清除")
         return loadWeChatAvatar(act)
+    }
+
+    /** 通过微信原生 UserInfo 接口读取本机账号昵称 */
+    private fun loadWeChatNickname(act: Activity): String {
+        // 策略A：通过 WeDatabaseApi.getSelfProfileField 读取昵称
+        try {
+            val name = WeDatabaseApi.getSelfProfileField(SelfProfileField.NAME)
+            if (name is String && name.isNotBlank()) {
+                WeLogger.d(TAG, "昵称: 策略A (getSelfProfileField) 成功: $name")
+                return name
+            }
+        } catch (e: Throwable) {
+            WeLogger.w(TAG, "昵称: 策略A (getSelfProfileField) 失败", e)
+        }
+
+        // 策略B：通过反射读取 MultiUserInfo 字段
+        try {
+            val userInfo = act.reflekt()
+                .firstField { type = "com.tencent.mm.model.MultiUserInfo" }
+                .get()
+            if (userInfo != null) {
+                val nickFields = listOf("nickname", "nickName", "userNickname", "displayName")
+                for (fieldName in nickFields) {
+                    try {
+                        val nick = userInfo.reflekt()
+                            ?.firstField { name = fieldName }
+                            ?.get() as? String
+                        if (!nick.isNullOrBlank()) {
+                            WeLogger.d(TAG, "昵称: 策略B (MultiUserInfo.$fieldName) 成功: $nick")
+                            return nick
+                        }
+                    } catch (_: Throwable) {}
+                }
+            }
+        } catch (e: Throwable) {
+            WeLogger.w(TAG, "昵称: 策略B (MultiUserInfo) 失败", e)
+        }
+
+        WeLogger.w(TAG, "昵称: 全部策略失败，使用空昵称")
+        return ""
     }
 
     /** 从视图树中查找头像 ImageView */
