@@ -103,6 +103,9 @@ object TabTheme : ClickableFeature() {
     private var opacity by prefOption("tab_theme_opacity", 0.15f)
     private var transparentStatusBar by prefOption("tab_theme_transparent_status_bar", true)
 
+    // 持有背景容器引用，用于生命周期显隐控制
+    private var bgContainer: android.widget.FrameLayout? = null
+
     @Serializable
     data class TabThemeConfig(
         val name: String = "默认主题",
@@ -176,13 +179,11 @@ object TabTheme : ClickableFeature() {
 
             val decor = activity.window?.decorView as? ViewGroup ?: return@hookAfter
 
-            val config = loadConfig()
-
             // 检查是否已有背景容器，避免重复添加
             val existingTag = "${OVERLAY_TAG_PREFIX}container"
-            var bgContainer = decor.findViewWithTag<android.widget.FrameLayout>(existingTag)
-            if (bgContainer == null) {
-                bgContainer = android.widget.FrameLayout(activity).apply {
+            var localContainer = decor.findViewWithTag<android.widget.FrameLayout>(existingTag)
+            if (localContainer == null) {
+                localContainer = android.widget.FrameLayout(activity).apply {
                     tag = existingTag
                     setLifecycleOwner(lifecycleOwner)
                     layoutParams = ViewGroup.LayoutParams(
@@ -194,8 +195,10 @@ object TabTheme : ClickableFeature() {
                     isFocusable = false
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
-                decor.addView(bgContainer)
+                decor.addView(localContainer)
             }
+            // 保存引用，供生命周期回调控制显隐
+            bgContainer = localContainer
 
             val tabImageViews = mutableMapOf<Int, ImageView>()
 
@@ -217,7 +220,7 @@ object TabTheme : ClickableFeature() {
                         }
                         alpha = opacity
                     }
-                    bgContainer.addView(iv)
+                    localContainer.addView(iv)
                     tabImageViews[tabIndex] = iv
                 }
             }
@@ -230,6 +233,22 @@ object TabTheme : ClickableFeature() {
                         iv.visibility = if (idx == position) View.VISIBLE else View.GONE
                     }
                 }
+
+            // ── 生命周期挂钩：离开主页时隐藏背景，避免与聊天背景重叠 ──
+            // 当聊天 Activity 覆盖在主 Activity 之上时，onPause 会被调用
+            activity.javaClass.reflekt()
+                .firstMethod { name = "onResume"; parameterCount = 0 }
+                .hookAfter {
+                    if (tabThemeEnabled && bgContainer != null) {
+                        bgContainer!!.visibility = View.VISIBLE
+                    }
+                }
+
+            activity.javaClass.reflekt()
+                .firstMethod { name = "onPause"; parameterCount = 0 }
+                .hookAfter {
+                    bgContainer?.visibility = View.GONE
+                }
         }
     }
 
@@ -237,17 +256,32 @@ object TabTheme : ClickableFeature() {
         runCatching {
             val window = activity.window ?: return
             window.statusBarColor = android.graphics.Color.TRANSPARENT
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                window.isStatusBarContrastEnforced = false
-            }
+
+            // 根据深色模式调整状态栏图标颜色，确保在背景图片上可见
+            val isDark = (activity.resources.configuration.uiMode and
+                    android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                    android.content.res.Configuration.UI_MODE_NIGHT_YES
+
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
+                window.insetsController?.isAppearanceLightStatusBars = !isDark
             } else {
                 @Suppress("DEPRECATION")
                 val decor = window.decorView as? ViewGroup ?: return
-                decor.systemUiVisibility = decor.systemUiVisibility or
+                var flags = decor.systemUiVisibility
+                flags = flags or
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                         View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                if (!isDark) {
+                    flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                } else {
+                    flags = flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                }
+                decor.systemUiVisibility = flags
+            }
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                window.isStatusBarContrastEnforced = false
             }
         }.onFailure {
             WeLogger.w(TAG, "failed to apply immersive status bar", it)

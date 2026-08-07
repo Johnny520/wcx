@@ -39,9 +39,13 @@ import com.composables.icons.materialsymbols.outlined.Check_circle
 import com.composables.icons.materialsymbols.outlined.Phone_android
 import com.composables.icons.materialsymbols.outlined.Smartphone
 import com.composables.icons.materialsymbols.outlined.Sports_esports
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
+import com.Johnny.wcx.dynamic.LocalAdaptationEngine
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.AppUpdater
@@ -197,10 +201,27 @@ fun HomePager(onOpenFeatures: () -> Unit) {
     var isLatest by remember { mutableStateOf(false) }
     var isChecking by remember { mutableStateOf(true) }
 
+    // Dex 适配确认对话框状态
+    var showAdaptationDialog by remember { mutableStateOf(false) }
+    var adaptationMessage by remember { mutableStateOf("") }
+
     // 设备信息：微信版本和运行环境在重组间保持稳定
     val wechatVersion = remember { safeGetWeChatVersionInfo(context) }
     val lspEnvironment = remember { detectOrReadLspEnvironment(context) }
     val lspApiVersion = remember { safeGetLspApiVersion() }
+
+    // 检查 Dex 适配引擎状态，进入模块界面时弹出确认提示
+    LaunchedEffect(Unit) {
+        if (LocalAdaptationEngine.state == LocalAdaptationEngine.EngineState.PENDING_CONFIRMATION) {
+            adaptationMessage = "微信已更新，需要重新适配Dex以确保功能正常，是否立即适配？"
+            showAdaptationDialog = true
+        }
+        // 注册适配确认回调（后续引擎状态变更时也会触发）
+        LocalAdaptationEngine.onAdaptationConfirmationRequired { message ->
+            adaptationMessage = message
+            showAdaptationDialog = true
+        }
+    }
 
     LaunchedEffect(Unit) {
         isChecking = true
@@ -321,6 +342,30 @@ fun HomePager(onOpenFeatures: () -> Unit) {
         item {
             Spacer(Modifier.height(CONTENT_BOTTOM_INSET))
         }
+    }
+
+    // Dex 适配确认对话框
+    if (showAdaptationDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showAdaptationDialog = false
+                LocalAdaptationEngine.cancelAdaptation()
+            },
+            title = { Text("Dex 适配确认") },
+            text = { Text(adaptationMessage) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAdaptationDialog = false
+                    LocalAdaptationEngine.confirmAdaptation()
+                }) { Text("立即适配") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showAdaptationDialog = false
+                    LocalAdaptationEngine.cancelAdaptation()
+                }) { Text("取消") }
+            }
+        )
     }
 }
 

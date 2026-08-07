@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import androidx.activity.ComponentActivity
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.features.items.beautify.wex.feature.WexBottomBarFeature
 import com.Johnny.wcx.features.items.beautify.wex.feature.WexHomeCardsFeature
 import com.Johnny.wcx.features.items.beautify.wex.feature.WexTopBarFeature
@@ -37,6 +38,9 @@ object WexBeautifyFeature : ClickableFeature() {
 
     private const val TAG = "WexBeautify"
     private const val PREFS_NAME = "wex_beautify_prefs"
+
+    /** 每日一图默认API地址 */
+    const val DEFAULT_IMAGE_API = "https://api.03c3.cn/api/zb"
 
     /** 独立 SharedPreferences，不与 WCX 其他功能配置混用 */
     @Volatile
@@ -107,6 +111,19 @@ object WexBeautifyFeature : ClickableFeature() {
         get() = wexPrefs.getBoolean("float_lyric_enabled", false)
         set(value) = wexPrefs.edit().putBoolean("float_lyric_enabled", value).apply()
 
+    // 每日一图配置
+    var imageApiUrl: String
+        get() = wexPrefs.getString("image_api_url", DEFAULT_IMAGE_API) ?: DEFAULT_IMAGE_API
+        set(value) = wexPrefs.edit().putString("image_api_url", value).apply()
+
+    var imageApiKey: String
+        get() = wexPrefs.getString("image_api_key", "") ?: ""
+        set(value) = wexPrefs.edit().putString("image_api_key", value).apply()
+
+    var imageRefreshInterval: Int
+        get() = wexPrefs.getInt("image_refresh_interval", 3600)
+        set(value) = wexPrefs.edit().putInt("image_refresh_interval", value).apply()
+
     var logEnabled: Boolean
         get() = wexPrefs.getBoolean("log_enabled", true)
         set(value) = wexPrefs.edit().putBoolean("log_enabled", value).apply()
@@ -114,6 +131,10 @@ object WexBeautifyFeature : ClickableFeature() {
     // ==================== 生命周期 ====================
 
     override fun onEnable() {
+        if (!BuildConfig.BEAUTIFY_ENABLED) {
+            WeLogger.w(TAG, "Wex美化编译开关已关闭，跳过启用")
+            return
+        }
         WeLogger.i(TAG, "========== Wex美化: 已开启 ==========")
         val ctx = context ?: return
         wexPrefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -164,6 +185,10 @@ object WexBeautifyFeature : ClickableFeature() {
     // ==================== UI ====================
 
     override fun onClick(context: ComponentActivity) {
+        if (!BuildConfig.BEAUTIFY_ENABLED) {
+            com.Johnny.wcx.utils.android.showToast("Wex美化编译开关已关闭")
+            return
+        }
         this.context = context
         if (!::wexPrefs.isInitialized) {
             wexPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

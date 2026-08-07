@@ -15,7 +15,7 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
 
     private const val TAG = "DisableVideosAutoPlay"
 
-    // ── 原有 Hook 点 ①：SnsAutoPlayUtil.checkAutoPlay ──────────────────────
+    // Hook ①：SnsAutoPlayUtil.checkAutoPlay — 自动播放策略判断
     private val methodCheckAutoPlay by dexMethod {
         matcher {
             usingEqStrings(
@@ -25,7 +25,7 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
         }
     }
 
-    // ── 原有 Hook 点 ②：ImproveAutoPlayManager.autoPlay$2.invoke ────────────
+    // Hook ②：ImproveAutoPlayManager.autoPlay$2.invoke — 改进版自动播放触发
     private val methodImproveAutoPlayInvoke by dexMethod {
         matcher {
             usingEqStrings(
@@ -35,99 +35,45 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
         }
     }
 
-    // ── 新增 Hook 点 ③：SnsVideoView / SightView 自动开始播放 ────────────────
-    private val methodVideoStartPlay by dexMethod {
-        searchPackages("com.tencent.mm.plugin.sns.ui")
-        matcher {
-            usingEqStrings("start", "SnsVideoView")
-        }
-    }
-
-    // ── 新增 Hook 点 ④：视频预加载 / prepare 阶段拦截 ────────────────────────
-    private val methodVideoPrepare by dexMethod {
-        searchPackages("com.tencent.mm.plugin.sns")
-        matcher {
-            usingEqStrings("prepare", "SnsVideo")
-        }
-    }
-
     override fun onEnable() {
-        WeLogger.i(TAG, "========== 禁止朋友圈视频自动播放: 已开启 ==========")
-
-        // Hook ①：SnsAutoPlayUtil.checkAutoPlay
+        // Hook ①：SnsAutoPlayUtil.checkAutoPlay → 强制返回 false
         try {
             methodCheckAutoPlay.hookBefore {
                 try {
                     if (method is java.lang.reflect.Method) {
                         val returnType = (method as java.lang.reflect.Method).returnType
                         if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
-                            WeLogger.d(TAG, "拦截 checkAutoPlay: 返回 false, 调用栈=${Thread.currentThread().stackTrace.take(5).joinToString(" <- ") { it.methodName }}")
                             result = false
                         }
                     }
                 } catch (e: Throwable) {
-                    WeLogger.e(TAG, "checkAutoPlay hook 异常", e)
+                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                 }
             }
-            WeLogger.d(TAG, "Hook ① checkAutoPlay 注册成功")
         } catch (e: Throwable) {
-            WeLogger.e(TAG, "Hook ① checkAutoPlay 注册失败", e)
+            WeLogger.e(TAG, "checkAutoPlay hook 注册失败", e)
         }
 
-        // Hook ②：ImproveAutoPlayManager.autoPlay$2.invoke
+        // Hook ②：ImproveAutoPlayManager.autoPlay$2.invoke → 强制返回 false
         try {
             methodImproveAutoPlayInvoke.hookBefore {
                 try {
                     if (method is java.lang.reflect.Method) {
                         val returnType = (method as java.lang.reflect.Method).returnType
                         if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
-                            WeLogger.d(TAG, "拦截 ImproveAutoPlay invoke: 返回 false")
                             result = false
                         }
                     }
                 } catch (e: Throwable) {
-                    WeLogger.e(TAG, "ImproveAutoPlay hook 异常", e)
+                    // 兜底异常捕获
                 }
             }
-            WeLogger.d(TAG, "Hook ② ImproveAutoPlay 注册成功")
         } catch (e: Throwable) {
-            WeLogger.e(TAG, "Hook ② ImproveAutoPlay 注册失败 (可能微信版本已变更)", e)
+            WeLogger.e(TAG, "ImproveAutoPlay hook 注册失败", e)
         }
-
-        // Hook ③：视频 View 开始播放 — 兜底拦截
-        try {
-            methodVideoStartPlay.hookBefore {
-                try {
-                    WeLogger.d(TAG, "拦截视频 start 播放: 阻断自动播放")
-                    result = null
-                } catch (e: Throwable) {
-                    WeLogger.e(TAG, "videoStart hook 异常", e)
-                }
-            }
-            WeLogger.d(TAG, "Hook ③ videoStart 注册成功")
-        } catch (e: Throwable) {
-            WeLogger.w(TAG, "Hook ③ videoStart 注册失败 (可能微信版本已变更): ${e.message}")
-        }
-
-        // Hook ④：视频 prepare 阶段 — 兜底拦截
-        try {
-            methodVideoPrepare.hookBefore {
-                try {
-                    WeLogger.d(TAG, "拦截视频 prepare: 阻断预加载自动播放")
-                    result = null
-                } catch (e: Throwable) {
-                    WeLogger.e(TAG, "videoPrepare hook 异常", e)
-                }
-            }
-            WeLogger.d(TAG, "Hook ④ videoPrepare 注册成功")
-        } catch (e: Throwable) {
-            WeLogger.w(TAG, "Hook ④ videoPrepare 注册失败 (可能微信版本已变更): ${e.message}")
-        }
-
-        WeLogger.i(TAG, "========== 禁止朋友圈视频自动播放: 全部 Hook 注册完成 ==========")
     }
 
     override fun onDisable() {
-        WeLogger.i(TAG, "禁止朋友圈视频自动播放: 已关闭，恢复原生行为")
+        // 关闭功能时无需额外操作，Hook 由框架自动解除
     }
 }

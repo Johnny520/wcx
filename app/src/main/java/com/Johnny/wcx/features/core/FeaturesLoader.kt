@@ -1,53 +1,72 @@
 package com.Johnny.wcx.features.core
 
-import com.tencent.mm.ui.LauncherUI
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.cache.DexCacheManager
+import com.Johnny.wcx.dynamic.AutoAdaptationManager
+import com.Johnny.wcx.dynamic.DynamicFallbackChain
 import com.Johnny.wcx.features.api.ui.WeSettingsInjector
-import com.Johnny.wcx.ui.content.DexResolver
-import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.measureTime
 
+/**
+ * 功能加载器 — 集成动态适配引擎，取消手动"完美适配"按钮。
+ *
+ * 加载流程：
+ * 1. 尝试从缓存加载 Dex 委托（快速路径）
+ * 2. 缓存完整 → 直接启动所有功能
+ * 3. 缓存不完整/过期 → 触发后台静默全自动适配
+ * 4. 适配完成后自动注入 Hook 并启动功能
+ *
+ * 不再需要用户手动操作，全程全自动。
+ */
 object FeaturesLoader {
 
     private const val TAG = "FeaturesLoader"
 
     fun loadFeatures() {
+        // 初始化全自动适配管理器
+        AutoAdaptationManager.init()
+
         val allFeatures = FeaturesProvider.ALL_HOOK_ITEMS
         val allDexItems = allFeatures.filterIsInstance<IResolveDex>()
 
+        // 检查缓存是否有效
         val outdatedItems = DexCacheManager.getOutdatedItems(allDexItems)
         val validItems = allDexItems - outdatedItems.toSet()
 
         if (outdatedItems.isNotEmpty())
             WeLogger.i(TAG, "found ${validItems.size} valid items, ${outdatedItems.size} outdated items")
 
-        // Load what we can from cache. Items with *some* missing keys are still partially loaded —
-        // their valid delegates work immediately; only the item itself is queued for re-resolution.
+        // 从缓存加载（快速路径）
         val cacheFailedItems = loadDescriptorsFromCache(validItems)
         val allBrokenItems = (outdatedItems + cacheFailedItems).distinct()
 
-        if (allBrokenItems.isNotEmpty())
-            handleBrokenItems(allBrokenItems)
+        if (allBrokenItems.isNotEmpty()) {
+            // 缓存不完整，触发后台自动适配（不再显示弹窗）
+            WeLogger.i(TAG, "${allBrokenItems.size} items need re-adaptation, triggering auto-adapt in background")
+            scheduleAutoAdaptation(allBrokenItems)
+        }
 
+        // 启动所有功能（缓存完整的直接启动，不完整的跳过）
         val elapsed = measureTime {
             allFeatures.forEach { feature ->
                 val isBroken = feature is IResolveDex && allBrokenItems.contains(feature)
 
                 if (isBroken && feature !is WeSettingsInjector) {
-                    WeLogger.w(TAG, "skipping ${feature.name} — incomplete cache, awaiting re-resolution")
+                    // 检查是否已有备用链路处于激活状态
+                    if (DynamicFallbackChain.isFallbackActive(feature.name)) {
+                        WeLogger.i(TAG, "starting ${feature.name} via fallback chain")
+                        feature.startup()
+                        return@forEach
+                    }
+                    WeLogger.w(TAG, "skipping ${feature.name} — awaiting auto-adaptation")
                     return@forEach
                 }
 
@@ -65,10 +84,6 @@ object FeaturesLoader {
 
     /**
      * 逐委托从缓存恢复状态。
-     *
-     * - 某个委托的 key 缺失 → 其他委托不受影响，仍正常加载。
-     * - 有任意 key 缺失的 item 加入返回列表，等待 DexKit 重新扫描。
-     * - 缓存文件整体读取失败 → 删除损坏文件，整个 item 加入返回列表。
      */
     private fun loadDescriptorsFromCache(items: List<IResolveDex>): List<IResolveDex> {
         val failedItems = mutableListOf<IResolveDex>()
@@ -83,15 +98,12 @@ object FeaturesLoader {
                     continue
                 }
 
-                // loadFromCache 逐委托加载；返回未命中的 key 集合
                 val missingKeys = item.loadFromCache(cache)
                 if (missingKeys.isNotEmpty()) {
                     val total = item.dexDelegates.size
                     val loaded = total - missingKeys.size
                     WeLogger.w(TAG, "$path: loaded $loaded/$total delegates from cache, missing: $missingKeys")
                     failedItems += item
-                    // 已命中的委托此时已经可用；hook 仍然跳过（见 loadFeatures），
-                    // 等 DexKit 把缺失的部分补齐、cache 更新后下次启动即完整。
                 }
             } catch (e: Exception) {
                 WeLogger.e(TAG, "cache load failed for $path", e)
@@ -103,35 +115,45 @@ object FeaturesLoader {
         return failedItems
     }
 
-    private fun handleBrokenItems(brokenItems: List<IResolveDex>) {
-        if (Preferences.noDexResolve) return
-        if (!TargetProcesses.isInMain) return
+    /**
+     * 后台静默自动适配 — 替代原来的手动 DexResolver 弹窗。
+     *
+     * 注册适配完成回调，AutoAdaptationManager 适配完成后自动重新加载功能。
+     */
+    private fun scheduleAutoAdaptation(brokenItems: List<IResolveDex>) {
+        if (Preferences.noDexResolve) {
+            WeLogger.w(TAG, "noDexResolve is set, skipping auto-adaptation")
+            return
+        }
 
-        WeLogger.i(TAG, "launching background coroutine to repair ${brokenItems.size} items")
+        WeLogger.i(TAG, "scheduling background auto-adaptation for ${brokenItems.size} items")
 
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-            var activity = LauncherUI.getInstance()
-            var waited = 0L
-            while (activity == null && waited < 30_000L) {
-                delay(1_000.milliseconds)
-                waited += 1_000
-                activity = LauncherUI.getInstance()
-            }
+            // 等待 AutoAdaptationManager 完成适配
+            AutoAdaptationManager.onAdaptationComplete {
+                WeLogger.i(TAG, "auto-adaptation complete, re-loading features")
 
-            if (activity == null) {
-                WeLogger.w(TAG, "no LauncherUI available for dex-repair dialog; skipping")
-                return@launch
-            }
+                // 重新加载功能（适配完成后注入的 Hook 已就绪）
+                val allFeatures = FeaturesProvider.ALL_HOOK_ITEMS
+                allFeatures.forEach { feature ->
+                    if (feature.isActive) return@forEach
 
-            val boundActivity = activity
-            withContext(Dispatchers.Main) {
-                showComposeDialog(boundActivity, directlyDismissable = false) {
-                    DexResolver(
-                        boundActivity,
-                        brokenItems,
-                        MainScope(),
-                        onDismiss
-                    )
+                    val isBroken = feature is IResolveDex &&
+                        brokenItems.any { (it as BaseFeature).name == feature.name }
+
+                    if (isBroken && feature !is WeSettingsInjector) {
+                        if (DynamicFallbackChain.isFailed(feature.name)) {
+                            WeLogger.w(TAG, "feature ${feature.name} still failed after adaptation")
+                            return@forEach
+                        }
+                    }
+
+                    try {
+                        feature.startup()
+                    } catch (e: Exception) {
+                        WeLogger.e(TAG, "failed to start ${feature.name} after adaptation", e)
+                        DynamicFallbackChain.handleFailure(feature, e)
+                    }
                 }
             }
         }

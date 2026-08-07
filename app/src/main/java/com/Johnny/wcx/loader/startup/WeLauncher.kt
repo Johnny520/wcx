@@ -7,7 +7,9 @@ import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.dexkit.cache.DexCacheManager
 import com.Johnny.wcx.features.core.FeaturesLoader
-import com.Johnny.wcx.loader.utils.ActivityProxy
+import com.Johnny.wcx.dynamic.LocalAdaptationEngine
+import com.Johnny.wcx.dynamic.SelfHealingMonitor
+import com.Johnny.wcx.loader.utils.ActivityLauncher
 import com.Johnny.wcx.loader.utils.ParcelableFixer
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.RuntimeConfig
@@ -31,7 +33,9 @@ object WeLauncher {
 
         if (TargetProcesses.isInMain) {
             val appContext = context.applicationContext ?: context
-            ActivityProxy.init(appContext)
+            ActivityLauncher.init()
+            LocalAdaptationEngine.init(appContext)
+            SelfHealingMonitor.init()
 
             val prefs =
                 context.getSharedPreferences("${PackageNames.WECHAT}_preferences", Context.MODE_PRIVATE)

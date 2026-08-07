@@ -192,11 +192,15 @@ object AddMainScreenFab : ClickableFeature() {
     }
 
     private fun startActivityByName(context: Context, className: String) {
-        val intent = Intent().apply {
-            setClassName(context.packageName, className)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, className)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            WeLogger.e(TAG, "启动 Activity 失败: $className", e)
         }
-        context.startActivity(intent)
     }
 
     override fun onEnable() {
@@ -297,9 +301,14 @@ object AddMainScreenFab : ClickableFeature() {
 
                     FabType.MODULE_SETTINGS -> {
                         {
-                            activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            })
+                            try {
+                                activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                })
+                            } catch (e: Exception) {
+                                WeLogger.e(TAG, "启动模块设置失败", e)
+                                showToast("无法打开模块设置")
+                            }
                         }
                     }
 
