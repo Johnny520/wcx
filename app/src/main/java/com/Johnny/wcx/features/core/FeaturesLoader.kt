@@ -8,6 +8,7 @@ import com.Johnny.wcx.features.api.ui.WeSettingsInjector
 import com.Johnny.wcx.ui.content.DexResolver
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.TargetProcesses
+import com.Johnny.wcx.utils.VersionCompat
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import kotlinx.coroutines.CoroutineScope
@@ -106,6 +107,23 @@ object FeaturesLoader {
     private fun handleBrokenItems(brokenItems: List<IResolveDex>) {
         if (Preferences.noDexResolve) return
         if (!TargetProcesses.isInMain) return
+
+        // 版本兼容性检测：大量Hook失效时输出警告日志并弹窗提示用户
+        try {
+            val (compatible, message) = VersionCompat.checkCompatibility(
+                brokenItems.size,
+                FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<IResolveDex>().size
+            )
+            if (!compatible) {
+                WeLogger.w(TAG, "版本兼容性警告: $message")
+                // 弹窗提示用户当前微信版本部分功能暂未适配
+                showToast("当前微信版本部分功能暂未适配，等待模块更新")
+            } else {
+                WeLogger.i(TAG, "版本兼容性: $message")
+            }
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "版本兼容性检测异常", e)
+        }
 
         WeLogger.i(TAG, "launching background coroutine to repair ${brokenItems.size} items")
 

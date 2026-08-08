@@ -103,9 +103,6 @@ object TabTheme : ClickableFeature() {
     private var opacity by prefOption("tab_theme_opacity", 0.15f)
     private var transparentStatusBar by prefOption("tab_theme_transparent_status_bar", true)
 
-    // 持有背景容器引用，用于生命周期显隐控制
-    private var bgContainer: android.widget.FrameLayout? = null
-
     @Serializable
     data class TabThemeConfig(
         val name: String = "默认主题",
@@ -146,8 +143,37 @@ object TabTheme : ClickableFeature() {
         applyTheme()
     }
 
+    /**
+     * 检测当前前台 Activity 是否为聊天会话页面。
+     * 聊天会话页面内，模块全局主题背景应强制失效，避免与用户自定义聊天背景重叠。
+     */
+    private fun isChatActivityForeground(): Boolean {
+        return try {
+            val atClass = Class.forName("android.app.ActivityThread")
+            val currentAtMethod = atClass.getDeclaredMethod("currentActivityThread")
+            val at = currentAtMethod.invoke(null)
+            val activitiesField = atClass.getDeclaredField("mActivities")
+            activitiesField.isAccessible = true
+            val activities = activitiesField.get(at) as? Map<*, *> ?: return false
+
+            for (record in activities.values) {
+                val activity = record?.javaClass?.getDeclaredField("activity")
+                    ?.apply { isAccessible = true }
+                    ?.get(record) as? Activity ?: continue
+                if (!activity.isFinishing && activity.javaClass.name.contains("ChattingUI")) {
+                    return true
+                }
+            }
+            false
+        } catch (e: Throwable) {
+            WeLogger.d(TAG, "检测聊天Activity失败: ${e.message}")
+            false
+        }
+    }
+
     private fun applyTheme() {
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
+            try {
             val activity = thisObject.reflekt()
                 .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
                 .get()!! as Activity
@@ -179,11 +205,13 @@ object TabTheme : ClickableFeature() {
 
             val decor = activity.window?.decorView as? ViewGroup ?: return@hookAfter
 
+            val config = loadConfig()
+
             // 检查是否已有背景容器，避免重复添加
             val existingTag = "${OVERLAY_TAG_PREFIX}container"
-            var localContainer = decor.findViewWithTag<android.widget.FrameLayout>(existingTag)
-            if (localContainer == null) {
-                localContainer = android.widget.FrameLayout(activity).apply {
+            var bgContainer = decor.findViewWithTag<android.widget.FrameLayout>(existingTag)
+            if (bgContainer == null) {
+                bgContainer = android.widget.FrameLayout(activity).apply {
                     tag = existingTag
                     setLifecycleOwner(lifecycleOwner)
                     layoutParams = ViewGroup.LayoutParams(
@@ -195,10 +223,8 @@ object TabTheme : ClickableFeature() {
                     isFocusable = false
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
-                decor.addView(localContainer)
+                decor.addView(bgContainer)
             }
-            // 保存引用，供生命周期回调控制显隐
-            bgContainer = localContainer
 
             val tabImageViews = mutableMapOf<Int, ImageView>()
 
@@ -220,35 +246,33 @@ object TabTheme : ClickableFeature() {
                         }
                         alpha = opacity
                     }
-                    localContainer.addView(iv)
+                    bgContainer.addView(iv)
                     tabImageViews[tabIndex] = iv
                 }
             }
 
+            // 页面切换时检测是否为聊天会话页面，是则隐藏模块主题背景
             tabsAdapter.reflekt()
                 .firstMethod { name = "onPageSelected" }
                 .hookAfter {
-                    val position = args[0] as Int
-                    tabImageViews.forEach { (idx, iv) ->
-                        iv.visibility = if (idx == position) View.VISIBLE else View.GONE
+                    try {
+                        val position = args[0] as Int
+                        val inChatPage = isChatActivityForeground()
+                        tabImageViews.forEach { (idx, iv) ->
+                            if (inChatPage) {
+                                // 聊天会话页面内，模块全局主题背景强制失效
+                                iv.visibility = View.GONE
+                            } else {
+                                iv.visibility = if (idx == position) View.VISIBLE else View.GONE
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        WeLogger.e(TAG, "onPageSelected hook 异常", e)
                     }
                 }
-
-            // ── 生命周期挂钩：离开主页时隐藏背景，避免与聊天背景重叠 ──
-            // 当聊天 Activity 覆盖在主 Activity 之上时，onPause 会被调用
-            activity.javaClass.reflekt()
-                .firstMethod { name = "onResume"; parameterCount = 0 }
-                .hookAfter {
-                    if (tabThemeEnabled && bgContainer != null) {
-                        bgContainer!!.visibility = View.VISIBLE
-                    }
-                }
-
-            activity.javaClass.reflekt()
-                .firstMethod { name = "onPause"; parameterCount = 0 }
-                .hookAfter {
-                    bgContainer?.visibility = View.GONE
-                }
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
+            }
         }
     }
 
@@ -256,31 +280,17 @@ object TabTheme : ClickableFeature() {
         runCatching {
             val window = activity.window ?: return
             window.statusBarColor = android.graphics.Color.TRANSPARENT
-
-            // 根据深色模式调整状态栏图标颜色，确保在背景图片上可见
-            val isDark = (activity.resources.configuration.uiMode and
-                    android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-                    android.content.res.Configuration.UI_MODE_NIGHT_YES
-
-            val decor = window.decorView as? ViewGroup ?: return
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                window.isStatusBarContrastEnforced = false
+            }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
             } else {
                 @Suppress("DEPRECATION")
-                var flags = decor.systemUiVisibility
-                flags = flags or
+                val decor = window.decorView as? ViewGroup ?: return
+                decor.systemUiVisibility = decor.systemUiVisibility or
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                         View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                decor.systemUiVisibility = flags
-            }
-
-            // Use WindowInsetsControllerCompat for consistent behavior across API levels
-            androidx.core.view.WindowInsetsControllerCompat(window, decor).apply {
-                isAppearanceLightStatusBars = !isDark
-            }
-
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                window.isStatusBarContrastEnforced = false
             }
         }.onFailure {
             WeLogger.w(TAG, "failed to apply immersive status bar", it)

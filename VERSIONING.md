@@ -1,6 +1,6 @@
 # Versioning
 
-WCX does not use semantic versioning. The module is distributed as CI-built "nightly" artifacts
+WCX does not use semantic versioning. The module is distributed as CI-built artifacts
 with a deterministic, git-derived version scheme. There are no manual version bumps or release
 branches.
 
@@ -8,19 +8,20 @@ branches.
 
 Both values are computed at build time in `app/build.gradle.kts`.
 
-| Field         | Source                                                                      | Example       |
-|---------------|-----------------------------------------------------------------------------|---------------|
-| `versionCode` | `git rev-list --count HEAD` — total number of commits in the current branch | `592`         |
-| `versionName` | `"git+"` + `git rev-parse --short HEAD` — short commit hash                 | `git+8920253` |
+| Field         | Source                                                                                             | Example       |
+|---------------|----------------------------------------------------------------------------------------------------|---------------|
+| `versionCode` | `(git rev-list --count HEAD) + versionBaseOffset` — commit count + baseline offset                  | `174`         |
+| `versionName` | `"v" + versionCode` — auto-generated from versionCode                                              | `v174`        |
 
+- `versionBaseOffset` ensures the versionCode never falls below the baseline (v174 = offset 26 from v148).
 - `versionCode` monotonically increases with every commit.
-- `versionName` uniquely identifies the exact build commit.
+- `versionName` is derived from versionCode, not commit hash.
 - Neither is manually edited; they are fully automated.
 
 The APK also embeds these in `BuildConfig`:
 
 - `BuildConfig.COMMIT_HASH` — short commit hash
-- `BuildConfig.TAG` — always `"WeKit"`
+- `BuildConfig.TAG` — always `"WCX"`
 - `BuildConfig.BUILD_TIMESTAMP` — `System.currentTimeMillis()` at build time
 
 ## Release Model
@@ -43,9 +44,9 @@ Generated in CI:
 
 ```json
 {
-  "versionCode": 592,
-  "versionName": "git+8920253",
-  "commit": "8920253"
+  "versionCode": 174,
+  "versionName": "v174",
+  "commit": "2bbf8a8"
 }
 ```
 

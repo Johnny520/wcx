@@ -35,19 +35,20 @@ android {
     val commitCount = getCommitCount()
     val gitHash = getGitHash()
 
+    // v174 基线：commitCount 基于 v148，需要偏移 +26 到达 v174
+    // 后续每增加一个 commit，versionCode 自动递增
+    val versionBaseOffset = 26
+
     defaultConfig {
         applicationId = libs.versions.namespace.get()
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = commitCount
-        versionName = "git+$gitHash"
+        versionCode = commitCount + versionBaseOffset
+        versionName = "v${commitCount + versionBaseOffset}"
 
         buildConfigField("String", "COMMIT_HASH", "\"${gitHash}\"")
         buildConfigField("String", "TAG", "\"WCX\"")
         buildConfigField("long", "BUILD_TIMESTAMP", "${System.currentTimeMillis()}L")
-
-        // 侧滑栏 + WEX 美化功能编译开关
-        // 设置为 false 时，侧滑栏、WEX美化相关类在运行时不注册 Hook，避免残留代码造成劫持冲突
         buildConfigField("boolean", "BEAUTIFY_ENABLED", "true")
     }
 
@@ -137,8 +138,8 @@ android {
         }
 
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = !project.hasProperty("disableMinify")
+            isShrinkResources = !project.hasProperty("disableMinify")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -176,11 +177,6 @@ android {
         compose = true
         buildConfig = true
     }
-}
-
-// Disable aboutLibraries network fetching for offline builds
-aboutLibraries {
-    offlineMode = true
 }
 
 tasks.withType<KotlinCompile> {
@@ -376,4 +372,3 @@ tasks.withType<KotlinJvmCompile>().configureEach {
         freeCompilerArgs.add("-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi")
     }
 }
-// CI trigger Fri Aug  7 00:12:01 UTC 2026

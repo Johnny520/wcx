@@ -201,6 +201,7 @@ object AddMainScreenFab : ClickableFeature() {
 
     override fun onEnable() {
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
+            try {
             val activity = thisObject.reflekt()
                 .firstField {
                     type = "com.tencent.mm.ui.MMFragmentActivity"
@@ -285,21 +286,35 @@ object AddMainScreenFab : ClickableFeature() {
                 val icon = iconPool[item.iconName] ?: MaterialSymbols.OutlinedFilled.Add
                 val action: () -> Unit = when (item.type) {
                     FabType.START_ACTIVITY -> {
-                        { item.targetActivity?.let { startActivityByName(activity, it) } }
+                        { item.targetActivity?.let {
+                            try {
+                                startActivityByName(activity, it)
+                            } catch (e: Throwable) {
+                                WeLogger.e(TAG, "START_ACTIVITY 启动失败: $it", e)
+                            }
+                        } }
                     }
 
                     FabType.MARK_ALL_READ -> {
                         {
-                            WeConversationApi.markAllAsRead()
-                            showToast("已将全部未读消息标为已读")
+                            try {
+                                WeConversationApi.markAllAsRead()
+                                showToast("已将全部未读消息标为已读")
+                            } catch (e: Throwable) {
+                                WeLogger.e(TAG, "清空未读失败", e)
+                            }
                         }
                     }
 
                     FabType.MODULE_SETTINGS -> {
                         {
-                            activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            })
+                            try {
+                                activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                })
+                            } catch (e: Throwable) {
+                                WeLogger.e(TAG, "MODULE_SETTINGS 启动失败", e)
+                            }
                         }
                     }
 
@@ -426,6 +441,9 @@ object AddMainScreenFab : ClickableFeature() {
                     }
                 }
             )
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "onEnable hookAfter 异常", e)
+            }
         }
     }
 
