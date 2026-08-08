@@ -84,8 +84,8 @@ import com.composables.icons.materialsymbols.outlinedfilled.Wallet
 import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.settings.SettingsActivity
-import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.loader.utils.ActivityLauncher
+import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
@@ -802,22 +802,6 @@ object AddMainScreenFab : ClickableFeature() {
                                         ) {
                                             Icon(
                                                 imageVector = MaterialSymbols.Outlined.Delete,
-                                                contentDescription = "删除 ${item.name}",
-                                                tint = MaterialTheme.colorScheme.error,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = { TextButton(onDismiss) { Text("完成") } },
-            )
-        }
-    }
-}
-ete,
                                                 contentDescription = "删除 ${item.name}",
                                                 tint = MaterialTheme.colorScheme.error,
                                             )

@@ -831,17 +831,20 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                             // 假用户播报开关
+                            // Bug Fix (v198): 显式说明默认状态为「关闭」，并使用 Switch
+                            // 而非 Checkbox，使开关 ON/OFF 状态更加明确。
                             ListItem(
                                 modifier = Modifier.clickable { fakeUserState = !fakeUserState },
                                 trailingContent = {
-                                    Checkbox(checked = fakeUserState, onCheckedChange = null)
+                                    Switch(checked = fakeUserState, onCheckedChange = null)
                                 },
-                                headlineContent = { Text("启用假用户播报") },
+                                headlineContent = { Text("启用假用户播报（默认关闭）") },
                                 supportingContent = {
                                     Text(
-                                        "关闭：仅显示居中本地系统提示\n" +
+                                        "关闭（默认）：仅显示居中本地系统提示\n" +
                                                 "开启：居中提示保留，额外生成虚拟假用户发言（仅本地可见，不会发送到群内）\n" +
-                                                "生效范围：进群、退群、被移出群聊"
+                                                "生效范围：进群、退群、被移出群聊\n" +
+                                                "依赖：需先开启总开关与本地观察模式"
                                     )
                                 }
                             )
