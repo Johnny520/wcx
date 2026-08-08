@@ -27,7 +27,6 @@ import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.loader.utils.ActivityLauncher
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.bool
 import com.Johnny.wcx.utils.reflection.int
@@ -439,22 +438,18 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
     @Suppress("NOTHING_TO_INLINE")
     fun openSettingsDialog(context: Context) {
-        // Bug Fix (v198): 必须通过 ActivityLauncher 代理启动模块 SettingsActivity。
-        // 原因：从微信宿主进程直接 startActivity(SettingsActivity::class.java) 会被
-        // ActivityManager 拒绝（无法跨包启动未导出的私有 Activity），
-        // 即便设置 exported="true" 也无法绕过 LSPosed 宿主进程的权限隔离。
-        //
-        // 正确流程（参考 ActivityLauncher.kt）：
-        //  1. 把目标类名放进 Intent extra
-        //  2. 启动 WeChat 自带的 WeChatSplashActivity 作为代理 Activity
-        //  3. ActivityLauncher 在 WeChatSplashActivity.onCreate 注入的 hook
-        //     会拦截并从 extra 取出真实类名，通过 setClassName 启动目标 Activity
+        // Bug Fix (v201): 对齐上游 WeKit 的最简 Intent 启动方式。
+        // 配合 WeLauncher.init() 中 ActivityProxy.init() 注入的 IActivityManager /
+        // Instrumentation / Handler.Callback 钩子，模块 Activity 会被代理到
+        // WeChatSplashActivity 中转并最终通过 setClassName 启动真实 Activity。
+        // ActivityProxy.ActProxyMgr.isModuleProxyActivity() 通过
+        //   className.startsWith(PackageNames.MODULE)
+        // 判定模块 Activity 并走代理路由；manifest 中 SettingsActivity
+        // 已声明 exported="true"，因此经代理路由后能正常拉起。
         try {
-            ActivityLauncher.launch(context, SettingsActivity::class.java.name)
-            WeLogger.i(TAG, "openSettingsDialog: 启动模块设置 Activity (via ActivityLauncher)")
+            context.startActivity(Intent(context, SettingsActivity::class.java))
         } catch (e: Throwable) {
-            // 兜底：捕获所有异常，绝不向微信主线程抛出
-            WeLogger.e(TAG, "openSettingsDialog 失败", e)
+            WeLogger.e(TAG, "openSettingsDialog 启动失败", e)
         }
     }
 

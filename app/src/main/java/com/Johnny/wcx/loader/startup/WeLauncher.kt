@@ -9,7 +9,7 @@ import com.Johnny.wcx.dexkit.cache.DexCacheManager
 import com.Johnny.wcx.features.core.FeaturesLoader
 import com.Johnny.wcx.dynamic.LocalAdaptationEngine
 import com.Johnny.wcx.dynamic.SelfHealingMonitor
-import com.Johnny.wcx.loader.utils.ActivityLauncher
+import com.Johnny.wcx.loader.utils.ActivityProxy
 import com.Johnny.wcx.loader.utils.ParcelableFixer
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.RuntimeConfig
@@ -33,7 +33,7 @@ object WeLauncher {
 
         if (TargetProcesses.isInMain) {
             val appContext = context.applicationContext ?: context
-            ActivityLauncher.init()
+            ActivityProxy.init(appContext)
             LocalAdaptationEngine.init(appContext)
             SelfHealingMonitor.init()
 

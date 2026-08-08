@@ -84,7 +84,6 @@ import com.composables.icons.materialsymbols.outlinedfilled.Wallet
 import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.settings.SettingsActivity
-import com.Johnny.wcx.loader.utils.ActivityLauncher
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -311,15 +310,13 @@ object AddMainScreenFab : ClickableFeature() {
                     FabType.MODULE_SETTINGS -> {
                         {
                             try {
-                                // Bug Fix (v198): 必须通过 ActivityLauncher 代理启动。
-                                // 在微信宿主进程里直接 startActivity(SettingsActivity) 会被拒绝，
-                                // 即便 SettingsActivity 已 declared exported="true" 也无法绕过宿主进程的权限隔离。
-                                // 正确做法是把目标类名放进 Intent extra，由 ActivityLauncher
-                                // 注入在 WeChatSplashActivity.onCreate 的 hook 接管并启动真实 Activity。
-                                ActivityLauncher.launch(activity, SettingsActivity::class.java.name)
-                                WeLogger.i(TAG, "MODULE_SETTINGS: 启动模块设置 Activity (via ActivityLauncher)")
+                                // Bug Fix (v201): 对齐 WeKit 上游的最简 Intent 启动方式。
+                                // 之前 v196 加的 setPackage(PackageNames.MODULE) 实际上是无效的，
+                                // 真正的代理路由依赖 WeLauncher.init() 中的 ActivityProxy.init()
+                                // 钩子 IActivityManager.startActivity()。去掉 setPackage 即可。
+                                activity.startActivity(Intent(activity, SettingsActivity::class.java))
+                                WeLogger.i(TAG, "MODULE_SETTINGS: 启动模块设置 Activity")
                             } catch (e: Throwable) {
-                                // 兜底：捕获所有其它异常，绝不让微信主线程崩溃
                                 WeLogger.e(TAG, "MODULE_SETTINGS 启动失败", e)
                             }
                         }

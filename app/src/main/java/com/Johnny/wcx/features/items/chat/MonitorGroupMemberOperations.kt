@@ -119,8 +119,8 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     private var nickChangeEnabled by prefOption("gmc_nick_change_enabled", true)
     private var kickEnabled by prefOption("gmc_kick_enabled", true)
     private var kickExtraExit by prefOption("gmc_kick_extra_exit", false)
-    // Bug Fix (v198): 假用户播报默认必须为关闭。
-    // - 这里保留 key 名 gmc_fake_user_broadcast 以兼容已升级用户，但显式以 false 作为默认；
+    // Bug Fix (v201): 假用户播报默认必须为关闭。
+    // - 保留 key 名 gmc_fake_user_broadcast 以兼容已升级用户，显式以 false 作为默认；
     // - 历史上若该键已被持久化为 true，用户首次打开 UI 仍可手动关闭。
     private var fakeUserBroadcast by prefOption("gmc_fake_user_broadcast", false)
     private var groupFilterEnabled by prefOption("gmc_group_filter_enabled", false)
@@ -637,8 +637,8 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             )
 
             // 假用户播报：仅开关开启时，额外生成虚拟假用户发言（纯文本，无 wxId，仅本地可见）
-            // Bug Fix (v198): 增加 masterEnabled + modeBEnabled 守卫 + 显式日志。默认必须为关闭状态，
-            // 避免在 masterEnabled 未启用或用户未明确开启 fakeUserBroadcast 时出现误播报。
+            // Bug Fix (v201): 增加 masterEnabled + modeBEnabled 守卫 + 显式日志。
+            // 默认必须为关闭状态，避免 masterEnabled 未启用或用户未明确开启时出现误播报。
             if (masterEnabled && modeBEnabled && fakeUserBroadcast &&
                 eventType in listOf("join", "leave", "kick", "kick_extra")
             ) {
@@ -837,7 +837,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                             // 假用户播报开关
-                            // Bug Fix (v198): 显式说明默认状态为「关闭」，并使用 Switch
+                            // Bug Fix (v201): 显式说明默认状态为「关闭」，并使用 Switch
                             // 而非 Checkbox，使开关 ON/OFF 状态更加明确。
                             ListItem(
                                 modifier = Modifier.clickable { fakeUserState = !fakeUserState },
