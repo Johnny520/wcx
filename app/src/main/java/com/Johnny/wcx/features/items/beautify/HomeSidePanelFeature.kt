@@ -430,7 +430,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
             val btnSettings = makeIconButton(act, "⚙", dp(40, act)) {
-                try { showPanelSettingsDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "设置按钮异常", e); showToast("配置面板打开失败") }
+                try { showPanelSettingsDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "设置按钮异常", e); showToast("配置面板打开失败：" + e.message) }
             }
             val btnClose = makeIconButton(act, "✕", dp(40, act)) {
                 try { hidePanel() } catch (e: Throwable) { WeLogger.e(TAG, "关闭按钮异常", e) }
@@ -548,7 +548,7 @@ object HomeSidePanelFeature : ClickableFeature() {
             // 长按头像 → 弹配置；单击无动作
             isLongClickable = true
             setOnLongClickListener {
-                try { showAvatarConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "头像配置异常", e) }
+                try { showAvatarConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "头像配置异常", e); showToast("头像配置失败：" + e.message) }
                 true
             }
         }
@@ -560,7 +560,7 @@ object HomeSidePanelFeature : ClickableFeature() {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             isClickable = true; isFocusable = true
             setOnLongClickListener {
-                try { showStatusConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "状态配置异常", e) }
+                try { showStatusConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "状态配置异常", e); showToast("状态配置失败：" + e.message) }
                 true
             }
         }
@@ -628,7 +628,7 @@ object HomeSidePanelFeature : ClickableFeature() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8, act) }
             isLongClickable = true
             setOnLongClickListener {
-                try { showSignatureConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "签名配置异常", e) }
+                try { showSignatureConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "签名配置异常", e); showToast("签名配置失败：" + e.message) }
                 true
             }
         }
@@ -670,7 +670,7 @@ object HomeSidePanelFeature : ClickableFeature() {
             // 仅长按触发配置，单击无动作
             isLongClickable = true
             setOnLongClickListener {
-                try { showWeatherConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "天气配置异常", e) }
+                try { showWeatherConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "天气配置异常", e); showToast("天气配置失败：" + e.message) }
                 true
             }
         }
@@ -753,7 +753,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     try { executeSlotTarget(act, slot) } catch (e: Throwable) { WeLogger.e(TAG, "slot ${slot.slotId} 点击异常", e) }
                 }
                 setOnLongClickListener {
-                    try { showSlotPickerDialog(act, slot.slotId, slot) } catch (e: Throwable) { WeLogger.e(TAG, "slot ${slot.slotId} 选择异常", e) }
+                    try { showSlotPickerDialog(act, slot.slotId, slot) } catch (e: Throwable) { WeLogger.e(TAG, "slot ${slot.slotId} 选择异常", e); showToast("快捷栏选择失败：" + e.message) }
                     true
                 }
             }
@@ -854,7 +854,7 @@ object HomeSidePanelFeature : ClickableFeature() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { val m = dp(8, act); setMargins(0, m, 0, m) }
             isLongClickable = true
             setOnLongClickListener {
-                try { showDailyQuoteConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "每日一言配置异常", e) }
+                try { showDailyQuoteConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "每日一言配置异常", e); showToast("每日一言配置失败：" + e.message) }
                 true
             }
         }
@@ -925,7 +925,12 @@ object HomeSidePanelFeature : ClickableFeature() {
             }
 
             // 4. 重置 / 完成
-            val scroll = ScrollView(act).apply { addView(container) }
+            val scroll = ScrollView(act).apply {
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                addView(container.also {
+                    it.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                })
+            }
             AlertDialog.Builder(act)
                 .setTitle("侧边栏设置")
                 .setView(scroll)
@@ -1066,7 +1071,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     } catch (e: Throwable) { WeLogger.e(TAG, "重置异常", e) }
                 }
                 .show()
-        } catch (e: Throwable) { WeLogger.e(TAG, "showSlotPickerDialog 异常", e) }
+        } catch (e: Throwable) { WeLogger.e(TAG, "showSlotPickerDialog 异常", e); showToast("快捷栏选择打开失败：" + e.message) }
     }
 
     /** icon emoji → iconName 映射 */
@@ -1113,7 +1118,12 @@ object HomeSidePanelFeature : ClickableFeature() {
 
             AlertDialog.Builder(act)
                 .setTitle("头像配置")
-                .setView(ScrollView(act).apply { addView(container) })
+                .setView(ScrollView(act).apply {
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    addView(container.also {
+                        it.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    })
+                })
                 .setPositiveButton("保存") { d, _ ->
                     try {
                         avatarMode = modeHolder[0]
@@ -1126,7 +1136,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 }
                 .setNegativeButton("取消", null)
                 .show()
-        } catch (e: Throwable) { WeLogger.e(TAG, "showAvatarConfigDialog 异常", e) }
+        } catch (e: Throwable) { WeLogger.e(TAG, "showAvatarConfigDialog 异常", e); showToast("头像配置打开失败：" + e.message) }
     }
 
     // ==================== 签名配置弹窗（3 模式）====================
@@ -1155,7 +1165,12 @@ object HomeSidePanelFeature : ClickableFeature() {
 
             AlertDialog.Builder(act)
                 .setTitle("签名/语录配置")
-                .setView(ScrollView(act).apply { addView(container) })
+                .setView(ScrollView(act).apply {
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    addView(container.also {
+                        it.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    })
+                })
                 .setPositiveButton("保存") { d, _ ->
                     try {
                         quoteMode = modeHolder[0]
@@ -1170,7 +1185,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 }
                 .setNegativeButton("取消", null)
                 .show()
-        } catch (e: Throwable) { WeLogger.e(TAG, "showSignatureConfigDialog 异常", e) }
+        } catch (e: Throwable) { WeLogger.e(TAG, "showSignatureConfigDialog 异常", e); showToast("签名配置打开失败：" + e.message) }
     }
 
     // ==================== 状态行配置弹窗 ====================
@@ -1193,7 +1208,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 }
                 .setNegativeButton("取消", null)
                 .show()
-        } catch (e: Throwable) { WeLogger.e(TAG, "showStatusConfigDialog 异常", e) }
+        } catch (e: Throwable) { WeLogger.e(TAG, "showStatusConfigDialog 异常", e); showToast("状态配置打开失败：" + e.message) }
     }
 
     // ==================== 天气配置弹窗（API+Key，完整保存）====================
@@ -1211,7 +1226,12 @@ object HomeSidePanelFeature : ClickableFeature() {
             val inputs = (0 until container.childCount).map { container.getChildAt(it) as EditText }
             AlertDialog.Builder(act)
                 .setTitle("天气配置")
-                .setView(ScrollView(act).apply { addView(container) })
+                .setView(ScrollView(act).apply {
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    addView(container.also {
+                        it.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    })
+                })
                 .setPositiveButton("保存") { d, _ ->
                     try {
                         weatherCity = inputs[0].text.toString().ifBlank { "北京" }
@@ -1227,7 +1247,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 }
                 .setNegativeButton("取消", null)
                 .show()
-        } catch (e: Throwable) { WeLogger.e(TAG, "showWeatherConfigDialog 异常", e) }
+        } catch (e: Throwable) { WeLogger.e(TAG, "showWeatherConfigDialog 异常", e); showToast("天气配置打开失败：" + e.message) }
     }
 
     // ==================== 每日一言配置弹窗（API+Key，完整保存）====================
@@ -1243,7 +1263,12 @@ object HomeSidePanelFeature : ClickableFeature() {
             val inputs = (0 until container.childCount).map { container.getChildAt(it) as EditText }
             AlertDialog.Builder(act)
                 .setTitle("每日一言配置")
-                .setView(ScrollView(act).apply { addView(container) })
+                .setView(ScrollView(act).apply {
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    addView(container.also {
+                        it.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    })
+                })
                 .setPositiveButton("保存") { d, _ ->
                     try {
                         dailyQuoteApiUrl = inputs[0].text.toString()
@@ -1258,7 +1283,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                 }
                 .setNegativeButton("取消", null)
                 .show()
-        } catch (e: Throwable) { WeLogger.e(TAG, "showDailyQuoteConfigDialog 异常", e) }
+        } catch (e: Throwable) { WeLogger.e(TAG, "showDailyQuoteConfigDialog 异常", e); showToast("每日一言配置打开失败：" + e.message) }
     }
 
     // ==================== 工具方法 ====================
