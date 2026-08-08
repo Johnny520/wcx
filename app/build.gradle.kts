@@ -35,7 +35,7 @@ android {
     val commitCount = getCommitCount()
     val gitHash = getGitHash()
 
-    // v174 基线：commitCount 基于 v148，需要偏移 +26 到达 v174
+    // v194 基线：commitCount 基于 v148，偏移 +26
     // 后续每增加一个 commit，versionCode 自动递增
     val versionBaseOffset = 26
 
