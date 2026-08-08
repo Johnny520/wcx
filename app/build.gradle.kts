@@ -35,16 +35,21 @@ android {
     val commitCount = getCommitCount()
     val gitHash = getGitHash()
 
+    // v174 基线：commitCount 基于 v148，需要偏移 +26 到达 v174
+    // 后续每增加一个 commit，versionCode 自动递增
+    val versionBaseOffset = 26
+
     defaultConfig {
         applicationId = libs.versions.namespace.get()
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = commitCount
-        versionName = "git+$gitHash"
+        versionCode = commitCount + versionBaseOffset
+        versionName = "v${commitCount + versionBaseOffset}"
 
         buildConfigField("String", "COMMIT_HASH", "\"${gitHash}\"")
         buildConfigField("String", "TAG", "\"WCX\"")
         buildConfigField("long", "BUILD_TIMESTAMP", "${System.currentTimeMillis()}L")
+        buildConfigField("boolean", "BEAUTIFY_ENABLED", "true")
     }
 
     splits {
@@ -133,8 +138,8 @@ android {
         }
 
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = !project.hasProperty("disableMinify")
+            isShrinkResources = !project.hasProperty("disableMinify")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

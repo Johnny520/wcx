@@ -281,27 +281,31 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
         clsSettingsUi.reflekt().firstMethod { name = "onPreferenceTreeClick" }
             .hookBefore {
-                if (args.size < 2) return@hookBefore
-                val preference = args[1] ?: return@hookBefore
+                try {
+                    if (args.size < 2) return@hookBefore
+                    val preference = args[1] ?: return@hookBefore
 
-                val key = methodGetKey.method.invoke(preference) as? String
+                    val key = methodGetKey.method.invoke(preference) as? String
 
-                if (PREFS_KEY == key) {
-                    val activity = thisObject as Activity
+                    if (PREFS_KEY == key) {
+                        val activity = thisObject as Activity
 
-                    openSettingsDialog(activity)
+                        openSettingsDialog(activity)
 
-                    try {
-                        // 仅当原方法返回 boolean 时才设置 result = true
-                        if (method is java.lang.reflect.Method) {
-                            val returnType = (method as java.lang.reflect.Method).returnType
-                            if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
-                                result = true
+                        try {
+                            // 仅当原方法返回 boolean 时才设置 result = true
+                            if (method is java.lang.reflect.Method) {
+                                val returnType = (method as java.lang.reflect.Method).returnType
+                                if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                                    result = true
+                                }
                             }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                         }
-                    } catch (e: Throwable) {
-                        // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                     }
+                } catch (e: Throwable) {
+                    WeLogger.e(TAG, "onPreferenceTreeClick hook 异常", e)
                 }
             }
     }
@@ -377,7 +381,13 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
             pageClass = SettingGroupMain::class.java
             parentClass = SettingAdditionHeaderSearch::class.java
             childClass = SettingGroupPersonalInfo::class.java
-            onClick = { openSettingsDialog(it) }
+            onClick = {
+                try {
+                    openSettingsDialog(it)
+                } catch (e: Throwable) {
+                    WeLogger.e(TAG, "modern settings onClick 异常", e)
+                }
+            }
         }
 //
 //        val item3 = settingsManager.createItem {
@@ -399,28 +409,40 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
         LauncherUI::class.reflekt().apply {
             firstMethod { name = "onCreate" }
                 .hookBefore {
-                    val activity = thisObject as Activity
-                    val intent = activity.intent ?: return@hookBefore
-                    intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
-                    // wait for resources & theme to init
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        openSettingsDialog(activity)
-                    }, 500)
+                    try {
+                        val activity = thisObject as Activity
+                        val intent = activity.intent ?: return@hookBefore
+                        intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
+                        // wait for resources & theme to init
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            openSettingsDialog(activity)
+                        }, 500)
+                    } catch (e: Throwable) {
+                        WeLogger.e(TAG, "hookLauncherUi onCreate 异常", e)
+                    }
                 }
 
             firstMethod { name = "onNewIntent" }
                 .hookBefore {
-                    val activity = thisObject as Activity
-                    val intent = activity.intent ?: return@hookBefore
-                    intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
-                    openSettingsDialog(activity)
+                    try {
+                        val activity = thisObject as Activity
+                        val intent = activity.intent ?: return@hookBefore
+                        intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
+                        openSettingsDialog(activity)
+                    } catch (e: Throwable) {
+                        WeLogger.e(TAG, "hookLauncherUi onNewIntent 异常", e)
+                    }
                 }
         }
     }
 
     @Suppress("NOTHING_TO_INLINE")
     fun openSettingsDialog(context: Context) {
-        context.startActivity(Intent(context, SettingsActivity::class.java))
+        try {
+            context.startActivity(Intent(context, SettingsActivity::class.java))
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "openSettingsDialog 启动失败", e)
+        }
     }
 
 //    private class SettingsMenuItemClickListener(val context: Context) :

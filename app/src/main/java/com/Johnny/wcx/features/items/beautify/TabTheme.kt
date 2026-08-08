@@ -143,8 +143,37 @@ object TabTheme : ClickableFeature() {
         applyTheme()
     }
 
+    /**
+     * 检测当前前台 Activity 是否为聊天会话页面。
+     * 聊天会话页面内，模块全局主题背景应强制失效，避免与用户自定义聊天背景重叠。
+     */
+    private fun isChatActivityForeground(): Boolean {
+        return try {
+            val atClass = Class.forName("android.app.ActivityThread")
+            val currentAtMethod = atClass.getDeclaredMethod("currentActivityThread")
+            val at = currentAtMethod.invoke(null)
+            val activitiesField = atClass.getDeclaredField("mActivities")
+            activitiesField.isAccessible = true
+            val activities = activitiesField.get(at) as? Map<*, *> ?: return false
+
+            for (record in activities.values) {
+                val activity = record?.javaClass?.getDeclaredField("activity")
+                    ?.apply { isAccessible = true }
+                    ?.get(record) as? Activity ?: continue
+                if (!activity.isFinishing && activity.javaClass.name.contains("ChattingUI")) {
+                    return true
+                }
+            }
+            false
+        } catch (e: Throwable) {
+            WeLogger.d(TAG, "检测聊天Activity失败: ${e.message}")
+            false
+        }
+    }
+
     private fun applyTheme() {
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
+            try {
             val activity = thisObject.reflekt()
                 .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
                 .get()!! as Activity
@@ -222,14 +251,28 @@ object TabTheme : ClickableFeature() {
                 }
             }
 
+            // 页面切换时检测是否为聊天会话页面，是则隐藏模块主题背景
             tabsAdapter.reflekt()
                 .firstMethod { name = "onPageSelected" }
                 .hookAfter {
-                    val position = args[0] as Int
-                    tabImageViews.forEach { (idx, iv) ->
-                        iv.visibility = if (idx == position) View.VISIBLE else View.GONE
+                    try {
+                        val position = args[0] as Int
+                        val inChatPage = isChatActivityForeground()
+                        tabImageViews.forEach { (idx, iv) ->
+                            if (inChatPage) {
+                                // 聊天会话页面内，模块全局主题背景强制失效
+                                iv.visibility = View.GONE
+                            } else {
+                                iv.visibility = if (idx == position) View.VISIBLE else View.GONE
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        WeLogger.e(TAG, "onPageSelected hook 异常", e)
                     }
                 }
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
+            }
         }
     }
 
