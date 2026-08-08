@@ -143,7 +143,13 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
     private fun isGroupAllowed(groupWxId: String): Boolean {
         if (!groupFilterEnabled) return true
-        val seomeConfigsJson)
+        val selected = getSelectedGroups()
+        return selected.isEmpty() || groupWxId in selected
+    }
+
+    private fun getGroupWelcomeConfigs(): Map<String, GroupWelcomeConfig> {
+        return runCatching {
+            json.decodeFromString<Map<String, GroupWelcomeConfig>>(groupWelcomeConfigsJson)
         }.getOrDefault(emptyMap())
     }
 
