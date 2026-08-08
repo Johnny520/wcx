@@ -310,12 +310,23 @@ object AddMainScreenFab : ClickableFeature() {
                     FabType.MODULE_SETTINGS -> {
                         {
                             try {
+                                // Bug Fix (v194/v196): FAB 显式 setPackage 跳转
+                                // —— 与 WeSettingsInjector.openSettingsDialog 保持一致；
+                                // 细粒度 try-catch 捕获 ActivityNotFoundException 与 SecurityException。
                                 activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
                                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     setPackage(PackageNames.MODULE)
                                 })
+                                WeLogger.i(TAG, "MODULE_SETTINGS: 成功启动模块设置 Activity")
+                            } catch (e: android.content.ActivityNotFoundException) {
+                                // 目标 Activity 不存在 / 不可导出 —— 通常意味着模块未正确安装或清单损坏
+                                WeLogger.e(TAG, "MODULE_SETTINGS 启动失败: 找不到模块设置 Activity (package=${PackageNames.MODULE})", e)
+                            } catch (e: SecurityException) {
+                                // Activity 未 exported 或缺少权限
+                                WeLogger.e(TAG, "MODULE_SETTINGS 启动失败: 模块设置 Activity 未导出或权限不足", e)
                             } catch (e: Throwable) {
-                                WeLogger.e(TAG, "MODULE_SETTINGS 启动失败", e)
+                                // 兜底：捕获所有其它异常，绝不让微信主线程崩溃
+                                WeLogger.e(TAG, "MODULE_SETTINGS 启动模块设置 Activity 时发生未预期异常", e)
                             }
                         }
                     }

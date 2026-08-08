@@ -439,9 +439,26 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
     @Suppress("NOTHING_TO_INLINE")
     fun openSettingsDialog(context: Context) {
         try {
-            context.startActivity(Intent(context, SettingsActivity::class.java))
+            // Bug Fix (v194/v196): 必须显式设置目标包名为模块包（com.Johnny.wcx）。
+            // 在微信宿主进程中，Intent 不携带 setPackage 时，ActivityManager
+            // 可能将 ComponentName 解析到错误的包（com.tencent.mm），导致
+            // ActivityNotFoundException 或静默失败。
+            // 同时显式加上 NEW_TASK 标志，保证从非 Activity Context 启动也能正常工作。
+            val intent = Intent(context, SettingsActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                setPackage(PackageNames.MODULE)
+            }
+            context.startActivity(intent)
+            WeLogger.i(TAG, "openSettingsDialog: 成功启动模块设置 Activity, package=${PackageNames.MODULE}")
+        } catch (e: android.content.ActivityNotFoundException) {
+            // 目标 Activity 不存在 / 不可导出 —— 通常意味着模块未正确安装或清单损坏
+            WeLogger.e(TAG, "openSettingsDialog 失败: 找不到模块设置 Activity (package=${PackageNames.MODULE})", e)
+        } catch (e: SecurityException) {
+            // Activity 未 exported 或缺少权限
+            WeLogger.e(TAG, "openSettingsDialog 失败: 模块设置 Activity 未导出或权限不足", e)
         } catch (e: Throwable) {
-            WeLogger.e(TAG, "openSettingsDialog 启动失败", e)
+            // 兜底：捕获所有其它异常，绝不向微信主线程抛出
+            WeLogger.e(TAG, "openSettingsDialog 启动模块设置 Activity 时发生未预期异常", e)
         }
     }
 
