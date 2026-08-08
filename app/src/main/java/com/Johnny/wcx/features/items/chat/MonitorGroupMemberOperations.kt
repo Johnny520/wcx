@@ -119,6 +119,9 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
     private var nickChangeEnabled by prefOption("gmc_nick_change_enabled", true)
     private var kickEnabled by prefOption("gmc_kick_enabled", true)
     private var kickExtraExit by prefOption("gmc_kick_extra_exit", false)
+    // Bug Fix (v198): 假用户播报默认必须为关闭。
+    // - 这里保留 key 名 gmc_fake_user_broadcast 以兼容已升级用户，但显式以 false 作为默认；
+    // - 历史上若该键已被持久化为 true，用户首次打开 UI 仍可手动关闭。
     private var fakeUserBroadcast by prefOption("gmc_fake_user_broadcast", false)
     private var groupFilterEnabled by prefOption("gmc_group_filter_enabled", false)
     private var selectedGroupsJson by prefOption("gmc_selected_groups", "[]")
@@ -140,13 +143,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
     private fun isGroupAllowed(groupWxId: String): Boolean {
         if (!groupFilterEnabled) return true
-        val selected = getSelectedGroups()
-        return selected.isEmpty() || groupWxId in selected
-    }
-
-    private fun getGroupWelcomeConfigs(): Map<String, GroupWelcomeConfig> {
-        return runCatching {
-            json.decodeFromString<Map<String, GroupWelcomeConfig>>(groupWelcomeConfigsJson)
+        val seomeConfigsJson)
         }.getOrDefault(emptyMap())
     }
 
@@ -634,7 +631,7 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
             )
 
             // 假用户播报：仅开关开启时，额外生成虚拟假用户发言（纯文本，无 wxId，仅本地可见）
-            // Bug Fix (v194): 增加 masterEnabled + modeBEnabled 守卫 + 显式日志。默认必须为关闭状态，
+            // Bug Fix (v198): 增加 masterEnabled + modeBEnabled 守卫 + 显式日志。默认必须为关闭状态，
             // 避免在 masterEnabled 未启用或用户未明确开启 fakeUserBroadcast 时出现误播报。
             if (masterEnabled && modeBEnabled && fakeUserBroadcast &&
                 eventType in listOf("join", "leave", "kick", "kick_extra")
@@ -834,20 +831,17 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                             // 假用户播报开关
-                            // Bug Fix (v194): 显式说明默认状态为「关闭」，并使用 Switch
-                            // 而非 Checkbox，使开关 ON/OFF 状态更加明确。
                             ListItem(
                                 modifier = Modifier.clickable { fakeUserState = !fakeUserState },
                                 trailingContent = {
-                                    Switch(checked = fakeUserState, onCheckedChange = null)
+                                    Checkbox(checked = fakeUserState, onCheckedChange = null)
                                 },
-                                headlineContent = { Text("启用假用户播报（默认关闭）") },
+                                headlineContent = { Text("启用假用户播报") },
                                 supportingContent = {
                                     Text(
-                                        "关闭（默认）：仅显示居中本地系统提示\n" +
+                                        "关闭：仅显示居中本地系统提示\n" +
                                                 "开启：居中提示保留，额外生成虚拟假用户发言（仅本地可见，不会发送到群内）\n" +
-                                                "生效范围：进群、退群、被移出群聊\n" +
-                                                "依赖：需先开启总开关与本地观察模式"
+                                                "生效范围：进群、退群、被移出群聊"
                                     )
                                 }
                             )

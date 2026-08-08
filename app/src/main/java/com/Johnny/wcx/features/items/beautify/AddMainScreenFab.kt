@@ -85,6 +85,7 @@ import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.features.api.core.WeConversationApi
+import com.Johnny.wcx.loader.utils.ActivityLauncher
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
@@ -310,23 +311,16 @@ object AddMainScreenFab : ClickableFeature() {
                     FabType.MODULE_SETTINGS -> {
                         {
                             try {
-                                // Bug Fix (v194/v196): FAB 显式 setPackage 跳转
-                                // —— 与 WeSettingsInjector.openSettingsDialog 保持一致；
-                                // 细粒度 try-catch 捕获 ActivityNotFoundException 与 SecurityException。
-                                activity.startActivity(Intent(activity, SettingsActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    setPackage(PackageNames.MODULE)
-                                })
-                                WeLogger.i(TAG, "MODULE_SETTINGS: 成功启动模块设置 Activity")
-                            } catch (e: android.content.ActivityNotFoundException) {
-                                // 目标 Activity 不存在 / 不可导出 —— 通常意味着模块未正确安装或清单损坏
-                                WeLogger.e(TAG, "MODULE_SETTINGS 启动失败: 找不到模块设置 Activity (package=${PackageNames.MODULE})", e)
-                            } catch (e: SecurityException) {
-                                // Activity 未 exported 或缺少权限
-                                WeLogger.e(TAG, "MODULE_SETTINGS 启动失败: 模块设置 Activity 未导出或权限不足", e)
+                                // Bug Fix (v198): 必须通过 ActivityLauncher 代理启动。
+                                // 在微信宿主进程里直接 startActivity(SettingsActivity) 会被拒绝，
+                                // 即便 SettingsActivity 已 declared exported="true" 也无法绕过宿主进程的权限隔离。
+                                // 正确做法是把目标类名放进 Intent extra，由 ActivityLauncher
+                                // 注入在 WeChatSplashActivity.onCreate 的 hook 接管并启动真实 Activity。
+                                ActivityLauncher.launch(activity, SettingsActivity::class.java.name)
+                                WeLogger.i(TAG, "MODULE_SETTINGS: 启动模块设置 Activity (via ActivityLauncher)")
                             } catch (e: Throwable) {
                                 // 兜底：捕获所有其它异常，绝不让微信主线程崩溃
-                                WeLogger.e(TAG, "MODULE_SETTINGS 启动模块设置 Activity 时发生未预期异常", e)
+                                WeLogger.e(TAG, "MODULE_SETTINGS 启动失败", e)
                             }
                         }
                     }
@@ -808,6 +802,22 @@ object AddMainScreenFab : ClickableFeature() {
                                         ) {
                                             Icon(
                                                 imageVector = MaterialSymbols.Outlined.Delete,
+                                                contentDescription = "删除 ${item.name}",
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onDismiss) { Text("完成") } },
+            )
+        }
+    }
+}
+ete,
                                                 contentDescription = "删除 ${item.name}",
                                                 tint = MaterialTheme.colorScheme.error,
                                             )
