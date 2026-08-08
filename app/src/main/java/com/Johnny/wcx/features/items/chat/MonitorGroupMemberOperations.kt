@@ -364,6 +364,89 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
 
     private const val GMC_PREFIX = "[gmc:"
 
+    // =========================================================================
+    // Bug Fix (v203): 群成员变动文案白名单过滤工具
+    // 严格只保留【用户展示昵称 + wxid】两个核心字段；
+    // 自动剔除 join:#xxx、颜色控制代码、::xxx/[]/@ 分隔符、底层协议指令等全部冗余字符。
+    // =========================================================================
+
+    /**
+     * 字段级白名单清洗：用于 displayName 等用户展示字段
+     * 保留中英文/数字/空格/常见标点/emoji；
+     * 自动剔除 join:#xxx、协议头 [gmc:...]、::xxx、[xxx]、@chatroom、颜色代码、控制字符。
+     * @param maxLen 单字段最大长度，防止异常大数据撑爆聊天面板
+     */
+    private fun sanitizeMemberField(raw: String?, maxLen: Int = 32): String {
+        if (raw.isNullOrEmpty()) return ""
+        var s = raw
+        // 1. 剥 GMC/协议头（防止意外泄漏到展示）
+        s = s.replace(Regex("""\\[gmc:[^\\]]*]"""), "")
+        // 2. 剥 join:#xxx / chatroom:#xxx / weixin:#xxx 等标记前缀
+        s = s.replace(Regex("""\b(?:join|leave|chatroom|weixin|delchatroommember|sysmsg|msg|scence|username)\s*:\s*#\S+""", RegexOption.IGNORE_CASE), "")
+        // 3. 剥 ::xxx 类协议段（CSV/JSON 风）
+        s = s.replace(Regex("""::\S+"""), "")
+        // 4. 剥 [xxx] 类小括号段（标签/字段名）
+        s = s.replace(Regex("""\[[^\]]{0,30}]"""), "")
+        // 5. 剥 @chatroom 群后缀
+        s = s.replace(Regex("""\s*@chatroom\b""", RegexOption.IGNORE_CASE), "")
+        s = s.replace(Regex("""\(@chatroom\)""", RegexOption.IGNORE_CASE), "")
+        // 6. 剥 #RRGGBB / #RRGGBBAA 颜色码（防止误把 hex 当昵称）
+        s = s.replace(Regex("""#[0-9A-Fa-f]{6,8}\b"""), "")
+        // 7. 剥 ANSI/底层控制字符
+        s = s.replace(Regex("""[\u0000-\u001f\u007f]"""), "")
+        // 8. 合并多余空白、剥首尾空白
+        s = s.replace(Regex("""\s{2,}"""), " ")
+        s = s.replace(Regex("""[,，。.:：；;]{2,}"""), "，")
+        s = s.trim()
+        // 9. 防止异常超长砸场
+        if (s.length > maxLen) s = s.substring(0, maxLen).trim()
+        return s
+    }
+
+    /**
+     * wxid 专用字段白名单：宽松字符（字母数字下划线-点-@）
+     * 用于清洗群成员 wxId，避免 join:#xxx 这种混入
+     */
+    private fun sanitizeWxId(raw: String?, maxLen: Int = 64): String {
+        if (raw.isNullOrEmpty()) return ""
+        var s = raw
+        // 剥 GMC 协议头
+        s = s.replace(Regex("""\\[gmc:[^\\]]*]"""), "")
+        // 剥 join:# / chatroom:# 前缀
+        s = s.replace(Regex("""^\s*(?:join|leave|chatroom|weixin|delchatroommember|sysmsg)\s*:\s*#\s*""", RegexOption.IGNORE_CASE), "")
+        // 剥 ::xxx 后段
+        s = s.replace(Regex("""::.+"""), "")
+        // 剥 [xxx] 字段
+        s = s.replace(Regex("""\[[^\]]{0,30}]"""), "")
+        // 剥多余空白
+        s = s.trim()
+        // 仅保留 wxid 合法字符集
+        s = s.replace(Regex("""[^A-Za-z0-9_\-@.]"""), "")
+        if (s.length > maxLen) s = s.substring(0, maxLen)
+        return s
+    }
+
+    /**
+     * 整段文案兜底清洗：在分发到本地/群广播前应用
+     * - 剥 [gmc:...] / join:#xxx / ::xxx / @chatroom / 颜色码
+     * - 防止底层指令/标记泄漏到用户最终读到的文案
+     */
+    private fun sanitizeEventText(raw: String): String {
+        if (raw.isEmpty()) return raw
+        var s = raw
+        s = s.replace(Regex("""\\[gmc:[^\\]]*]"""), "")
+        s = s.replace(Regex("""\bjoin\s*:\s*#\S+""", RegexOption.IGNORE_CASE), "")
+        s = s.replace(Regex("""\bchatroom\s*:\s*@\S+""", RegexOption.IGNORE_CASE), "")
+        s = s.replace(Regex("""::\S+"""), "")
+        s = s.replace(Regex("""\[[^\]]{0,30}]"""), "")
+        s = s.replace(Regex("""\s*@chatroom\b""", RegexOption.IGNORE_CASE), "")
+        s = s.replace(Regex("""#[0-9A-Fa-f]{6,8}\b"""), "")
+        s = s.replace(Regex("""[\u0000-\u001f\u007f]"""), "")
+        s = s.replace(Regex("""\(\s*\)"""), "")
+        s = s.replace(Regex("""\s{3,}"""), " ")
+        return s.trim()
+    }
+
     private fun buildGmcContent(
         eventType: String,
         color: String,
@@ -604,14 +687,25 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         plainText: String,
         clickableWxIds: List<Pair<String, String>>
     ) {
-        // ===== 分支①：本地提醒模式（仅本机聊天界面居中系统提示） =====
-        if (modeBEnabled) {
-            triggerLocalNotification(eventType, group, color, plainText, clickableWxIds)
+        // Bug Fix (v203): 入口处先兜底清洗 plainText 与 clickableWxIds，确保本地/广播两条链路上层都不会泄漏脏字符
+        // wxid 列表同时清洗（name, wxId 各自白名单）
+        val safePlainText = sanitizeEventText(plainText)
+        val safeClickableWxIds = clickableWxIds.map { (name, id) ->
+            sanitizeMemberField(name) to sanitizeWxId(id)
         }
+        try {
+            // ===== 分支①：本地提醒模式（仅本机聊天界面居中系统提示） =====
+            if (modeBEnabled) {
+                triggerLocalNotification(eventType, group, color, safePlainText, safeClickableWxIds)
+            }
 
-        // ===== 分支②：群广播推送模式（以当前微信号发送普通文本消息） =====
-        if (modeAEnabled) {
-            triggerGroupBroadcast(group, plainText)
+            // ===== 分支②：群广播推送模式（以当前微信号发送普通文本消息） =====
+            if (modeAEnabled) {
+                triggerGroupBroadcast(group, safePlainText)
+            }
+        } catch (e: Throwable) {
+            // 兜底：整段链路炸了仅记日志，不向用户抛/不刷屏
+            WeLogger.e(TAG, "triggerEvent dispatch failed: event=$eventType group=$group", e)
         }
     }
 
@@ -687,8 +781,10 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
      */
     private fun triggerGroupBroadcast(group: String, plainText: String) {
         runCatching {
+            // Bug Fix (v203): 群广播出去的最终文案二次兜底清洗，避免任何残留 join:# / 颜色码 / :: 片段外露
+            val finalText = sanitizeEventText(plainText)
             // 仅发送纯文本，不携带任何颜色/样式信息
-            WeMessageApi.sendText(group, plainText)
+            WeMessageApi.sendText(group, finalText)
         }.onFailure {
             WeLogger.e(TAG, "failed to send broadcast", it)
         }
@@ -707,22 +803,38 @@ object MonitorGroupMemberOperations : ClickableFeature(), IResolveDex,
         adminDisplayName: String,
         adminWxId: String = ""
     ): String {
-        // 根据开关决定是否包含 wxid：关闭时仅显示昵称，开启时显示 昵称(wxid)
-        val userNameFormatted = if (showWxId) "$displayName($wxId)" else displayName
-        val adminNameFormatted = if (adminDisplayName.isNotEmpty()) {
-            if (showWxId) "$adminDisplayName($adminWxId)" else adminDisplayName
-        } else ""
-        return template
-            // 旧变量（已废弃，不再解析 {链接昵称}，用户手动输入会原样输出）
-            .replace("{管理员昵称}", adminNameFormatted)
-            .replace("{旧昵称}", oldNick)
-            .replace("{新昵称}", newNick)
-            // 标准变量
-            .replace("\$nickname", userNameFormatted)
-            .replace("\$userName", userNameFormatted)
-            .replace("\$adminName", adminNameFormatted)
-            .replace("\$oldNickname", oldNick)
-            .replace("\$newNickname", newNick)
+        // Bug Fix (v203): 所有入参走白名单清洗，避免底层 join:#/协议字段直接外露
+        return runCatching {
+            val safeDisplayName = sanitizeMemberField(displayName)
+            val safeWxId = sanitizeWxId(wxId)
+            val safeOldNick = sanitizeMemberField(oldNick)
+            val safeNewNick = sanitizeMemberField(newNick)
+            val safeAdminDisplay = sanitizeMemberField(adminDisplayName)
+            val safeAdminWxId = sanitizeWxId(adminWxId)
+
+            // 根据开关决定是否包含 wxid：关闭时仅显示昵称，开启时显示 昵称(wxid)
+            val userNameFormatted = if (showWxId) "$safeDisplayName($safeWxId)" else safeDisplayName
+            val adminNameFormatted = if (safeAdminDisplay.isNotEmpty()) {
+                if (showWxId) "$safeAdminDisplay($safeAdminWxId)" else safeAdminDisplay
+            } else ""
+
+            template
+                // 旧变量（已废弃，不再解析 {链接昵称}，用户手动输入会原样输出）
+                .replace("{管理员昵称}", adminNameFormatted)
+                .replace("{旧昵称}", safeOldNick)
+                .replace("{新昵称}", safeNewNick)
+                // 标准变量
+                .replace("\$nickname", userNameFormatted)
+                .replace("\$userName", userNameFormatted)
+                .replace("\$adminName", adminNameFormatted)
+                .replace("\$oldNickname", safeOldNick)
+                .replace("\$newNickname", safeNewNick)
+        }.getOrElse {
+            // 兜底简洁文案：仅保留兜底安全变量，避免异常链路把脏字符抛给用户
+            WeLogger.e(TAG, "formatText failed, fallback to minimal template", it)
+            val safeName = sanitizeMemberField(displayName)
+            "$safeName"
+        }
     }
 
     // =========================================================================
