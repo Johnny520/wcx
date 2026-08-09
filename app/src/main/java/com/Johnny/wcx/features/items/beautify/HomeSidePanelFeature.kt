@@ -30,6 +30,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.appcompat.app.AlertDialog
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
+import androidx.fragment.app.FragmentManager
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
@@ -87,23 +90,97 @@ object HomeSidePanelFeature : ClickableFeature() {
         override fun onActivityResumed(activity: Activity) {
             if (!masterEnabled) return
             try {
-                if (isLauncherUI(activity)) {
+                if (activity.javaClass.name == "com.tencent.mm.ui.LauncherUI") {
+                    // 注册 Fragment 监听（每次进入 LauncherUI 都注册一次，幂等）
+                    registerFragmentCallbacks(activity)
                     if (attachedActivity !== activity) {
                         removeAllViews()
                         attachedActivity = activity
                     }
-                    if (triggerView == null && panelRootView == null) attachTriggerButton(activity)
+                    updateVisibility()
+                } else {
+                    // 非 LauncherUI（如 ChattingUI 等子 Activity）进入前台，强制移除侧滑栏
+                    if (attachedActivity === activity || triggerView != null) {
+                        removeAllViews()
+                        attachedActivity = null
+                    }
                 }
             } catch (e: Throwable) { WeLogger.e(TAG, "onActivityResumed 异常", e) }
         }
         override fun onActivityPaused(activity: Activity) {
-            try { if (attachedActivity === activity) removeAllViews() } catch (e: Throwable) { WeLogger.e(TAG, "onActivityPaused 异常", e) }
+            try {
+                if (attachedActivity === activity) {
+                    removeAllViews()
+                    unregisterFragmentCallbacks(activity)
+                    attachedActivity = null
+                }
+            } catch (e: Throwable) { WeLogger.e(TAG, "onActivityPaused 异常", e) }
         }
         override fun onActivityStopped(activity: Activity) {}
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
         override fun onActivityDestroyed(activity: Activity) {
-            try { if (attachedActivity === activity) { removeAllViews(); attachedActivity = null } }
-            catch (e: Throwable) { WeLogger.e(TAG, "onActivityDestroyed 异常", e) }
+            try {
+                if (attachedActivity === activity) {
+                    removeAllViews()
+                    unregisterFragmentCallbacks(activity)
+                    attachedActivity = null
+                }
+            } catch (e: Throwable) { WeLogger.e(TAG, "onActivityDestroyed 异常", e) }
+        }
+    }
+
+    // ==================== Fragment 监听（首页 Tab 切换感知）====================
+    @Volatile private var fragmentCallbacksRegistered = false
+    private val fragmentCallbacks = object : FragmentManager.FragmentLifecycleCallbacks() {
+        override fun onFragmentResumed(fm: FragmentManager, f: Fragment) {
+            try { updateVisibility() } catch (e: Throwable) { WeLogger.e(TAG, "onFragmentResumed 异常", e) }
+        }
+        override fun onFragmentPaused(fm: FragmentManager, f: Fragment) {
+            try { updateVisibility() } catch (e: Throwable) { WeLogger.e(TAG, "onFragmentPaused 异常", e) }
+        }
+        override fun onFragmentHiddenChanged(fm: FragmentManager, f: Fragment, hidden: Boolean) {
+            try { updateVisibility() } catch (e: Throwable) { WeLogger.e(TAG, "onFragmentHiddenChanged 异常", e) }
+        }
+    }
+
+    private fun registerFragmentCallbacks(act: Activity) {
+        try {
+            if (fragmentCallbacksRegistered) return
+            val fragAct = act as? FragmentActivity ?: return
+            fragAct.supportFragmentManager.registerFragmentLifecycleCallbacks(fragmentCallbacks, true)
+            fragmentCallbacksRegistered = true
+        } catch (e: Throwable) { WeLogger.e(TAG, "registerFragmentCallbacks 异常", e) }
+    }
+
+    private fun unregisterFragmentCallbacks(act: Activity) {
+        try {
+            if (!fragmentCallbacksRegistered) return
+            val fragAct = act as? FragmentActivity ?: return
+            fragAct.supportFragmentManager.unregisterFragmentLifecycleCallbacks(fragmentCallbacks)
+            fragmentCallbacksRegistered = false
+        } catch (e: Throwable) { WeLogger.e(TAG, "unregisterFragmentCallbacks 异常", e) }
+    }
+
+    /**
+     * 统一出口：根据当前 Activity + Fragment 判断 show/hide。
+     * - 在 LauncherUI 首页 Tab：创建或保留侧滑栏
+     * - 在 LauncherUI 其它 Tab / 其它 Activity：立即 removeView
+     */
+    private fun updateVisibility() {
+        val act = attachedActivity ?: return
+        if (!masterEnabled) {
+            removeAllViews()
+            return
+        }
+        val shouldShow = isHomePageActive(act)
+        if (shouldShow) {
+            if (triggerView == null && panelRootView == null) {
+                attachTriggerButton(act)
+            }
+        } else {
+            if (triggerView != null || panelRootView != null) {
+                removeAllViews()
+            }
         }
     }
     @Volatile private var callbacksRegistered = false
@@ -320,9 +397,44 @@ object HomeSidePanelFeature : ClickableFeature() {
             .getDeclaredMethod("currentApplication").invoke(null) as? Application
     } catch (_: Throwable) { null }
 
-    private fun isLauncherUI(act: Activity): Boolean = try {
-        !act.isFinishing && act.javaClass.name == "com.tencent.mm.ui.LauncherUI"
-    } catch (_: Throwable) { false }
+    /**
+ * 判断当前活动 + Fragment 是否处于【微信首页会话列表】。
+ * 微信主 Activity 是 LauncherUI，但内部 4 个 Tab（首页/通讯录/发现/我）都是 Fragment。
+ * 因此必须同时校验 Activity 是 LauncherUI && 当前 resumed Fragment 是首页 Tab。
+ * 进入其它 Tab、私聊/群聊 Activity（ChattingUI）时返回 false。
+ */
+private fun isHomePageActive(act: Activity): Boolean = try {
+    if (act.isFinishing) return false
+    if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return false
+    val fragAct = act as? FragmentActivity ?: return true  // 不是 FragmentActivity 时，仅靠 Activity 校验
+    val current = fragAct.supportFragmentManager.fragments.find { it.isResumed && it.isVisible && !it.isHidden }
+        ?: return false
+    isHomeTabClass(current.javaClass.name)
+} catch (e: Throwable) { WeLogger.e(TAG, "isHomePageActive 异常", e); false }
+
+/**
+ * 首页 Tab Fragment 类名匹配（兼容多版本微信）：
+ * - 微信 8.x：com.tencent.mm.ui.conversation.ConversationListFragment
+ * - 微信 7.x：com.tencent.mm.ui.HomeMainUI$HomeChatFragment / HomeMainFragment
+ * - 微信 6.x：com.tencent.mm.ui.HomeMainUI
+ * 匹配规则：必须是首页会话列表类，且不能是通讯录/我/发现 Fragment。
+ */
+private fun isHomeTabClass(className: String): Boolean {
+    if (className.isEmpty()) return false
+    // 排除其他 Tab Fragment
+    if (className.contains("Contact") || className.contains("Address") ||
+        className.contains("MeTab") || className.contains("Finder") ||
+        className.contains("Setting") || className.contains("DiscoverUI") ||
+        className.contains("FindFragment") || className.contains("SelfInfo")) {
+        return false
+    }
+    // 命中首页 Tab
+    return className.contains("HomeMainUI") ||
+           className.contains("ConversationList") ||
+           className.contains("HomeChatFragment") ||
+           className.contains("MainUI") && className.contains("Home") ||
+           className == "com.tencent.mm.ui.LandingPageUI"
+}
 
     private fun findLauncherUI(): Activity? = try {
         val atClass = Class.forName("android.app.ActivityThread")
