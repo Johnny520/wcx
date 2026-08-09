@@ -138,9 +138,6 @@ object HomeSidePanelFeature : ClickableFeature() {
         override fun onFragmentPaused(fm: FragmentManager, f: Fragment) {
             try { updateVisibility() } catch (e: Throwable) { WeLogger.e(TAG, "onFragmentPaused 异常", e) }
         }
-        override fun onFragmentHiddenChanged(fm: FragmentManager, f: Fragment, hidden: Boolean) {
-            try { updateVisibility() } catch (e: Throwable) { WeLogger.e(TAG, "onFragmentHiddenChanged 异常", e) }
-        }
     }
 
     private fun registerFragmentCallbacks(act: Activity) {
@@ -444,7 +441,7 @@ private fun isHomeTabClass(className: String): Boolean {
         for (record in activities.values) {
             val activity = record?.javaClass?.getDeclaredField("activity")
                 ?.apply { isAccessible = true }?.get(record) as? Activity ?: continue
-            if (isLauncherUI(activity)) return activity
+            if (activity.javaClass.name == "com.tencent.mm.ui.LauncherUI") return activity
         }
         null
     } catch (_: Throwable) { null }
