@@ -1,0 +1,263 @@
+package com.Johnny.wcx.features.items.system
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.os.Parcelable
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.toClass
+import com.Johnny.wcx.dexkit.abc.IResolveDex
+import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.core.ClickableFeature
+import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.DefaultColumn
+import com.Johnny.wcx.ui.content.OsmLocationPicker
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.getTopMostActivity
+import com.Johnny.wcx.utils.android.showToast
+import org.osmdroid.util.GeoPoint
+import java.util.concurrent.ConcurrentHashMap
+
+@Feature(name = "虚拟定位", categories = ["系统与隐私"], description = "预设定微信获取到的经纬度")
+object FakeLocation : ClickableFeature(), IResolveDex {
+
+    private val methodListener by dexMethod {
+        matcher {
+            name = "onLocationChanged"
+            usingEqStrings("MicroMsg.SLocationListener")
+        }
+    }
+    private val methodListenerWgs84 by dexMethod {
+        matcher {
+            name = "onLocationChanged"
+            usingEqStrings("MicroMsg.SLocationListenerWgs84")
+        }
+    }
+    private val methodDefaultManager by dexMethod {
+        matcher {
+            name = "onLocationChanged"
+            usingEqStrings("MicroMsg.DefaultTencentLocationManager", "[mlocationListener]error:%d, reason:%s")
+        }
+    }
+
+    private const val KEY_LAT = "fake_lat"
+    private const val KEY_LNG = "fake_lng"
+
+    private const val DEFAULT_LAT = 31.224361F
+    private const val DEFAULT_LNG = 121.469170F
+    private const val WECHAT_LOCATION_REQUEST_CODE = 6
+    private const val TAG = "FakeLocation"
+
+    private var latitude by prefOption(KEY_LAT, DEFAULT_LAT)
+    private var longitude by prefOption(KEY_LNG, DEFAULT_LNG)
+
+    private val hookedLocationClasses = ConcurrentHashMap.newKeySet<Class<*>>()
+    private val locationIntentRegex = Regex("""lat ([-+]?[0-9]*\.?[0-9]+);lng ([-+]?[0-9]*\.?[0-9]+);""")
+
+    @Volatile
+    private var pendingWeChatPicker = false
+
+    @Volatile
+    private var wechatPickerHooked = false
+
+    override fun onEnable() {
+        listOf(methodListener, methodListenerWgs84, methodDefaultManager).forEach {
+            it.hookBefore {
+                val tencentLocation = args[0]
+                hookTencentLocation(tencentLocation)
+            }
+        }
+    }
+
+    override fun onDisable() {
+        hookedLocationClasses.clear()
+        pendingWeChatPicker = false
+        wechatPickerHooked = false
+    }
+
+    override fun onClick(context: ComponentActivity) {
+        showLocationPickerChooser(context)
+    }
+
+    private fun showLocationPickerChooser(context: Context) {
+        showComposeDialog(context) {
+            AlertDialogContent(
+                title = { Text("选择虚拟定位") },
+                text = {
+                    DefaultColumn {
+                        ListItem(
+                            modifier = Modifier.clickable {
+                                onDismiss()
+                                launchWechatLocationPicker()
+                            },
+                            supportingContent = { Text("调用微信内置地图选择位置") },
+                            headlineContent = { Text("微信原生地图选点") },
+                        )
+                        ListItem(
+                            modifier = Modifier.clickable {
+                                onDismiss()
+                                showOsmLocationPicker(context)
+                            },
+                            supportingContent = { Text("使用 OpenStreetMap 选择位置") },
+                            headlineContent = { Text("OSM 地图选点") },
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onDismiss) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+    }
+
+    private fun showOsmLocationPicker(context: Context) {
+        showComposeDialog(context) {
+            OsmLocationPicker(
+                initialLocation = GeoPoint(
+                    latitude.toDouble(),
+                    longitude.toDouble(),
+                ),
+                onLocationSelected = {
+                    onDismiss()
+                    saveLocation(it.latitude.toFloat(), it.longitude.toFloat())
+                },
+                onDismiss = onDismiss
+            )
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun launchWechatLocationPicker() {
+        val activity = getTopMostActivity()
+        if (activity == null) {
+            showToast("获取当前 Activity 失败!")
+            return
+        }
+
+        val redirectUiClass = "${activity.packageName}.plugin.location.ui.RedirectUI".toClass()
+
+        if (!ensureWeChatPickerHooked(redirectUiClass)) {
+            showToast("微信地图选点结果监听失败!")
+            return
+        }
+
+        runCatching {
+            pendingWeChatPicker = true
+            activity.startActivityForResult(
+                Intent(activity, redirectUiClass).apply {
+                    putExtra("map_view_type", 8)
+                },
+                WECHAT_LOCATION_REQUEST_CODE
+            )
+        }.onFailure {
+            pendingWeChatPicker = false
+            WeLogger.e(TAG, "failed to launch native location picker", it)
+            showToast("启动微信地图失败! 错因: ${it.message}")
+        }
+    }
+
+    private fun hookTencentLocation(tencentLocation: Any?) {
+        val locationClass = tencentLocation?.javaClass ?: return
+        if (locationClass in hookedLocationClasses) return
+
+        val locationRef = locationClass.reflekt()
+        val getLatitudeMethod = locationRef.firstMethod { name = "getLatitude" }
+        val getLongitudeMethod = locationRef.firstMethod { name = "getLongitude" }
+        if (!hookedLocationClasses.add(locationClass)) return
+
+        getLatitudeMethod.hookBefore {
+            try {
+                // 仅当原方法返回 double 时才设置 result，避免对非 double 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Double::class.javaPrimitiveType || returnType == java.lang.Double::class.java) {
+                        result = latitude.toDouble()
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
+        }
+
+        getLongitudeMethod.hookBefore {
+            try {
+                // 仅当原方法返回 double 时才设置 result，避免对非 double 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Double::class.javaPrimitiveType || returnType == java.lang.Double::class.java) {
+                        result = longitude.toDouble()
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
+        }
+    }
+
+    private fun ensureWeChatPickerHooked(redirectUiClass: Class<*>): Boolean {
+        if (wechatPickerHooked) return true
+
+        return synchronized(this) {
+            if (wechatPickerHooked) return@synchronized true
+
+            val onActivityResult = runCatching {
+                redirectUiClass.reflekt().firstMethod {
+                    name = "onActivityResult"
+                    parameters(Int::class, Int::class, Intent::class)
+                }.self
+            }.onFailure {
+                WeLogger.e(TAG, "failed to find native location picker result handler", it)
+            }.getOrNull() ?: return@synchronized false
+
+            onActivityResult.hookAfter {
+                handleWechatLocationPickerResult(args)
+            }
+            wechatPickerHooked = true
+            true
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun handleWechatLocationPickerResult(args: Array<Any?>) {
+        val requestCode = args.getOrNull(0) as? Int ?: return
+        if (requestCode != WECHAT_LOCATION_REQUEST_CODE || !pendingWeChatPicker) return
+
+        pendingWeChatPicker = false
+        val resultCode = args.getOrNull(1) as? Int ?: return
+        if (resultCode != Activity.RESULT_OK) return
+
+        val intent = args.getOrNull(2) as? Intent ?: return
+        val locationIntent = intent.getParcelableExtra<Parcelable>("KLocationIntent") ?: return
+        val locationData = locationIntent.reflekt()
+            .firstMethod { returnType = String::class }
+            .invoke() as? String ?: return
+
+        val match = locationIntentRegex.find(locationData)
+        val latitude = match?.groupValues?.getOrNull(1)?.toFloatOrNull()
+        val longitude = match?.groupValues?.getOrNull(2)?.toFloatOrNull()
+        if (latitude == null || longitude == null) {
+            WeLogger.w(TAG, "failed to parse native location result: $locationData")
+            showToast("解析微信地图选点失败")
+            return
+        }
+
+        saveLocation(latitude, longitude)
+    }
+
+    private fun saveLocation(latitude: Float, longitude: Float) {
+        this.latitude = latitude
+        this.longitude = longitude
+        showToast("已选择 ${"%.4f".format(latitude)}, ${"%.4f".format(longitude)}")
+    }
+}

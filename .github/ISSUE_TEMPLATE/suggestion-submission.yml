@@ -1,0 +1,87 @@
+name: 建议反馈 / Feature Request
+description: 提交对 WeKit 的优化建议，助力模块体验提升 / Submit suggestions to improve WeKit
+title: "[Suggestion] "
+labels: ["Suggestion"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        非常感谢您为 WeKit 提出优化建议！您的想法对产品改进至关重要。
+        为了让开发者更清晰地理解您的建议，请按以下模板填写信息。
+        
+        Thank you for helping us improve WeKit! Please use the template below to describe your ideas clearly.
+
+  - type: textarea
+    attributes:
+      label: 建议内容概述 / Suggestion Overview
+      placeholder: |
+        请用简洁的语言描述您的建议（例如：建议支持崩溃信息捕获）
+        
+        A concise summary of your suggestion (e.g., Support automatic crash log capture)
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 建议的背景与原因 / Background & Motivation
+      placeholder: |
+        说明您提出此建议的场景或痛点（例如：如果应用发生崩溃，有了日志捕获可以更精准地定位问题）
+        
+        Explain the scenario or pain points (e.g., When the app crashes, having a capture tool makes it much easier to diagnose the root cause)
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 建议的具体实施方案 / Proposed Implementation
+      placeholder: |
+        （可选）描述您期望的实现方式（例如：在应用崩溃后，下次重启时自动弹窗展示详细日志，并支持导出和一键分享）
+        
+        (Optional) How would you like this to be implemented? (e.g., Display a detailed log dialog upon the next launch after a crash, with options to export or share)
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 预期效果 / Expected Outcome
+      placeholder: |
+        说明建议实施后能带来的改善（例如：帮助开发者提升修复效率，同时也降低了用户反馈问题的门槛）
+        
+        What are the benefits? (e.g., Helps developers fix stability issues faster and provides a better way for users to report bugs)
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 关联的现有功能 / Related Features
+      placeholder: |
+        （可选）若建议与现有功能相关，请列出（例如：日志管理、注入设置）
+        
+        (Optional) List any existing features related to this suggestion (e.g., Log Manager, Injection Settings)
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 补充材料 / Supplementary Materials
+      placeholder: |
+        （可选）可粘贴参考截图、设计草图或相关链接
+        
+        (Optional) Screenshots, design sketches, or links for reference
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: duplication-check
+    attributes:
+      label: 提交前确认 / Confirmation
+      options:
+        - label: |
+            我已在 Issue Tracker 中搜索过，未发现相同或高度相似的建议。
+            I have searched the Issue Tracker and found no duplicate suggestions.
+          required: true
+        - label: |
+            我承诺建议内容不涉及违规信息。
+            I confirm that this suggestion complies with community guidelines.
+          required: true

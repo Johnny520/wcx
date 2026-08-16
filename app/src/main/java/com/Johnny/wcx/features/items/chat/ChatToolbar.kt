@@ -1,0 +1,871 @@
+package com.Johnny.wcx.features.items.chat
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.view.View
+import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.FrameLayout
+import android.widget.GridView
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.toMutableStateList
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import androidx.core.view.children
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlined.Account_box
+import com.composables.icons.materialsymbols.outlined.Add
+import com.composables.icons.materialsymbols.outlined.Arrow_drop_down
+import com.composables.icons.materialsymbols.outlined.Attach_file
+import com.composables.icons.materialsymbols.outlined.Attach_money
+import com.composables.icons.materialsymbols.outlined.Camera
+import com.composables.icons.materialsymbols.outlined.Chat
+import com.composables.icons.materialsymbols.outlined.Check
+import com.composables.icons.materialsymbols.outlined.Delete
+import com.composables.icons.materialsymbols.outlined.Drag_handle
+import com.composables.icons.materialsymbols.outlined.Edit
+import com.composables.icons.materialsymbols.outlined.Favorite
+import com.composables.icons.materialsymbols.outlined.Format_list_numbered
+import com.composables.icons.materialsymbols.outlined.Location_on
+import com.composables.icons.materialsymbols.outlined.Mail
+import com.composables.icons.materialsymbols.outlined.Mic
+import com.composables.icons.materialsymbols.outlined.Music_note
+import com.composables.icons.materialsymbols.outlined.Photo_library
+import com.composables.icons.materialsymbols.outlined.Redeem
+import com.composables.icons.materialsymbols.outlined.Settings
+import com.composables.icons.materialsymbols.outlined.Video_chat
+import com.composables.icons.materialsymbols.outlined.Voice_chat
+import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
+import dev.ujhhgtg.reflekt.reflekt
+import dev.ujhhgtg.reflekt.utils.createInstance
+import com.Johnny.wcx.dexkit.abc.IResolveDex
+import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.api.core.WeMessageApi
+import com.Johnny.wcx.features.api.ui.WeCurrentConversationApi
+import com.Johnny.wcx.features.core.ClickableFeature
+import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.DefaultColumn
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.InjectedUiTheme
+import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
+import com.Johnny.wcx.ui.utils.findViewByChildIndexes
+import com.Johnny.wcx.ui.utils.findViewWhich
+import com.Johnny.wcx.ui.utils.iterable
+import com.Johnny.wcx.ui.utils.setLifecycleOwner
+import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.constructor
+import com.Johnny.wcx.utils.now
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
+import java.lang.ref.WeakReference
+import java.util.UUID
+import kotlin.time.Duration.Companion.seconds
+
+private enum class ToolbarDisplayMode(val preferenceValue: String, val label: String) {
+    ICON_AND_TEXT("icon_and_text", "图标+文字"),
+    ICON_ONLY("icon_only", "仅图标"),
+    TEXT_ONLY("text_only", "仅文字");
+
+    companion object {
+        fun fromPreference(value: String): ToolbarDisplayMode =
+            entries.firstOrNull { it.preferenceValue == value } ?: ICON_AND_TEXT
+    }
+}
+
+@SuppressLint("StaticFieldLeak")
+@Feature(name = "聊天工具栏", categories = ["聊天"], description = "在输入框上方添加工具栏")
+object ChatToolbar : ClickableFeature(), IResolveDex {
+
+    private const val TAG = "ChatToolbar"
+
+    private val NAME_TO_ICON_MAP = mapOf(
+        "相册" to MaterialSymbols.Outlined.Photo_library,
+        "拍摄" to MaterialSymbols.Outlined.Camera,
+        "系统拍摄" to MaterialSymbols.Outlined.Camera,
+        "视频通话" to MaterialSymbols.Outlined.Video_chat,
+        "语音通话" to MaterialSymbols.Outlined.Voice_chat,
+        "位置" to MaterialSymbols.Outlined.Location_on,
+        "红包" to MaterialSymbols.Outlined.Mail,
+        "礼物" to MaterialSymbols.Outlined.Redeem,
+        "转账" to MaterialSymbols.Outlined.Attach_money,
+        "语音输入" to MaterialSymbols.Outlined.Mic,
+        "收藏" to MaterialSymbols.Outlined.Favorite,
+        "接龙" to MaterialSymbols.Outlined.Format_list_numbered,
+        "文件" to MaterialSymbols.Outlined.Attach_file,
+        "个人名片" to MaterialSymbols.Outlined.Account_box,
+        "音乐" to MaterialSymbols.Outlined.Music_note
+    )
+
+    // 快捷回复 is a wekit-injected item (not backed by a WeChat grid tool), so it lives
+    // outside NAME_TO_ICON_MAP. Its icon is resolved via iconFor().
+    private const val QUICK_REPLY_NAME = "快捷回复"
+
+    private val methodAppPanelInitAppGrid by dexMethod {
+        matcher {
+            declaredClass = "com.tencent.mm.pluginsdk.ui.chat.AppPanel"
+            usingEqStrings("MicroMsg.AppPanel", "initAppGrid()")
+        }
+    }
+    private val methodAppPanelOnMeasure by dexMethod {
+        searchPackages("com.tencent.mm.pluginsdk.ui.chat")
+        matcher {
+            usingEqStrings(
+                "MicroMsg.AppPanel",
+                "onMeasure width: %d, heigth:%d, isMeasured:%b, gridWidth:%d, gridHeight:%d"
+            )
+        }
+    }
+
+    private data class MenuItem(
+        val name: String,
+        val onClickListener: AdapterView.OnItemClickListener,
+        val onLongClickListener: AdapterView.OnItemLongClickListener,
+        val gridView: WeakReference<GridView>,
+        val itemView: WeakReference<View>,
+        val indexInGrid: Int
+    )
+
+    private data class QuickReplyDraft(
+        val id: String = UUID.randomUUID().toString(),
+        val text: String,
+    )
+
+    private val toolsState = MutableStateFlow<List<Pair<String, MenuItem>>>(emptyList())
+
+    private var itemsOrder by WePrefs.prefOption("chat_toolbar_order", NAME_TO_ICON_MAP.keys.joinToString(","))
+    private var enabledItems by WePrefs.prefOption("chat_toolbar_enabled_items", NAME_TO_ICON_MAP.keys)
+    private var displayModeValue by WePrefs.prefOption(
+        "chat_toolbar_display_mode",
+        ToolbarDisplayMode.ICON_AND_TEXT.preferenceValue,
+    )
+
+    // quick replies are stored as a JSON string array so individual replies may safely
+    // contain commas, newlines or any other character
+    private var quickRepliesRaw by WePrefs.prefOption("chat_toolbar_quick_replies", "")
+
+    private val quickRepliesSerializer = ListSerializer(String.serializer())
+
+    private fun loadQuickReplies(): List<String> {
+        val raw = quickRepliesRaw
+        if (raw.isEmpty()) return emptyList()
+        return runCatching { Json.decodeFromString(quickRepliesSerializer, raw) }
+            .getOrElse {
+                WeLogger.w(TAG, "failed to parse quick replies, resetting: ${it.message}")
+                emptyList()
+            }
+    }
+
+    private fun saveQuickReplies(replies: List<String>) {
+        quickRepliesRaw = Json.encodeToString(quickRepliesSerializer, replies)
+    }
+
+    private fun iconFor(name: String): ImageVector =
+        if (name == QUICK_REPLY_NAME) MaterialSymbols.Outlined.Chat else NAME_TO_ICON_MAP.getValue(name)
+
+    // Ensures every supported item is present while preserving the user's saved order. Legacy
+    // configs that predate quick replies get that item inserted first.
+    private fun normalizeOrder(order: List<String>): List<String> {
+        val supportedItems = setOf(QUICK_REPLY_NAME) + NAME_TO_ICON_MAP.keys
+        val result = order.filter { it in supportedItems }.distinct().toMutableList()
+        if (QUICK_REPLY_NAME !in result) result.add(0, QUICK_REPLY_NAME)
+        NAME_TO_ICON_MAP.keys.forEach { if (it !in result) result.add(it) }
+        return result
+    }
+
+    private fun insertQuickReply(text: String) {
+        WeMessageApi.sendText(WeCurrentConversationApi.value, text)
+    }
+
+    private var lastToolListUpdateTime = now()
+
+    override fun onEnable() {
+        methodAppPanelInitAppGrid.apply {
+            hookBefore {
+                val appPanel = args[0] as LinearLayout
+                // WeChat normally lets MMFlipper.onMeasure feed the real measured size into the
+                // measurer (g.a). We have to invoke initAppGrid before the panel is laid out, so we
+                // reproduce WeChat's own natural dimensions instead of hardcoding pixels.
+                //   width  = screen width (initAppGrid derives column count as gridWidth / dp(82))
+                //   height = the MMFlipper height. initAppGrid spreads any height left over after
+                //            the icon rows into grid spacing/top-padding, so overshooting here shows
+                //            up as extra padding at the bottom of the panel.
+                // The panel's port height is NOT a fixed 215dp: getPortHeightPX() returns a value
+                // set to match the soft-keyboard height (setPortHeighPx), which is device/IME
+                // dependent. The container LinearLayout (a1r, child path 0,0) already has that
+                // resolved height in its layoutParams (set in AppPanel.y()), so read it at runtime
+                // and only fall back to the 215dp portrait / 158dp landscape default. The flipper
+                // is that container minus the MMDotView strip below it (6dp dot + 16dp paddingBottom
+                // = 22dp, see layout hy.xml), which is fixed in dp.
+                val metrics = appPanel.resources.displayMetrics
+                val width = metrics.widthPixels
+                val fallbackDp = if (metrics.widthPixels < metrics.heightPixels) 215 else 158
+                val containerHeight = appPanel.findViewByChildIndexes<View>(0, 0)
+                    ?.layoutParams?.height?.takeIf { it > 0 }
+                    ?: (fallbackDp * metrics.density).toInt()
+                val dotStrip = (22 * metrics.density).toInt()
+                val height = (containerHeight - dotStrip).coerceAtLeast(1)
+                val measurer = methodAppPanelOnMeasure.method.declaringClass.createInstance(appPanel)
+                methodAppPanelOnMeasure.method.invoke(measurer, width, height)
+            }
+
+            hookAfter {
+                val now = now()
+                if (now - lastToolListUpdateTime < 2.seconds) return@hookAfter
+
+                val tools = mutableListOf<Pair<String, MenuItem>>()
+
+                val appPanel = args[0] as LinearLayout
+                val grids = appPanel.findViewByChildIndexes<ViewGroup>(0, 0, 0)!!
+                    .children.map { view -> view as GridView }
+
+                grids.forEach { grid ->
+                    val onClickListener = grid.reflekt()
+                        .firstField { type = AdapterView.OnItemClickListener::class }.get()!! as AdapterView.OnItemClickListener
+                    val onLongClickListener = grid.reflekt()
+                        .firstField { type = AdapterView.OnItemLongClickListener::class }.get()!! as AdapterView.OnItemLongClickListener
+                    val listAdapter = grid.adapter
+
+                    listAdapter.iterable(grid).forEachIndexed { index, itemView ->
+                        val name = (itemView.tag.reflekt()
+                            .firstField { type = TextView::class }
+                            .get()!! as TextView).text.toString()
+                        tools.add(
+                            name to MenuItem(
+                                name,
+                                onClickListener,
+                                onLongClickListener,
+                                WeakReference(grid),
+                                WeakReference(itemView),
+                                index
+                            )
+                        )
+                    }
+                }
+
+                WeLogger.d(TAG, "populated tool list with ${tools.size} items")
+                toolsState.value = tools
+
+                // rate limit this since this method is called REALLY frequently
+                lastToolListUpdateTime = now()
+            }
+        }
+
+        ChatFooter::class.constructor.hookAfter {
+            val chatFooter = thisObject as FrameLayout
+            val activity = chatFooter.context as Activity
+
+            val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(activity)
+
+            chatFooter.setLifecycleOwner(lifecycleOwner)
+            val linearLayout = chatFooter.findViewByChildIndexes<LinearLayout>(0, 1)!!
+            linearLayout.setLifecycleOwner(lifecycleOwner)
+            if (linearLayout.findViewWhich<View> { it is ComposeView } != null) return@hookAfter
+            activity.window.decorView.setLifecycleOwner(lifecycleOwner)
+
+            linearLayout.addView(ComposeView(activity).apply {
+                setLifecycleOwner(lifecycleOwner)
+
+                setContent {
+                    InjectedUiTheme {
+                        val tools by toolsState.collectAsStateWithLifecycle()
+                        val itemsOrder = remember { itemsOrder }
+                        val enabledItems = remember { enabledItems }
+                        val displayMode = remember { ToolbarDisplayMode.fromPreference(displayModeValue) }
+
+                        val sortedVisibleItems = remember(tools) {
+                            if (tools.isEmpty()) return@remember emptyList()
+
+                            val firstTool = tools[0].second
+                            val orderList = normalizeOrder(itemsOrder.split(",").filter { it.isNotEmpty() })
+                            val list = mutableListOf<Pair<String, () -> Unit>>()
+
+                            list.add(QUICK_REPLY_NAME to {
+                                showQuickReplyPicker(activity)
+                            })
+
+                            list.add("相册" to {
+                                firstTool.onClickListener.onItemClick(firstTool.gridView.get()!!, firstTool.itemView.get()!!, 0, 0)
+                            })
+                            list.add("系统拍摄" to {
+                                firstTool.onLongClickListener.onItemLongClick(null, null, 0, 0)
+                            })
+
+                            tools.forEach { (name, menuItem) ->
+                                if (name in NAME_TO_ICON_MAP && name != "相册" && name != "系统拍摄") {
+                                    val gridView = menuItem.gridView.get() ?: return@forEach
+                                    val itemView = menuItem.itemView.get() ?: return@forEach
+                                    list.add(name to {
+                                        menuItem.onClickListener.onItemClick(
+                                            gridView,
+                                            itemView,
+                                            menuItem.indexInGrid + 1,
+                                            0
+                                        )
+                                    })
+                                }
+                            }
+
+                            list.distinctBy { it.first }
+                                .filter { it.first in enabledItems }
+                                .sortedBy { item ->
+                                    val idx = orderList.indexOf(item.first)
+                                    if (idx == -1) Int.MAX_VALUE else idx
+                                }
+                        }
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) {
+                            items(sortedVisibleItems, key = { it.first }) { (name, onClick) ->
+                                val icon = iconFor(name)
+                                FeatureChip(name, icon, displayMode, onClick)
+                            }
+                        }
+                    }
+                }
+            }, 0)
+        }
+    }
+
+    override fun onDisable() {
+        toolsState.value = emptyList()
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    override fun onClick(context: ComponentActivity) {
+        showComposeDialog(context) {
+            val currentOrder = remember {
+                normalizeOrder(itemsOrder.split(",").filter { it.isNotEmpty() }).toMutableStateList()
+            }
+            val currentEnabled = remember { enabledItems.toMutableStateList() }
+            var currentDisplayMode by remember {
+                mutableStateOf(ToolbarDisplayMode.fromPreference(displayModeValue))
+            }
+            var displayModeMenuExpanded by remember { mutableStateOf(false) }
+
+            AlertDialogContent(
+                modifier = Modifier.fillMaxWidth(),
+                title = { Text("聊天工具栏") },
+                text = {
+                    DefaultColumn {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            ListItem(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { displayModeMenuExpanded = true },
+                                headlineContent = { Text("显示样式") },
+                                supportingContent = { Text(currentDisplayMode.label) },
+                                trailingContent = {
+                                    Icon(
+                                        MaterialSymbols.Outlined.Arrow_drop_down,
+                                        contentDescription = "选择显示样式",
+                                    )
+                                },
+                            )
+                            DropdownMenu(
+                                expanded = displayModeMenuExpanded,
+                                onDismissRequest = { displayModeMenuExpanded = false },
+                            ) {
+                                ToolbarDisplayMode.entries.forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = { Text(mode.label) },
+                                        trailingIcon = if (mode == currentDisplayMode) ({
+                                            Icon(
+                                                MaterialSymbols.Outlined.Check,
+                                                contentDescription = null,
+                                            )
+                                        }) else null,
+                                        onClick = {
+                                            currentDisplayMode = mode
+                                            displayModeMenuExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        Column {
+                            Text("显示与顺序", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "长按拖动手柄调整顺序，使用开关控制是否显示",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        ReorderableList(
+                            items = currentOrder,
+                            itemKey = { it },
+                            onMove = { from, to ->
+                                currentOrder.add(to, currentOrder.removeAt(from))
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 480.dp),
+                        ) { name, dragHandleModifier ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 60.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .then(dragHandleModifier),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        MaterialSymbols.Outlined.Drag_handle,
+                                        contentDescription = "拖动 $name",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier.size(36.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        iconFor(name),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                                Text(
+                                    text = name,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 8.dp),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                if (name == QUICK_REPLY_NAME) {
+                                    IconButton(onClick = { showQuickReplyConfig(context) }) {
+                                        Icon(
+                                            MaterialSymbols.Outlined.Settings,
+                                            contentDescription = "配置快捷回复",
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = name in currentEnabled,
+                                    onCheckedChange = { checked ->
+                                        if (checked) {
+                                            if (name !in currentEnabled) currentEnabled.add(name)
+                                        } else {
+                                            currentEnabled.remove(name)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        itemsOrder = currentOrder.joinToString(",")
+                        enabledItems = currentEnabled.toSet()
+                        displayModeValue = currentDisplayMode.preferenceValue
+                        onDismiss()
+                    }) {
+                        Text("确定")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+    }
+
+    // shown when the user taps the 快捷回复 chip in the chat toolbar: pick a reply to insert
+    private fun showQuickReplyPicker(context: Context) {
+        showComposeDialog(context) {
+            val replies = remember { loadQuickReplies() }
+
+            AlertDialogContent(
+                modifier = Modifier.fillMaxWidth(),
+                title = { Text(QUICK_REPLY_NAME) },
+                text = {
+                    if (replies.isEmpty()) {
+                        Text("暂无快捷回复, 请在「聊天工具栏」设置中配置")
+                    } else {
+                        LazyColumn {
+                            items(replies) { reply ->
+                                ListItem(
+                                    modifier = Modifier.clickable {
+                                        insertQuickReply(reply)
+                                        onDismiss()
+                                    },
+                                    headlineContent = { Text(reply) },
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text("关闭")
+                    }
+                }
+            )
+        }
+    }
+
+    private fun showQuickReplyEditor(
+        context: Context,
+        title: String,
+        initialValue: String = "",
+        onSave: (String) -> Unit,
+    ) {
+        showComposeDialog(context) {
+            var value by remember { mutableStateOf(initialValue) }
+
+            AlertDialogContent(
+                title = { Text(title) },
+                text = {
+                    TextField(
+                        value = value,
+                        onValueChange = { value = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("输入回复内容") },
+                        minLines = 3,
+                        maxLines = 8,
+                    )
+                },
+                dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            onSave(value.trim())
+                            onDismiss()
+                        },
+                        enabled = value.isNotBlank(),
+                    ) { Text("保存") }
+                },
+            )
+        }
+    }
+
+    // Shown from the settings button in the quick-reply row.
+    @OptIn(ExperimentalFoundationApi::class)
+    private fun showQuickReplyConfig(context: Context) {
+        showComposeDialog(context) {
+            val replies = remember {
+                loadQuickReplies().map { QuickReplyDraft(text = it) }.toMutableStateList()
+            }
+
+            AlertDialogContent(
+                modifier = Modifier.fillMaxWidth(),
+                title = { Text(QUICK_REPLY_NAME) },
+                text = {
+                    DefaultColumn {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("回复内容", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "点击编辑，长按手柄调整顺序",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    showQuickReplyEditor(context, "添加快捷回复") { text ->
+                                        replies.add(QuickReplyDraft(text = text))
+                                    }
+                                }
+                            ) {
+                                Icon(MaterialSymbols.Outlined.Add, contentDescription = null)
+                                Text("添加")
+                            }
+                        }
+
+                        if (replies.isEmpty()) {
+                            Text(
+                                "暂无快捷回复，点击右上角“添加”创建。",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 28.dp),
+                            )
+                        } else {
+                            ReorderableList(
+                                items = replies,
+                                itemKey = { it.id },
+                                onMove = { from, to ->
+                                    replies.add(to, replies.removeAt(from))
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 420.dp),
+                            ) { reply, dragHandleModifier ->
+                                val editReply = {
+                                    showQuickReplyEditor(
+                                        context = context,
+                                        title = "编辑快捷回复",
+                                        initialValue = reply.text,
+                                    ) { text ->
+                                        val index = replies.indexOfFirst { it.id == reply.id }
+                                        if (index >= 0) replies[index] = reply.copy(text = text)
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 60.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .then(dragHandleModifier),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            MaterialSymbols.Outlined.Drag_handle,
+                                            contentDescription = "拖动快捷回复",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Text(
+                                        text = reply.text,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable(onClick = editReply)
+                                            .padding(horizontal = 8.dp, vertical = 12.dp),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    IconButton(onClick = editReply) {
+                                        Icon(
+                                            MaterialSymbols.Outlined.Edit,
+                                            contentDescription = "编辑快捷回复",
+                                        )
+                                    }
+                                    IconButton(onClick = { replies.removeAll { it.id == reply.id } }) {
+                                        Icon(
+                                            MaterialSymbols.Outlined.Delete,
+                                            contentDescription = "删除快捷回复",
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        saveQuickReplies(replies.map { it.text.trim() }.filter { it.isNotEmpty() })
+                        onDismiss()
+                    }) {
+                        Text("确定")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun <T> ReorderableList(
+    items: List<T>,
+    itemKey: (T) -> Any,
+    onMove: (from: Int, to: Int) -> Unit,
+    modifier: Modifier = Modifier,
+    itemContent: @Composable (item: T, dragHandleModifier: Modifier) -> Unit,
+) {
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val hapticFeedback = LocalHapticFeedback.current
+    var draggingKey by remember { mutableStateOf<Any?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        userScrollEnabled = draggingKey == null,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        itemsIndexed(
+            items = items,
+            key = { _, item -> itemKey(item) },
+        ) { _, item ->
+            val key = itemKey(item)
+            val isDragging = draggingKey == key
+            val dragHandleModifier = Modifier.pointerInput(key) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        if (listState.layoutInfo.visibleItemsInfo.any { it.key == key }) {
+                            draggingKey = key
+                            dragOffset = 0f
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
+                        }
+                    },
+                    onDragCancel = {
+                        draggingKey = null
+                        dragOffset = 0f
+                    },
+                    onDragEnd = {
+                        draggingKey = null
+                        dragOffset = 0f
+                    },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        if (draggingKey != key) return@detectDragGesturesAfterLongPress
+                        dragOffset += amount.y
+
+                        val currentInfo = listState.layoutInfo.visibleItemsInfo
+                            .firstOrNull { it.key == key }
+                            ?: return@detectDragGesturesAfterLongPress
+                        val currentIndex = currentInfo.index
+                        val start = currentInfo.offset + dragOffset
+                        val end = start + currentInfo.size
+                        val target = listState.layoutInfo.visibleItemsInfo.firstOrNull { targetInfo ->
+                            if (targetInfo.index == currentIndex) {
+                                false
+                            } else if (dragOffset > 0f) {
+                                targetInfo.index > currentIndex &&
+                                        end > targetInfo.offset + targetInfo.size / 2
+                            } else {
+                                targetInfo.index < currentIndex &&
+                                        start < targetInfo.offset + targetInfo.size / 2
+                            }
+                        }
+                        if (target != null) {
+                            onMove(currentIndex, target.index)
+                            dragOffset -= target.offset - currentInfo.offset
+                        }
+
+                        val viewport = listState.layoutInfo
+                        val center = currentInfo.offset + dragOffset + currentInfo.size / 2
+                        when {
+                            center < viewport.viewportStartOffset + 56 && listState.canScrollBackward ->
+                                coroutineScope.launch { listState.scrollBy(-12f) }
+
+                            center > viewport.viewportEndOffset - 56 && listState.canScrollForward ->
+                                coroutineScope.launch { listState.scrollBy(12f) }
+                        }
+                    },
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(if (isDragging) 1f else 0f)
+                    .graphicsLayer {
+                        translationY = if (isDragging) dragOffset else 0f
+                        scaleX = if (isDragging) 1.02f else 1f
+                        scaleY = if (isDragging) 1.02f else 1f
+                        shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                    }
+                    .then(if (isDragging) Modifier else Modifier.animateItem())
+            ) {
+                itemContent(item, dragHandleModifier)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeatureChip(
+    text: String,
+    icon: ImageVector,
+    displayMode: ToolbarDisplayMode,
+    onClick: () -> Unit,
+) {
+    AssistChip(
+        onClick = onClick,
+        label = {
+            when (displayMode) {
+                ToolbarDisplayMode.ICON_ONLY -> Icon(
+                    icon,
+                    contentDescription = text,
+                    modifier = Modifier.size(AssistChipDefaults.IconSize),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+
+                ToolbarDisplayMode.ICON_AND_TEXT,
+                ToolbarDisplayMode.TEXT_ONLY -> Text(text)
+            }
+        },
+        leadingIcon = if (displayMode == ToolbarDisplayMode.ICON_AND_TEXT) ({
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(AssistChipDefaults.IconSize),
+            )
+        }) else null,
+    )
+}

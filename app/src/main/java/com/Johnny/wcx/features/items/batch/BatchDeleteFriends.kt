@@ -1,0 +1,96 @@
+package com.Johnny.wcx.features.items.batch
+
+import android.content.Context
+import androidx.activity.ComponentActivity
+import androidx.compose.material3.Text
+import com.Johnny.wcx.features.api.core.WeContactApi
+import com.Johnny.wcx.features.api.core.WeDatabaseApi
+import com.Johnny.wcx.features.core.ClickableFeature
+import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.ContactsSelector
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.android.showToastSuspend
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+@Feature(
+    name = "批量删除好友",
+    categories = ["批量操作"],
+    description = "选择多个好友后一次性删除, 请求会自动间隔以规避服务器风控"
+)
+object BatchDeleteFriends : ClickableFeature() {
+
+    private const val TAG = "BatchDeleteFriends"
+
+    override val noSwitchWidget = true
+
+    /** Space out deletions to avoid WeChat's server-side rate limiting. */
+    private const val DELETE_INTERVAL_MS = 1500L
+
+    override fun onClick(context: ComponentActivity) {
+        val friends = WeDatabaseApi.getFriends()
+
+        showComposeDialog(context) {
+            ContactsSelector(
+                title = "选择要删除的好友",
+                contacts = friends,
+                initialSelectedWxIds = emptySet(),
+                onDismiss = onDismiss,
+                onConfirm = { selectedWxIds ->
+                    if (selectedWxIds.isEmpty()) {
+                        showToast("请选择至少一个好友")
+                        return@ContactsSelector
+                    }
+
+                    onDismiss()
+                    confirmAndDelete(context, selectedWxIds)
+                }
+            )
+        }
+    }
+
+    private fun confirmAndDelete(context: Context, wxIds: Set<String>) {
+        showComposeDialog(context) {
+            AlertDialogContent(
+                title = { Text("确认删除") },
+                text = { Text("确定要删除选中的 ${wxIds.size} 位好友吗? 此操作不可逆! 可选择同时将其拉黑.") },
+                dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                confirmButton = {
+                    Button(onClick = {
+                        onDismiss()
+                        deleteFriends(wxIds, WeContactApi.DeleteMode.BLOCK_AND_DELETE)
+                    }) { Text("拉黑并删除") }
+                    Button(onClick = {
+                        onDismiss()
+                        deleteFriends(wxIds, WeContactApi.DeleteMode.DELETE_ONLY)
+                    }) { Text("删除") }
+                }
+            )
+        }
+    }
+
+    private fun deleteFriends(wxIds: Set<String>, mode: WeContactApi.DeleteMode) {
+        CoroutineScope(Dispatchers.IO).launch {
+            showToastSuspend("正在删除 ${wxIds.size} 位好友...")
+
+            var success = 0
+            wxIds.forEachIndexed { index, wxId ->
+                if (WeContactApi.deleteContact(wxId, mode)) success++
+                WeLogger.i(TAG, "deleted contact $wxId ($success/${wxIds.size})")
+                if (index < wxIds.size - 1) delay(DELETE_INTERVAL_MS)
+            }
+
+            showToastSuspend(
+                if (success == wxIds.size) "已删除 ${wxIds.size} 位好友"
+                else "已删除 $success/${wxIds.size} 位好友"
+            )
+        }
+    }
+}

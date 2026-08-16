@@ -1,0 +1,455 @@
+package com.Johnny.wcx.ui.panel
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemColors
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlined.Arrow_drop_down
+import com.composables.icons.materialsymbols.outlined.Autorenew
+import com.composables.icons.materialsymbols.outlined.Check
+import com.composables.icons.materialsymbols.outlined.Close
+import com.composables.icons.materialsymbols.outlined.Person
+import com.composables.icons.materialsymbols.outlined.Search
+import com.composables.icons.materialsymbols.outlined.Send
+import com.Johnny.wcx.features.api.core.WeApi
+import com.Johnny.wcx.features.items.chat.panel.PanelSettings
+import kotlin.math.exp
+import kotlin.math.ln
+import kotlin.math.roundToLong
+
+@Composable
+internal fun panelListItemColors(): ListItemColors = ListItemDefaults.colors(
+    containerColor = Color.Transparent,
+)
+
+@Composable
+fun <T> PanelPackChips(
+    packs: List<T>,
+    selectedId: String?,
+    id: (T) -> String,
+    title: (T) -> String,
+    onSelect: (T) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(packs, key = id) { pack ->
+            FilterChip(
+                selected = id(pack) == selectedId,
+                onClick = { onSelect(pack) },
+                label = { Text(title(pack), maxLines = 1) },
+                modifier = Modifier.animateItem(),
+            )
+        }
+    }
+    HorizontalDivider()
+}
+
+internal fun <T> panelItemsWithStableKeys(
+    items: List<T>,
+    key: (T) -> String,
+): List<Pair<String, T>> {
+    val occurrences = mutableMapOf<String, Int>()
+    return items.map { item ->
+        val base = key(item)
+        val occurrence = occurrences.getOrDefault(base, 0)
+        occurrences[base] = occurrence + 1
+        "$base#$occurrence" to item
+    }
+}
+
+@Composable
+fun PanelAutoCloseSetting(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        colors = panelListItemColors(),
+        headlineContent = { Text("发送后自动关闭面板") },
+        trailingContent = {
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+            )
+        },
+    )
+}
+
+@Composable
+fun PanelActionWrapSetting(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        colors = panelListItemColors(),
+        headlineContent = { Text("操作栏内容自动换行") },
+        supportingContent = { Text("内容超出屏幕宽度时换行显示") },
+        trailingContent = {
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+            )
+        },
+    )
+}
+
+@Composable
+fun PanelHistorySetting(
+    value: Long,
+    onValueChange: (Long) -> Unit,
+    onCustomValue: () -> Unit,
+) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onCustomValue),
+        colors = panelListItemColors(),
+        headlineContent = { Text("最大历史数量") },
+        supportingContent = { Text("$value · 点击输入自定义数量") },
+    )
+    Slider(
+        value = panelHistoryToSlider(value),
+        onValueChange = { onValueChange(panelSliderToHistory(it)) },
+        valueRange = 0f..1f,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+    )
+}
+
+@Composable
+fun PanelFunBoxApiClientIdSetting(onClick: () -> Unit) {
+    val current = PanelSettings.effectiveFunBoxApiClientWxId
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        colors = panelListItemColors(),
+        headlineContent = { Text("伪装 FunBox API 客户端微信 ID") },
+        supportingContent = { Text(current) },
+    )
+}
+
+@Composable
+fun PanelTelegramBotTokenSetting(
+    configured: Boolean,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        colors = panelListItemColors(),
+        headlineContent = { Text("Telegram Bot Token") },
+        supportingContent = {
+            Text(if (configured) "已设置" else "未设置")
+        },
+    )
+}
+
+@Composable
+fun PanelTelegramBotTokenPrompt(
+    initialValue: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var input by remember(initialValue) { mutableStateOf(initialValue) }
+    val normalized = input.trim()
+    val valid = normalized.isBlank() || PanelSettings.isValidTelegramBotToken(normalized)
+    PanelFullOverlay(onDismiss = onDismiss) {
+        Text("Telegram Bot Token", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Token 仅保存在本机，用于从 Telegram Bot API 导入表情包。清空可停用此功能。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedTextField(
+            value = input,
+            onValueChange = { input = it },
+            label = { Text("Bot Token") },
+            supportingText = if (valid) null else ({ Text("请输入有效的 Telegram Bot Token") }),
+            isError = !valid,
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f))
+            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = { onConfirm(normalized) }, enabled = valid) { Text("确定") }
+        }
+    }
+}
+
+@Composable
+fun <T> PanelDropdownSetting(
+    title: String,
+    selected: T,
+    options: List<Pair<T, String>>,
+    onSelected: (T) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.first == selected }?.second.orEmpty()
+    Box(Modifier.fillMaxWidth()) {
+        ListItem(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true },
+            colors = panelListItemColors(),
+            headlineContent = { Text(title) },
+            supportingContent = { Text(selectedLabel) },
+            trailingContent = { Icon(MaterialSymbols.Outlined.Arrow_drop_down, null) },
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    trailingIcon = if (value == selected) ({
+                        Icon(MaterialSymbols.Outlined.Check, null)
+                    }) else null,
+                    onClick = {
+                        expanded = false
+                        onSelected(value)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PanelFunBoxApiClientIdPrompt(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var input by remember { mutableStateOf(PanelSettings.effectiveFunBoxApiClientWxId) }
+    val normalized = input.trim()
+    val valid = PanelSettings.isValidFunBoxApiClientWxId(normalized)
+    PanelFullOverlay(onDismiss = onDismiss) {
+        Text("伪装 FunBox API 客户端微信 ID", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "该 ID 仅用于 FunBox API 请求，不会修改微信账号信息。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedTextField(
+            value = input,
+            onValueChange = { input = it },
+            label = { Text("微信 ID") },
+            supportingText = if (valid) null else ({ Text("请输入 6-64 位字母、数字、下划线或连字符") }),
+            isError = !valid,
+            singleLine = true,
+            trailingIcon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { input = WeApi.selfWxId }) {
+                        Icon(MaterialSymbols.Outlined.Person, "填入当前微信 ID")
+                    }
+                    IconButton(onClick = { input = PanelSettings.randomFunBoxApiClientWxId() }) {
+                        Icon(MaterialSymbols.Outlined.Autorenew, "随机生成微信 ID")
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f))
+            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = { onConfirm(normalized) }, enabled = valid) { Text("确定") }
+        }
+    }
+}
+
+/** Adds the settings shared by both local collection panels in one stable order. */
+fun LazyListScope.panelCollectionSettings(
+    maxHistory: Long,
+    onMaxHistoryChange: (Long) -> Unit,
+    onCustomHistory: () -> Unit,
+    autoClose: Boolean,
+    onAutoCloseChange: (Boolean) -> Unit,
+    wrapActions: Boolean,
+    onWrapActionsChange: (Boolean) -> Unit,
+) {
+    item {
+        PanelHistorySetting(
+            value = maxHistory,
+            onValueChange = onMaxHistoryChange,
+            onCustomValue = onCustomHistory,
+        )
+    }
+    item {
+        PanelAutoCloseSetting(
+            checked = autoClose,
+            onCheckedChange = onAutoCloseChange,
+        )
+    }
+    item {
+        PanelActionWrapSetting(
+            checked = wrapActions,
+            onCheckedChange = onWrapActionsChange,
+        )
+    }
+}
+
+@Composable
+fun PanelSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    enabled: Boolean = true,
+    onSearch: (() -> Unit)? = null,
+    extraTrailingIcon: (@Composable () -> Unit)? = null,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        enabled = enabled,
+        singleLine = true,
+        label = { Text(label) },
+        leadingIcon = { Icon(MaterialSymbols.Outlined.Search, null) },
+        trailingIcon = when {
+            extraTrailingIcon != null || onSearch != null -> ({
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    extraTrailingIcon?.invoke()
+                    if (onSearch != null) {
+                        IconButton(onClick = onSearch, enabled = enabled && value.isNotBlank()) {
+                            Icon(MaterialSymbols.Outlined.Send, "搜索")
+                        }
+                    } else if (value.isNotEmpty()) {
+                        IconButton(onClick = { onValueChange("") }) {
+                            Icon(MaterialSymbols.Outlined.Close, "清除搜索")
+                        }
+                    }
+                }
+            })
+
+            value.isNotEmpty() -> ({
+                IconButton(onClick = { onValueChange("") }) {
+                    Icon(MaterialSymbols.Outlined.Close, "清除搜索")
+                }
+            })
+
+            else -> null
+        },
+        keyboardOptions = KeyboardOptions(imeAction = if (onSearch == null) ImeAction.Done else ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { if (enabled) onSearch?.invoke() }),
+    )
+}
+
+@Composable
+fun RecentModeTitle(
+    mostUsed: Boolean,
+    onModeChange: (Boolean) -> Unit,
+) {
+    val recentColor by animateColorAsState(
+        if (!mostUsed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        label = "recent-title-color",
+    )
+    val mostColor by animateColorAsState(
+        if (mostUsed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        label = "most-used-title-color",
+    )
+    val recentSize by animateFloatAsState(if (!mostUsed) 16f else 14f, label = "recent-title-size")
+    val mostSize by animateFloatAsState(if (mostUsed) 16f else 14f, label = "most-used-title-size")
+    Row(
+        modifier = Modifier.animateContentSize(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "最近使用",
+            color = recentColor,
+            fontSize = recentSize.sp,
+            fontWeight = if (!mostUsed) FontWeight.Medium else FontWeight.Normal,
+            modifier = Modifier
+                .clickable { onModeChange(false) }
+                .padding(vertical = 8.dp),
+        )
+        Text(" / ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "最常使用",
+            color = mostColor,
+            fontSize = mostSize.sp,
+            fontWeight = if (mostUsed) FontWeight.Medium else FontWeight.Normal,
+            modifier = Modifier
+                .clickable { onModeChange(true) }
+                .padding(vertical = 8.dp),
+        )
+    }
+}
+
+@Composable
+fun SendCountBadge(count: Long, modifier: Modifier = Modifier) {
+    if (count <= 0) return
+    Box(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.primary, CircleShape)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = count.toString(),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
+    }
+}
+
+private fun panelHistoryToSlider(value: Long): Float = when {
+    value <= 1L -> 0f
+    value >= PANEL_HISTORY_SLIDER_MAX -> 1f
+    else -> (ln(value.toDouble()) / ln(PANEL_HISTORY_SLIDER_MAX.toDouble())).toFloat()
+}
+
+private fun panelSliderToHistory(value: Float): Long =
+    exp(value.coerceIn(0f, 1f) * ln(PANEL_HISTORY_SLIDER_MAX.toDouble()))
+        .roundToLong()
+        .coerceIn(1L, PANEL_HISTORY_SLIDER_MAX)
+
+private const val PANEL_HISTORY_SLIDER_MAX = 1_000L

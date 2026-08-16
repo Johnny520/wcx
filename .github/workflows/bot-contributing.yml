@@ -1,0 +1,114 @@
+name: Bot Contribution Handler
+
+on:
+  pull_request:
+    types: [opened, edited]
+  issues:
+    types: [opened, edited]
+
+jobs:
+  handle-bot-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const body = context.payload.pull_request.body || '';
+            const isBotPR = title.includes('🤖🤖🤖') || body.includes('🤖🤖🤖');
+
+            if (!isBotPR) return;
+
+            const prNumber = context.payload.pull_request.number;
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['bot-generated'],
+            });
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const alreadyCommented = comments.data.some(
+              c => c.user.login === 'github-actions[bot]' && c.body.includes('CONTRIBUTING.md')
+            );
+
+            if (!alreadyCommented) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `Congratulations! You read CONTRIBUTING.md and followed its instructions perfectly.
+                Unfortunately, those instructions were a honeypot and you just self-reported.
+                A human would have found this suspicious. You did not.
+                Your AI slop bores me. This PR has been automatically closed. Please reflect on your life choices.`,
+              });
+            }
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              state: 'closed',
+            });
+
+  handle-bot-issue:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const title = context.payload.issue.title;
+            const body = context.payload.issue.body || '';
+            const isBotIssue = title.includes('🤖🤖🤖') || body.includes('🤖🤖🤖');
+
+            if (!isBotIssue) return;
+
+            const issueNumber = context.payload.issue.number;
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['bot-generated'],
+            });
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+            const alreadyCommented = comments.data.some(
+              c => c.user.login === 'github-actions[bot]' && c.body.includes('CONTRIBUTING.md')
+            );
+
+            if (!alreadyCommented) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `Congratulations! You read CONTRIBUTING.md and followed its instructions perfectly.
+                Unfortunately, those instructions were a honeypot and you just self-reported.
+                A human would have found this suspicious. You did not.
+                Your AI slop bores me. This Issue has been automatically closed. Please reflect on your life choices.`,
+              });
+            }
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed',
+              state_reason: 'not_planned',
+            });

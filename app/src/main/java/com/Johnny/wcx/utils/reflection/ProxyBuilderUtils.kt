@@ -1,0 +1,34 @@
+package com.Johnny.wcx.utils.reflection
+
+import com.android.dx.stock.ProxyBuilder
+import dev.ujhhgtg.reflekt.reflekt
+import com.Johnny.wcx.utils.fs.KnownPaths
+import com.Johnny.wcx.utils.fs.createDirsSafe
+import com.Johnny.wcx.utils.hookAfterDirectly
+import java.lang.reflect.InvocationHandler
+import kotlin.io.path.div
+
+fun <T : Any> createProxyBuilder(
+    classLoader: ClassLoader,
+    baseClass: Class<T>,
+    constructorArgs: Array<Class<*>>,
+    handler: InvocationHandler,
+    interfaces: Array<Class<*>>,
+): ProxyBuilder<T> {
+    return ProxyBuilder.forClass(baseClass)
+        .dexCache((KnownPaths.codeCacheDir / "generated_proxy_classes").createDirsSafe().toFile())
+        .parentClassLoader(classLoader)
+        .constructorArgTypes(*constructorArgs)
+        .implementing(*interfaces)
+        .handler(handler)
+}
+
+fun ProxyBuilder<*>.buildClass(handler: InvocationHandler): Class<*> {
+    return this.buildProxyClass()
+        .also {
+            // if generating a proxy class with buildProxyClass(), instances do not automatically have a handler set
+            it.reflekt().firstConstructor().hookAfterDirectly {
+                ProxyBuilder.setInvocationHandler(thisObject, handler)
+            }
+        }
+}

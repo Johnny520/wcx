@@ -1,0 +1,143 @@
+package com.Johnny.wcx.features.items.system
+
+import androidx.activity.ComponentActivity
+import com.Johnny.wcx.features.core.ClickableFeature
+import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToastSuspend
+import com.Johnny.wcx.utils.formatBytesSize
+import com.Johnny.wcx.utils.formatEpoch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.nio.file.Path
+import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.deleteRecursively
+import kotlin.io.path.div
+import kotlin.io.path.exists
+import kotlin.time.Duration.Companion.milliseconds
+
+@Feature(name = "清理缓存垃圾", categories = ["系统与隐私"], description = "自动或手动清理微信的缓存")
+object AutoCleanCache : ClickableFeature() {
+
+    private const val TAG = "AutoCleanCache"
+    private const val CLEAN_INTERVAL = 30 * 60 * 1000L // 每 30 分钟清理一次
+
+    private var cleanJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val cleanPaths: List<Path>
+        get() {
+            val paths = mutableListOf<Path>()
+
+            val dataDir = HostInfo.application.filesDir.parentFile?.toPath() ?: return paths
+            paths.add(dataDir / "cache")
+            paths.add(dataDir / "MicroMsg" / "crash")
+            paths.add(dataDir / "appbrand")
+            paths.add(dataDir / "cache" / "appbrand")
+            paths.add(dataDir / "MicroMsg" / "appbrand")
+            paths.add(dataDir / "cache" / "liteapp")
+            paths.add(dataDir / "files" / "liteapp")
+            paths.add(dataDir / "tinker")
+            paths.add(dataDir / "tinker_server")
+            paths.add(dataDir / "tinker_temp")
+
+            val externalCacheDir = HostInfo.application.externalCacheDir
+            if (externalCacheDir != null) {
+                val storageDataDir = externalCacheDir.toPath().parent ?: return paths
+                paths.add(storageDataDir / "cache")
+                paths.add(storageDataDir / "files" / "xlog")
+                paths.add(storageDataDir / "files" / "onelog")
+                paths.add(storageDataDir / "files" / "tbslog")
+                paths.add(storageDataDir / "files" / "Tencent" / "tbs_common_log")
+                paths.add(storageDataDir / "files" / "Tencent" / "tbs_live_log")
+            }
+
+            return paths
+        }
+
+    override fun onEnable() {
+        startCleaningJob()
+    }
+
+    private fun startCleaningJob() {
+        cleanJob?.cancel()
+        cleanJob = scope.launch {
+            while (isActive) {
+                performClean()
+                delay(CLEAN_INTERVAL.milliseconds)
+            }
+        }
+    }
+
+    @OptIn(ExperimentalPathApi::class)
+    private fun performClean(): Long {
+        var totalDeletedBytes = 0L
+        cleanPaths.forEach { path ->
+            try {
+                WeLogger.d(TAG, "deleting $path")
+                if (path.exists()) {
+                    // 保留 WCX/upload 子目录，避免 REST API 上传临时文件被误删
+                    val wcxUploadDir = path / "WCX" / "upload"
+                    if (wcxUploadDir.exists()) {
+                        // 遍历删除除 WCX/upload 之外的所有内容
+                        path.toFile().listFiles()?.forEach { file ->
+                            if (file.name == "WCX") {
+                                // 对 WCX 目录，保留 upload 子目录
+                                file.listFiles()?.forEach { wcxChild ->
+                                    if (wcxChild.name != "upload") {
+                                        val childPath = wcxChild.toPath()
+                                        totalDeletedBytes += calculateSize(childPath)
+                                        childPath.deleteRecursively()
+                                    }
+                                }
+                            } else {
+                                val childPath = file.toPath()
+                                totalDeletedBytes += calculateSize(childPath)
+                                childPath.deleteRecursively()
+                            }
+                        }
+                    } else {
+                        totalDeletedBytes += calculateSize(path)
+                        path.deleteRecursively()
+                    }
+                }
+            } catch (e: Exception) {
+                WeLogger.w(TAG, "exception during cleaning: ${path.fileName}, ${e.message}")
+            }
+        }
+        return totalDeletedBytes
+    }
+
+    private fun calculateSize(path: Path): Long {
+        val file = path.toFile()
+        if (!file.exists()) return 0L
+        if (file.isFile) return file.length()
+
+        var size = 0L
+        file.listFiles()?.forEach {
+            size += if (it.isDirectory) calculateSize(it.toPath()) else it.length()
+        }
+        return size
+    }
+
+    override fun onClick(context: ComponentActivity) {
+        scope.launch {
+            val deletedSize = performClean()
+            val sizeText = formatBytesSize(deletedSize)
+
+            val timeText =
+                if (isEnabled) "\n下次自动清理将在 ${formatEpoch(System.currentTimeMillis() + CLEAN_INTERVAL)} 进行"
+                else ""
+
+            showToastSuspend(context, "缓存清理完成, 共释放 $sizeText$timeText")
+
+            if (isEnabled) startCleaningJob()
+        }
+    }
+}
