@@ -135,6 +135,9 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
     @Volatile
     private var activePredicate: String? = null
 
+    @Volatile
+    private var activeGroup: ChatGroup? = null
+
     private val groupsFile by lazy { KnownPaths.moduleData / "conversation_groups.json" }
 
     @Volatile
@@ -148,6 +151,7 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         hookConversationListQuery()
+        hookNewMessageNotification()
 
         methodOnTabCreate.hookAfter {
             val convListView = thisObject.reflekt()
@@ -231,8 +235,9 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
     }
 
     override fun onDisable() {
-        // Clear the active predicate so the conversation list shows all conversations.
+        // Clear the active predicate and group so the conversation list shows all conversations.
         activePredicate = null
+        activeGroup = null
         // Remove the tab bar header view from the ListView to clean up the UI.
         // Must run on the UI thread since it manipulates the View hierarchy.
         runOnUiThread {
@@ -357,6 +362,7 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
         // groups need a DB read to materialize their member list, and doing that while WeChat is
         // already running the list query would nest reads on the same path.
         // The "全部" tab (or a null group) applies no filter.
+        activeGroup = if (group == null || isAllTab(group.id)) null else group
         activePredicate = if (group == null || isAllTab(group.id)) {
             null
         } else {
@@ -404,6 +410,64 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
             val sql = args.firstOrNull() as? String ?: return@hookBefore
             rewriteConversationListSql(sql)?.let { args[0] = it }
         }
+    }
+
+    // Hooks the ConversationStorage notify dispatcher to handle real-time per-row update events (type 3).
+    // 1. In custom / preset groups: prevents new messages of non-member talkers from popping up in the active tab.
+    // 2. In PRESET_UNREAD: when an open chat is read (unread becomes 0), automatically triggers reload to remove it from unread tab.
+    private fun hookNewMessageNotification() {
+        val method = WeConversationApi.methodNotifyConversationChanged
+        if (method.isPlaceholder) {
+            WeLogger.w(TAG, "conversation notify method not resolved; tab message filtering unavailable")
+            return
+        }
+        method.hookBefore {
+            val eventType = args[0] as? Int ?: return@hookBefore
+            if (eventType != 3) return@hookBefore
+            val talker = args[2] as? String ?: return@hookBefore
+            if (talker.isEmpty()) return@hookBefore
+
+            val currentGroup = activeGroup ?: return@hookBefore
+
+            if (currentGroup.type == GroupType.PRESET_UNREAD) {
+                if (!isConversationUnread(talker)) {
+                    result = null
+                    WeConversationApi.reloadConversations()
+                    return@hookBefore
+                }
+                return@hookBefore
+            }
+
+            if (!isTalkerInActiveGroup(talker, currentGroup)) {
+                result = null
+            }
+        }
+    }
+
+    private fun isTalkerInActiveGroup(talker: String, group: ChatGroup): Boolean {
+        return when (group.type) {
+            GroupType.MANUAL -> group.members.contains(talker)
+            GroupType.PRESET_GROUPS -> talker.endsWith("@chatroom")
+            GroupType.PRESET_OFFICIALS -> talker.startsWith("gh_")
+            GroupType.PRESET_UNREAD -> isConversationUnread(talker)
+            GroupType.SQL -> getGroupMembers(group).contains(talker)
+        }
+    }
+
+    private fun isConversationUnread(talker: String): Boolean {
+        return runCatching {
+            val cursor = WeDatabaseApi.rawQuery(
+                "SELECT unReadCount, unReadMuteCount FROM rconversation WHERE username = ? LIMIT 1",
+                arrayOf(talker)
+            )
+            cursor.use { c ->
+                if (c.moveToFirst()) {
+                    val unread = c.getInt(0)
+                    val unreadMute = c.getInt(1)
+                    unread > 0 || unreadMute > 0
+                } else false
+            }
+        }.getOrDefault(false)
     }
 
     // Returns the rewritten SQL, or null to leave it untouched (all non-list queries and "全部").
