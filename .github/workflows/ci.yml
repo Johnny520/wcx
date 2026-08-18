@@ -236,7 +236,7 @@ jobs:
           COMMIT_COUNT=$(git rev-list --count HEAD)
           GIT_HASH=$(git rev-parse --short HEAD)
           # v174 基线偏移量，与 build.gradle.kts 中的 versionBaseOffset 保持一致
-          VERSION_OFFSET=30  # 与 build.gradle.kts versionBaseOffset=30 对齐
+          VERSION_OFFSET=223  # 与 build.gradle.kts versionBaseOffset=223 对齐
           VERSION_CODE=$((COMMIT_COUNT + VERSION_OFFSET))
           VERSION_TAG="v${VERSION_CODE}"
           echo "tag=${VERSION_TAG}" >> $GITHUB_OUTPUT

@@ -37,7 +37,7 @@ android {
 
     // v194 基线：commitCount 基于 v148，偏移 +26
     // 后续每增加一个 commit，versionCode 自动递增
-    val versionBaseOffset = 30  // v210 连号起点（commit 180+30=210，下次 commit 181+30=211）
+    val versionBaseOffset = 223  // 清空历史后 commitCount 重新计算，偏移 223 让版本回到 v227
 
     defaultConfig {
         applicationId = libs.versions.namespace.get()

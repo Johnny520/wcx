@@ -1,0 +1,619 @@
+package com.Johnny.wcx.features.items.contacts
+
+import android.app.Activity
+import android.content.Context
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import dev.ujhhgtg.reflekt.reflekt
+import com.Johnny.wcx.dexkit.abc.IResolveDex
+import com.Johnny.wcx.dexkit.dsl.dexClass
+import com.Johnny.wcx.dexkit.dsl.dexConstructor
+import com.Johnny.wcx.dexkit.dsl.dexField
+import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.api.core.WeDatabaseApi
+import com.Johnny.wcx.features.api.core.WeUnsafeApi
+import com.Johnny.wcx.features.api.ui.WeContactPrefsScreenApi
+import com.Johnny.wcx.features.api.ui.WeContactPrefsScreenApi.IContactInfoProvider
+import com.Johnny.wcx.features.api.ui.WeContactPrefsScreenApi.PreferenceItem
+import com.Johnny.wcx.features.core.ClickableFeature
+import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.features.items.contacts.SplitGroupCall.resolveDex
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.SingleContactSelector
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.RuntimeConfig
+import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.currentWxId
+import com.Johnny.wcx.utils.android.runOnUiThread
+import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.reflection.BString
+import com.Johnny.wcx.utils.reflection.int
+import org.luckypray.dexkit.DexKitBridge
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+import kotlin.random.Random
+import androidx.compose.ui.Modifier as UiModifier
+import java.lang.reflect.Modifier as ReflectModifier
+
+@Feature(
+    name = "分裂群组通话",
+    categories = ["娱乐"],
+    description = "随机生成假群 ID, 并发起群通话或实时对讲后终止推送到他人手机"
+)
+object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
+
+    private const val TAG = "SplitGroupCall"
+    private const val PREF_KEY = "split_group_call"
+    private const val OPERATION_DURATION_MS = 3000L
+
+    private val batchRunning = AtomicBoolean(false)
+
+    private enum class OperationMode(val label: String) {
+        VOIP("发起假群通话并挂断"),
+        WALKIE_TALKIE("发起假群实时对讲机并终止"),
+    }
+
+    /** com.tencent.mm.plugin.multitalk.model.e3 —— SubCoreMultiTalk. */
+    private val classSubCoreMultiTalk by dexClass {
+        matcher {
+            usingStrings("MicroMsg.SubCoreMultiTalk", "add , is running , forbid add")
+        }
+    }
+
+    /** com.tencent.mm.plugin.multitalk.model.v0 —— MultiTalkManager. */
+    private val methodExitMultiTalk by dexMethod {
+        matcher {
+            usingStrings("exitCurrentMultiTalk: isReject %b isMissCall %b isPhoneCall %b isNetworkError %b")
+        }
+    }
+
+    private val multiTalkManagerClass by lazy { methodExitMultiTalk.method.declaringClass }
+
+    /** com.tencent.mm.plugin.multitalk.ilinkservice.i4 —— ILinkService (enum, 单例 INSTANCE). */
+    private val classILinkService by dexClass {
+        matcher {
+            usingStrings("steve: initsession : mIsInitedEngine :%b mIsInitingEngine %b mCurrentStatus %d mIsJoiningRoom %b")
+        }
+    }
+
+    /** com.tencent.mm.plugin.multitalk.ilinkservice.w —— ILinkMember. */
+    private val classILinkMember by dexClass {
+        matcher {
+            usingStrings("ILinkMember{memberId=")
+        }
+    }
+
+    /** com.tencent.mm.plugin.multitalk.ilinkservice.n1 —— 邀请任务 (Runnable). */
+    private val classInviteTask by dexClass {
+        matcher {
+            usingStrings("enter inviteSync. %s, %s, %d, %b")
+        }
+    }
+
+    /** e3.Ri() —— 获取 MultiTalkManager 单例. */
+    private val methodGetMultiTalkManager by dexMethod {
+        matcher {
+            declaredClass = classSubCoreMultiTalk.getDescriptorString()!!
+            modifiers = ReflectModifier.STATIC or ReflectModifier.PUBLIC
+            returnType(multiTalkManagerClass)
+        }
+    }
+
+    /** v0.D(e4) —— 设置通话状态 (onChangeMultiTalkStatus). */
+    private val methodSetStatus by dexMethod {
+        matcher {
+            declaredClass(multiTalkManagerClass)
+            paramCount = 1
+            usingStrings("onChangeMultiTalkStatus is %s")
+        }
+    }
+
+    /** v0.O(String, int) —— setCurrentMTSDKMode, 记录群 -> 通话模式. */
+    private val methodSetMtSdkMode by dexMethod {
+        matcher {
+            declaredClass(multiTalkManagerClass)
+            paramCount = 2
+            usingStrings("setCurrentMTSDKMode groupid:%s, mode:%d")
+        }
+    }
+
+    /** i4.N(long, String) —— 设置自身 uin 与用户名 (set name). */
+    private val methodSetName by dexMethod {
+        matcher {
+            declaredClass = classILinkService.getDescriptorString()!!
+            paramCount = 2
+            usingStrings("set name=%s, uin=%d")
+        }
+    }
+
+    /** i4.J(Runnable) —— 投递任务到 ILink 串行工作线程. */
+    private val methodPostTask by dexMethod {
+        matcher {
+            declaredClass = classILinkService.getDescriptorString()!!
+            paramCount = 1
+            paramTypes("java.lang.Runnable")
+        }
+    }
+
+    /** n1(i4, ArrayList<w>, String) —— 邀请任务构造器. */
+    private val ctorInviteTask by dexConstructor {
+        matcher {
+            declaredClass = classInviteTask.getDescriptorString()!!
+            paramCount = 3
+            paramTypes(classILinkService.getDescriptorString()!!, "java.util.ArrayList", "java.lang.String")
+        }
+    }
+
+    /**
+     * c1(i4, int) —— 挂断任务 (Runnable), run() 调用 native Hangup(int)。
+     * c1 与 i4 都含有字符串 "Hangup ret:", 但 i4 (enum) 的构造器签名是 (String, int),
+     * 因此用 (i4, int) 的参数签名即可唯一命中 c1 的构造器。
+     */
+    private val ctorHangupTask by dexConstructor {
+        matcher {
+            declaredClass {
+                usingStrings("Hangup ret:")
+            }
+            paramCount = 2
+            paramTypes(classILinkService.getDescriptorString()!!, "int")
+        }
+    }
+
+    /** i4.INSTANCE —— ILinkService 单例. */
+    private val fieldILinkInstance by dexField {
+        matcher {
+            declaredClass = classILinkService.getDescriptorString()!!
+            type = classILinkService.getDescriptorString()!!
+            modifiers = ReflectModifier.PUBLIC or ReflectModifier.STATIC or ReflectModifier.FINAL
+        }
+    }
+
+    /**
+     * i4.f166883p1 —— 房间 ID (chatroom username) 字符串字段, 进入 native Invite。
+     * i4 上有多个 String 字段, 无法按名字/顺序命中; 通过 "唯一读取该字段的方法" 反查:
+     * 方法 p(b) 含字符串 "start audio device failed", 且其中唯一被读取的 String 字段即 f166883p1。
+     * 由 [resolveDex] 手动填充。
+     */
+    private val fieldRoomId by dexField()
+
+    /** TalkRoomServer.enterTalkRoom(String, int) —— 发起「实时对讲机」. */
+    private val methodEnterTalkRoom by dexMethod {
+        matcher {
+            usingStrings("enterTalkRoom %s scene %d")
+            paramTypes("java.lang.String", "int")
+            returnType("void")
+        }
+    }
+
+    private val talkRoomServerClass by lazy { methodEnterTalkRoom.method.declaringClass }
+
+    /** TalkRoomServer.exitTalkRoom() —— 终止当前「实时对讲机」. */
+    private val methodExitTalkRoom by dexMethod {
+        matcher {
+            declaredClass(talkRoomServerClass)
+            usingStrings("exitTalkRoom", "exitTalkRoom: has exited")
+            paramCount = 0
+            returnType("void")
+        }
+    }
+
+    /** SubCoreTalkRoom 上返回 TalkRoomServer 单例的静态方法. */
+    private val methodGetTalkRoomServer by dexMethod {
+        matcher {
+            modifiers = ReflectModifier.PUBLIC or ReflectModifier.STATIC
+            paramCount = 0
+            returnType(talkRoomServerClass)
+        }
+    }
+
+    /** TalkRoomServer 当前房间 ID; 空值表示没有正在进行的实时对讲. */
+    private val fieldCurrentTalkRoom by dexField {
+        matcher {
+            declaredClass(methodEnterTalkRoom.method.declaringClass)
+            type = "java.lang.String"
+        }
+    }
+
+    override fun resolveDex(dexKit: DexKitBridge) {
+        val iLinkServiceName = classILinkService.clazz.name
+        val readerMethod = dexKit.findMethod {
+            matcher {
+                declaredClass = classILinkService.getDescriptorString()!!
+                usingStrings("start audio device failed")
+            }
+        }.single()
+        val roomIdField = readerMethod.usingFields
+            .map { it.field }
+            .single { it.className == iLinkServiceName && it.typeName == "java.lang.String" }
+        fieldRoomId.setDescriptor(roomIdField)
+    }
+
+    override fun onClick(context: ComponentActivity) {
+        showComposeDialog(context) {
+            SingleContactSelector(
+                "分裂群组通话",
+                WeDatabaseApi.getGroups(),
+                initialSelectedWxId = null,
+                onDismiss = onDismiss,
+            ) { wxId ->
+                onDismiss()
+                showSplitCallDialog(context, wxId)
+            }
+        }
+    }
+
+    override fun getContactInfoItem(activity: Activity): List<PreferenceItem> {
+        val wxId = activity.currentWxId ?: return emptyList()
+        if (!wxId.endsWith("@chatroom")) return emptyList()
+
+        return listOf(
+            PreferenceItem(
+                key = PREF_KEY,
+                title = "分裂群组通话",
+                position = 1
+            )
+        )
+    }
+
+    override fun onItemClick(activity: Activity, key: String): Boolean {
+        if (key != PREF_KEY) return false
+        val wxId = activity.currentWxId ?: return true
+        showSplitCallDialog(activity, wxId)
+        return true
+    }
+
+    override fun onEnable() {
+        WeContactPrefsScreenApi.addProvider(this)
+    }
+
+    override fun onDisable() {
+        WeContactPrefsScreenApi.removeProvider(this)
+    }
+
+    private fun generateFakeGroupId(wxId: String): String {
+        val rawId = wxId.substringBefore("@")
+        val randomCount = Random.nextInt(1, 4)
+        val cjkChars = (0 until randomCount).map {
+            (0x4E00..0x9FA5).random().toChar()
+        }.joinToString("")
+        return "${rawId}${cjkChars}@chatroom"
+    }
+
+    private fun showSplitCallDialog(context: Activity, wxId: String) {
+        showComposeDialog(context) {
+            var repeatCount by remember { mutableStateOf("1") }
+            var mode by remember { mutableStateOf(OperationMode.WALKIE_TALKIE) }
+
+            AlertDialogContent(
+                title = { Text("分裂群组通话") },
+                text = {
+                    Column(
+                        modifier = UiModifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = repeatCount,
+                            onValueChange = { value ->
+                                repeatCount = value.filter(Char::isDigit)
+                            },
+                            label = { Text("重复次数") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = UiModifier.fillMaxWidth(),
+                        )
+                        OperationMode.entries.forEach { option ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = UiModifier
+                                    .fillMaxWidth()
+                                    .clickable { mode = option },
+                            ) {
+                                RadioButton(
+                                    selected = mode == option,
+                                    onClick = { mode = option },
+                                )
+                                Text(option.label)
+                            }
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onDismiss) { Text("取消") }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val count = repeatCount.toIntOrNull()
+                        if (count == null || count <= 0) {
+                            showToast("请输入大于 0 的重复次数")
+                            return@Button
+                        }
+                        if (!batchRunning.compareAndSet(false, true)) {
+                            showToast("已有分裂群组通话任务正在执行")
+                            return@Button
+                        }
+
+                        onDismiss()
+                        startBatch(context, wxId, count, mode)
+                    }) { Text("确定") }
+                }
+            )
+        }
+    }
+
+    private fun startBatch(
+        context: Context,
+        originalGroupId: String,
+        repeatCount: Int,
+        mode: OperationMode,
+    ) {
+        thread(name = "SplitGroupCallBatchThread") {
+            val generatedIds = mutableListOf<String>()
+            var completed = 0
+            var failed = 0
+            var cleanupFailed = false
+
+            try {
+                val reservedIds = WeDatabaseApi.getGroups()
+                    .mapTo(mutableSetOf()) { it.wxId }
+
+                repeat(repeatCount) { index ->
+                    val fakeGroupId = generateUniqueFakeGroupId(originalGroupId, reservedIds)
+                    reservedIds += fakeGroupId
+                    generatedIds += fakeGroupId
+
+                    WeLogger.i(
+                        TAG,
+                        "batch ${index + 1}/$repeatCount: ${mode.name}, fakeGroupId=$fakeGroupId",
+                    )
+                    runCatching {
+                        when (mode) {
+                            OperationMode.VOIP ->
+                                startAndStopVoip(context, originalGroupId, fakeGroupId)
+
+                            OperationMode.WALKIE_TALKIE ->
+                                startAndStopWalkieTalkie(fakeGroupId)
+                        }
+                    }.onSuccess {
+                        completed++
+                    }.onFailure { e ->
+                        failed++
+                        WeLogger.e(
+                            TAG,
+                            "batch ${index + 1}/$repeatCount failed for $fakeGroupId",
+                            e,
+                        )
+                    }
+                }
+            } catch (e: Throwable) {
+                failed += repeatCount - completed - failed
+                WeLogger.e(TAG, "split group call batch aborted", e)
+            } finally {
+                runCatching {
+                    DeleteFakeGroups.deleteFakeGroups(generatedIds)
+                }.onFailure { e ->
+                    cleanupFailed = true
+                    WeLogger.e(TAG, "failed to clean generated fake groups", e)
+                }
+                batchRunning.set(false)
+
+                runOnUiThread {
+                    val cleanupStatus = if (cleanupFailed) "，自动清理失败" else "，已自动清理"
+                    showToast(
+                        "任务结束：成功 $completed 次，失败 $failed 次$cleanupStatus ${generatedIds.size} 个假群",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun generateUniqueFakeGroupId(
+        originalGroupId: String,
+        reservedIds: Set<String>,
+    ): String {
+        repeat(1000) {
+            val candidate = generateFakeGroupId(originalGroupId)
+            if (candidate !in reservedIds) return candidate
+        }
+        error("failed to generate a unique fake group ID")
+    }
+
+    /**
+     * 复刻 TalkRoomUI 的进入/退出流程, 使用旧「实时对讲机」协议栈而非 MultiTalk 语音通话:
+     *   TalkRoomServer.enterTalkRoom(fakeGroupId, 0) -> 等待请求下发 -> exitTalkRoom()。
+     */
+    private fun startAndStopWalkieTalkie(fakeGroupId: String) {
+        val server = methodGetTalkRoomServer.method.invoke(null)
+            ?: error("TalkRoomServer instance is null")
+        var enterAttempted = false
+
+        try {
+            runOnUiThreadAndWait {
+                val currentRoom = fieldCurrentTalkRoom.field.get(server) as? String
+                check(currentRoom.isNullOrEmpty()) {
+                    "another talk room is already active: $currentRoom"
+                }
+
+                WeLogger.i(TAG, "entering fake talk room: $fakeGroupId")
+                enterAttempted = true
+                methodEnterTalkRoom.method.invoke(server, fakeGroupId, 0)
+            }
+
+            Thread.sleep(OPERATION_DURATION_MS)
+        } finally {
+            if (enterAttempted) {
+                runOnUiThreadAndWait {
+                    val activeRoom = fieldCurrentTalkRoom.field.get(server) as? String
+                    when {
+                        activeRoom == fakeGroupId -> {
+                            methodExitTalkRoom.method.invoke(server)
+                            WeLogger.i(TAG, "fake talk room terminated: $fakeGroupId")
+                        }
+
+                        activeRoom.isNullOrEmpty() ->
+                            WeLogger.i(TAG, "fake talk room already terminated: $fakeGroupId")
+
+                        else -> error(
+                            "talk room changed before exit: " +
+                                "expected=$fakeGroupId, active=$activeRoom",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 复刻 WeChat 发起群通话的真实流程 (com.tencent.mm.plugin.multitalk.ui.u#onMenuItemClick):
+     *   1. v0.D(e4.Creating)          —— 通话状态置为「创建中」
+     *   2. i4.N(selfUin, selfWxId)     —— 设置自身身份 (e2 据此把自己从被邀请者中剔除)
+     *   3. i4.f166883p1 = fakeGroupId  —— 房间 ID
+     *   4. i4.J(new n1(i4, members, fakeGroupId)) —— 投递邀请任务 -> 引擎初始化 -> native Invite (对方响铃)
+     *   5. v0.O(fakeGroupId, 2)        —— 记录群 -> 通话模式
+     * 之后延时若干秒 (让邀请下发、对方响铃), 再投递 c1(i4, 1) 触发 native Hangup 挂断。
+     */
+    private fun startAndStopVoip(context: Context, originalGroupId: String, fakeGroupId: String) {
+        WeLogger.i(TAG, "initiating fake group call: $fakeGroupId (original: $originalGroupId)")
+
+        val iLink = fieldILinkInstance.field.get(null)
+            ?: error("ILinkService instance is null")
+        val mgr = methodGetMultiTalkManager.method.invoke(null)
+            ?: error("MultiTalkManager instance is null")
+
+        // e4 状态枚举: [Init, Inviting, Creating, Starting, Talking]
+        val statusEnumClass = methodSetStatus.method.parameterTypes[0]
+        val statusValues = statusEnumClass.enumConstants
+            ?: error("multitalk status is not an enum")
+        check(statusValues.size >= 3) { "unexpected multitalk status enum: ${statusValues.size}" }
+        val statusInit = statusValues[0]
+        val statusCreating = statusValues[2]
+
+        val statusField = mgr.javaClass.declaredFields
+            .first { it.type == statusEnumClass }
+            .apply { isAccessible = true }
+
+        check(statusField.get(mgr) == statusInit) {
+            "multitalk is not idle"
+        }
+
+        // 被邀请成员 = 原群真实成员 + 自己 (自己会在 e2 中被剔除, 不会响铃自身)
+        val selfWxId = RuntimeConfig.loggedInWxId
+        val selfUin = context
+            .getSharedPreferences("system_config_prefs", Context.MODE_PRIVATE)
+            .getInt("default_uin", 0)
+            .toLong()
+
+        val memberWxIds = WeDatabaseApi.getGroupMembers(originalGroupId)
+            .map { it.wxId }
+            .filter { it.isNotEmpty() }
+            .toMutableList()
+        if (selfWxId.isNotEmpty() && selfWxId !in memberWxIds) memberWxIds += selfWxId
+
+        check(memberWxIds.isNotEmpty()) { "group has no members" }
+
+        val memberList = ArrayList<Any>(memberWxIds.size)
+        for (memberWxId in memberWxIds) {
+            val member = WeUnsafeApi.allocateInstance(classILinkMember.clazz)!!
+            member.reflekt().apply {
+                // w 的 String 字段顺序: [openId, mUserName, mInviteUserName] -> [1] = mUserName
+                fields { type = BString }[1].set(memberWxId)
+                // w 的 int 字段顺序: [memberId, mStatus, mScreenStatus] -> [1] = mStatus
+                fields { type = int }[1].set(2)
+            }
+            memberList.add(member)
+        }
+
+        var statusChangeAttempted = false
+        var invitePostAttempted = false
+        try {
+            runOnUiThreadAndWait {
+                statusChangeAttempted = true
+                methodSetStatus.method.invoke(mgr, statusCreating)
+                methodSetName.method.invoke(iLink, selfUin, selfWxId)
+                fieldRoomId.field.set(iLink, fakeGroupId)
+
+                val inviteTask =
+                    ctorInviteTask.constructor.newInstance(iLink, memberList, fakeGroupId) as Runnable
+                invitePostAttempted = true
+                methodPostTask.method.invoke(iLink, inviteTask)
+
+                methodSetMtSdkMode.method.invoke(mgr, fakeGroupId, 2)
+                WeLogger.i(TAG, "invite posted for ${memberList.size} members")
+            }
+
+            // 等待邀请下发并让对方响铃, 再挂断
+            Thread.sleep(OPERATION_DURATION_MS)
+        } finally {
+            if (statusChangeAttempted || invitePostAttempted) {
+                runOnUiThreadAndWait {
+                    val hangupError = if (invitePostAttempted) {
+                        runCatching {
+                            // native Hangup —— 停止响铃/结束通话
+                            val hangupTask =
+                                ctorHangupTask.constructor.newInstance(iLink, 1) as Runnable
+                            methodPostTask.method.invoke(iLink, hangupTask)
+                        }.exceptionOrNull()
+                    } else {
+                        null
+                    }
+
+                    // 复位 MultiTalkManager 状态 (等价于 v0.f(false, false)).
+                    if (statusField.get(mgr) != statusInit) {
+                        runCatching {
+                            methodExitMultiTalk.method.invoke(
+                                mgr,
+                                false,
+                                false,
+                                false,
+                                false,
+                                true,
+                                false,
+                            )
+                        }.onFailure { e ->
+                            WeLogger.w(TAG, "exitCurrentMultiTalk failed, resetting status directly", e)
+                            statusField.set(mgr, statusInit)
+                        }
+                    }
+                    hangupError?.let { throw it }
+                }
+            }
+        }
+    }
+
+    private fun runOnUiThreadAndWait(action: () -> Unit) {
+        val latch = CountDownLatch(1)
+        var failure: Throwable? = null
+        runOnUiThread {
+            try {
+                action()
+            } catch (e: Throwable) {
+                failure = e
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        latch.await()
+        failure?.let { throw it }
+    }
+}
