@@ -17,10 +17,10 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.AudioUtils
+import com.Johnny.wcx.utils.MediaFileTypeDetector
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.android.showToastSuspend
 import com.Johnny.wcx.utils.coerceToInt
-import com.Johnny.wcx.utils.fileExtension
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,7 +33,7 @@ import kotlin.io.path.outputStream
 /**
  * Opens a system file picker to select an audio file and send it as a WeChat voice message.
  *
- * Extracted from [com.Johnny.wcx.features.items.chat.ChatInputBarEnhancements] so that
+ * Extracted from [com.Johnny.wcx.features.api.ui.WeChatInputBarMenuApi] so that
  * [com.Johnny.wcx.features.items.chat.VoicePanel] can offer the same escape-hatch without
  * duplicating the logic.
  */
@@ -48,16 +48,16 @@ internal fun selectAndSendVoice(context: Context, currentConv: String) {
             }
 
             lifecycleScope.launch(Dispatchers.IO) {
-                val extension = uri.fileExtension.trimStart('.').ifEmpty { "mp3" }
-                val tempPath = PanelPaths.panelCacheDir / "picked-${UUID.randomUUID()}.$extension"
+                val tempPath = PanelPaths.panelCacheDir / "picked-${UUID.randomUUID()}.bin"
                 val prepareResult = runCatching {
                     contentResolver.openInputStream(uri)?.use { input ->
                         tempPath.outputStream().use(input::copyTo)
                     } ?: error("无法读取所选语音文件")
-                    val mimeType = contentResolver.getType(uri).orEmpty()
-                    val isSilk = mimeType in setOf("audio/amr", "audio/silk") ||
-                            extension.equals("silk", true) || extension.equals("amr", true)
-                    Triple(isSilk, AudioUtils.getDurationMs(tempPath.absolutePathString()), tempPath)
+                    val format = MediaFileTypeDetector.detectAudio(tempPath)
+                        ?: error("不支持或无法识别的语音格式")
+                    val directSource = format == MediaFileTypeDetector.AudioFormat.SILK ||
+                            format == MediaFileTypeDetector.AudioFormat.AMR
+                    Triple(directSource, AudioUtils.getDurationMs(tempPath.absolutePathString()), tempPath)
                 }
                 if (prepareResult.isFailure) {
                     tempPath.deleteIfExists()
@@ -137,17 +137,8 @@ internal fun selectAndSendVoice(context: Context, currentConv: String) {
                 }
             }
         }
-        // android couldn't distinguish AMR-extension SILK files, so we just use amr here
         importLauncher.launch(
-            arrayOf(
-                "audio/mpeg",
-                "audio/amr",
-                "audio/x-wav",
-                "audio/wav",
-                "audio/mp4",
-                "audio/x-m4a",
-                "application/octet-stream"
-            )
+            arrayOf("*/*")
         )
     }
 }

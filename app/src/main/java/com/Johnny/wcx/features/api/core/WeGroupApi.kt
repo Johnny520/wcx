@@ -6,8 +6,8 @@ import com.Johnny.wcx.features.api.net.WeNetSceneApi
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.WeLogger
-import com.Johnny.wcx.utils.reflection.BInt
 import com.Johnny.wcx.utils.reflection.BString
+import com.Johnny.wcx.utils.reflection.int
 
 @Feature(name = "群聊管理服务", categories = ["API"], description = "提供添加/删除/邀请群成员能力")
 object WeGroupApi : ApiFeature(), IResolveDex {
@@ -31,12 +31,12 @@ object WeGroupApi : ApiFeature(), IResolveDex {
     // ul.p(String chatRoomName, List<String> members, int scene)
     private val ctorDelMember by dexConstructor {
         matcher {
-            usingStrings("delchatroommember")
+            usingEqStrings("/cgi-bin/micromsg-bin/delchatroommember")
             paramCount(3)
             paramTypes(
                 BString,
                 List::class.java,
-                BInt
+                int
             )
         }
     }
@@ -49,7 +49,7 @@ object WeGroupApi : ApiFeature(), IResolveDex {
             paramTypes(
                 BString,
                 List::class.java,
-                BInt,
+                int,
                 Any::class.java
             )
         }

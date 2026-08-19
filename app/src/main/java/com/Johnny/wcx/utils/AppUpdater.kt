@@ -5,12 +5,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
+import com.Johnny.wcx.loader.entry.zygisk.ZygiskLoaderService
+import com.Johnny.wcx.loader.startup.StartupInfo
 import com.Johnny.wcx.utils.android.getSystemService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -28,22 +31,6 @@ import kotlin.coroutines.resumeWithException
 data class UpdateInfo(
     val versionCode: Int,
     val versionName: String,
-    val releaseTag: String = "",
-    val releaseUrl: String = "",
-    val changelog: String = "",
-    val apkUrl: String = "",
-)
-
-/**
- * Release 列表项，用于历史版本展示
- */
-data class ReleaseItem(
-    val tag: String,
-    val name: String,
-    val body: String,
-    val url: String,
-    val publishedAt: String,
-    val isPrerelease: Boolean,
 )
 
 sealed interface UpdateResult {
@@ -57,49 +44,35 @@ sealed interface UpdateResult {
     data class Error(val cause: Throwable) : UpdateResult
 }
 
-// ─── GitHub Release API ────────────────────────────────────────────────────
+// ─── ABI → APK mapping ───────────────────────────────────────────────────────
 
-private const val GITHUB_API_LATEST =
-    "https://api.github.com/repos/Johnny520/wcx/releases/latest"
-private const val GITHUB_API_RELEASES =
-    "https://api.github.com/repos/Johnny520/wcx/releases?per_page=20"
-private const val RELEASES_PAGE = "https://github.com/Johnny520/wcx/releases"
+private const val BASE_URL =
+    "https://github.com/Ujhhgtg/WeKit/releases/download/CI"
 
 // APKs are published per entry-point flavor: app-<flavor>-<abi>-release.apk.
 // Stay on the same flavor the installed build was compiled for.
 private val FLAVOR = BuildConfig.FLAVOR_SLUG
-private val ABI_LIST = listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
-private const val UNIVERSAL_APK_SUFFIX = "universal-release.apk"
 
-/**
- * 从 GitHub Release 的 asset 列表中选择最适合当前设备的 APK 下载地址
- */
-private fun selectApkUrl(assets: List<GitHubAsset>): String {
-    val supportedAbis = Build.SUPPORTED_ABIS
+private val ABI_APK_MAP = mapOf(
+    "arm64-v8a" to "$BASE_URL/app-$FLAVOR-arm64-v8a-release.apk",
+    "armeabi-v7a" to "$BASE_URL/app-$FLAVOR-armeabi-v7a-release.apk",
+)
+private const val UPDATE_JSON_URL = "$BASE_URL/update.json"
+private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+private const val ZIP_MIME_TYPE = "application/zip"
+
+/** Returns the best APK URL for this device. */
+private fun apkUrlForDevice(): String {
+    val supportedAbis = Build.SUPPORTED_ABIS  // ordered by preference
     for (abi in supportedAbis) {
-        val expected = "app-$FLAVOR-$abi-release.apk"
-        assets.firstOrNull { it.name == expected }?.let { return it.browser_download_url }
+        ABI_APK_MAP[abi]?.let { return it }
     }
-    assets.firstOrNull { it.name.endsWith(UNIVERSAL_APK_SUFFIX) }?.let { return it.browser_download_url }
-    return RELEASES_PAGE
+    error("Unsupported Android ABI: ${supportedAbis.joinToString()}")
 }
 
-@Serializable
-private data class GitHubAsset(
-    val name: String,
-    val browser_download_url: String,
-)
-
-@Serializable
-private data class GitHubRelease(
-    val tag_name: String,
-    val name: String,
-    val body: String,
-    val prerelease: Boolean,
-    val html_url: String,
-    val assets: List<GitHubAsset>,
-    val published_at: String,
-)
+/** Matches the release name emitted by the Zygisk packager. */
+private fun zygiskModuleFileName(info: UpdateInfo): String =
+    "WeKit-${info.versionCode}-${info.versionName}-release.zip"
 
 // ─── AppUpdater ───────────────────────────────────────────────────────────────
 
@@ -108,7 +81,7 @@ private data class GitHubRelease(
  *
  * Usage:
  * ```
- * when (val result = AppUpdater.checkForUpdate(context)) {
+ * when (val result = AppUpdater.checkForUpdate()) {
  *     is UpdateResult.UpdateAvailable -> AppUpdater.downloadAndInstall(context, result.info)
  *     is UpdateResult.UpToDate        -> { /* nothing to do */ }
  *     is UpdateResult.Error           -> { /* show error */ }
@@ -131,17 +104,17 @@ object AppUpdater {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
-     * 从 GitHub API 获取最新 Release 信息，检测是否有新版本
+     * Fetches [UPDATE_JSON_URL] and compares [UpdateInfo.versionCode] with
+     * the currently installed version.
      *
-     * 兼容 CI 构建版和正式发行版，自动适配不同的 tag 命名
+     * Must be called from a coroutine; network I/O runs on [Dispatchers.IO].
      */
     suspend fun checkForUpdate(): UpdateResult = withContext(Dispatchers.IO) {
         runCatching {
-            val release = fetchLatestRelease()
-            val updateInfo = parseUpdateInfo(release)
+            val remoteInfo = fetchUpdateInfo()
             val installedCode = BuildConfig.VERSION_CODE
-            if (updateInfo.versionCode > installedCode) {
-                UpdateResult.UpdateAvailable(updateInfo)
+            if (remoteInfo.versionCode > installedCode) {
+                UpdateResult.UpdateAvailable(remoteInfo)
             } else {
                 UpdateResult.UpToDate
             }
@@ -151,29 +124,9 @@ object AppUpdater {
     }
 
     /**
-     * 获取最近的 Release 列表（含更新说明）
-     *
-     * @return 按发布时间倒序排列的 Release 列表，最多 20 个
-     */
-    suspend fun getReleaseHistory(): Result<List<ReleaseItem>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val releases = fetchAllReleases()
-            releases.map { release ->
-                ReleaseItem(
-                    tag = release.tag_name,
-                    name = release.name,
-                    body = release.body,
-                    url = release.html_url,
-                    publishedAt = release.published_at,
-                    isPrerelease = release.prerelease,
-                )
-            }
-        }
-    }
-
-    /**
-     * Enqueues an APK download via [DownloadManager] and, on completion,
-     * triggers the system installer.
+     * Downloads the update matching the active loader. Zygisk mode downloads
+     * the module ZIP and opens it with a compatible root manager; other modes
+     * download the APK and open the system package installer.
      *
      * Requires the `REQUEST_INSTALL_PACKAGES` permission and a FileProvider
      * authority of `<packageName>.provider` in your manifest.
@@ -182,76 +135,64 @@ object AppUpdater {
      * [BroadcastReceiver] on [Dispatchers.Main].
      */
     suspend fun downloadAndInstall(context: Context, info: UpdateInfo) {
-        val apkUrl = info.apkUrl.ifBlank { selectApkUrl(emptyList()) }
-        val fileName = "wcx-${info.versionName}.apk"
+        val isZygisk = StartupInfo.loaderService is ZygiskLoaderService
+        val fileName: String
+        val downloadUrl: String
+        val mimeType: String
+        if (isZygisk) {
+            fileName = zygiskModuleFileName(info)
+            downloadUrl = "$BASE_URL/$fileName"
+            mimeType = ZIP_MIME_TYPE
+        } else {
+            fileName = "wekit-${info.versionName}.apk"
+            downloadUrl = apkUrlForDevice()
+            mimeType = APK_MIME_TYPE
+        }
 
-        val downloadId = enqueueDownload(context, apkUrl, fileName)
-        val apkFile = waitForDownload(context, downloadId)
+        val downloadId = enqueueDownload(context, downloadUrl, fileName, mimeType)
+        val downloadedFile = waitForDownload(context, downloadId)
+        val contentUri = getDownloadedFileUri(context, downloadedFile)
 
-        install(context, apkFile)
+        if (isZygisk) {
+            launchKsuWithModule(context, contentUri)
+        } else {
+            installApk(context, contentUri)
+        }
+    }
+
+    fun launchKsuWithModule(context: Context, zipUri: Uri) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(zipUri, ZIP_MIME_TYPE)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private fun fetchLatestRelease(): GitHubRelease {
-        val request = Request.Builder()
-            .url(GITHUB_API_LATEST)
-            .header("Accept", "application/vnd.github.v3+json")
-            .build()
+    private fun fetchUpdateInfo(): UpdateInfo {
+        val request = Request.Builder().url(UPDATE_JSON_URL).build()
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                error("HTTP ${response.code} fetching latest release")
+                error("HTTP ${response.code} fetching update info")
             }
             val body = response.body.string()
             return json.decodeFromString(body)
         }
     }
 
-    private fun fetchAllReleases(): List<GitHubRelease> {
-        val request = Request.Builder()
-            .url(GITHUB_API_RELEASES)
-            .header("Accept", "application/vnd.github.v3+json")
-            .build()
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                error("HTTP ${response.code} fetching releases")
-            }
-            val body = response.body.string()
-            return json.decodeFromString(body)
-        }
-    }
-
-    private fun parseUpdateInfo(release: GitHubRelease): UpdateInfo {
-        val tagName = release.tag_name
-        val versionCode = extractVersionCode(tagName)
-        val apkUrl = selectApkUrl(release.assets)
-        return UpdateInfo(
-            versionCode = versionCode,
-            versionName = release.name,
-            releaseTag = tagName,
-            releaseUrl = release.html_url,
-            changelog = release.body,
-            apkUrl = apkUrl,
-        )
-    }
-
-    private fun extractVersionCode(tagName: String): Int {
-        val vPrefix = tagName.removePrefix("v")
-        vPrefix.toIntOrNull()?.let { return it }
-        val ciMatch = Regex("""CI-?(\d+)?""", RegexOption.IGNORE_CASE).find(tagName)
-        ciMatch?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
-        val hashMatch = Regex("""[0-9a-f]{7}""", RegexOption.IGNORE_CASE).find(tagName)
-        hashMatch?.let { return Int.MAX_VALUE - 1000 }
-        return Int.MAX_VALUE - 9999
-    }
-
-    private fun enqueueDownload(context: Context, url: String, fileName: String): Long {
+    private fun enqueueDownload(
+        context: Context,
+        url: String,
+        fileName: String,
+        mimeType: String,
+    ): Long {
         val request = DownloadManager.Request(url.toUri()).apply {
-            setTitle("WCX 更新")
+            setTitle("WeKit 更新")
             setDescription("正在下载更新...")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-            setMimeType("application/vnd.android.package-archive")
+            setMimeType(mimeType)
         }
         val dm = context.getSystemService<DownloadManager>()
         return dm.enqueue(request)
@@ -313,7 +254,7 @@ object AppUpdater {
             }
         }
 
-    private fun install(context: Context, apk: File) {
+    private fun getDownloadedFileUri(context: Context, file: File): Uri {
         /*
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -327,15 +268,16 @@ object AppUpdater {
         </provider>
          */
 
-        val uri =
-            FileProvider.getUriForFile(
-                context,
-                "${PackageNames.WECHAT}.external.recovery.logprovider",
-                apk,
-            )
+        return FileProvider.getUriForFile(
+            context,
+            "${PackageNames.WECHAT}.external.recovery.logprovider",
+            file,
+        )
+    }
 
+    private fun installApk(context: Context, apkUri: Uri) {
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
+            setDataAndType(apkUri, APK_MIME_TYPE)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
         }
         context.startActivity(intent)

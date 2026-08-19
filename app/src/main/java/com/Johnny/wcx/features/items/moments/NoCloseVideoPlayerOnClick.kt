@@ -27,52 +27,42 @@ object NoCloseVideoPlayerOnClick : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodVideoOnTouchListenerOnTouch.hookBefore {
-            try {
-                val event = args[1] as MotionEvent
-                if ((event.action and 0xFF) == MotionEvent.ACTION_UP) {
-                    if (!::activityField.isInitialized) {
-                        activityField = thisObject.reflekt()
-                            .firstField { type { it isSubclassOf Activity::class } }
-                            .self
-                    }
-
-                    val activity = activityField.get(thisObject) as Activity
-
-                    if (!::viewStateField.isInitialized) {
-                        viewStateField = activity.reflekt()
-                            .firstField {
-                                type { !it.isBuiltin }
-                            }.self
-                    }
-
-                    val viewState = viewStateField.get(activity)
-
-                    // this doesn't actually inherit HeroSeekBarView
-                    val expandableSeekBar = (viewState.reflekt()
-                        .firstFieldOrNull { type = "com.tencent.mm.pluginsdk.ui.seekbar.ExpandableHeroSeekBarView" }
-                        ?: return@hookBefore).get()!!
-
-                    if (!::getToggleBtnMethod.isInitialized) {
-                        getToggleBtnMethod = expandableSeekBar.reflekt()
-                            .firstMethod { name = "getExpandBarBtn" }
-                            .self.makeAccessible()
-                    }
-
-                    val toggleBtn = getToggleBtnMethod.invoke(expandableSeekBar) as FrameLayout
-                    toggleBtn.performClick()
+            val event = args[1] as MotionEvent
+            if ((event.action and 0xFF) == MotionEvent.ACTION_UP) {
+                if (!::activityField.isInitialized) {
+                    activityField = thisObject!!.reflekt()
+                        .firstField { type { it isSubclassOf Activity::class } }
+                        .self
                 }
 
-                // always consume
-                // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
-                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
-                        result = false
-                    }
+                val activity = activityField.get(thisObject) as Activity
+
+                if (!::viewStateField.isInitialized) {
+                    viewStateField = activity.reflekt()
+                        .firstField {
+                            type { !it.isBuiltin }
+                        }.self
                 }
-            } catch (e: Throwable) {
-                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+
+                val viewState = viewStateField.get(activity)
+
+                // this doesn't actually inherit HeroSeekBarView
+                val expandableSeekBar = (viewState.reflekt()
+                    .firstFieldOrNull { type = "com.tencent.mm.pluginsdk.ui.seekbar.ExpandableHeroSeekBarView" }
+                    ?: return@hookBefore).get()!!
+
+                if (!::getToggleBtnMethod.isInitialized) {
+                    getToggleBtnMethod = expandableSeekBar.reflekt()
+                        .firstMethod { name = "getExpandBarBtn" }
+                        .self.makeAccessible()
+                }
+
+                val toggleBtn = getToggleBtnMethod.invoke(expandableSeekBar) as FrameLayout
+                toggleBtn.performClick()
             }
+
+            // always consume
+            result = false
         }
     }
 

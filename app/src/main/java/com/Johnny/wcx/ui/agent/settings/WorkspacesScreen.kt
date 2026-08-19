@@ -103,7 +103,10 @@ private fun EditWorkspaceDialog(
     onDelete: () -> Unit,
     onRename: (String) -> Unit,
 ) {
-    var name by remember { mutableStateOf(initialName) }
+    // Keyed on [initialName]: the dialog is composed unconditionally, so on first composition nothing
+    // is being edited and [initialName] is blank. Unkeyed state would leave the field empty when the
+    // user later taps a workspace to rename it.
+    var name by remember(initialName, show) { mutableStateOf(initialName) }
     WindowDialog(show = show, title = "编辑工作区", onDismissRequest = onDismiss) {
         Column {
             TextField(value = name, onValueChange = { name = it }, label = "工作区名称（会重命名真实文件夹）", useLabelAsPlaceholder = true, singleLine = true)

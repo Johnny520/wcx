@@ -89,7 +89,9 @@ fun SkillsScreen(onBack: () -> Unit) {
     SkillEditorDialog(
         show = showEditor,
         existing = editing,
-        onDismiss = { showEditor = false },
+        // Clear [editing] too: the editor's field state is keyed on it, so leaving it set would keep
+        // the abandoned edits alive and re-show them the next time the same skill is opened.
+        onDismiss = { showEditor = false; editing = null },
         onSave = { name, description, body ->
             scope.launch {
                 val ok = withContext(Dispatchers.IO) { SkillStore.save(name, description, body) }

@@ -87,8 +87,8 @@ private suspend fun getText(url: String): String = withContext(Dispatchers.IO) {
 private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
-        override fun onFailure(call: Call, error: IOException) {
-            if (continuation.isActive) continuation.resumeWithException(error)
+        override fun onFailure(call: Call, e: IOException) {
+            if (continuation.isActive) continuation.resumeWithException(e)
         }
 
         override fun onResponse(call: Call, response: Response) {
@@ -243,14 +243,14 @@ object RingDuoDuoVoiceProvider : VoiceProvider {
             )
         }
         val category = parent.metadata["category"]?.toIntOrNull() ?: error("无效分类")
-        val plain = categoryPrefix + category +
+        val plain = CATEGORY_PREFIX + category +
                 "&from=&page=${page + 1}&pagesize=25&uid=&ptime=2023-08-24&tstamp=${System.currentTimeMillis()}"
         parseRingXml(getText(wrappedUrl(plain)), page)
     }.logProviderResult(name, "browse", page)
 
     override suspend fun search(query: String, page: Int): Result<VoiceProviderPage> = runCatching {
         require(query.isNotBlank()) { "搜索内容不能为空" }
-        val plain = searchPrefix + query +
+        val plain = SEARCH_PREFIX + query +
                 "&src=input&page=${page + 1}&pagesize=15&include=all&ctdb=1&cudb=1" +
                 "&ptime=2023-08-24&tstamp=${System.currentTimeMillis()}"
         parseRingXml(getText(wrappedUrl(plain)), page)
@@ -312,11 +312,11 @@ object RingDuoDuoVoiceProvider : VoiceProvider {
         return VoiceProviderPage(items, page, hasMore)
     }
 
-    private const val categoryPrefix =
+    private const val CATEGORY_PREFIX =
         "user=12345678&prod=RingDD_ar_8.9.36.0&isrc=RingDD_ar_8.9.36.0_qq.apk" +
                 "&dev=UAWEIP90Kelin114514&vc=60089360&loc=CN&sp=cm&type=getlist&listid="
 
-    private const val searchPrefix =
+    private const val SEARCH_PREFIX =
         "user=12345678&prod=RingDD_ar_8.9.36.0&isrc=RingDD_ar_8.9.36.0_qq.apk" +
                 "&dev=HUAWEIP90Kelin114514&vc=60089360&loc=CN&sp=cm&type=search&keyword="
 }

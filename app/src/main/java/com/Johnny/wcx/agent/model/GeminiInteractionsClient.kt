@@ -3,7 +3,7 @@ package com.Johnny.wcx.agent.model
 import com.Johnny.wcx.utils.WeLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
-import io.ktor.client.request.post
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
@@ -64,92 +64,93 @@ class GeminiInteractionsClient(
         val endpoint = "${baseUrl.trimEnd('/')}/interactions?alt=sse"
         val body = LlmJson.shallowMerge(buildBody(request), request.customJsonOverride)
 
-        val resp = http.post(endpoint) {
+        // The response is scoped to `execute { … }`: every early exit below (HTTP error, stream
+        // error, break on interaction.completed) previously abandoned an open SSE body channel,
+        // leaking the connection until GC. `execute` releases it on every path, incl. exceptions.
+        http.preparePost(endpoint) {
             header(GeminiCommon.API_KEY_HEADER, apiKey)
             contentType(ContentType.Application.Json)
             setBody(LlmJson.json.encodeToString(JsonObject.serializer(), body))
-        }
-        if (!resp.status.isSuccess()) {
-            emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
-            return@flow
-        }
+        }.execute { resp ->
+            if (!resp.status.isSuccess()) {
+                emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
+                return@execute
+            }
 
-        val textBuf = StringBuilder()
-        val reasoningBuf = StringBuilder()
-        // The last thought_signature delta seen this stream — stored so it can be replayed on
-        // the next turn as a thought step preceding any function_call / model_output steps.
-        var lastThoughtSignature: String? = null
-        // Accumulates function_call argument fragments per step index.
-        val pendingCalls = sortedMapOf<Int, PartialFunctionCall>()
-        val completedCalls = mutableListOf<LlmToolCall>()
-        // callId -> toolName map: populated from input history AND from function_call steps received.
-        val toolNames = buildInputToolNames(request.messages)
-        var finishReason: String? = null
-        var usage: LlmUsage? = null
+            val textBuf = StringBuilder()
+            val reasoningBuf = StringBuilder()
+            // The last thought_signature delta seen this stream — stored so it can be replayed on
+            // the next turn as a thought step preceding any function_call / model_output steps.
+            var lastThoughtSignature: String? = null
+            // Accumulates function_call argument fragments per step index.
+            val pendingCalls = sortedMapOf<Int, PartialFunctionCall>()
+            val completedCalls = mutableListOf<LlmToolCall>()
+            var finishReason: String? = null
+            var usage: LlmUsage? = null
 
-        val channel = resp.bodyAsChannel()
-        var eventType = ""
+            val channel = resp.bodyAsChannel()
+            var eventType = ""
 
-        while (true) {
-            @Suppress("DEPRECATION")
-            val rawLine = channel.readUTF8Line() ?: break
-            val line = rawLine.trim()
+            while (true) {
+                @Suppress("DEPRECATION")
+                val rawLine = channel.readUTF8Line() ?: break
+                val line = rawLine.trim()
 
-            when {
-                line.startsWith("event:") -> {
-                    eventType = line.removePrefix("event:").trim()
-                }
+                when {
+                    line.startsWith("event:") -> {
+                        eventType = line.removePrefix("event:").trim()
+                    }
 
-                line.startsWith("data:") -> {
-                    val data = line.removePrefix("data:").trim()
-                    if (data.isEmpty()) continue
-                    val ev = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
+                    line.startsWith("data:") -> {
+                        val data = line.removePrefix("data:").trim()
+                        if (data.isEmpty()) continue
+                        val ev = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
 
-                    when (eventType) {
-                        "step.start" -> {
-                            val stepIndex = ev["index"]?.jsonPrimitive?.intOrNull ?: 0
-                            val step = ev["step"]?.jsonObject ?: continue
-                            when (step["type"]?.jsonPrimitive?.contentOrNullSafe()) {
-                                "thought" -> {
-                                    // Emit the empty sentinel so the UI shows "思考中…" immediately.
-                                    if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
-                                    // Thought summary text may be available immediately in step.start.
-                                    step["summary"]?.jsonArray?.forEach { el ->
-                                        el.jsonObject["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
-                                            if (t.isNotEmpty()) {
-                                                reasoningBuf.append(t); emit(LlmStreamEvent.ReasoningDelta(t))
+                        when (eventType) {
+                            "step.start" -> {
+                                val stepIndex = ev["index"]?.jsonPrimitive?.intOrNull ?: 0
+                                val step = ev["step"]?.jsonObject ?: continue
+                                when (step["type"]?.jsonPrimitive?.contentOrNullSafe()) {
+                                    "thought" -> {
+                                        // Emit the empty sentinel so the UI shows "思考中…" immediately.
+                                        if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
+                                        // Thought summary text may be available immediately in step.start.
+                                        step["summary"]?.jsonArray?.forEach { el ->
+                                            el.jsonObject["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
+                                                if (t.isNotEmpty()) {
+                                                    reasoningBuf.append(t); emit(LlmStreamEvent.ReasoningDelta(t))
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                "function_call" -> {
-                                    // Register the call; arguments may trickle in via step.delta.
-                                    val id = step["id"]?.jsonPrimitive?.contentOrNullSafe() ?: "call_$stepIndex"
-                                    val name = step["name"]?.jsonPrimitive?.contentOrNullSafe() ?: ""
-                                    toolNames[id] = name
-                                    pendingCalls[stepIndex] = PartialFunctionCall(id = id, name = name)
-                                    // Arguments may already be present in step.start.
-                                    step["arguments"]?.let { args ->
-                                        val pc = pendingCalls[stepIndex] ?: return@let
-                                        if (args is JsonObject) {
-                                            // Full args object up front — serialise directly.
-                                            pc.argsBuf.append(LlmJson.json.encodeToString(JsonObject.serializer(), args))
-                                            pc.argsFromObject = true
-                                        } else {
-                                            pc.argsBuf.append(args.jsonPrimitive.contentOrNullSafe() ?: "")
+                                    "function_call" -> {
+                                        // Register the call; arguments may trickle in via step.delta.
+                                        val id = step["id"]?.jsonPrimitive?.contentOrNullSafe() ?: "call_$stepIndex"
+                                        val name = step["name"]?.jsonPrimitive?.contentOrNullSafe() ?: ""
+                                        pendingCalls[stepIndex] = PartialFunctionCall(id = id, name = name)
+                                        // Arguments may already be present in step.start.
+                                        step["arguments"]?.let { args ->
+                                            val pc = pendingCalls[stepIndex] ?: return@let
+                                            if (args is JsonObject) {
+                                                // Full args object up front — serialise directly.
+                                                pc.argsBuf.append(LlmJson.json.encodeToString(JsonObject.serializer(), args))
+                                                pc.argsFromObject = true
+                                            } else {
+                                                pc.argsBuf.append(args.jsonPrimitive.contentOrNullSafe() ?: "")
+                                            }
                                         }
                                     }
-                                }
 
-                                "model_output" -> {
-                                    // Initial content may contain text blocks.
-                                    step["content"]?.jsonArray?.forEach { el ->
-                                        el.jsonObject.let { part ->
-                                            if (part["type"]?.jsonPrimitive?.contentOrNullSafe() == "text") {
-                                                part["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
-                                                    if (t.isNotEmpty()) {
-                                                        textBuf.append(t); emit(LlmStreamEvent.TextDelta(t))
+                                    "model_output" -> {
+                                        // Initial content may contain text blocks.
+                                        step["content"]?.jsonArray?.forEach { el ->
+                                            el.jsonObject.let { part ->
+                                                if (part["type"]?.jsonPrimitive?.contentOrNullSafe() == "text") {
+                                                    part["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
+                                                        if (t.isNotEmpty()) {
+                                                            textBuf.append(t); emit(LlmStreamEvent.TextDelta(t))
+                                                        }
                                                     }
                                                 }
                                             }
@@ -157,110 +158,110 @@ class GeminiInteractionsClient(
                                     }
                                 }
                             }
-                        }
 
-                        "step.delta" -> {
-                            val stepIndex = ev["index"]?.jsonPrimitive?.intOrNull ?: 0
-                            val delta = ev["delta"]?.jsonObject ?: continue
-                            when (delta["type"]?.jsonPrimitive?.contentOrNullSafe()) {
-                                "text" -> delta["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
-                                    if (t.isNotEmpty()) {
-                                        textBuf.append(t); emit(LlmStreamEvent.TextDelta(t))
+                            "step.delta" -> {
+                                val stepIndex = ev["index"]?.jsonPrimitive?.intOrNull ?: 0
+                                val delta = ev["delta"]?.jsonObject ?: continue
+                                when (delta["type"]?.jsonPrimitive?.contentOrNullSafe()) {
+                                    "text" -> delta["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
+                                        if (t.isNotEmpty()) {
+                                            textBuf.append(t); emit(LlmStreamEvent.TextDelta(t))
+                                        }
                                     }
-                                }
 
-                                "thought_summary" -> delta["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
-                                    if (t.isNotEmpty()) {
-                                        if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
-                                        reasoningBuf.append(t); emit(LlmStreamEvent.ReasoningDelta(t))
+                                    "thought_summary" -> delta["text"]?.jsonPrimitive?.contentOrNullSafe()?.let { t ->
+                                        if (t.isNotEmpty()) {
+                                            if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
+                                            reasoningBuf.append(t); emit(LlmStreamEvent.ReasoningDelta(t))
+                                        }
                                     }
-                                }
 
-                                "thought_signature" -> delta["signature"]?.jsonPrimitive?.contentOrNullSafe()?.let { sig ->
-                                    if (sig.isNotEmpty()) lastThoughtSignature = sig
-                                }
+                                    "thought_signature" -> delta["signature"]?.jsonPrimitive?.contentOrNullSafe()?.let { sig ->
+                                        if (sig.isNotEmpty()) lastThoughtSignature = sig
+                                    }
 
-                                "arguments" -> {
-                                    val pc = pendingCalls[stepIndex]
-                                    if (pc != null) {
-                                        delta["partial_arguments"]?.jsonPrimitive?.contentOrNullSafe()?.let { frag ->
-                                            pc.argsBuf.append(frag)
+                                    "arguments" -> {
+                                        val pc = pendingCalls[stepIndex]
+                                        if (pc != null) {
+                                            delta["partial_arguments"]?.jsonPrimitive?.contentOrNullSafe()?.let { frag ->
+                                                pc.argsBuf.append(frag)
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        "step.stop" -> {
-                            val stepIndex = ev["index"]?.jsonPrimitive?.intOrNull ?: 0
-                            pendingCalls.remove(stepIndex)?.let { pc ->
-                                if (pc.name.isNotEmpty()) {
-                                    val argsJson = if (pc.argsFromObject) {
-                                        pc.argsBuf.toString().ifEmpty { "{}" }
-                                    } else {
-                                        // argsBuf may be a JSON string fragment; validate and fall back.
-                                        val raw = pc.argsBuf.toString()
-                                        runCatching {
-                                            LlmJson.json.parseToJsonElement(raw).jsonObject
-                                            raw
-                                        }.getOrElse { "{}" }
+                            "step.stop" -> {
+                                val stepIndex = ev["index"]?.jsonPrimitive?.intOrNull ?: 0
+                                pendingCalls.remove(stepIndex)?.let { pc ->
+                                    if (pc.name.isNotEmpty()) {
+                                        val argsJson = if (pc.argsFromObject) {
+                                            pc.argsBuf.toString().ifEmpty { "{}" }
+                                        } else {
+                                            // argsBuf may be a JSON string fragment; validate and fall back.
+                                            val raw = pc.argsBuf.toString()
+                                            runCatching {
+                                                LlmJson.json.parseToJsonElement(raw).jsonObject
+                                                raw
+                                            }.getOrElse { "{}" }
+                                        }
+                                        completedCalls.add(LlmToolCall(id = pc.id, name = pc.name, argumentsJson = argsJson))
                                     }
-                                    completedCalls.add(LlmToolCall(id = pc.id, name = pc.name, argumentsJson = argsJson))
                                 }
                             }
-                        }
 
-                        "interaction.completed" -> {
-                            finishReason = "stop"
-                            ev["interaction"]?.jsonObject?.get("usage")?.jsonObject?.let { u ->
-                                val inp = u["total_input_tokens"]?.jsonPrimitive?.intOrNull
-                                val out = u["total_output_tokens"]?.jsonPrimitive?.intOrNull
-                                val thought = u["total_thought_tokens"]?.jsonPrimitive?.intOrNull ?: 0
-                                val total = u["total_tokens"]?.jsonPrimitive?.intOrNull
-                                usage = LlmUsage(
-                                    promptTokens = inp,
-                                    // Gemini bills output + thought tokens together; report the sum.
-                                    completionTokens = out?.let { it + thought },
-                                    totalTokens = total,
-                                )
+                            "interaction.completed" -> {
+                                finishReason = "stop"
+                                ev["interaction"]?.jsonObject?.get("usage")?.jsonObject?.let { u ->
+                                    val inp = u["total_input_tokens"]?.jsonPrimitive?.intOrNull
+                                    val out = u["total_output_tokens"]?.jsonPrimitive?.intOrNull
+                                    val thought = u["total_thought_tokens"]?.jsonPrimitive?.intOrNull ?: 0
+                                    val total = u["total_tokens"]?.jsonPrimitive?.intOrNull
+                                    usage = LlmUsage(
+                                        promptTokens = inp,
+                                        // Gemini bills output + thought tokens together; report the sum.
+                                        completionTokens = out?.let { it + thought },
+                                        totalTokens = total,
+                                    )
+                                }
+                                break
                             }
-                            break
-                        }
 
-                        "error" -> {
-                            emit(LlmStreamEvent.Failed(LlmException("Interactions stream error: $data")))
-                            return@flow
+                            "error" -> {
+                                emit(LlmStreamEvent.Failed(LlmException("Interactions stream error: $data")))
+                                return@execute
+                            }
                         }
                     }
+                    // Blank lines reset the event type (SSE spec).
+                    line.isEmpty() -> eventType = ""
                 }
-                // Blank lines reset the event type (SSE spec).
-                line.isEmpty() -> eventType = ""
             }
-        }
 
-        // Flush any pending calls that didn't get a step.stop (defensive).
-        pendingCalls.values.forEach { pc ->
-            if (pc.name.isNotEmpty()) {
-                val argsJson = pc.argsBuf.toString().let { raw ->
-                    runCatching { LlmJson.json.parseToJsonElement(raw).jsonObject; raw }.getOrElse { "{}" }
+            // Flush any pending calls that didn't get a step.stop (defensive).
+            pendingCalls.values.forEach { pc ->
+                if (pc.name.isNotEmpty()) {
+                    val argsJson = pc.argsBuf.toString().let { raw ->
+                        runCatching { LlmJson.json.parseToJsonElement(raw).jsonObject; raw }.getOrElse { "{}" }
+                    }
+                    completedCalls.add(LlmToolCall(id = pc.id, name = pc.name, argumentsJson = argsJson))
                 }
-                completedCalls.add(LlmToolCall(id = pc.id, name = pc.name, argumentsJson = argsJson))
             }
-        }
 
-        emit(
-            LlmStreamEvent.Completed(
-                LlmMessage(
-                    role = LlmRole.ASSISTANT,
-                    content = textBuf.toString().ifEmpty { null },
-                    reasoning = reasoningBuf.toString().ifEmpty { null },
-                    reasoningSignature = lastThoughtSignature,
-                    toolCalls = completedCalls,
-                ),
-                finishReason ?: if (completedCalls.isNotEmpty()) "stop" else null,
-                usage,
+            emit(
+                LlmStreamEvent.Completed(
+                    LlmMessage(
+                        role = LlmRole.ASSISTANT,
+                        content = textBuf.toString().ifEmpty { null },
+                        reasoning = reasoningBuf.toString().ifEmpty { null },
+                        reasoningSignature = lastThoughtSignature,
+                        toolCalls = completedCalls,
+                    ),
+                    finishReason ?: if (completedCalls.isNotEmpty()) "stop" else null,
+                    usage,
+                )
             )
-        )
+        }
     }
 
     // -- request body ---------------------------------------------------------

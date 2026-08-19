@@ -9,11 +9,11 @@ import android.view.View
 import android.widget.TextView
 import androidx.core.graphics.toColorInt
 import androidx.core.view.isGone
-import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.utils.HookParam
 
 /**
  * Sole annotator for real-name characters in group-chat message views.
@@ -72,7 +72,7 @@ object DisplayGroupMemberRealName : ApiFeature(), WeChatMessageViewApi.ICreateVi
 
     // ── ICreateViewListener ───────────────────────────────────────────────────
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
         if (!msgInfo.isInGroupChat) return
         if (msgInfo.isSend != 0) return

@@ -28,7 +28,7 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
     private var disableOutCall by prefOption("voip_disable_ringtone_out_call", true)
     private var disableInCall by prefOption("voip_disable_ringtone_in_call", false)
 
-    private val methodPlaySound by dexMethod(allowFailure = true) {
+    private val methodPlaySound by dexMethod {
         matcher {
             usingEqStrings("MicroMsg.BaseSceneSetting", "playSound Failed Throwable t = ")
         }
@@ -43,17 +43,7 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
                 val disOutCall = isOutCall && disableOutCall
                 val disInCall = !isOutCall && disableInCall
                 if (disOutCall || disInCall) {
-                    try {
-                        // 仅当原方法返回 void 时才设置 result = false 阻断播放
-                        if (method is java.lang.reflect.Method) {
-                            val returnType = (method as java.lang.reflect.Method).returnType
-                            if (returnType == Void.TYPE) {
-                                result = false
-                            }
-                        }
-                    } catch (e: Throwable) {
-                        // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-                    }
+                    result = false
                 }
             }
         }

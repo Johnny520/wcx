@@ -12,6 +12,8 @@ import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.runOnUiThread
+import com.Johnny.wcx.utils.reflection.BString
+import com.Johnny.wcx.utils.reflection.int
 import com.Johnny.wcx.utils.strings.isGroupChatWxId
 import java.lang.reflect.Modifier
 import java.nio.ByteBuffer
@@ -117,6 +119,25 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     private val methodSetNoDnd by dexMethod {
         matcher {
             usingEqStrings("MicroMsg.OpenImOpLogLogic", "OpenImOpLogLogic OpenIMModContactMuteOplog username:%s switch cancel")
+        }
+    }
+
+    // RoomServiceFactory.get(roomId) (`ed0.e.hj` on 8.0.76) -> the room service for that room's
+    // suffix (`@chatroom`, `@im.chatroom`, ...), which builds the room oplog operations. Anchored
+    // on the log it emits for a room id without a suffix.
+    private val methodGetRoomService by dexMethod(allowFailure = true) {
+        matcher {
+            usingEqStrings("MicroMsg.RoomServiceFactory", "get NotNullChatRoom %s")
+        }
+    }
+
+    // RoomOpLogCallbackFactory.request() (`com.tencent.mm.roomsdk.model.factory.f.b`) — hands the
+    // operation built by the room service to the oplog queue, i.e. actually sends it. 8.0.69+ logs
+    // "request oplog with result %s" and older builds "request oplog %s", so match the prefix.
+    private val methodRoomOpLogRequest by dexMethod(allowFailure = true) {
+        matcher {
+            usingStrings("MicroMsg.RoomCallbackFactory", "request oplog")
+            paramCount = 0
         }
     }
 
@@ -503,13 +524,70 @@ object WeConversationApi : ApiFeature(), IResolveDex {
 
     /**
      * Toggle "消息免打扰" for [convId] and sync it to the server.
+     *
+     * Group chats and everyone else are muted through completely different server operations, so
+     * this dispatches on the talker — see [setChatRoomDnd] for why the contact path cannot be used
+     * for a group.
      */
     fun setDnd(convId: String, dnd: Boolean) {
+        if (convId.isGroupChatWxId) {
+            setChatRoomDnd(convId, dnd)
+            return
+        }
         val stub = methodSetDnd.method.parameterTypes[0].createInstance(convId)
         if (dnd) {
             methodSetDnd.method.invoke(null, stub, true)
         } else {
             methodSetNoDnd.method.invoke(null, stub, true)
+        }
+    }
+
+    /**
+     * Mute / unmute a **group chat** by sending the `OpModChatRoomNotify` oplog (op 20), which is
+     * what WeChat's own ChatroomInfoUI switch does.
+     *
+     * A group's mute state is *not* the contact's mute bit: the server keeps it as the room's
+     * ChatRoomNotify flag (`0` = muted, see [isDnd]) and only mirrors it into `rcontact.type & 512`
+     * when it pushes the room contact back down. Running a group through the contact path
+     * ([methodSetDnd]) therefore flips the local `512` bit — so the row does turn muted for a
+     * moment — but the modContact oplog it sends is meaningless for a room, and the next contact
+     * push from the server resets the bit, which is the "reverts after a few seconds" symptom.
+     *
+     * Like the native switch, this only sends the operation; the local contact (and with it the
+     * conversation-list mute icon) is updated when the server pushes the room contact back.
+     *
+     * Both `@chatroom` and OpenIM `@im.chatroom` rooms are covered: the room service is picked by
+     * the room id's suffix, and each implementation builds its own flavour of the operation.
+     */
+    private fun setChatRoomDnd(roomId: String, dnd: Boolean) {
+        if (methodGetRoomService.isPlaceholder || methodRoomOpLogRequest.isPlaceholder) {
+            WeLogger.w(TAG, "room notify oplog unavailable on this build, cannot set dnd for $roomId")
+            return
+        }
+        try {
+            val serviceFactory = methodGetRoomService.method.declaringClass
+            val roomService = methodGetRoomService.method
+                .invoke(WeServiceApi.getServiceByClass(serviceFactory.interfaces[0]), roomId)!!
+            // RoomService.modChatRoomNotify(roomId, notifyMsg, defaultNeedPushFlag): notifyMsg is
+            // the ChatRoomNotify value to set (1 = notify, 0 = muted). The push flag selects which
+            // messages still notify while muted; 0 is the value 8.0.65 hardcodes and the default of
+            // the `clicfg_chatroom_mute_refine_default` config newer builds read it from.
+            val operation = roomService.reflekt()
+                .firstMethod {
+                    parameters(BString, int, int)
+                    returnType(methodRoomOpLogRequest.method.declaringClass.superclass!!)
+                }
+                .invoke(roomId, if (dnd) 0 else 1, 0)
+            // An unknown room suffix yields WeChat's no-op room service, whose operation object is
+            // not the oplog-backed one — sending it is impossible, and silently doing nothing here
+            // would look exactly like the bug this replaced.
+            if (operation == null || !methodRoomOpLogRequest.method.declaringClass.isInstance(operation)) {
+                WeLogger.w(TAG, "no room oplog service for $roomId, dnd=$dnd not applied")
+                return
+            }
+            methodRoomOpLogRequest.method.invoke(operation)
+        } catch (ex: Exception) {
+            WeLogger.w(TAG, "exception while setting chat room dnd=$dnd for $roomId", ex)
         }
     }
 

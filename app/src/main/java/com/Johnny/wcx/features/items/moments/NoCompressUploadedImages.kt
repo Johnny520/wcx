@@ -23,8 +23,8 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.fs.asPath
-import com.Johnny.wcx.utils.reflection.BBool
 import com.Johnny.wcx.utils.reflection.BString
+import com.Johnny.wcx.utils.reflection.bool
 import kotlin.io.path.copyTo
 
 @Feature(
@@ -64,7 +64,7 @@ object NoCompressUploadedImages : ClickableFeature(), IResolveDex {
     private val vfsGetCachePathMethod by lazy {
         WeMomentsApi.classVfs.reflekt().firstMethod {
             modifiers(Modifiers.STATIC)
-            parameters(BString, BBool)
+            parameters(BString, bool)
             returnType = BString
         }
     }
@@ -95,7 +95,7 @@ object NoCompressUploadedImages : ClickableFeature(), IResolveDex {
                     val cachePath = vfsGetCachePathMethod.invoke(null, strConcat2, true) as? String
                     if (cachePath != null) {
                         val dst = cachePath.asPath
-                        src.copyTo(dst)
+                        src.copyTo(dst, overwrite = true)
                     }
                 }
             }

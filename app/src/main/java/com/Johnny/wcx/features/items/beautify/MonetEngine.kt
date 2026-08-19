@@ -16,6 +16,8 @@ import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.features.items.beautify.MonetEngine.DEFAULT_COLOR
+import com.Johnny.wcx.features.items.beautify.MonetEngine.primaryColor
 import com.Johnny.wcx.ui.utils.theme.SeedResolver
 import com.Johnny.wcx.ui.utils.theme.ThemeSettings
 import com.Johnny.wcx.utils.HostInfo
@@ -41,34 +43,15 @@ object MonetEngine : ApiFeature() {
     private const val DEFAULT_COLOR = -16268960 // 0xFF07C160
 
     private val scheme by lazy {
-        try {
-            val dark = HostInfo.application.isDarkMode
-            SeedResolver.materialScheme(SeedResolver.customSeed(HostInfo.application, dark), dark)
-        } catch (e: Exception) {
-            WeLogger.w(TAG, "failed to resolve monet scheme, device may not support dynamic colors", e)
-            throw e
-        }
+        val dark = HostInfo.application.isDarkMode
+        SeedResolver.materialScheme(SeedResolver.customSeed(HostInfo.application, dark), dark)
     }
 
     /** Accent that replaces the brand green (M3 `primary`). */
-    private val primaryColor by lazy {
-        try {
-            scheme.primary.toArgb()
-        } catch (e: Exception) {
-            WeLogger.w(TAG, "failed to get primary color from scheme", e)
-            DEFAULT_COLOR // fallback to WeChat green so hooks are no-ops
-        }
-    }
+    private val primaryColor by lazy { scheme.primary.toArgb() }
 
     /** Legible foreground for content sitting on [primaryColor] (M3 `onPrimary`). */
-    private val onPrimaryColor by lazy {
-        try {
-            scheme.onPrimary.toArgb()
-        } catch (e: Exception) {
-            WeLogger.w(TAG, "failed to get onPrimary color from scheme", e)
-            -1 // white fallback
-        }
-    }
+    private val onPrimaryColor by lazy { scheme.onPrimary.toArgb() }
 
     override fun onEnable() {
         if (!(ThemeSettings.applyToWechat && ThemeSettings.customColor)) {
@@ -76,96 +59,66 @@ object MonetEngine : ApiFeature() {
             return
         }
 
-        try {
-            // Force resolution now so failures are caught early
-            val resolvedPrimary = primaryColor
-            val resolvedOnPrimary = onPrimaryColor
-            WeLogger.i(TAG, "monet colors resolved: primary=#${Integer.toHexString(resolvedPrimary)}, onPrimary=#${Integer.toHexString(resolvedOnPrimary)}")
-        } catch (e: Exception) {
-            WeLogger.w(TAG, "monet color resolution failed, recoloring disabled", e)
-            return
-        }
-
-        runCatching {
-            "com.tencent.mm.ui.widget.MMSwitchBtn".toClass().constructors.forEach {
-                it.hookAfter {
-                    thisObject.reflekt()
-                        .fields {
-                            type = Int::class
-                            superclass()
-                        }.forEach { field ->
-                            if (field.get()!! as Int == DEFAULT_COLOR)
-                                field.set(primaryColor)
-                        }
-                }
+        "com.tencent.mm.ui.widget.MMSwitchBtn".toClass().constructors.forEach {
+            it.hookAfter {
+                thisObject!!.reflekt()
+                    .fields {
+                        type = Int::class
+                        superclass()
+                    }.forEach { field ->
+                        if (field.get()!! as Int == DEFAULT_COLOR)
+                            field.set(primaryColor)
+                    }
             }
-        }.onFailure {
-            WeLogger.w(TAG, "failed to hook MMSwitchBtn", it)
         }
 
         // GradientDrawable/PaintDrawable fills (incl. WeChat's green button shapes) draw through
         // Paint.setColor, so swapping the brand green here recolors those backgrounds to primary.
-        runCatching {
-            Paint::class.reflekt()
-                .firstMethod { name = "setColor" }
-                .hookBefore {
-                    val color = args[0] as Int
-                    if (color != DEFAULT_COLOR) return@hookBefore
-                    args[0] = primaryColor
-                }
-        }.onFailure {
-            WeLogger.w(TAG, "failed to hook Paint.setColor", it)
-        }
+        Paint::class.reflekt()
+            .firstMethod { name = "setColor" }
+            .hookBefore {
+                val color = args[0] as Int
+                if (color != DEFAULT_COLOR) return@hookBefore
+                args[0] = primaryColor
+            }
 
         // ColorDrawable draws via Canvas.drawColor (not Paint.setColor), so it needs its own swap.
-        runCatching {
-            View::class.reflekt().firstMethod { name = "setBackgroundDrawable" }.hookBefore {
-                val drawable = args[0] as? Drawable? ?: return@hookBefore
-                if (drawable is ColorDrawable && drawable.color == DEFAULT_COLOR) {
-                    drawable.color = primaryColor
-                }
+        View::class.reflekt().firstMethod { name = "setBackgroundDrawable" }.hookBefore {
+            val drawable = args[0] as? Drawable? ?: return@hookBefore
+            if (drawable is ColorDrawable && drawable.color == DEFAULT_COLOR) {
+                drawable.color = primaryColor
             }
-        }.onFailure {
-            WeLogger.w(TAG, "failed to hook View.setBackgroundDrawable", it)
         }
 
         // Green (brand) buttons already get their background recolored to primary by the Paint /
         // ColorDrawable hooks above. Neutral / cancel buttons keep their own colors —
         // we deliberately don't blanket-tint every Button.
-        runCatching {
-            View::class.reflekt().firstMethod { name = "onFinishInflate" }.hookAfter {
-                val button = thisObject as? Button ?: return@hookAfter
-                if (button.background?.hasBrandGreen() == true) {
-                    button.setTextColor(onPrimaryColor)
-                    button.backgroundTintList = ColorStateList.valueOf(primaryColor)
-                }
+        View::class.reflekt().firstMethod { name = "onFinishInflate" }.hookAfter {
+            val button = thisObject as? Button ?: return@hookAfter
+            if (button.background?.hasBrandGreen() == true) {
+                button.setTextColor(onPrimaryColor)
+                button.backgroundTintList = ColorStateList.valueOf(primaryColor)
             }
-        }.onFailure {
-            WeLogger.w(TAG, "failed to hook View.onFinishInflate", it)
         }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             return
         }
 
-        runCatching {
-            TextView::class.reflekt().firstMethod { name = "onAttachedToWindow" }.hookAfter {
-                val editText = thisObject as? EditText? ?: return@hookAfter
-                editText.apply {
-                    textCursorDrawable?.apply {
-                        setTint(primaryColor)
-                        editText.textCursorDrawable = this
-                    }
-
-                    // android views are weird
-                    val handle = textSelectHandle ?: return@apply
-                    handle.mutate()
-                    setTextSelectHandle(handle)
-                    textSelectHandle!!.setTint(primaryColor)
+        TextView::class.reflekt().firstMethod { name = "onAttachedToWindow" }.hookAfter {
+            val editText = thisObject as? EditText? ?: return@hookAfter
+            editText.apply {
+                textCursorDrawable?.apply {
+                    setTint(primaryColor)
+                    editText.textCursorDrawable = this
                 }
+
+                // android views are weird
+                val handle = textSelectHandle ?: return@apply
+                handle.mutate()
+                setTextSelectHandle(handle)
+                textSelectHandle!!.setTint(primaryColor)
             }
-        }.onFailure {
-            WeLogger.w(TAG, "failed to hook EditText cursor tinting", it)
         }
     }
 

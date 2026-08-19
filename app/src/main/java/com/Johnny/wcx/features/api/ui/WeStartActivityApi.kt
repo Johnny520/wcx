@@ -3,10 +3,10 @@ package com.Johnny.wcx.features.api.ui
 import android.app.Activity
 import android.content.ContextWrapper
 import android.content.Intent
-import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -14,7 +14,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 object WeStartActivityApi : ApiFeature() {
 
     fun interface IStartActivityListener {
-        fun onStartActivity(param: XC_MethodHook.MethodHookParam, intent: Intent)
+        fun onStartActivity(param: HookParam, intent: Intent)
     }
 
     private const val TAG = "WeStartActivityApi"
@@ -45,7 +45,7 @@ object WeStartActivityApi : ApiFeature() {
         }
     }
 
-    private fun handleStartActivity(param: XC_MethodHook.MethodHookParam) {
+    private fun handleStartActivity(param: HookParam) {
         val intent = param.args[0] as? Intent ?: param.args[1] as? Intent
         if (intent == null) {
             WeLogger.w(TAG, "startActivity called but no Intent found in arguments")

@@ -1,10 +1,10 @@
 package com.Johnny.wcx.features.items.official_accounts
 
 import android.content.Intent
-import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.features.api.ui.WeStartActivityApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 
 @Feature(
@@ -23,7 +23,7 @@ object UseMultiWebViewForOfficialAccounts : SwitchFeature(), WeStartActivityApi.
         WeStartActivityApi.removeListener(this)
     }
 
-    override fun onStartActivity(param: XC_MethodHook.MethodHookParam, intent: Intent) {
+    override fun onStartActivity(param: HookParam, intent: Intent) {
         val className = intent.component?.className ?: return
         if (!className.endsWith(".ui.timeline.preload.ui.TmplWebViewMMUI")) return
 

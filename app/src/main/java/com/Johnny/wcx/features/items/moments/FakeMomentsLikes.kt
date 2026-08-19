@@ -38,6 +38,7 @@ import com.Johnny.wcx.utils.android.showToast
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.LinkedList
+import java.util.concurrent.ConcurrentHashMap
 
 @Feature(name = "伪集赞", categories = ["朋友圈"], description = "自定义朋友圈点赞用户列表")
 object FakeMomentsLikes : SwitchFeature(), WeMomentsContextMenuApi.IMenuItemsProvider,
@@ -46,7 +47,8 @@ object FakeMomentsLikes : SwitchFeature(), WeMomentsContextMenuApi.IMenuItemsPro
     private const val TAG = "FakeMomentsLikes"
 
     // 存储每个朋友圈动态的伪点赞用户配置 (snsId -> Set<WxId>)
-    private val fakeLikeWxIds = mutableMapOf<Long, Set<String>>()
+    // 由 UI 线程写入 (菜单里选择伪点赞联系人), 由数据库监听线程读取, 因此必须是并发安全的.
+    private val fakeLikeWxIds = ConcurrentHashMap<Long, Set<String>>()
     private lateinit var parseFromMethod: Method
     private lateinit var snsUserProtobufClass: Class<*>
     private lateinit var snsUserProtobufClassWxIdField: Field

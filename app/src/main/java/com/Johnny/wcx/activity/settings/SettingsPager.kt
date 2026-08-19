@@ -2,11 +2,9 @@ package com.Johnny.wcx.activity.settings
 
 
 import android.content.Context
-import android.content.Intent
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,28 +15,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,17 +36,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.clickable
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
-import androidx.compose.material3.CircularProgressIndicator
 import coil3.compose.AsyncImage
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Account_circle
@@ -72,13 +57,11 @@ import com.composables.icons.materialsymbols.outlined.Contrast
 import com.composables.icons.materialsymbols.outlined.Delete_forever
 import com.composables.icons.materialsymbols.outlined.Download
 import com.composables.icons.materialsymbols.outlined.Frame_bug
-import com.composables.icons.materialsymbols.outlined.History
 import com.composables.icons.materialsymbols.outlined.Label
 import com.composables.icons.materialsymbols.outlined.License
 import com.composables.icons.materialsymbols.outlined.Lightbulb_2
 import com.composables.icons.materialsymbols.outlined.Notifications
 import com.composables.icons.materialsymbols.outlined.Palette
-import com.composables.icons.materialsymbols.outlined.Public
 import com.composables.icons.materialsymbols.outlined.Rule_settings
 import com.composables.icons.materialsymbols.outlined.Search
 import com.composables.icons.materialsymbols.outlined.Style
@@ -87,34 +70,32 @@ import com.composables.icons.materialsymbols.outlined.Update
 import com.composables.icons.materialsymbols.outlined.Upload
 import com.composables.icons.materialsymbols.outlined.Volunteer_activism
 import com.composables.icons.materialsymbols.outlined.Wallpaper
-import com.composables.icons.materialsymbols.outlined.Qr_code
-import com.composables.icons.materialsymbols.outlined.Send
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.tencent.mm.ui.LauncherUI
 import com.Johnny.wcx.BuildConfig
-import com.Johnny.wcx.aboutlibraries.AboutLibrariesProvider
+import com.Johnny.wcx.R
 import com.Johnny.wcx.activity.TransparentActivity
-import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.items.debug.ResetDexCache
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.MiuixSmallTitle
 import com.Johnny.wcx.ui.utils.GitHubIcon
+import com.Johnny.wcx.ui.utils.TelegramIcon
 import com.Johnny.wcx.ui.utils.theme.AppColorSpec
 import com.Johnny.wcx.ui.utils.theme.AppPaletteStyle
 import com.Johnny.wcx.ui.utils.theme.AppThemeMode
 import com.Johnny.wcx.ui.utils.theme.ThemeSettings
 import com.Johnny.wcx.utils.AppUpdater
 import com.Johnny.wcx.utils.HostInfo
-import com.Johnny.wcx.utils.ReleaseItem
 import com.Johnny.wcx.utils.UpdateResult
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToastSuspend
 import com.Johnny.wcx.utils.formatEpoch
 import com.Johnny.wcx.utils.openInSystem
 import com.Johnny.wcx.utils.serialization.DefaultJson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -156,20 +137,16 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 // ---------------------------------------------------------------------------
 
 @Composable
-fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit) {
+fun SettingsPager(onOpenLicense: () -> Unit) {
     val context = LocalComponentActivity.current
 
     var showClearConfirm by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<UpdateResult.UpdateAvailable?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
-    var showChangelog by remember { mutableStateOf(false) }
-    var showDonate by remember { mutableStateOf(false) }
 
     ClearConfigDialog(show = showClearConfirm, onDismiss = { showClearConfirm = false })
     UpdateAvailableDialog(info = updateInfo, onDismiss = { updateInfo = null }, context = context)
     UpdateErrorDialog(message = updateError, onDismiss = { updateError = null })
-    ChangelogDialog(show = showChangelog, onDismiss = { showChangelog = false }, context = context)
-    DonateDialog(show = showDonate, onDismiss = { showDonate = false }, context = context)
 
     MiuixListScaffold(title = "设置") {
         // Account info card — shown at top of Settings tab.
@@ -207,6 +184,7 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
                     title = "清理消息内容微信 ID 前缀时允许非标准 ID",
                     summary = "允许处理不带 'wxid_' 前缀的微信 ID, 可能导致误伤消息原始内容 (实验性)",
                     icon = MaterialSymbols.Outlined.Rule_settings,
+                    default = true,
                 )
             }
         }
@@ -276,12 +254,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
                         )
                     },
                 )
-                PrefArrow(
-                    title = "更新记录",
-                    summary = "查看历史版本更新内容",
-                    icon = MaterialSymbols.Outlined.History,
-                    onClick = { showChangelog = true },
-                )
             }
         }
 
@@ -289,12 +261,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "关于", modifier = Modifier.padding(top = 12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
-                PrefArrow(
-                    title = "鸣谢名单",
-                    summary = "感谢为本模块提供基础和灵感的项目与作者",
-                    icon = MaterialSymbols.Outlined.Volunteer_activism,
-                    onClick = onOpenAcknowledgements,
-                )
                 PrefArrow(title = "版本", summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", icon = MaterialSymbols.Outlined.Label)
                 PrefArrow(title = "构建提交时间", summary = formatEpoch(BuildConfig.BUILD_TIMESTAMP, true), icon = MaterialSymbols.Outlined.Build_circle)
                 PrefArrow(
@@ -306,7 +272,14 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
                     title = "捐赠",
                     summary = "支持项目开发 (模块完全开源免费, 捐赠无特权)",
                     icon = MaterialSymbols.Outlined.Volunteer_activism,
-                    onClick = { showDonate = true },
+                    onClick = {
+//                        context.startActivity(Intent().apply {
+//                            setClassName(HostInfo.packageName, "${PackageNames.WECHAT}.plugin.collect.reward.ui.QrRewardSelectMoneyUI")
+//                            putExtra("key_qrcode_url", "m0n#Z7LGW*s4AVH!z'd(?)")
+//                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+//                        })
+                        "https://ifdian.net/a/ujhhgtg".toUri().openInSystem(context, true)
+                    },
                 )
                 PrefArrow(
                     title = "开放源代码许可",
@@ -316,19 +289,14 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
                 )
                 PrefArrow(
                     title = "GitHub",
-                    summary = "Johnny520/wcx",
+                    summary = "Ujhhgtg/WeKit",
                     icon = GitHubIcon,
-                    onClick = { "https://github.com/Johnny520/wcx".toUri().openInSystem(context, true) })
+                    onClick = { "https://github.com/Ujhhgtg/WeKit".toUri().openInSystem(context, true) })
                 PrefArrow(
-                    title = "TG 群组",
-                    summary = "@wcx12138",
-                    icon = MaterialSymbols.Outlined.Send,
-                    onClick = { "https://t.me/wcx12138".toUri().openInSystem(context, true) })
-                PrefArrow(
-                    title = "官方网站",
-                    summary = "https://johnny520.github.io/Johnny/",
-                    icon = MaterialSymbols.Outlined.Public,
-                    onClick = { "https://johnny520.github.io/Johnny/".toUri().openInSystem(context, true) })
+                    title = "Telegram",
+                    summary = "https://t.me/+7j5dJ6g16B43OWVl",
+                    icon = TelegramIcon,
+                    onClick = { "https://t.me/+7j5dJ6g16B43OWVl".toUri().openInSystem(context, true) })
             }
         }
 
@@ -588,8 +556,11 @@ private fun PrefSwitch(
     title: String,
     summary: String,
     icon: ImageVector,
+    default: Boolean = false,
 ) {
-    var checked by remember { mutableStateOf(WePrefs.getBoolOrFalse(key)) }
+    // Must match the default declared on the matching `prefOption`, otherwise the switch shows
+    // "off" for a preference that is actually on until the user toggles it once.
+    var checked by remember(key, default) { mutableStateOf(WePrefs.getBoolOrDef(key, default)) }
     SwitchPreference(
         title = title,
         summary = summary,
@@ -682,7 +653,7 @@ private fun exportConfig(context: Context) {
                 withContext(Dispatchers.Main) { finish() }
             }
         }
-        exportLauncher.launch("wcx_prefs_backup.json")
+        exportLauncher.launch("wekit_prefs_backup.json")
     }
 }
 
@@ -779,7 +750,7 @@ private fun ClearConfigDialog(show: Boolean, onDismiss: () -> Unit) {
 private fun UpdateAvailableDialog(
     info: UpdateResult.UpdateAvailable?,
     onDismiss: () -> Unit,
-    context: Context,
+    context: ComponentActivity,
 ) {
     MiuixConfirmDialog(
         show = info != null,
@@ -792,8 +763,17 @@ private fun UpdateAvailableDialog(
         onConfirm = {
             val target = info ?: return@MiuixConfirmDialog
             onDismiss()
-            CoroutineScope(Dispatchers.Default).launch {
-                AppUpdater.downloadAndInstall(context, target.info)
+            // The activity's scope, so closing settings mid-download cancels the download wait
+            // (and with it the BroadcastReceiver it keeps registered on this activity).
+            // This UI is proxied into WeChat's process: an escaping exception here would take
+            // WeChat down with it, so nothing may leave this coroutine.
+            context.lifecycleScope.launch(Dispatchers.Default) {
+                runCatching { AppUpdater.downloadAndInstall(context, target.info) }
+                    .onFailure { e ->
+                        if (e is CancellationException) throw e
+                        WeLogger.e("AppUpdater", "failed to download update", e)
+                        showToastSuspend(context, "下载更新失败: ${e.message ?: "未知错误"}")
+                    }
             }
         },
     )
@@ -808,134 +788,6 @@ private fun UpdateErrorDialog(message: String?, onDismiss: () -> Unit) {
         dismissText = "关闭",
         onDismiss = onDismiss,
     )
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ChangelogDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
-    var releases by remember { mutableStateOf<List<ReleaseItem>?>(null) }
-    var loadingError by remember { mutableStateOf<String?>(null) }
-    var retryTick by remember { mutableStateOf(0) }
-
-    LaunchedEffect(show, retryTick) {
-        if (!show) return@LaunchedEffect
-        releases = null
-        loadingError = null
-        AppUpdater.getReleaseHistory()
-            .onSuccess { releases = it }
-            .onFailure { loadingError = it.message ?: "未知错误" }
-    }
-
-    WindowDialog(show = show, title = "更新记录", onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            when {
-                releases == null && loadingError == null -> {
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                }
-                loadingError != null -> {
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = "加载失败", color = MiuixTheme.colorScheme.error)
-                            Spacer(Modifier.height(8.dp))
-                            Text(text = loadingError!!, fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                            Spacer(Modifier.height(12.dp))
-                            TextButton(text = "重试", onClick = { retryTick++ })
-                        }
-                    }
-                }
-                releases.isNullOrEmpty() -> {
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp), contentAlignment = Alignment.Center) {
-                        Text(text = "暂无更新记录", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    }
-                }
-                else -> {
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 400.dp)) {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(vertical = 4.dp),
-                        ) {
-                            items(releases!!, key = { it.tag }) { release ->
-                                ChangelogItem(release, onClick = {
-                                    release.url.toUri().openInSystem(context, true)
-                                })
-                            }
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            TextButton(
-                text = "关闭",
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun ChangelogItem(release: ReleaseItem, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = release.name,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                if (release.isPrerelease) {
-                    Text(
-                        text = "预发布",
-                        fontSize = 11.sp,
-                        color = MiuixTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(MiuixTheme.colorScheme.secondaryContainer)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
-            }
-            Text(
-                text = formatReleaseDate(release.publishedAt),
-                fontSize = 12.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-            if (release.body.isNotBlank()) {
-                Text(
-                    text = release.body.take(200).let { if (release.body.length > 200) "$it..." else it },
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    maxLines = 5,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
-        }
-    }
-}
-
-private fun formatReleaseDate(isoDate: String): String {
-    return runCatching {
-        val input = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
-        input.timeZone = java.util.TimeZone.getTimeZone("UTC")
-        val date = input.parse(isoDate) ?: return@runCatching isoDate
-        val output = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
-        output.format(date)
-    }.getOrDefault(isoDate)
 }
 
 /** Two-button (cancel / confirm) miuix dialog. */
@@ -991,56 +843,18 @@ private fun MiuixMessageDialog(
 }
 
 
-@Composable
-private fun DonateDialog(show: Boolean, onDismiss: () -> Unit, context: Context) {
-    WindowDialog(show = show, title = "捐赠支持", onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-        ) {
-
-            Card(modifier = Modifier.fillMaxWidth(), onClick = {
-                "https://ifdian.net/a/Johnny520".toUri().openInSystem(context, true)
-            }) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFE85D04)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(text = "爱", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(text = "爱发电", fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurface)
-                            Text(text = "点击跳转至爱发电页面", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-            TextButton(
-                text = "关闭",
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-            )
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 //  Open-source license screen
 // ---------------------------------------------------------------------------
 
 @Composable
 fun LicenseScreen(onBack: () -> Unit) {
-    val libraries = remember {
-        Libs.Builder().withJson(AboutLibrariesProvider.ABOUT_LIBRARIES_JSON).build().libraries
+    val resources = LocalResources.current
+    val libraries = remember(resources) {
+        val json = resources.openRawResource(R.raw.aboutlibraries)
+            .bufferedReader()
+            .use { it.readText() }
+        Libs.Builder().withJson(json).build().libraries
     }
 
     val queryState = rememberTextFieldState()
@@ -1191,123 +1005,5 @@ private fun LibraryRow(library: Library, modifier: Modifier = Modifier) {
                 }
             }
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  Acknowledgements screen
-// ---------------------------------------------------------------------------
-
-@Composable
-fun AcknowledgementsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    MiuixListScaffold(
-        title = "鸣谢",
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = MaterialSymbols.Outlined.Arrow_back,
-                    contentDescription = "返回",
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
-            }
-        },
-    ) {
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight()
-                    .background(MiuixTheme.colorScheme.surface)
-                    .padding(top = 24.dp, bottom = 20.dp),
-            ) {
-                Text(
-                    text = "鸣谢名单",
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 22.sp,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "本模块大量功能实现源于 wekit 模块作者，已获作者授权。",
-                        fontSize = 14.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        lineHeight = 22.sp,
-                    )
-                }
-            }
-        }
-
-        item {
-            Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            runCatching {
-                                val intent = Intent(Intent.ACTION_VIEW, "https://github.com/Ujhhgtg/WeKit".toUri())
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            }.onFailure {
-                                WeLogger.e("Settings", "failed to open wekit url", it)
-                            }
-                        }
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "wekit",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MiuixTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = ":",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    Text(
-                        text = "https://github.com/Ujhhgtg/WeKit",
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        textDecoration = TextDecoration.Underline,
-                    )
-                }
-            }
-        }
-
-        item {
-            Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "首先，我想明确一点：二次创作本身是一件非常好的事情。无论是新增实用功能，还是修复原有缺陷、优化使用体验，这些贡献都能切实提升项目的实用价值，让工具变得更好用、更完善。\n\n在遵守开源精神的前提下，发挥各自的创意与技术，打磨出更优秀、更强大的作品。如果这些改进能够继续以免费的形式开放分享给社区，让更多人受益，甚至可以说，技术进步的最终意义，本就是服务更多人（请允许我在此稍作夸大其词）。\n\n在二次发布或衍生项目中，保留原项目的开源信息、作者署名及相关声明。这既是对开源社区基本规则的尊重，也是对原作者的劳动成果的一种认可。\n当然，是否保留这些信息，最终取决于每位开发者的个人判断与选择。",
-                        fontSize = 14.sp,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        lineHeight = 22.sp,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = "· 开源的核心在于共享与进步，愿我们共同珍惜并维护这份来之不易的开放与信任。",
-                        fontSize = 14.sp,
-                        color = MiuixTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                        lineHeight = 22.sp,
-                    )
-                }
-            }
-        }
-
-        item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
     }
 }

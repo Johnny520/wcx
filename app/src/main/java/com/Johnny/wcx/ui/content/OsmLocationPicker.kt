@@ -202,6 +202,13 @@ fun OsmLocationPicker(
                             mapView.setTileSource(tileSource)
                         }
                     },
+                    // osmdroid 的 MapView 必须显式 onDetach, 否则瓦片下载线程池和瓦片缓存
+                    // 会一直挂在微信这个长生命周期进程上, 每开一次选点就泄漏一份。
+                    onRelease = { mapView ->
+                        if (mapViewRef === mapView) mapViewRef = null
+                        markerRef.value = null
+                        mapView.onDetach()
+                    },
                 )
 
                 // Hint overlay – hidden once a point is chosen

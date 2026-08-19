@@ -158,6 +158,12 @@ object CrashLogsManager {
 
     val crashLogDirPath: String get() = crashLogsDir.absolutePathString()
 
+    /**
+     * File-name prefix every crash report must carry — [allCrashLogs] filters on it. Handed to the
+     * native handler at install time so it names its reports the same way this object does.
+     */
+    val crashLogFileNamePrefix: String get() = CRASH_LOGS_PREFIX
+
     fun setPendingJavaCrashFlag(logFileName: String) {
         try {
             (crashLogsDir / PENDING_JAVA_CRASH_FLAG).writeText(logFileName)
@@ -215,9 +221,9 @@ object CrashLogsManager {
 
     private const val CRASH_LOGS_DIR = "crashes"
 
-    // Unified with the run-log naming style (logs/wcx-*.log): "wcx-crash-" prefix plus a
+    // Unified with the run-log naming style (logs/wekit-*.log): "wekit-crash-" prefix plus a
     // dash-separated timestamp precise to the millisecond so multiple crashes per second stay unique.
-    private const val CRASH_LOGS_PREFIX = "wcx-crash-"
+    private const val CRASH_LOGS_PREFIX = "wekit-crash-"
     private const val CRASH_LOG_SUFFIX = ".log"
     private const val PENDING_CRASH_FLAG = "pending_crash.flag"
     private const val PENDING_JAVA_CRASH_FLAG = "pending_java_crash.flag"

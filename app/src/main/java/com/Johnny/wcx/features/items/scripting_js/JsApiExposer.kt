@@ -2,7 +2,6 @@ package com.Johnny.wcx.features.items.scripting_js
 
 import android.os.Handler
 import android.os.Looper
-import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.utils.createInstance
 import dev.ujhhgtg.reflekt.utils.makeAccessible
 import dev.ujhhgtg.reflekt.utils.toClass
@@ -10,14 +9,15 @@ import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.net.WePacketHelper
 import com.Johnny.wcx.features.api.net.WeProtoData
+import com.Johnny.wcx.utils.HookHandle
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.fs.createDirsSafe
 import com.Johnny.wcx.utils.hookAfterDirectly
 import com.Johnny.wcx.utils.hookBeforeDirectly
-import com.Johnny.wcx.utils.reflection.DexKit
 import com.Johnny.wcx.utils.reflection.asMethod
+import com.Johnny.wcx.utils.reflection.withDexKit
 import com.Johnny.wcx.utils.serialization.DefaultJson
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -70,6 +70,7 @@ object JsApiExposer {
     private const val TAG_XPOSED_API = "JsApiExposer.XposedApi"
     private const val TAG_REFLECT_API = "JsApiExposer.ReflectApi"
     private const val TAG_DEXKIT_API = "JsApiExposer.DexKitApi"
+    private const val TAG_WECHAT_API = "JsApiExposer.WeChatApi"
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
@@ -819,6 +820,104 @@ object JsApiExposer {
         ScriptableObject.putProperty(scope, "hostinfo", hostObj)
     }
 
+    /**
+     * Talker of the `onMessage` callback currently running *on this thread*.
+     *
+     * A script's scope is built once and reused for every event, so the recipient of
+     * `wechat.reply*()` cannot be baked into it. The engine publishes it here for the duration of
+     * each `onMessage` call instead: message callbacks arrive on WeChat's database thread(s) and a
+     * script never runs concurrently with itself, so a thread-local is enough to keep two chats —
+     * or two scripts — from seeing each other's talker.
+     */
+    private val currentTalker = ThreadLocal<String?>()
+
+    /** Publishes [talker] as the reply target of this thread; returns the value it replaced. */
+    internal fun beginMessageContext(talker: String): String? {
+        val previous = currentTalker.get()
+        currentTalker.set(talker)
+        return previous
+    }
+
+    /** Restores what [beginMessageContext] replaced (sending a reply can re-enter onMessage). */
+    internal fun endMessageContext(previous: String?) {
+        if (previous == null) currentTalker.remove() else currentTalker.set(previous)
+    }
+
+    /**
+     * Sends whatever `onMessage` returned back to [talker], per the `MessageResponse` contract in
+     * `globals.d.ts`: a string is a text reply, an object selects a message kind, anything
+     * else (including `null`/`undefined`) means "no reply".
+     *
+     * Never throws — it runs on WeChat's database insert path, which is not hook-guarded.
+     */
+    internal fun dispatchMessageResponse(talker: String, result: Any?) {
+        try {
+            when {
+                result == null || result is Undefined || result == ScriptableObject.NOT_FOUND -> return
+
+                // Rhino string concatenation yields ConsString, not String, hence CharSequence.
+                result is CharSequence -> {
+                    val text = result.toString()
+                    if (text.isNotEmpty()) WeMessageApi.sendText(talker, text)
+                }
+
+                result is Scriptable -> sendMessageResponse(talker, result)
+
+                else -> WeLogger.w(
+                    TAG_WECHAT_API,
+                    "onMessage returned an unsupported value of type ${result.javaClass.name}"
+                )
+            }
+        } catch (e: Exception) {
+            WeLogger.e(TAG_WECHAT_API, "failed to send the value returned by onMessage", e)
+        }
+    }
+
+    private fun sendMessageResponse(talker: String, response: Scriptable) {
+        fun str(name: String): String? {
+            val value = ScriptableObject.getProperty(response, name)
+            if (value == null || value is Undefined || value == ScriptableObject.NOT_FOUND) return null
+            return value.toString().takeIf { it.isNotEmpty() }
+        }
+
+        fun missing(field: String, type: String) =
+            WeLogger.w(TAG_WECHAT_API, "onMessage returned a '$type' response without '$field'")
+
+        when (val type = str("type") ?: "text") {
+            "text" -> {
+                val content = str("content") ?: return missing("content", type)
+                WeMessageApi.sendText(talker, content)
+            }
+
+            "image" -> {
+                val path = str("path") ?: return missing("path", type)
+                WeMessageApi.sendImage(talker, path)
+            }
+
+            "file" -> {
+                val path = str("path") ?: return missing("path", type)
+                WeMessageApi.sendFile(talker, path, str("title") ?: path.substringAfterLast('/'))
+            }
+
+            "voice" -> {
+                val path = str("path") ?: return missing("path", type)
+                val duration = ScriptableObject.getProperty(response, "duration") as? Number
+                WeMessageApi.sendVoice(talker, path, duration?.toInt() ?: 0)
+            }
+
+            "appmsg" -> {
+                val content = str("content") ?: return missing("content", type)
+                WeMessageApi.sendXmlAppMsg(talker, content)
+            }
+
+            else -> WeLogger.w(TAG_WECHAT_API, "onMessage returned unknown response type '$type'")
+        }
+    }
+
+    /**
+     * @param talker optional fixed reply target; when null (every caller today) `wechat.reply*()`
+     *   resolves the talker of the message being handled on the calling thread instead.
+     */
     private fun exposeWeChatApis(scope: ScriptableObject, talker: String? = null) {
         val weObj = NativeObject()
 
@@ -900,33 +999,44 @@ object JsApiExposer {
                 }
             }
         )
-        if (talker != null) {
-            weObj.putAction("replyText") { args ->
-                val text = args.getOrNull(0)?.toString()
-                if (text != null) WeMessageApi.sendText(talker, text)
+
+        // Always exposed: the scope outlives any single message, so the target is resolved per
+        // call. Returns null (and warns) when called outside of onMessage, e.g. from onLoad, a
+        // packet hook or a task.run() thread.
+        fun replyTarget(api: String): String? {
+            val target = currentTalker.get() ?: talker
+            if (target == null) {
+                WeLogger.w(TAG_WECHAT_API, "wechat.$api called outside of onMessage; ignored")
             }
-            weObj.putAction("replyImage") { args ->
-                val path = args.getOrNull(0)?.toString()
-                if (path != null) WeMessageApi.sendImage(talker, path)
-            }
-            weObj.putAction("replyFile") { args ->
-                val path = args.getOrNull(0)?.toString()
-                if (path != null) {
-                    val title = args.getOrNull(1)?.toString() ?: path.substringAfterLast('/')
-                    WeMessageApi.sendFile(talker, path, title)
-                }
-            }
-            weObj.putAction("replyVoice") { args ->
-                val path = args.getOrNull(0)?.toString()
-                if (path != null) {
-                    val durationMs = (args.getOrNull(1) as? Number)?.toInt() ?: 0
-                    WeMessageApi.sendVoice(talker, path, durationMs)
-                }
-            }
-            weObj.putAction("replyAppMsg") { args ->
-                val content = args.getOrNull(0)?.toString()
-                if (content != null) WeMessageApi.sendXmlAppMsg(talker, content)
-            }
+            return target
+        }
+
+        weObj.putAction("replyText") { args ->
+            val text = args.getOrNull(0)?.toString() ?: return@putAction
+            val to = replyTarget("replyText") ?: return@putAction
+            WeMessageApi.sendText(to, text)
+        }
+        weObj.putAction("replyImage") { args ->
+            val path = args.getOrNull(0)?.toString() ?: return@putAction
+            val to = replyTarget("replyImage") ?: return@putAction
+            WeMessageApi.sendImage(to, path)
+        }
+        weObj.putAction("replyFile") { args ->
+            val path = args.getOrNull(0)?.toString() ?: return@putAction
+            val to = replyTarget("replyFile") ?: return@putAction
+            val title = args.getOrNull(1)?.toString() ?: path.substringAfterLast('/')
+            WeMessageApi.sendFile(to, path, title)
+        }
+        weObj.putAction("replyVoice") { args ->
+            val path = args.getOrNull(0)?.toString() ?: return@putAction
+            val to = replyTarget("replyVoice") ?: return@putAction
+            val durationMs = (args.getOrNull(1) as? Number)?.toInt() ?: 0
+            WeMessageApi.sendVoice(to, path, durationMs)
+        }
+        weObj.putAction("replyAppMsg") { args ->
+            val content = args.getOrNull(0)?.toString() ?: return@putAction
+            val to = replyTarget("replyAppMsg") ?: return@putAction
+            WeMessageApi.sendXmlAppMsg(to, content)
         }
         ScriptableObject.putProperty(weObj, "getSelfWxId", object : BaseFunction() {
             override fun call(
@@ -1301,7 +1411,7 @@ object JsApiExposer {
         return obj
     }
 
-    private fun createHookHandle(unhook: XC_MethodHook.Unhook): NativeObject {
+    private fun createHookHandle(unhook: HookHandle): NativeObject {
         val handle = NativeObject()
         ScriptableObject.putProperty(handle, "unhook", object : BaseFunction() {
             override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
@@ -1838,20 +1948,22 @@ object JsApiExposer {
                 val searcher = args.getOrNull(0) as? NativeObject
                     ?: return NativeObject()
                 return try {
-                    val results = DexKit.findMethod {
-                        val pkgs = getStringArrayProperty(searcher, "searchPackages")
-                        if (pkgs != null) searchPackages(*pkgs)
-                        matcher {
-                            getStringProperty(searcher, "declaringClass")?.let { declaredClass = it }
-                            getStringProperty(searcher, "name")?.let { name = it }
-                            getStringProperty(searcher, "returnType")?.let { returnType = it }
-                            getIntProperty(searcher, "paramCount")?.let { paramCount = it }
-                            getStringArrayProperty(searcher, "paramTypes")?.let { paramTypes(*it) }
-                            getStringArrayProperty(searcher, "usingEqStrings")?.let { usingEqStrings(*it) }
-                            getNumberArrayProperty(searcher, "usingNumbers")?.let { usingNumbers(*it) }
+                    withDexKit { dexKit ->
+                        val results = dexKit.findMethod {
+                            val pkgs = getStringArrayProperty(searcher, "searchPackages")
+                            if (pkgs != null) searchPackages(*pkgs)
+                            matcher {
+                                getStringProperty(searcher, "declaringClass")?.let { declaredClass = it }
+                                getStringProperty(searcher, "name")?.let { name = it }
+                                getStringProperty(searcher, "returnType")?.let { returnType = it }
+                                getIntProperty(searcher, "paramCount")?.let { paramCount = it }
+                                getStringArrayProperty(searcher, "paramTypes")?.let { paramTypes(*it) }
+                                getStringArrayProperty(searcher, "usingEqStrings")?.let { usingEqStrings(*it) }
+                                getNumberArrayProperty(searcher, "usingNumbers")?.let { usingNumbers(*it) }
+                            }
                         }
+                        createDexMethodResult(results.toList(), cx, scope)
                     }
-                    createDexMethodResult(results.toList(), cx, scope)
                 } catch (e: Exception) {
                     WeLogger.e(TAG_DEXKIT_API, "dexkit.findMethod failed", e)
                     createDexMethodResult(emptyList(), cx, scope)
@@ -1869,19 +1981,21 @@ object JsApiExposer {
                 val searcher = args.getOrNull(0) as? NativeObject
                     ?: return NativeObject()
                 return try {
-                    val results = DexKit.findClass {
-                        val pkgs = getStringArrayProperty(searcher, "searchPackages")
-                        if (pkgs != null) searchPackages(*pkgs)
-                        matcher {
-                            getStringProperty(searcher, "name")?.let { className = it }
-                            getStringProperty(searcher, "superclass")?.let { superClass = it }
-                            getStringArrayProperty(searcher, "usingEqStrings")?.let { usingEqStrings(*it) }
-                            getStringArrayProperty(searcher, "interfaces")?.forEach { ifaceName ->
-                                addInterface { className = ifaceName }
+                    withDexKit { dexKit ->
+                        val results = dexKit.findClass {
+                            val pkgs = getStringArrayProperty(searcher, "searchPackages")
+                            if (pkgs != null) searchPackages(*pkgs)
+                            matcher {
+                                getStringProperty(searcher, "name")?.let { className = it }
+                                getStringProperty(searcher, "superclass")?.let { superClass = it }
+                                getStringArrayProperty(searcher, "usingEqStrings")?.let { usingEqStrings(*it) }
+                                getStringArrayProperty(searcher, "interfaces")?.forEach { ifaceName ->
+                                    addInterface { className = ifaceName }
+                                }
                             }
                         }
+                        createDexClassResult(results.toList(), cx, scope)
                     }
-                    createDexClassResult(results.toList(), cx, scope)
                 } catch (e: Exception) {
                     WeLogger.e(TAG_DEXKIT_API, "dexkit.findClass failed", e)
                     createDexClassResult(emptyList(), cx, scope)

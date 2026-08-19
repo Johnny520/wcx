@@ -3,6 +3,7 @@ package com.Johnny.wcx.features.items.chat.panel.voice
 import com.Johnny.wcx.features.items.chat.panel.CloneVoice
 import com.Johnny.wcx.features.items.chat.panel.PanelPaths
 import com.Johnny.wcx.utils.AudioUtils
+import com.Johnny.wcx.utils.MediaFileTypeDetector
 import com.Johnny.wcx.utils.fs.asPath
 import com.Johnny.wcx.utils.serialization.DefaultJson
 import kotlinx.serialization.Serializable
@@ -16,7 +17,6 @@ import kotlin.io.path.absolutePathString
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.div
-import kotlin.io.path.extension
 import kotlin.io.path.fileSize
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
@@ -72,22 +72,20 @@ object CloneVoiceRepository {
     }
 
     @Synchronized
-    fun import(name: String, displayName: String, input: InputStream, declaredSize: Long? = null): Result<CloneVoice> =
+    fun import(name: String, input: InputStream, declaredSize: Long? = null): Result<CloneVoice> =
         runCatching {
             val safeName = name.trim()
             require(safeName.isNotBlank()) { "音色名称不能为空" }
             if (declaredSize != null && declaredSize > MAX_IMPORT_BYTES) {
                 error("音色文件不能超过 1 MiB")
             }
-            val suffix = displayName.substringAfterLast('.', "bin").lowercase().replace(Regex("[^a-z0-9]"), "")
-                .ifBlank { "bin" }
             val id = UUID.randomUUID().toString().replace("-", "")
-            val fileName = "$id.$suffix"
-            val destination = PanelPaths.cloneVoiceDir / fileName
-            destination.parent.createDirectories()
+            val temporary = PanelPaths.cloneVoiceDir / "$id.part"
+            var destination: Path? = null
+            temporary.parent.createDirectories()
             try {
                 input.use { source ->
-                    Files.newOutputStream(destination).use { output ->
+                    Files.newOutputStream(temporary).use { output ->
                         val buffer = ByteArray(8192)
                         var total = 0L
                         while (true) {
@@ -100,6 +98,11 @@ object CloneVoiceRepository {
                         require(total > 0) { "音色文件为空" }
                     }
                 }
+                val format = MediaFileTypeDetector.detectAudio(temporary)
+                    ?: error("音色文件不是可识别的语音格式")
+                val fileName = "$id.${format.extension}"
+                destination = PanelPaths.cloneVoiceDir / fileName
+                moveImportedFile(temporary, destination)
                 require(isReadableVoice(destination)) { "音色文件不可读" }
                 val clone = CloneVoice(id = id, name = safeName, fileName = fileName)
                 val store = requireStore()
@@ -111,15 +114,16 @@ object CloneVoiceRepository {
                 )
                 clone
             } catch (error: Throwable) {
-                destination.deleteIfExists()
+                temporary.deleteIfExists()
+                destination?.deleteIfExists()
                 throw error
             }
         }
 
     @Synchronized
-    fun importBytes(name: String, displayName: String, bytes: ByteArray): Result<CloneVoice> {
+    fun importBytes(name: String, bytes: ByteArray): Result<CloneVoice> {
         require(bytes.size.toLong() <= MAX_IMPORT_BYTES) { "音色文件不能超过 1 MiB" }
-        return import(name, displayName, bytes.inputStream(), bytes.size.toLong())
+        return import(name, bytes.inputStream(), bytes.size.toLong())
     }
 
     @Synchronized
@@ -155,7 +159,9 @@ object CloneVoiceRepository {
     fun synthesisInput(voice: CloneVoice): Result<Pair<ByteArray, String>> = runCatching {
         val source = voicePath(voice)
         require(source.isRegularFile()) { "选择的语音文件不存在或不可读" }
-        if (source.extension.equals("silk", true) || hasSilkHeader(source)) {
+        val format = MediaFileTypeDetector.detectAudio(source)
+            ?: error("选择的音色文件格式无法识别")
+        if (format == MediaFileTypeDetector.AudioFormat.SILK) {
             val stem = md5(source.absolutePathString())
             val pcm = PanelPaths.panelCacheDir / "$stem.pcm"
             val mp3 = PanelPaths.panelCacheDir / "$stem.mp3"
@@ -168,7 +174,7 @@ object CloneVoiceRepository {
                 mp3.deleteIfExists()
             }
         } else {
-            Files.readAllBytes(source) to voice.fileName
+            Files.readAllBytes(source) to voice.fileName.substringBeforeLast('.', voice.fileName) + ".${format.extension}"
         }
     }
 
@@ -211,15 +217,20 @@ object CloneVoiceRepository {
 
     private fun isReadableVoice(path: Path): Boolean {
         if (!path.isRegularFile() || path.fileSize() <= 0) return false
-        return AudioUtils.getDurationMs(path.absolutePathString()) > 0
+        return MediaFileTypeDetector.detectAudio(path) != null &&
+                AudioUtils.getDurationMs(path.absolutePathString()) > 0
     }
 
-    private fun hasSilkHeader(path: Path): Boolean = runCatching {
-        Files.newInputStream(path).use { input ->
-            val header = ByteArray(8)
-            input.read(header) == header.size && header.contentEquals(byteArrayOf(2, 35, 33, 83, 73, 76, 75, 95))
-        }
-    }.getOrDefault(false)
+    private fun moveImportedFile(source: Path, destination: Path) {
+        runCatching {
+            Files.move(
+                source,
+                destination,
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        }.getOrElse { Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING) }
+    }
 
     private fun md5(value: String) = MessageDigest.getInstance("MD5")
         .digest(value.toByteArray())

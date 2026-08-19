@@ -41,7 +41,9 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.formatEpoch
+import java.util.Collections
 import java.util.Locale
+import java.util.WeakHashMap
 
 @Feature(
     name = "底部详细信息", categories = ["朋友圈"],
@@ -50,6 +52,9 @@ import java.util.Locale
 object DisplayDetails : ClickableFeature(), IResolveDex {
 
     private const val TAG = "DisplayDetails"
+
+    /** Roots already carrying our layout listener, so repeated attach attempts stay idempotent. */
+    private val attachedRoots: MutableSet<ViewGroup> = Collections.newSetFromMap(WeakHashMap())
 
     private var textFormat by prefOption("moments_details_text_format", DEFAULT_TEXT_FORMAT)
     private var timeFormat by prefOption("moments_details_time_format", DEFAULT_TIME_FORMAT)
@@ -152,13 +157,18 @@ object DisplayDetails : ClickableFeature(), IResolveDex {
         intArrayOf(0, 200, 800, 2000).forEach { delay ->
             root.postDelayed({
                 runCatching { attachToLists(root) }
-                    .onFailure { WeLogger.w(TAG, "attach failed, delay=${delay}ms") }
+                    .onFailure { WeLogger.w(TAG, "attach failed, delay=${delay}ms", it) }
             }, delay.toLong())
         }
     }
 
     private fun attachToLists(root: ViewGroup) {
         val container = root.findViewWhich<WxRecyclerView> { it is WxRecyclerView } ?: error("RecyclerView not found")
+        // scheduleAttach retries four times, and every attempt that finds the list would otherwise
+        // register its own layout listener, multiplying the per-item reflection/regex work.
+        synchronized(attachedRoots) {
+            if (!attachedRoots.add(root)) return
+        }
         container.viewTreeObserver.addOnGlobalLayoutListener {
             for (i in 0 until container.childCount) {
                 runCatching {

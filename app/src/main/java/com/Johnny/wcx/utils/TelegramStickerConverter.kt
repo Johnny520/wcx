@@ -11,9 +11,9 @@ import kotlin.io.path.fileSize
 import kotlin.io.path.isRegularFile
 
 object TelegramStickerConverter {
-    fun tgsToGif(input: Path, output: Path): Result<Unit> = runCatching {
+    fun tgsToGif(input: Path, output: Path, frameRate: Int): Result<Unit> = runCatching {
         output.parent?.createDirectories()
-        tgsToGifNative(input.toString(), output.toString())?.let(::error)
+        tgsToGifNative(input.toString(), output.toString(), frameRate)?.let(::error)
         require(output.isRegularFile() && output.fileSize() > 0L) { "TGS 转换未生成 GIF" }
     }
 
@@ -40,7 +40,11 @@ object TelegramStickerConverter {
         }
     }
 
-    private external fun tgsToGifNative(inputPath: String, outputPath: String): String?
+    private external fun tgsToGifNative(
+        inputPath: String,
+        outputPath: String,
+        frameRate: Int,
+    ): String?
 
     private external fun webmToGifNative(
         inputPath: String,

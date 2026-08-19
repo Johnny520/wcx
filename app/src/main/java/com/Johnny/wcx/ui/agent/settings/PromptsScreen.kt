@@ -231,8 +231,11 @@ private fun TwoFieldEditor(
     onDelete: (() -> Unit)?,
     onSave: (String, String) -> Unit,
 ) {
-    var f1 by remember { mutableStateOf(field1) }
-    var f2 by remember { mutableStateOf(field2) }
+    // Keyed on the incoming values (and [show]): all four editors are composed unconditionally, so on
+    // first composition nothing is being edited and [field1]/[field2] are blank. Unkeyed state would
+    // freeze those blanks and 保存 would then wipe the prompt's name/regex with an empty string.
+    var f1 by remember(field1, show) { mutableStateOf(field1) }
+    var f2 by remember(field2, show) { mutableStateOf(field2) }
     WindowDialog(show = show, title = title, onDismissRequest = onDismiss) {
         Column {
             TextField(value = f1, onValueChange = { f1 = it }, label = field1Label, useLabelAsPlaceholder = true, singleLine = true)

@@ -7,8 +7,13 @@ import com.Johnny.wcx.utils.WeLogger
 
 abstract class SwitchFeature : BaseFeature() {
 
-    /** Default state when the user has never toggled this feature. */
-    protected open val defaultEnabled: Boolean = false
+    /**
+     * Default state when the user has never toggled this feature.
+     *
+     * Public so the settings UI can seed its switches with the same default [startup] uses —
+     * otherwise a feature defaulting to on would show as off until first toggled.
+     */
+    open val defaultEnabled: Boolean = false
 
     /** Whether this feature should load in the current process. Defaults to the main process only. */
     protected open val shouldLoadInCurrentProcess: Boolean

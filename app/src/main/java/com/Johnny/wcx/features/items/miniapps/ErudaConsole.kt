@@ -3,11 +3,13 @@ package com.Johnny.wcx.features.items.miniapps
 import android.webkit.ValueCallback
 import android.webkit.WebView
 import dev.ujhhgtg.reflekt.reflekt
+import com.Johnny.wcx.R
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
-import com.Johnny.wcx.eruda.ErudaProvider
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.loader.utils.ResourcesInjector
+import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.BString
@@ -19,6 +21,14 @@ import org.luckypray.dexkit.query.enums.StringMatchType
     description = "小程序页面注入 Eruda 调试控制台"
 )
 object ErudaConsole : SwitchFeature(), IResolveDex {
+
+    private val erudaScript by lazy {
+        val resources = HostInfo.application.resources
+        ResourcesInjector.injectModuleRes(resources)
+        resources.openRawResource(R.raw.eruda)
+            .bufferedReader()
+            .use { it.readText() }
+    }
 
     private val xwebOnPageFinished by dexMethod {
         searchPackages("com.tencent.mm.plugin.appbrand.page")
@@ -52,11 +62,11 @@ object ErudaConsole : SwitchFeature(), IResolveDex {
     override fun onEnable() {
         xwebOnPageFinished.hookAfter {
             WeLogger.i(TAG, "injecting into xwebOnPageFinished: ${args[0]}")
-            injectEruda(args[0])
+            injectEruda(args[0]!!)
         }
         androidOnPageFinished.hookAfter {
             WeLogger.i(TAG, "injecting into androidOnPageFinished: ${args[0]}")
-            injectEruda(args[0])
+            injectEruda(args[0]!!)
         }
     }
 
@@ -64,12 +74,12 @@ object ErudaConsole : SwitchFeature(), IResolveDex {
         try {
             when (webView) {
                 is WebView -> {
-                    webView.evaluateJavascript(ErudaProvider.ERUDA_JS, null)
+                    webView.evaluateJavascript(erudaScript, null)
                     webView.evaluateJavascript("eruda.init();", null)
                 }
 
                 is com.tencent.xweb.WebView -> {
-                    webView.evaluateJavascript(ErudaProvider.ERUDA_JS, null)
+                    webView.evaluateJavascript(erudaScript, null)
                     webView.evaluateJavascript("eruda.init();", null)
                 }
 
@@ -79,7 +89,7 @@ object ErudaConsole : SwitchFeature(), IResolveDex {
                         parameters(BString, ValueCallback::class)
                         superclass()
                     }.apply {
-                        invoke(ErudaProvider.ERUDA_JS, null)
+                        invoke(erudaScript, null)
                         invoke("eruda.init();", null)
                     }
                 }

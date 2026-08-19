@@ -32,6 +32,7 @@ import com.Johnny.wcx.ui.panel.VoicePanelActions
 import com.Johnny.wcx.ui.panel.showVoicePanelSheet
 import com.Johnny.wcx.utils.AudioUtils
 import com.Johnny.wcx.utils.EdgeTtsClient
+import com.Johnny.wcx.utils.MediaFileTypeDetector
 import com.Johnny.wcx.utils.coerceToInt
 import com.Johnny.wcx.utils.fs.asPath
 import kotlinx.coroutines.CancellationException
@@ -46,14 +47,9 @@ import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.deleteIfExists
-import com.Johnny.wcx.utils.WeLogger
 import kotlin.io.path.div
-import kotlin.io.path.extension
 import kotlin.io.path.isRegularFile
-import kotlin.io.path.name
 import kotlin.io.path.writeBytes
-
-private const val TAG = "VoicePanel"
 
 internal val EDGE_TTS_VOICES = listOf(
     "zh-CN-XiaoxiaoNeural" to "晓晓 (女, 温柔)",
@@ -163,7 +159,7 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
                 val source = path.path.asPath
                 try {
                     Files.newInputStream(source).use { input ->
-                        CloneVoiceRepository.import(name, source.name, input, Files.size(source)).getOrThrow()
+                        CloneVoiceRepository.import(name, input, Files.size(source)).getOrThrow()
                     }
                 } finally {
                     if (path.temporary) source.deleteIfExists()
@@ -179,7 +175,7 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
         addExample = { example ->
             withContext(Dispatchers.IO) {
                 FunBoxCloneVoiceRepository.exampleAudio(example).mapCatching { bytes ->
-                    CloneVoiceRepository.importBytes(example.title, example.fileName, bytes).getOrThrow()
+                    CloneVoiceRepository.importBytes(example.title, bytes).getOrThrow()
                     Unit
                 }
             }
@@ -212,11 +208,19 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
                     val bytes = activity.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     val result = if (bytes == null) Result.failure(IllegalStateException("无法读取所选语音"))
                     else if (bytes.size > MAX_SHARED_VOICE_BYTES) Result.failure(IllegalArgumentException("单条语音不能超过 10 MiB"))
-                    else FunBoxVoiceRepository.uploadVoice(
-                        packId,
-                        VoiceItem(id = name, title = name.substringBeforeLast('.'), format = name.substringAfterLast('.', "mp3")),
-                        bytes,
-                    )
+                    else {
+                        val format = MediaFileTypeDetector.detectAudio(bytes)
+                        if (format == null) Result.failure(IllegalArgumentException("不支持或无法识别的语音格式"))
+                        else FunBoxVoiceRepository.uploadVoice(
+                            packId,
+                            VoiceItem(
+                                id = name,
+                                title = name.substringBeforeLast('.', name),
+                                format = format.extension,
+                            ),
+                            bytes,
+                        )
+                    }
                     withContext(Dispatchers.Main) {
                         onComplete(result)
                         activity.finish()
@@ -229,15 +233,13 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
     private suspend fun resolveVoicePath(item: VoiceItem): Result<VoicePreview> = withContext(Dispatchers.IO) {
         cancellableResult {
             item.localPath?.let { return@cancellableResult VoicePreview(it, temporary = false) }
-            val (bytes, extension) = if (item.remoteObjectId != null) {
-                FunBoxServiceClient.downloadObject("voice", item.remoteObjectId).getOrThrow() to
-                        item.format.ifBlank { "mp3" }
+            val bytes = if (item.remoteObjectId != null) {
+                FunBoxServiceClient.downloadObject("voice", item.remoteObjectId).getOrThrow()
             } else {
                 val provider = VoiceProviderRegistry.forItem(item) ?: error("没有可用语音提供商")
                 val resolved = provider.resolveAudio(item).getOrThrow()
                 require(!resolved.remoteUrl.isNullOrBlank()) { "没有可用语音地址" }
-                FunBoxServiceClient.download(requireNotNull(resolved.remoteUrl)).getOrThrow() to
-                        resolved.format.ifBlank { item.format.ifBlank { "mp3" } }
+                FunBoxServiceClient.download(requireNotNull(resolved.remoteUrl)).getOrThrow()
             }
             require(bytes.isNotEmpty()) { "服务器未返回语音数据" }
             val prefix = bytes.copyOfRange(0, minOf(bytes.size, 256)).toString(Charsets.UTF_8).trimStart()
@@ -246,7 +248,9 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
                     .find(prefix)?.groupValues?.getOrNull(1)
                 error(message ?: "服务器返回的不是音频数据")
             }
-            val path = PanelPaths.panelCacheDir / "voice-${UUID.randomUUID()}.$extension"
+            val format = MediaFileTypeDetector.detectAudio(bytes)
+                ?: error("服务器返回了不支持或无法识别的语音格式")
+            val path = PanelPaths.panelCacheDir / "voice-${UUID.randomUUID()}.${format.extension}"
             path.writeBytes(bytes)
             VoicePreview(path.absolutePathString(), temporary = true)
         }
@@ -254,8 +258,9 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
 
     private suspend fun resolveExamplePath(example: CloneExample): Result<VoicePreview> = withContext(Dispatchers.IO) {
         FunBoxCloneVoiceRepository.exampleAudio(example).mapCatching { bytes ->
-            val extension = example.fileName.substringAfterLast('.', "wav")
-            val path = PanelPaths.panelCacheDir / "example-${UUID.randomUUID()}.$extension"
+            val format = MediaFileTypeDetector.detectAudio(bytes)
+                ?: error("音色示例不是可识别的语音格式")
+            val path = PanelPaths.panelCacheDir / "example-${UUID.randomUUID()}.${format.extension}"
             path.writeBytes(bytes)
             VoicePreview(path.absolutePathString(), temporary = true)
         }
@@ -281,26 +286,18 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
                     item.durationMs.takeIf { it > 0 }
                         ?: AudioUtils.getDurationMs(resolvedPath).coerceAtLeast(0L)
                 }
-
-                // 应用伪装语音时长配置
-                val finalDurationMs = if (FakeVoiceDuration.isEnabled) {
-                    val fakeMs = FakeVoiceDuration.getFakeDurationMs()
-                    val fakeDuration = if (fakeMs <= 0) 1000L else fakeMs
-                    WeLogger.d(TAG, "语音面板发送: 原始时长=${durationMs}ms, 伪装时长=${fakeDuration}ms, 开关=开启")
-                    fakeDuration
-                } else {
-                    WeLogger.d(TAG, "语音面板发送: 原始时长=${durationMs}ms, 开关=关闭, 使用真实时长")
-                    durationMs
-                }
-                val silkSource = source.extension.equals("silk", true) || source.extension.equals("amr", true)
-                val silkPath = if (silkSource) source else PanelPaths.panelCacheDir / "send-${UUID.randomUUID()}.silk"
+                val sourceFormat = MediaFileTypeDetector.detectAudio(source)
+                    ?: error("不支持或无法识别的语音格式")
+                val directSource = sourceFormat == MediaFileTypeDetector.AudioFormat.SILK ||
+                        sourceFormat == MediaFileTypeDetector.AudioFormat.AMR
+                val silkPath = if (directSource) source else PanelPaths.panelCacheDir / "send-${UUID.randomUUID()}.silk"
                 try {
-                    if (!silkSource) require(AudioUtils.anyToSilk(resolvedPath, silkPath.absolutePathString())) { "音频转 SILK 失败" }
-                    check(WeMessageApi.sendVoice(talker, silkPath.absolutePathString(), finalDurationMs.coerceToInt())) { "语音发送失败" }
+                    if (!directSource) require(AudioUtils.anyToSilk(resolvedPath, silkPath.absolutePathString())) { "音频转 SILK 失败" }
+                    check(WeMessageApi.sendVoice(talker, silkPath.absolutePathString(), durationMs.coerceToInt())) { "语音发送失败" }
                     if (recordUsage) VoicePanelRepository.recordSent(item)
                     Unit
                 } finally {
-                    if (!silkSource) silkPath.deleteIfExists()
+                    if (!directSource) silkPath.deleteIfExists()
                 }
             } finally {
                 if (temporarySource) source.deleteIfExists()
@@ -382,7 +379,7 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
                 title = title,
                 localPath = preview.path,
                 durationMs = AudioUtils.getDurationMs(preview.path).coerceAtLeast(0L),
-                format = preview.path.asPath.extension,
+                format = MediaFileTypeDetector.detectAudio(preview.path.asPath)?.extension.orEmpty(),
             ),
             recordUsage = false,
         )
@@ -454,14 +451,13 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
         files: List<PickedPanelFile>,
         resolver: ContentResolver,
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        val supported = files.filter { VoicePanelRepository.supportsFileName(it.name) }
-        if (supported.isEmpty()) {
+        if (files.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("所选内容中没有支持的语音文件"))
         }
 
         var imported = 0
         val failures = mutableListOf<Pair<String, Throwable>>()
-        supported.forEach { file ->
+        files.forEach { file ->
             runCatching {
                 val input = resolver.openInputStream(file.uri) ?: error("无法读取文件")
                 input.use {
@@ -504,7 +500,7 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
                     null,
                 )?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null }
                 val result = activity.contentResolver.openInputStream(uri)?.let { input ->
-                    CloneVoiceRepository.import(name.substringBeforeLast('.'), name, input, size).map { }
+                    CloneVoiceRepository.import(name.substringBeforeLast('.'), input, size).map { }
                 } ?: Result.failure(IllegalStateException("无法读取所选音色文件"))
                 withContext(Dispatchers.Main) {
                     onComplete(result)
@@ -515,8 +511,7 @@ object VoicePanel : SwitchFeature() { // entry implementation in ChatFooterHooks
     }
 
     private val AUDIO_MIME_TYPES = arrayOf(
-        "audio/*",
-        "application/octet-stream",
+        "*/*",
     )
     private const val MAX_SHARED_VOICE_BYTES = 10 * 1024 * 1024
 }

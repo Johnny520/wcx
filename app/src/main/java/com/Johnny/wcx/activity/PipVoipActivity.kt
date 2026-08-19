@@ -8,7 +8,10 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.ResultReceiver
+import android.util.Log
 import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,7 +42,7 @@ import com.composables.icons.materialsymbols.outlined.Mic
 import com.composables.icons.materialsymbols.outlined.Mic_off
 import com.composables.icons.materialsymbols.outlined.Videocam
 import com.composables.icons.materialsymbols.outlined.Videocam_off
-import com.Johnny.wcx.ui.utils.theme.ModuleTheme
+import com.Johnny.wcx.ui.utils.theme.ModuleAppTheme
 
 @Keep
 class PipVoipActivity : ComponentActivity() {
@@ -49,6 +52,26 @@ class PipVoipActivity : ComponentActivity() {
     private var micMuted by mutableStateOf(false)
     private var videoEnabled by mutableStateOf(true)
     private var closing = false
+    private var pipRequested = false
+
+    /** 宿主进程用这个通道反过来控制画中画（关闭 / 同步状态） */
+    private val commands = object : ResultReceiver(Handler(Looper.getMainLooper())) {
+        override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+            when (resultCode) {
+                COMMAND_CLOSE -> {
+                    closing = true
+                    finishAndRemoveTask()
+                }
+
+                COMMAND_UPDATE_STATE -> {
+                    resultData ?: return
+                    micMuted = resultData.getBoolean(EXTRA_MIC_MUTED, micMuted)
+                    videoEnabled = resultData.getBoolean(EXTRA_VIDEO_ENABLED, videoEnabled)
+                    updatePipParams()
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,12 +90,34 @@ class PipVoipActivity : ComponentActivity() {
         micMuted = intent.getBooleanExtra(EXTRA_MIC_MUTED, false)
         videoEnabled = intent.getBooleanExtra(EXTRA_VIDEO_ENABLED, true)
         setContent {
-            ModuleTheme(darkTheme = true) {
+            ModuleAppTheme(darkTheme = true) {
                 PipControls()
             }
         }
 
-        enterPictureInPictureMode(updatePipParams())
+        updatePipParams()
+        receiver.send(
+            RESULT_READY,
+            Bundle().apply { putParcelable(EXTRA_COMMAND_RECEIVER, commands) },
+        )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // enterPictureInPictureMode() 只能在 RESUMED 状态下调用，在 onCreate 里会被系统拒绝
+        if (closing || pipRequested || isInPictureInPictureMode) return
+        pipRequested = true
+        // 宿主的 stub Activity 在清单里没有 supportsPictureInPicture，system_server 会
+        // 直接抛 IllegalStateException —— 绝不能让它冒到微信的 onResume 里去
+        val entered = runCatching { enterPictureInPictureMode(updatePipParams()) }
+            .onFailure { Log.e(TAG, "enterPictureInPictureMode threw", it) }
+            .getOrDefault(false)
+        if (!entered) {
+            Log.e(TAG, "system refused picture-in-picture, handing the call back to wechat")
+            closing = true
+            receiver.send(RESULT_RESTORE, null)
+            finishAndRemoveTask()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -215,7 +260,10 @@ class PipVoipActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val TAG = "PipVoipActivity"
+
         const val EXTRA_RESULT_RECEIVER = "pip_voip_result_receiver"
+        const val EXTRA_COMMAND_RECEIVER = "pip_voip_command_receiver"
         const val EXTRA_GROUP_CALL = "pip_voip_group_call"
         const val EXTRA_MIC_MUTED = "pip_voip_mic_muted"
         const val EXTRA_VIDEO_ENABLED = "pip_voip_video_enabled"
@@ -230,6 +278,10 @@ class PipVoipActivity : ComponentActivity() {
         const val RESULT_TOGGLE_VIDEO = 3
         const val RESULT_RESTORE = 4
         const val RESULT_CLOSED = 5
+        const val RESULT_READY = 6
+
+        const val COMMAND_CLOSE = 1
+        const val COMMAND_UPDATE_STATE = 2
 
         private const val REQUEST_HANG_UP = 1
         private const val REQUEST_TOGGLE_MIC = 2
@@ -241,7 +293,6 @@ class PipVoipActivity : ComponentActivity() {
 
 class PipVoipActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val action = intent.action ?: return
-        PipVoipActivity.current?.handleAction(action)
+        PipVoipActivity.current!!.handleAction(intent.action!!)
     }
 }

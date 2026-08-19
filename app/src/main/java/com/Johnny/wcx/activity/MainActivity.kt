@@ -7,7 +7,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -28,9 +26,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -45,14 +41,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.composables.icons.materialsymbols.MaterialSymbols
-import com.composables.icons.materialsymbols.outlined.Chat
 import com.composables.icons.materialsymbols.outlined.Open_in_new
 import com.composables.icons.materialsymbols.outlined.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Check_circle
@@ -62,14 +56,13 @@ import com.composables.icons.materialsymbols.outlinedfilled.Warning
 import com.topjohnwu.superuser.Shell
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
-import com.Johnny.wcx.constants.WeChatVersions
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.IconButton
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.GitHubIcon
-import com.Johnny.wcx.ui.utils.theme.darkScheme
-import com.Johnny.wcx.ui.utils.theme.lightScheme
+import com.Johnny.wcx.ui.utils.TelegramIcon
+import com.Johnny.wcx.ui.utils.theme.ModuleAppTheme
 import com.Johnny.wcx.utils.android.androidUserId
 import com.Johnny.wcx.utils.android.getEnabled
 import com.Johnny.wcx.utils.android.setEnabled
@@ -78,6 +71,7 @@ import com.Johnny.wcx.utils.formatEpoch
 import com.Johnny.wcx.utils.hook_status.HookStatus
 import com.Johnny.wcx.utils.openInSystem
 import com.Johnny.wcx.utils.registerBshSnapshotDecompileLaunchers
+import com.Johnny.wcx.utils.serialization.DefaultJson
 
 class MainActivity : ComponentActivity() {
 
@@ -93,34 +87,67 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable
-    private fun ModuleTheme(
-        darkTheme: Boolean = isSystemInDarkTheme(),
-        content: @Composable () -> Unit
-    ) {
-        val colorScheme = if (darkTheme) darkScheme else lightScheme
-        MaterialExpressiveTheme(
-            colorScheme = colorScheme,
-            motionScheme = MotionScheme.expressive(),
-        ) {
-            content()
-        }
-    }
-
     private val selectFileLauncher = registerBshSnapshotDecompileLaunchers()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        if (intent?.action == TelegramDatabaseImportContract.ACTION_PICK_ROOT_STICKER_SETS) {
+            if (!PackageNames.isWeChat(callingPackage.orEmpty())) {
+                setResult(
+                    RESULT_CANCELED,
+                    Intent().putExtra(
+                        TelegramDatabaseImportContract.EXTRA_ERROR,
+                        "只允许从微信内的 WeKit 面板启动此操作",
+                    ),
+                )
+                finish()
+                return
+            }
+            Shell.getShell()
+            setContent {
+                ModuleAppTheme {
+                    RootTelegramStickerSetPickerContent(
+                        discoverInstances = {
+                            RootTelegramStickerSetRepository.discoverInstances(
+                                applicationInfo.uid / 100000,
+                            )
+                        },
+                        readInstalledSets = { instance ->
+                            RootTelegramStickerSetRepository.readInstalledSets(
+                                cacheDir,
+                                applicationInfo.uid,
+                                instance,
+                            )
+                        },
+                        onCancel = {
+                            setResult(RESULT_CANCELED)
+                            finish()
+                        },
+                        onComplete = { stickerSets ->
+                            setResult(
+                                RESULT_OK,
+                                Intent().putExtra(
+                                    TelegramDatabaseImportContract.EXTRA_STICKER_SETS,
+                                    DefaultJson.encodeToString(stickerSets),
+                                ),
+                            )
+                            finish()
+                        },
+                    )
+                }
+            }
+            return
+        }
+
         if (BuildConfig.HAS_LIBXPOSED_ENTRY) {
             runCatching { HookStatus.init(this) }
         }
 
         Shell.getShell()
-
         setContent {
-            ModuleTheme {
+            ModuleAppTheme {
                 AppContent(
                     selectFileLauncher,
                     onUrlClick = { url ->
@@ -278,10 +305,7 @@ class MainActivity : ComponentActivity() {
                     val activationState = rememberActivationState()
                     Card(
                         colors = CardDefaults.cardColors(containerColor = activationState.color),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .shadow(4.dp, RoundedCornerShape(16.dp))
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
@@ -311,10 +335,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -328,16 +349,12 @@ class MainActivity : ComponentActivity() {
                         }
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        InfoItem("构建提交哈希", BuildConfig.COMMIT_HASH.ifEmpty { "未知" })
+                        InfoItem("构建提交哈希", BuildConfig.COMMIT_HASH)
                         Spacer(modifier = Modifier.height(8.dp))
                         InfoItem(
                             "构建提交时间",
                             formatEpoch(BuildConfig.BUILD_TIMESTAMP, true)
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        InfoItem("已适配微信版本", getAdaptedWeChatVersions())
-                        Spacer(modifier = Modifier.height(8.dp))
-                        InfoItem("当前微信版本", getWeChatVersion())
                     }
                 }
 
@@ -363,10 +380,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -410,10 +424,7 @@ class MainActivity : ComponentActivity() {
                                 ?: "无法打开微信 (包名: $hostPkg)"
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -610,17 +621,16 @@ class MainActivity : ComponentActivity() {
                 )
 
                 LinkCard(
-                    icon = MaterialSymbols.Outlined.Chat,
-                    title = "交流群组",
-                    subtitle = "https://t.me/wcx12138",
-                    onClick = { onUrlClick("https://t.me/wcx12138") }
-                )
-
-                LinkCard(
                     icon = GitHubIcon,
                     title = "GitHub",
-                    subtitle = "Johnny520/wcx",
-                    onClick = { onUrlClick("https://github.com/Johnny520/wcx") }
+                    subtitle = "Ujhhgtg/WeKit",
+                    onClick = { onUrlClick("https://github.com/Ujhhgtg/WeKit") }
+                )
+                LinkCard(
+                    icon = TelegramIcon,
+                    title = "Telegram",
+                    subtitle = "https://t.me/+7j5dJ6g16B43OWVl",
+                    onClick = { onUrlClick("https://t.me/+7j5dJ6g16B43OWVl") }
                 )
             }
 
@@ -634,7 +644,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("版本: ${BuildConfig.VERSION_NAME}")
                             Text("版本号: ${BuildConfig.VERSION_CODE}")
-                            Text("作者：Johnny520@github")
+                            Text("作者：Ujhhgtg@github, cwuom@github")
                         }
                     },
                     confirmButton = {
@@ -663,50 +673,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun getWeChatVersion(): String {
-        return runCatching {
-            val pm = packageManager ?: return@runCatching "未安装"
-            val pkgInfo = pm.getPackageInfo(PackageNames.WECHAT, 0)
-            val versionName = pkgInfo.versionName?.ifEmpty { null } ?: return@runCatching "版本未知"
-            "v$versionName (${pkgInfo.longVersionCode})"
-        }.getOrDefault("未安装")
-    }
-
-    private fun getAdaptedWeChatVersions(): String {
-        return try {
-            val versions = WeChatVersions::class.java.declaredFields
-                .mapNotNull { field ->
-                    val name = field.name
-                    if (name.startsWith("MM_")) {
-                        val parts = name.removePrefix("MM_").split("_")
-                        if (parts.size >= 3) {
-                            "${parts[0]}.${parts[1]}.${parts[2]}"
-                        } else null
-                    } else null
-                }
-                .sortedWith(compareBy(
-                    { it.split(".").getOrNull(0)?.toIntOrNull() ?: 0 },
-                    { it.split(".").getOrNull(1)?.toIntOrNull() ?: 0 },
-                    { it.split(".").getOrNull(2)?.toIntOrNull() ?: 0 }
-                ))
-            if (versions.isNotEmpty()) {
-                "完整支持 8.0.69 ~ 8.0.76 · 维护 8.0.65~8.0.68 · 低版本部分功能可能失效"
-            } else {
-                "推荐 8.0.69 ~ 8.0.76，8.0.65 以下部分功能可能失效"
-            }
-        } catch (e: Exception) {
-            "推荐 8.0.69 ~ 8.0.76，8.0.65 以下部分功能可能失效"
-        }
-    }
-
     @Composable
     private fun LinkCard(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
         ElevatedCard(
             onClick = onClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .shadow(4.dp, RoundedCornerShape(16.dp)),
-            shape = RoundedCornerShape(16.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),

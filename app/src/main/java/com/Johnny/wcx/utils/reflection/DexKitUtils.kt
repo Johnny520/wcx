@@ -8,9 +8,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.result.ClassData
 import org.luckypray.dexkit.result.MethodData
@@ -24,35 +21,89 @@ inline val MethodData.asConstructor get() = getConstructorInstance(ClassLoaders.
 
 private object DexKitHolder {
 
+    private const val TAG = "DexKitHolder"
     private val IDLE_TIMEOUT = 30.seconds
 
-    // SupervisorJob so a cancelled timer job never takes down the whole scope
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val mutex = Mutex()
+    private val lock = Any()
 
     private var bridge: DexKitBridge? = null
-    private var idleJob: Job? = null
+    private var activeLeaseCount = 0
+    private var idleCloseJob: Job? = null
+    private var idleCloseGeneration = 0L
 
-    fun get(): DexKitBridge {
-        runBlocking {
-            mutex.withLock {
-                if (bridge == null) {
-                    bridge = DexKitBridge.create(HostInfo.appInfo.sourceDir)
+    fun acquire(): DexKitBridge = synchronized(lock) {
+        cancelIdleCloseLocked()
+
+        val current = bridge
+        val acquired = if (current?.isValid == true) {
+            current
+        } else {
+            DexKitBridge.create(HostInfo.appInfo.sourceDir).also { bridge = it }
+        }
+
+        activeLeaseCount++
+        acquired
+    }
+
+    fun release() = synchronized(lock) {
+        check(activeLeaseCount > 0) { "DexKit lease released without a matching acquire" }
+
+        activeLeaseCount--
+        if (activeLeaseCount == 0) {
+            scheduleIdleCloseLocked()
+        }
+    }
+
+    private fun cancelIdleCloseLocked() {
+        idleCloseGeneration++
+        idleCloseJob?.cancel()
+        idleCloseJob = null
+    }
+
+    private fun scheduleIdleCloseLocked() {
+        check(idleCloseJob == null)
+        val generation = ++idleCloseGeneration
+
+        idleCloseJob = scope.launch {
+            delay(IDLE_TIMEOUT)
+            synchronized(lock) {
+                if (generation != idleCloseGeneration || activeLeaseCount != 0) {
+                    return@synchronized
                 }
-                idleJob?.cancel()
-                idleJob = scope.launch {
-                    delay(IDLE_TIMEOUT)
-                    mutex.withLock {
-                        WeLogger.d("DexKitHolder", "timeout reached, closing DexKit")
-                        bridge?.close()
-                        bridge = null
-                        idleJob = null
-                    }
+
+                val idleBridge = bridge
+                bridge = null
+                idleCloseJob = null
+
+                if (idleBridge != null) {
+                    WeLogger.d(TAG, "idle timeout reached, closing DexKit")
+                    idleBridge.close()
                 }
             }
         }
-        return bridge!!
     }
 }
 
-val DexKit: DexKitBridge get() = DexKitHolder.get()
+/**
+ * Keeps the shared bridge valid for the entire [block]. DexKit result objects must be consumed
+ * inside the block because some of them retain the bridge for follow-up queries.
+ */
+fun <T> withDexKit(block: (DexKitBridge) -> T): T {
+    val dexKit = DexKitHolder.acquire()
+    return try {
+        block(dexKit)
+    } finally {
+        DexKitHolder.release()
+    }
+}
+
+/** Suspending counterpart of [withDexKit]. The lease remains active across suspension points. */
+suspend fun <T> withDexKitSuspending(block: suspend (DexKitBridge) -> T): T {
+    val dexKit = DexKitHolder.acquire()
+    return try {
+        block(dexKit)
+    } finally {
+        DexKitHolder.release()
+    }
+}

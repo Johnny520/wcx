@@ -104,7 +104,9 @@ fun TriggersScreen(onBack: () -> Unit) {
         show = showEditor,
         existing = editing,
         sessions = sessions,
-        onDismiss = { showEditor = false },
+        // Clear [editing] too: the editor's field state is keyed on it, so leaving it set would keep
+        // the abandoned edits alive and re-show them the next time the same trigger is opened.
+        onDismiss = { showEditor = false; editing = null },
         onSave = { built ->
             scope.launch {
                 WeAgentRepository.upsertTrigger(built)
@@ -194,9 +196,12 @@ private fun TriggerEditorDialog(
         mutableStateOf(scopeOptions.indexOf(existing?.scope ?: TriggerScope.GLOBAL).coerceAtLeast(0))
     }
     val selectedScope = scopeOptions[scopeIndex]
-    // Ordered session list for the picker; preselect the trigger's bound session if any.
+    // Ordered session list for the picker; preselect the trigger's bound session if any. The index is
+    // keyed on the session *ids*, not on [sessionList]: any background turn touching the sessions
+    // table re-emits the flow with a fresh list instance, which would otherwise silently reset the
+    // user's pick. Only sessions appearing/disappearing should invalidate it.
     val sessionList = remember(sessions) { sessions.values.toList() }
-    var boundSessionIndex by remember(existing, sessionList) {
+    var boundSessionIndex by remember(existing, sessions.keys) {
         mutableStateOf(sessionList.indexOfFirst { it.id == existing?.sessionId }.coerceAtLeast(0))
     }
 
@@ -396,6 +401,21 @@ private fun TriggerEditorDialog(
             )
             Spacer(Modifier.height(16.dp))
 
+            // An INTERVAL schedule with a blank/zero interval is silently dropped by TriggerScheduler
+            // (it needs intervalSeconds > 0), so the trigger would look enabled but never fire.
+            val intervalOk = type != TriggerType.SCHEDULE || kind != ScheduleKind.INTERVAL ||
+                    (intervalSeconds.toLongOrNull() ?: 0L) > 0L
+            // An empty sqlOps list is the "all three ops" sentinel in TriggerConditions, so unticking
+            // everything would produce a trigger firing on every DB write — the opposite of the intent.
+            val sqlOpsOk = type != TriggerType.SQL || opInsert || opUpdate || opQuery
+
+            if (!intervalOk) {
+                Text("间隔必须大于 0 秒，否则触发器不会运行。", Modifier.padding(vertical = 4.dp))
+            }
+            if (!sqlOpsOk) {
+                Text("至少需要选择一种数据库操作。", Modifier.padding(vertical = 4.dp))
+            }
+
             Row(Modifier.fillMaxWidth()) {
                 TextButton(text = "取消", onClick = onDismiss, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(12.dp))
@@ -405,7 +425,8 @@ private fun TriggerEditorDialog(
                     modifier = Modifier.weight(1f),
                     // Disable save when a session-bound trigger has no session to bind to.
                     enabled = name.isNotBlank() && promptTemplate.isNotBlank() &&
-                            (selectedScope == TriggerScope.GLOBAL || sessionList.isNotEmpty()),
+                            (selectedScope == TriggerScope.GLOBAL || sessionList.isNotEmpty()) &&
+                            intervalOk && sqlOpsOk,
                     onClick = {
                         val built = buildTrigger(
                             existing = existing,

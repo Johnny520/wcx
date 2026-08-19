@@ -3,7 +3,7 @@ package com.Johnny.wcx.agent.model
 import com.Johnny.wcx.utils.WeLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
-import io.ktor.client.request.post
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
@@ -38,65 +38,69 @@ class OpenAiChatCompletionsClient(
 
     override fun stream(request: LlmRequest): Flow<LlmStreamEvent> = flow {
         val body = LlmJson.shallowMerge(buildBody(request, stream = true), request.customJsonOverride)
-        val resp = http.post(endpoint) {
+        // The response is scoped to `execute { … }`: every early exit below (HTTP error, break on
+        // [DONE]) previously abandoned an open SSE body channel, leaking the connection until GC.
+        // `execute` releases it on every path, including exceptions.
+        http.preparePost(endpoint) {
             header(HttpHeaders.Authorization, "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(LlmJson.json.encodeToString(JsonObject.serializer(), body))
-        }
-        if (!resp.status.isSuccess()) {
-            emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
-            return@flow
-        }
-        val acc = ToolCallAccumulator()
-        val textBuf = StringBuilder()
-        val reasoningBuf = StringBuilder()
-        var finishReason: String? = null
-        var usage: LlmUsage? = null
-
-        val channel = resp.bodyAsChannel()
-        while (true) {
-            @Suppress("DEPRECATION")
-            val line = channel.readUTF8Line() ?: break
-            val data = SseParser.dataOrNull(line) ?: continue
-            if (data == "[DONE]") break
-
-            val chunk = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
-            // The final chunk (with stream_options.include_usage) carries `usage` and an empty
-            // `choices` array, so parse usage before the empty-choices `continue` below.
-            chunk["usage"]?.let { if (it is JsonObject) usage = parseUsage(it) }
-            val choice = chunk["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
-            choice["finish_reason"]?.jsonPrimitive?.contentOrNullSafe()?.let { finishReason = it }
-
-            val delta = choice["delta"]?.jsonObject ?: continue
-            delta["content"]?.jsonPrimitive?.contentOrNullSafe()?.let {
-                if (it.isNotEmpty()) {
-                    textBuf.append(it); emit(LlmStreamEvent.TextDelta(it))
-                }
+        }.execute { resp ->
+            if (!resp.status.isSuccess()) {
+                emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
+                return@execute
             }
-            // Some providers expose reasoning under `reasoning` or `reasoning_content`.
-            (delta["reasoning"] ?: delta["reasoning_content"])?.jsonPrimitive?.contentOrNullSafe()?.let {
-                if (it.isNotEmpty()) {
-                    // On the very first reasoning chunk, emit an empty sentinel so the UI shows the
-                    // "思考中..." card immediately — before the first real token is appended.
-                    if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
-                    reasoningBuf.append(it); emit(LlmStreamEvent.ReasoningDelta(it))
-                }
-            }
-            delta["tool_calls"]?.jsonArray?.forEach { acc.accept(it.jsonObject) }
-        }
+            val acc = ToolCallAccumulator()
+            val textBuf = StringBuilder()
+            val reasoningBuf = StringBuilder()
+            var finishReason: String? = null
+            var usage: LlmUsage? = null
 
-        emit(
-            LlmStreamEvent.Completed(
-                LlmMessage(
-                    role = LlmRole.ASSISTANT,
-                    content = textBuf.toString().ifEmpty { null },
-                    reasoning = reasoningBuf.toString().ifEmpty { null },
-                    toolCalls = acc.build(),
-                ),
-                finishReason,
-                usage,
+            val channel = resp.bodyAsChannel()
+            while (true) {
+                @Suppress("DEPRECATION")
+                val line = channel.readUTF8Line() ?: break
+                val data = SseParser.dataOrNull(line) ?: continue
+                if (data == "[DONE]") break
+
+                val chunk = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
+                // The final chunk (with stream_options.include_usage) carries `usage` and an empty
+                // `choices` array, so parse usage before the empty-choices `continue` below.
+                chunk["usage"]?.let { if (it is JsonObject) usage = parseUsage(it) }
+                val choice = chunk["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+                choice["finish_reason"]?.jsonPrimitive?.contentOrNullSafe()?.let { finishReason = it }
+
+                val delta = choice["delta"]?.jsonObject ?: continue
+                delta["content"]?.jsonPrimitive?.contentOrNullSafe()?.let {
+                    if (it.isNotEmpty()) {
+                        textBuf.append(it); emit(LlmStreamEvent.TextDelta(it))
+                    }
+                }
+                // Some providers expose reasoning under `reasoning` or `reasoning_content`.
+                (delta["reasoning"] ?: delta["reasoning_content"])?.jsonPrimitive?.contentOrNullSafe()?.let {
+                    if (it.isNotEmpty()) {
+                        // On the very first reasoning chunk, emit an empty sentinel so the UI shows the
+                        // "思考中..." card immediately — before the first real token is appended.
+                        if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
+                        reasoningBuf.append(it); emit(LlmStreamEvent.ReasoningDelta(it))
+                    }
+                }
+                delta["tool_calls"]?.jsonArray?.forEach { acc.accept(it.jsonObject) }
+            }
+
+            emit(
+                LlmStreamEvent.Completed(
+                    LlmMessage(
+                        role = LlmRole.ASSISTANT,
+                        content = textBuf.toString().ifEmpty { null },
+                        reasoning = reasoningBuf.toString().ifEmpty { null },
+                        toolCalls = acc.build(),
+                    ),
+                    finishReason,
+                    usage,
+                )
             )
-        )
+        }
     }
 
     // -- request body ---------------------------------------------------------

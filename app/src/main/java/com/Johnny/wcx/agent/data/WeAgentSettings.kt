@@ -27,7 +27,10 @@ object WeAgentSettings {
     const val KEY_DEFAULT_SYSTEM_PROMPT_ID = "default_system_prompt_id" // new-session default binding
     const val KEY_DEFAULT_WORKSPACE_ID = "default_workspace_id"     // §7 new-session default
     const val KEY_SEND_WHILE_RUNNING = "send_while_running"         // QUEUE_AFTER_TURN | QUEUE_AS_STEER
-    const val KEY_OVERLAY_FOREGROUND_ONLY = "overlay_foreground_only" // hide the floating ball when WeChat is backgrounded
+    const val KEY_OVERLAY_MODE = "overlay_mode"                     // DISABLED | FOREGROUND_ONLY | ALWAYS
+
+    /** Superseded by [KEY_OVERLAY_MODE]; still read once for migration of existing installs. */
+    const val KEY_OVERLAY_FOREGROUND_ONLY = "overlay_foreground_only"
 
     // Defaults
     const val DEFAULT_MAX_MODEL_REQUESTS = 50
@@ -68,8 +71,20 @@ object WeAgentSettings {
     suspend fun defaultSystemPromptId(): String? = get(KEY_DEFAULT_SYSTEM_PROMPT_ID)?.takeIf { it.isNotBlank() }
     suspend fun defaultWorkspaceId(): String? = get(KEY_DEFAULT_WORKSPACE_ID)?.takeIf { it.isNotBlank() }
 
-    /** When true, the floating ball is only shown while WeChat is in the foreground (default false = always). */
-    suspend fun overlayForegroundOnly(): Boolean = get(KEY_OVERLAY_FOREGROUND_ONLY)?.toBoolean() ?: false
+    /**
+     * When the floating ball should be attached. Falls back to the legacy boolean key so existing
+     * installs keep their choice; unset on both means [OverlayMode.ALWAYS] (the old default).
+     */
+    suspend fun overlayMode(): OverlayMode {
+        get(KEY_OVERLAY_MODE)?.let { stored ->
+            OverlayMode.entries.firstOrNull { it.name == stored }?.let { return it }
+        }
+        return if (get(KEY_OVERLAY_FOREGROUND_ONLY)?.toBoolean() == true) {
+            OverlayMode.FOREGROUND_ONLY
+        } else {
+            OverlayMode.ALWAYS
+        }
+    }
 
     /** Reads the send-while-running mode, defaulting to QUEUE_AFTER_TURN. */
     suspend fun sendWhileRunningMode(): com.Johnny.wcx.features.api.agent.WeAgentService.SendWhileRunningMode =
@@ -77,4 +92,14 @@ object WeAgentSettings {
             "QUEUE_AS_STEER" -> com.Johnny.wcx.features.api.agent.WeAgentService.SendWhileRunningMode.QUEUE_AS_STEER
             else -> com.Johnny.wcx.features.api.agent.WeAgentService.SendWhileRunningMode.QUEUE_AFTER_TURN
         }
+}
+
+/**
+ * When the WeAgent floating ball is attached to the WindowManager. [label] is the user-facing
+ * option text; declaration order is the order shown in the picker.
+ */
+enum class OverlayMode(val label: String) {
+    DISABLED("禁用"),
+    FOREGROUND_ONLY("仅在微信前台时显示"),
+    ALWAYS("始终显示"),
 }

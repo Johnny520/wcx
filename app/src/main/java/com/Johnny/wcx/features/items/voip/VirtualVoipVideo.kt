@@ -32,7 +32,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.toClass
@@ -46,10 +45,11 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.fs.KnownPaths
-import com.Johnny.wcx.utils.reflection.BInt
+import com.Johnny.wcx.utils.reflection.int
 import kotlin.io.path.div
 
 @Feature(
@@ -198,7 +198,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
 
             firstMethod {
                 name = "getCameraInfo"
-                parameters(BInt, Camera.CameraInfo::class)
+                parameters(int, Camera.CameraInfo::class)
             }.hookAfter {
                 if (!shouldInterceptCamera) return@hookAfter
                 val info = args[1] as? Camera.CameraInfo ?: return@hookAfter
@@ -417,7 +417,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
         }
     }
 
-    private fun hijackCamera2Session(param: XC_MethodHook.MethodHookParam) {
+    private fun hijackCamera2Session(param: HookParam) {
         param.args.forEachIndexed { index, arg ->
             if (arg == null) return@forEachIndexed
             val hijackedArg = when (arg) {
@@ -430,7 +430,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
                 surface = hijackedArg.playbackSurface,
                 ownsSurface = false
             )
-            WeLogger.d(TAG, "Camera2 session argument replaced: ${param.method.name}")
+            WeLogger.d(TAG, "Camera2 session argument replaced: ${param.member.name}")
             return
         }
     }

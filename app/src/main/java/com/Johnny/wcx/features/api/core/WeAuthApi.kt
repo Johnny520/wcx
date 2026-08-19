@@ -11,6 +11,7 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.ClassLoaders
 import java.lang.reflect.Proxy
 import java.util.LinkedList
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Feature(name = "授权与登录服务", categories = ["API"], description = "提供微信网页/小程序的授权登录能力")
 object WeAuthApi : ApiFeature(), IResolveDex {
@@ -24,6 +25,17 @@ object WeAuthApi : ApiFeature(), IResolveDex {
     }
 
     fun jsLogin(appId: String, onResult: (String?) -> Unit) {
+        // 调用方 (WeChatService.jsLogin) 用无超时的 suspendCancellableCoroutine 包装该回调,
+        // 因此必须保证 onResult 不多不少地被调用一次
+        val delivered = AtomicBoolean(false)
+        fun deliver(code: String?) {
+            if (delivered.compareAndSet(false, true)) {
+                onResult(code)
+            } else {
+                WeLogger.w(TAG, "jsLogin result already delivered, ignoring code=$code")
+            }
+        }
+
         try {
             val netScene = classNetSceneJSLogin.clazz.createInstance(
                 appId,
@@ -58,44 +70,59 @@ object WeAuthApi : ApiFeature(), IResolveDex {
                 arrayOf(callbackInterface)
             ) { _, method, args ->
                 if (method.name == "onSceneEnd") {
+                    // onResult 必须且仅被调用一次, 因此每条失败分支都要提前返回并回调 null,
+                    // 否则上层的 suspendCancellableCoroutine 会永远挂起
                     try {
                         val errType = args[0] as Int
                         val errCode = args[1] as Int
                         val errMsg = args[2] as? String
                         val scene = args[3]
 
-                        if (errType == 0 && errCode == 0 && scene != null) {
-                            val reqResp = scene.reflekt().firstMethod {
-                                name = "getReqResp"
-                                superclass()
-                            }.invoke()
-                            if (reqResp != null) {
-                                val respObj = reqResp.reflekt().firstMethod {
-                                    name = "getRespObj"
-                                    superclass()
-                                }.invoke()
-                                if (respObj != null) {
-                                    val proto = respObj.reflekt().getField("a")
-                                    if (proto != null) {
-                                        val stringFields = proto.javaClass.declaredFields.filter { it.type == String::class.java }
-                                        val code = if (stringFields.isNotEmpty()) {
-                                            WeLogger.d(TAG, "found string fields on response: ${stringFields.map { it.name }}")
-                                            stringFields[0].isAccessible = true
-                                            stringFields[0].get(proto) as? String
-                                        } else null
-
-                                        WeLogger.i(TAG, "jsLogin success, code: $code")
-                                        onResult(code)
-                                    }
-                                }
-                            }
-                        } else {
+                        if (errType != 0 || errCode != 0 || scene == null) {
                             WeLogger.w(TAG, "jsLogin failed: errType=$errType, errCode=$errCode, errMsg=$errMsg")
-                            onResult(null)
+                            deliver(null)
+                            return@newProxyInstance null
                         }
+
+                        val reqResp = scene.reflekt().firstMethod {
+                            name = "getReqResp"
+                            superclass()
+                        }.invoke()
+                        if (reqResp == null) {
+                            WeLogger.w(TAG, "jsLogin succeeded but reqResp is null")
+                            deliver(null)
+                            return@newProxyInstance null
+                        }
+
+                        val respObj = reqResp.reflekt().firstMethod {
+                            name = "getRespObj"
+                            superclass()
+                        }.invoke()
+                        if (respObj == null) {
+                            WeLogger.w(TAG, "jsLogin succeeded but respObj is null")
+                            deliver(null)
+                            return@newProxyInstance null
+                        }
+
+                        val proto = respObj.reflekt().getField("a")
+                        if (proto == null) {
+                            WeLogger.w(TAG, "jsLogin succeeded but response proto is null")
+                            deliver(null)
+                            return@newProxyInstance null
+                        }
+
+                        val stringFields = proto.javaClass.declaredFields.filter { it.type == String::class.java }
+                        val code = if (stringFields.isNotEmpty()) {
+                            WeLogger.d(TAG, "found string fields on response: ${stringFields.map { it.name }}")
+                            stringFields[0].isAccessible = true
+                            stringFields[0].get(proto) as? String
+                        } else null
+
+                        WeLogger.i(TAG, "jsLogin success, code: $code")
+                        deliver(code)
                     } catch (t: Throwable) {
                         WeLogger.e(TAG, "error parsing onSceneEnd", t)
-                        onResult(null)
+                        deliver(null)
                     }
                 }
                 null
@@ -104,7 +131,7 @@ object WeAuthApi : ApiFeature(), IResolveDex {
             doSceneMethod.invoke(netScene, dispatcher, callbackProxy)
         } catch (e: Exception) {
             WeLogger.e(TAG, "jsLogin execution failed", e)
-            onResult(null)
+            deliver(null)
         }
     }
 }
