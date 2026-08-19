@@ -2,6 +2,7 @@
 
 package com.Johnny.wcx.features.api.net.models.protobuf
 
+import com.Johnny.wcx.features.api.net.WePacketSigner
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToByteArray
@@ -21,14 +22,18 @@ object WeProto {
         encodeDefaults = true
     }
 
-    inline fun <reified T> encode(value: T): ByteArray {
-        // TODO: pre-process protobuf objects here
-        return protoBuf.encodeToByteArray(value)
+    @Deprecated(
+        message = "You might want encodeWithDefaults() instead. Use encode() when you are absolutely sure.",
+        level = DeprecationLevel.WARNING
+    )
+    inline fun <reified T : Any> encode(value: T): ByteArray {
+        val processed = WePacketSigner.preprocess(value)
+        return protoBuf.encodeToByteArray(processed)
     }
 
-    inline fun <reified T> encodeWithDefaults(value: T): ByteArray {
-        // TODO: pre-process protobuf objects here
-        return protoBufWithDefaults.encodeToByteArray(value)
+    inline fun <reified T : Any> encodeWithDefaults(value: T): ByteArray {
+        val processed = WePacketSigner.preprocess(value)
+        return protoBufWithDefaults.encodeToByteArray(processed)
     }
 
     inline fun <reified T> decode(bytes: ByteArray): T = protoBuf.decodeFromByteArray(bytes)

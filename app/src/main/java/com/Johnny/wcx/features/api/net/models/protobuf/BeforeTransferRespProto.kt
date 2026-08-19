@@ -28,5 +28,6 @@ data class BeforeTransferReqProto(
     @ProtoNumber(2) val userName: String = "",
     @ProtoNumber(4) val groupId: String? = null,
 ) {
+    @Suppress("DEPRECATION")
     fun encode(): ByteArray = WeProto.encode(this)
 }

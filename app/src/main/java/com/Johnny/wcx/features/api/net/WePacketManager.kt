@@ -13,6 +13,8 @@ object WePacketManager {
 
     fun removeInterceptor(interceptor: IWePacketInterceptor) = listeners.remove(interceptor)
 
+    internal fun hasInterceptors(): Boolean = listeners.isNotEmpty()
+
     internal fun handleRequestTamper(uri: String, cgiId: Int, reqBytes: ByteArray): ByteArray? {
         if (Preferences.verboseLog) {
             val data = WeProtoData.fromBytes(reqBytes)

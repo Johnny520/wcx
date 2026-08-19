@@ -209,6 +209,14 @@ class WeProtoData private constructor() {
         }
     }
 
+    /**
+     * 将当前字段序列化为 protobuf 消息字节。
+     *
+     * **序列化失败时抛出 [IOException], 而不是返回空数组。**
+     * 空数组会被 `parseFrom()` 解析成"所有字段都是默认值"的空包, 从而把真实的请求/响应整个抹掉;
+     * 因此调用方必须捕获异常并放弃本次篡改、沿用原始数据包。
+     */
+    @Throws(IOException::class)
     fun toMessageBytes(): ByteArray {
         val bos = ByteArrayOutputStream()
         val out = CodedOutputStream.newInstance(bos)
@@ -242,11 +250,17 @@ class WeProtoData private constructor() {
             out.flush()
             bos.toByteArray()
         }.getOrElse {
-            WeLogger.e(TAG, "toBytes failed", it)
-            ByteArray(0)
+            // 子消息序列化失败时已经记过日志, 直接向上传递避免重复包装
+            if (it is IOException) throw it
+            WeLogger.e(TAG, "toMessageBytes failed", it)
+            throw IOException("failed to serialize WeProtoData", it)
         }
     }
 
+    /**
+     * 与 [toMessageBytes] 相同的失败契约: 失败时抛出 [IOException], 调用方应放弃篡改。
+     */
+    @Throws(IOException::class)
     fun toPacketBytes(): ByteArray {
         val body = toMessageBytes()
         if (packetPrefix.isEmpty()) return body
@@ -273,22 +287,37 @@ class WeProtoData private constructor() {
         return before - fields.size
     }
 
+    /**
+     * 只有目标字段的 wire type 与写入的值类型一致时才赋值。
+     * 否则 [toMessageBytes] 里的 `f.value as Long` / `as Int` 会抛 ClassCastException,
+     * 进而毁掉整个数据包, 所以这里直接拒绝并记录日志。
+     */
+    private fun setScalarField(idx: Int, expectedWireType: Int, value: Any): Boolean {
+        val f = fields[idx]
+        if (f.wireType != expectedWireType) {
+            WeLogger.w(
+                TAG,
+                "refusing to set field ${f.fieldNumber}: wire type is ${f.wireType}, expected $expectedWireType"
+            )
+            return false
+        }
+        f.value = value
+        return true
+    }
+
     fun setVarInt(fieldNumber: Int, occurrenceIndex: Int, value: Long): Boolean {
         val idx = findFieldIndex(fieldNumber, occurrenceIndex).takeIf { it >= 0 } ?: return false
-        fields[idx].value = value
-        return true
+        return setScalarField(idx, 0, value)
     }
 
     fun setFixed64(fieldNumber: Int, occurrenceIndex: Int, value: Long): Boolean {
         val idx = findFieldIndex(fieldNumber, occurrenceIndex).takeIf { it >= 0 } ?: return false
-        fields[idx].value = value
-        return true
+        return setScalarField(idx, 1, value)
     }
 
     fun setFixed32(fieldNumber: Int, occurrenceIndex: Int, value: Int): Boolean {
         val idx = findFieldIndex(fieldNumber, occurrenceIndex).takeIf { it >= 0 } ?: return false
-        fields[idx].value = value
-        return true
+        return setScalarField(idx, 5, value)
     }
 
     fun setLenHex(fieldNumber: Int, occurrenceIndex: Int, hex: String): Boolean {

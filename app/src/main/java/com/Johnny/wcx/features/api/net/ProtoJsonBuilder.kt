@@ -47,7 +47,7 @@ object ProtoJsonBuilder {
     }
 
     private fun writeVarintTag(os: ByteArrayOutputStream, tag: Int, value: Long) {
-        writeRawVarInt32(os, (tag shl 3) or WIRETYPE_VAR_INT)
+        writeRawVarInt32(os, tag shl 3 or WIRETYPE_VAR_INT)
         writeRawVarInt64(os, value)
     }
 
@@ -57,7 +57,7 @@ object ProtoJsonBuilder {
     }
 
     private fun writeLengthDelimitedTag(os: ByteArrayOutputStream, tag: Int, bytes: ByteArray) {
-        writeRawVarInt32(os, (tag shl 3) or WIRETYPE_LENGTH_DELIMITED)
+        writeRawVarInt32(os, tag shl 3 or WIRETYPE_LENGTH_DELIMITED)
         writeRawVarInt32(os, bytes.size)
         os.write(bytes)
     }
@@ -65,11 +65,11 @@ object ProtoJsonBuilder {
     private fun writeRawVarInt32(os: ByteArrayOutputStream, value: Int) {
         var v = value
         while (true) {
-            if ((v and 0x7F.inv()) == 0) {
+            if (v and 0x7F.inv() == 0) {
                 os.write(v)
                 return
             } else {
-                os.write((v and 0x7F) or 0x80)
+                os.write(v and 0x7F or 0x80)
                 v = v ushr 7
             }
         }
@@ -78,11 +78,11 @@ object ProtoJsonBuilder {
     private fun writeRawVarInt64(os: ByteArrayOutputStream, value: Long) {
         var v = value
         while (true) {
-            if ((v and 0x7F.inv()) == 0L) {
+            if (v and 0x7F.inv() == 0L) {
                 os.write(v.toInt())
                 return
             } else {
-                os.write((v.toInt() and 0x7F) or 0x80)
+                os.write(v.toInt() and 0x7F or 0x80)
                 v = v ushr 7
             }
         }
