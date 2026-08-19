@@ -11,12 +11,6 @@ plugins {
     alias(libs.plugins.aboutlibraries.android)
 }
 
-fun getCommitCount(): Int {
-    return providers.exec {
-        commandLine("git", "rev-list", "--count", "HEAD")
-    }.standardOutput.asText.get().trim().toInt()
-}
-
 fun getGitHash(): String {
     return providers.exec {
         commandLine("git", "rev-parse", "--short", "HEAD")
@@ -32,19 +26,18 @@ android {
     }
     ndkVersion = libs.versions.ndk.get()
 
-    val commitCount = getCommitCount()
     val gitHash = getGitHash()
 
-    // v194 基线：commitCount 基于 v148，偏移 +26
-    // 后续每增加一个 commit，versionCode 自动递增
-    val versionBaseOffset = 223  // 清空历史后 commitCount 重新计算，偏移 223 让版本回到 v227
+    // 版本号从环境变量 VER 读取（CI 用 v* tag 最大 +1 计算），本地构建默认 v226
+    val verTag = System.getenv("VER") ?: "v226"
+    val verCode = verTag.removePrefix("v").toIntOrNull() ?: 226
 
     defaultConfig {
         applicationId = libs.versions.namespace.get()
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = commitCount + versionBaseOffset
-        versionName = "v${commitCount + versionBaseOffset}"
+        versionCode = verCode
+        versionName = verTag
 
         buildConfigField("String", "COMMIT_HASH", "\"${gitHash}\"")
         buildConfigField("String", "TAG", "\"WCX\"")

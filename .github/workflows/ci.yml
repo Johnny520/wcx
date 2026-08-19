@@ -53,6 +53,19 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: 获取最新tag，计算下一个版本
+        id: calc_ver
+        run: |
+          # 获取全部v开头tag，剥离v，数字排序，取最大值
+          ALL_TAGS=$(git tag -l "v*")
+          if [ -z "$ALL_TAGS" ]; then
+            NEXT=226
+          else
+            MAX=$(git tag -l "v*" | sed 's/v//' | sort -n | tail -n1)
+            NEXT=$((MAX + 1))
+          fi
+          echo "VER=v${NEXT}" >> $GITHUB_ENV
+
       - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
@@ -233,11 +246,16 @@ jobs:
       - name: Generate version info
         id: version
         run: |
-          COMMIT_COUNT=$(git rev-list --count HEAD)
           GIT_HASH=$(git rev-parse --short HEAD)
-          # v174 基线偏移量，与 build.gradle.kts 中的 versionBaseOffset 保持一致
-          VERSION_OFFSET=223  # 与 build.gradle.kts versionBaseOffset=223 对齐
-          VERSION_CODE=$((COMMIT_COUNT + VERSION_OFFSET))
+          # 读取全部 v* tag，取最大数字 +1 作为本次版本号
+          ALL_TAGS=$(git tag -l "v*")
+          if [ -z "$ALL_TAGS" ]; then
+            NEXT=226
+          else
+            MAX=$(git tag -l "v*" | sed 's/v//' | sort -n | tail -n1)
+            NEXT=$((MAX + 1))
+          fi
+          VERSION_CODE=${NEXT}
           VERSION_TAG="v${VERSION_CODE}"
           echo "tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
           echo "hash=${GIT_HASH}" >> $GITHUB_OUTPUT
