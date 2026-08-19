@@ -50,7 +50,7 @@ object WeContactApi : ApiFeature(), IResolveDex {
                     add(OpLog.operation(OpLog.CMD_DELETE_CONTACT, DelContactProto(UserNameProto(wxId))))
                 }
 
-                WePacketHelper.sendCgiRaw(
+                WePacketHelper.sendCgi(
                     "/cgi-bin/micromsg-bin/oplog", 681, 0, 0, OpLog.encodeRequest(operations)
                 ) {
                     onSuccess { _ -> if (cont.isActive) cont.resume(true) }
@@ -74,7 +74,7 @@ object WeContactApi : ApiFeature(), IResolveDex {
 
     fun verifyUser(userId: String, ticket: String, scene: Int, privacy: Int = 0) {
         try {
-            val netScene = ctorNetSceneVerifyUser.newInstance(3, userId, ticket, scene, "", privacy)
+            val netScene = ctorNetSceneVerifyUser.newInstance(3, userId, ticket, scene, "", privacy, null, null)
             WeNetSceneApi.sendNetScene(netScene)
         } catch (e: Exception) {
             WeLogger.e("WeContactApi", "verifyUser failed", e)

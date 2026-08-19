@@ -112,7 +112,7 @@ object DetectDeletedFriends : ClickableFeature() {
                                 break
                             }
 
-                            WePacketHelper.sendCgiRaw(
+                            WePacketHelper.sendCgi(
                                 "/cgi-bin/mmpay-bin/beforetransfer", 2783, 0, 0,
                                 BeforeTransferReqProto(userName = friend.wxId).encode()
                             ) {
@@ -438,7 +438,7 @@ object DetectDeletedFriends : ClickableFeature() {
                                     availableLabels = null
                                     phase = DialogPhase.SelectLabel(
                                         friends = abnormalFriends,
-                                        suggestedLabelName = "WCX_单删好友_${formatEpoch(System.currentTimeMillis(), includeDate = true)}"
+                                        suggestedLabelName = "WeKit_单删好友_${formatEpoch(System.currentTimeMillis(), includeDate = true)}"
                                     )
                                 }) { Text("标记标签") }
                                 TextButton(onClick = {

@@ -7,7 +7,6 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +26,7 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.content.WeColorField
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.currentWxId
@@ -68,8 +68,8 @@ object DisplayGroupMemberRealNamesLastChar : ClickableFeature(), IContactInfoPro
                 title = { Text("显示群成员实名尾字") },
                 text = {
                     DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
-                        TextField(
-                            label = { Text("前景色 (ARGB)") },
+                        WeColorField(
+                            label = "前景色",
                             value = fg,
                             onValueChange = { fg = it })
                     }
@@ -155,7 +155,7 @@ object DisplayGroupMemberRealNamesLastChar : ClickableFeature(), IContactInfoPro
     private fun actualFetchRealName(senderId: String, groupId: String?, onResult: (FetchResult) -> Unit) {
         CoroutineScope(Dispatchers.IO).launch {
             val reqBytes = BeforeTransferReqProto(userName = senderId, groupId = groupId).encode()
-            WePacketHelper.sendCgiRaw(
+            WePacketHelper.sendCgi(
                 "/cgi-bin/mmpay-bin/beforetransfer", 2783, 0, 0,
                 reqBytes
             ) {
