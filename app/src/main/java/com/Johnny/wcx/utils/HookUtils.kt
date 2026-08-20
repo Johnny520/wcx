@@ -60,3 +60,16 @@ inline fun Executable.hookDirectly(
 @Suppress("NOTHING_TO_INLINE")
 fun XC_MethodHook.MethodHookParam.invokeOriginal(thisObject: Any? = null, args: Array<Any?>? = null): Any? =
     XposedBridge.invokeOriginalMethod(method, thisObject ?: this.thisObject, args ?: this.args)
+
+// 上游新 Hook API 兼容别名：映射回 Xposed 旧类型。
+// 上游重构把 hook 抽象为 IHookBridge，但这几个新功能文件仍直接引用这些符号。
+typealias HookParam = XC_MethodHook.MethodHookParam
+
+typealias HookHandle = XC_MethodHook.Unhook
+
+abstract class HookCallback(priority: Int = 50) : XC_MethodHook(priority) {
+    protected abstract override fun beforeHookedMethod(param: HookParam)
+
+    protected abstract override fun afterHookedMethod(param: HookParam)
+}
+

@@ -15,6 +15,7 @@ import com.Johnny.wcx.utils.reflection.bool
 import com.Johnny.wcx.utils.reflection.int
 import com.Johnny.wcx.utils.reflection.void
 import java.lang.reflect.Field
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 
 @Feature(
@@ -110,6 +111,9 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
         }
 
         val hook = object : HookCallback() {
+            // MethodHookParam 无 extra 字段，用 map 在 before/after 之间传递状态
+            private val extraStore = ConcurrentHashMap<HookParam, TemporarilyRemovedSelections>()
+
             override fun beforeHookedMethod(param: HookParam) {
                 val adapter = param.thisObject ?: return
                 val message = param.args[0] ?: return
@@ -120,12 +124,12 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
                 // Let WeChat run its original add and UI refresh path with 99 existing selections.
                 val removed = selectedMessages.take(selectedMessages.size - SELECTION_LIMIT + 1)
                 selectedMessages.removeAll(removed.toSet())
-                param.extra = TemporarilyRemovedSelections(selectedMessages, removed)
+                extraStore[param] = TemporarilyRemovedSelections(selectedMessages, removed)
                 selectedMessageCountOverride.set(selectedMessages.size + removed.size + 1)
             }
 
             override fun afterHookedMethod(param: HookParam) {
-                val state = param.extra as? TemporarilyRemovedSelections ?: return
+                val state = extraStore.remove(param) ?: return
                 val remainingAndNew = state.selectedMessages.toList()
                 state.selectedMessages.clear()
                 state.selectedMessages.addAll(state.removed)
