@@ -2,6 +2,7 @@ package com.Johnny.wcx.loader.abc
 
 import androidx.annotation.Keep
 import java.lang.reflect.Constructor
+import java.lang.reflect.Executable
 import java.lang.reflect.Member
 import java.lang.reflect.Method
 
@@ -38,7 +39,7 @@ interface IHookBridge {
         fun unhook()
     }
 
-    val apiLevel: Int
+    val hookBridgeName: String
 
     val frameworkName: String
 
@@ -50,7 +51,7 @@ interface IHookBridge {
 
     val isDeoptimizationSupported: Boolean
 
-    fun deoptimize(member: Member): Boolean
+    fun deoptimize(executable: Executable): Boolean
 
     fun invokeOriginalMethod(method: Method, thisObject: Any?, args: Array<Any?>): Any?
 

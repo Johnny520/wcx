@@ -24,8 +24,18 @@ internal fun panelReorderActions(
     onCancel: () -> Unit,
     onSave: () -> Unit,
 ) = listOf(
-    PanelAction(MaterialSymbols.Outlined.Close, "取消", onClick = onCancel),
-    PanelAction(MaterialSymbols.Outlined.Save, "保存", onClick = onSave),
+    PanelAction(
+        MaterialSymbols.Outlined.Close,
+        "取消",
+        headerStart = true,
+        onClick = onCancel,
+    ),
+    PanelAction(
+        MaterialSymbols.Outlined.Save,
+        "保存",
+        showLabel = true,
+        onClick = onSave,
+    ),
 )
 
 internal fun <T> List<T>.moveItem(from: Int, to: Int): List<T> =

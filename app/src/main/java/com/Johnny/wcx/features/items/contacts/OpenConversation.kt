@@ -1,5 +1,6 @@
 package com.Johnny.wcx.features.items.contacts
 
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -22,41 +23,45 @@ object OpenConversation : ClickableFeature() {
     override val noSwitchWidget = true
 
     override fun onClick(context: ComponentActivity) {
-        showComposeDialog(context) {
-            var wxId by remember { mutableStateOf("") }
-            AlertDialogContent(
-                title = { Text("跳转对话") },
-                text = {
-                    TextField(
-                        value = wxId,
-                        onValueChange = { wxId = it },
-                        label = { Text("微信 ID") })
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (wxId.isBlank()) {
-                            showToast(context, "微信 ID 为空!")
-                            return@TextButton
-                        }
-                        WeApi.openContact(context, wxId, WeApi.OpenContactDestination.HOMEPAGE)
-                    }) { Text("好友主页") }
+        showOpenConversationDialog(context)
+    }
+}
 
-                    TextButton(onClick = {
-                        if (wxId.isBlank()) {
-                            showToast(context, "微信 ID 为空!")
-                            return@TextButton
-                        }
-                        WeApi.openContact(context, wxId, WeApi.OpenContactDestination.SETTINGS)
-                    }) { Text("好友设置") }
+fun showOpenConversationDialog(context: Context) {
+    showComposeDialog(context) {
+        var wxId by remember { mutableStateOf("") }
+        AlertDialogContent(
+            title = { Text("跳转对话") },
+            text = {
+                TextField(
+                    value = wxId,
+                    onValueChange = { wxId = it },
+                    label = { Text("微信 ID") })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (wxId.isBlank()) {
+                        showToast(context, "微信 ID 为空!")
+                        return@TextButton
+                    }
+                    WeApi.openContact(context, wxId, WeApi.OpenContactDestination.HOMEPAGE)
+                }) { Text("好友主页") }
 
-                    Button(onClick = {
-                        if (wxId.isBlank()) {
-                            showToast(context, "微信 ID 为空!")
-                            return@Button
-                        }
-                        WeApi.openContact(context, wxId, WeApi.OpenContactDestination.CONVERSATION)
-                    }) { Text("对话") }
-                })
-        }
+                TextButton(onClick = {
+                    if (wxId.isBlank()) {
+                        showToast(context, "微信 ID 为空!")
+                        return@TextButton
+                    }
+                    WeApi.openContact(context, wxId, WeApi.OpenContactDestination.SETTINGS)
+                }) { Text("好友设置") }
+
+                Button(onClick = {
+                    if (wxId.isBlank()) {
+                        showToast(context, "微信 ID 为空!")
+                        return@Button
+                    }
+                    WeApi.openContact(context, wxId, WeApi.OpenContactDestination.CONVERSATION)
+                }) { Text("对话") }
+            })
     }
 }

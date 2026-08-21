@@ -177,31 +177,11 @@ object FakeLocation : ClickableFeature(), IResolveDex {
         if (!hookedLocationClasses.add(locationClass)) return
 
         getLatitudeMethod.hookBefore {
-            try {
-                // 仅当原方法返回 double 时才设置 result，避免对非 double 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
-                    if (returnType == Double::class.javaPrimitiveType || returnType == java.lang.Double::class.java) {
-                        result = latitude.toDouble()
-                    }
-                }
-            } catch (e: Throwable) {
-                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-            }
+            result = latitude.toDouble()
         }
 
         getLongitudeMethod.hookBefore {
-            try {
-                // 仅当原方法返回 double 时才设置 result，避免对非 double 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
-                    if (returnType == Double::class.javaPrimitiveType || returnType == java.lang.Double::class.java) {
-                        result = longitude.toDouble()
-                    }
-                }
-            } catch (e: Throwable) {
-                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-            }
+            result = longitude.toDouble()
         }
     }
 

@@ -208,11 +208,21 @@ object ApiServer : ClickableFeature() {
     @Serializable
     data class MomentPicsRequest(val content: String, val picPaths: List<String>, val sdkId: String? = null, val sdkAppName: String? = null)
 
+    /**
+     * Mirrors what `NetSceneTransferOperation` actually wants (see `WePaymentApi.confirmTransfer`):
+     * transaction id, transfer id and the payer's username are three distinct values — the endpoint
+     * used to send the transfer id in the transaction id's place, producing a malformed operation.
+     */
     @Serializable
-    data class ConfirmTransferRequest(val transId: String, val transSpanId: String, val invalidTime: Int)
+    data class ConfirmTransferRequest(
+        val transactionId: String,
+        val transferId: String,
+        val payerUsername: String,
+        val invalidTime: Int
+    )
 
     @Serializable
-    data class RefuseTransferRequest(val transId: String, val transSpanId: String)
+    data class RefuseTransferRequest(val transactionId: String, val transferId: String, val payerUsername: String)
 
     @Serializable
     data class VerifyFriendRequest(val userId: String, val ticket: String, val scene: Int, val privacy: Int? = null)
@@ -301,8 +311,8 @@ object ApiServer : ClickableFeature() {
             serverInfo = Implementation(
                 name = "wechat-mcp-server",
                 version = BuildConfig.VERSION_NAME,
-                title = "WeChat MCP Server (powered by WCX)",
-                websiteUrl = "https://github.com/Johnny520/wcx"
+                title = "WeChat MCP Server (powered by WeKit)",
+                websiteUrl = "https://github.com/Ujhhgtg/WeKit"
             ),
             options = ServerOptions(
                 capabilities = ServerCapabilities(tools = ServerCapabilities.Tools(true))
@@ -374,7 +384,7 @@ object ApiServer : ClickableFeature() {
         addTool(
             name = "cache-image",
             description = "Cache an image message into WeChat's own storage by its server ID (equivalent to tapping the image to download from CDN); " +
-                    "does NOT decode or copy it to Download/WCX/; returns the internal WeChat image path. May take a while if not cached yet.",
+                    "does NOT decode or copy it to Download/WeKit/; returns the internal WeChat image path. May take a while if not cached yet.",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     addField("msg-svr-id", "Server ID (msgSvrId) of the image message to cache", "integer")
@@ -389,7 +399,7 @@ object ApiServer : ClickableFeature() {
 
         addTool(
             name = "download-image",
-            description = "Download the image of an image message by its server ID: cache it from CDN if needed, then decode and save it to Download/WCX/; " +
+            description = "Download the image of an image message by its server ID: cache it from CDN if needed, then decode and save it to Download/WeKit/; " +
                     "returns the saved local file path. May take a while if not cached yet.",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
@@ -405,7 +415,7 @@ object ApiServer : ClickableFeature() {
 
         addTool(
             name = "download-sticker",
-            description = "Decode the sticker of a sticker message by its server ID, convert it to a GIF and save it to Download/WCX/; " +
+            description = "Decode the sticker of a sticker message by its server ID, convert it to a GIF and save it to Download/WeKit/; " +
                     "returns the saved local file path",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
@@ -421,7 +431,7 @@ object ApiServer : ClickableFeature() {
 
         addTool(
             name = "download-voice",
-            description = "Decode the voice of a voice message by its server ID (silk → mp3) and save it to Download/WCX/; " +
+            description = "Decode the voice of a voice message by its server ID (silk → mp3) and save it to Download/WeKit/; " +
                     "returns the saved local mp3 file path",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
@@ -438,7 +448,7 @@ object ApiServer : ClickableFeature() {
         addTool(
             name = "cache-file",
             description = "Cache a file message into WeChat's own storage by its server ID (equivalent to tapping the file bubble to download); " +
-                    "does NOT copy it to Download/WCX/; returns the internal WeChat file path. May take a while for large files.",
+                    "does NOT copy it to Download/WeKit/; returns the internal WeChat file path. May take a while for large files.",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     addField("msg-svr-id", "Server ID (msgSvrId) of the file message to cache", "integer")
@@ -450,7 +460,7 @@ object ApiServer : ClickableFeature() {
                 required = listOf("conv-id", "msg-svr-id")
             )
         ) { req ->
-            val msgSvrId = req.arguments?.get("conv-id")?.jsonPrimitive?.longOrNull
+            val msgSvrId = req.arguments?.get("msg-svr-id")?.jsonPrimitive?.longOrNull
                 ?: return@addTool textRes("Invalid msg-svr-id", true)
             val convId = req.arguments?.get("conv-id")?.jsonPrimitive?.asStringOrNull
             WeChatService.cacheFile(msgSvrId, convId?.ifEmpty { null }).toCallToolResult { textRes(it) }
@@ -458,7 +468,7 @@ object ApiServer : ClickableFeature() {
 
         addTool(
             name = "download-file",
-            description = "Download a file message by its server ID: first cache it into WeChat's storage if needed, then copy it to Download/WCX/; " +
+            description = "Download a file message by its server ID: first cache it into WeChat's storage if needed, then copy it to Download/WeKit/; " +
                     "returns the saved local file path. May take a while for large files.",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
@@ -763,7 +773,7 @@ object ApiServer : ClickableFeature() {
         ) { req ->
             val args = req.arguments ?: return@addTool textRes("Arguments are empty", true)
             val convId = args["conv-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid conversation ID", true)
-            val msgSvrId = args["msg-svr-id"]?.jsonPrimitive?.intOrNull?.toLong() ?: return@addTool textRes("Invalid msg-svr-id", true)
+            val msgSvrId = args["msg-svr-id"]?.jsonPrimitive?.longOrNull ?: return@addTool textRes("Invalid msg-svr-id", true)
             val content = args["content"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid content", true)
             WeChatService.sendQuoteMessage(convId, msgSvrId, content).toCallToolResult { textRes("Sent successfully") }
         }
@@ -836,7 +846,7 @@ object ApiServer : ClickableFeature() {
             )
         ) { req ->
             val args = req.arguments ?: return@addTool textRes("Arguments are empty", true)
-            val msgId = args["msg-id"]?.jsonPrimitive?.intOrNull?.toLong() ?: return@addTool textRes("Invalid msg-id", true)
+            val msgId = args["msg-id"]?.jsonPrimitive?.longOrNull ?: return@addTool textRes("Invalid msg-id", true)
             WeChatService.revokeMessage(msgId).toCallToolResult { textRes("Revoked successfully") }
         }
 
@@ -855,7 +865,7 @@ object ApiServer : ClickableFeature() {
             val args = req.arguments ?: return@addTool textRes("Arguments are empty", true)
             val convId = args["conv-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid conversation ID", true)
             val content = args["content"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid content", true)
-            val timeMs = args["time-ms"]?.jsonPrimitive?.intOrNull?.toLong() ?: System.currentTimeMillis()
+            val timeMs = args["time-ms"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
             WeChatService.insertSystemMessage(convId, content, timeMs).toCallToolResult { textRes("Inserted successfully") }
         }
 
@@ -1199,20 +1209,20 @@ object ApiServer : ClickableFeature() {
             description = "Accept/confirm an incoming transfer payment",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
-                    addField("conv-id", "Conversation ID where the transfer is located")
-                    addField("trans-id", "Transfer ID")
-                    addField("trans-span-id", "Transfer span ID")
+                    addField("transaction-id", "Transaction ID of the transfer")
+                    addField("transfer-id", "Transfer ID")
+                    addField("payer-username", "WeChat wxid of the payer")
                     addField("invalid-time", "Transfer validity window time value", "integer")
                 },
-                required = listOf("conv-id", "trans-id", "trans-span-id", "invalid-time")
+                required = listOf("transaction-id", "transfer-id", "payer-username", "invalid-time")
             )
         ) { req ->
             val args = req.arguments ?: return@addTool textRes("Arguments are empty", true)
-            val convId = args["conv-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid conversation ID", true)
-            val transId = args["trans-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid trans-id", true)
-            val transSpanId = args["trans-span-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid trans-span-id", true)
+            val transactionId = args["transaction-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid transaction-id", true)
+            val transferId = args["transfer-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid transfer-id", true)
+            val payerUsername = args["payer-username"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid payer-username", true)
             val invalidTime = args["invalid-time"]?.jsonPrimitive?.intOrNull ?: return@addTool textRes("Invalid invalid-time", true)
-            WeChatService.confirmTransfer(convId, transId, transSpanId, invalidTime).toCallToolResult { textRes("Transfer confirmed successfully") }
+            WeChatService.confirmTransfer(transactionId, transferId, payerUsername, invalidTime).toCallToolResult { textRes("Transfer confirmed successfully") }
         }
 
         addTool(
@@ -1220,18 +1230,18 @@ object ApiServer : ClickableFeature() {
             description = "Reject/refuse an incoming transfer payment",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
-                    addField("conv-id", "Conversation ID where the transfer is located")
-                    addField("trans-id", "Transfer ID")
-                    addField("trans-span-id", "Transfer span ID")
+                    addField("transaction-id", "Transaction ID of the transfer")
+                    addField("transfer-id", "Transfer ID")
+                    addField("payer-username", "WeChat wxid of the payer")
                 },
-                required = listOf("conv-id", "trans-id", "trans-span-id")
+                required = listOf("transaction-id", "transfer-id", "payer-username")
             )
         ) { req ->
             val args = req.arguments ?: return@addTool textRes("Arguments are empty", true)
-            val convId = args["conv-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid conversation ID", true)
-            val transId = args["trans-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid trans-id", true)
-            val transSpanId = args["trans-span-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid trans-span-id", true)
-            WeChatService.refuseTransfer(convId, transId, transSpanId).toCallToolResult { textRes("Transfer refused successfully") }
+            val transactionId = args["transaction-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid transaction-id", true)
+            val transferId = args["transfer-id"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid transfer-id", true)
+            val payerUsername = args["payer-username"]?.jsonPrimitive?.content ?: return@addTool textRes("Invalid payer-username", true)
+            WeChatService.refuseTransfer(transactionId, transferId, payerUsername).toCallToolResult { textRes("Transfer refused successfully") }
         }
 
         addTool(
@@ -1954,7 +1964,7 @@ object ApiServer : ClickableFeature() {
                 }
             }
 
-            // GET /api/messages/{msgSvrId}/image — cache if needed, then decode & save to Download/WCX/
+            // GET /api/messages/{msgSvrId}/image — cache if needed, then decode & save to Download/WeKit/
             get("messages/{msgSvrId}/image") {
                 val msgSvrId = call.parameters["msgSvrId"]?.toLongOrNull()
                     ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid msgSvrId"))
@@ -1991,7 +2001,7 @@ object ApiServer : ClickableFeature() {
                 }
             }
 
-            // GET /api/messages/{msgSvrId}/file?talker=... — cache if needed, then copy to Download/WCX/
+            // GET /api/messages/{msgSvrId}/file?talker=... — cache if needed, then copy to Download/WeKit/
             get("messages/{msgSvrId}/file") {
                 val msgSvrId = call.parameters["msgSvrId"]?.toLongOrNull()
                     ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid msgSvrId"))
@@ -2130,7 +2140,7 @@ object ApiServer : ClickableFeature() {
                 post("confirm") {
                     val req = runCatching { call.receive<ConfirmTransferRequest>() }.getOrNull()
                         ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body"))
-                    call.respondResult(WeChatService.confirmTransfer(req.transId, req.transId, req.transSpanId, req.invalidTime)) {
+                    call.respondResult(WeChatService.confirmTransfer(req.transactionId, req.transferId, req.payerUsername, req.invalidTime)) {
                         respond(
                             HttpStatusCode.OK,
                             SuccessResponse()
@@ -2142,7 +2152,7 @@ object ApiServer : ClickableFeature() {
                 post("refuse") {
                     val req = runCatching { call.receive<RefuseTransferRequest>() }.getOrNull()
                         ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid request body"))
-                    call.respondResult(WeChatService.refuseTransfer(req.transId, req.transId, req.transSpanId)) {
+                    call.respondResult(WeChatService.refuseTransfer(req.transactionId, req.transferId, req.payerUsername)) {
                         respond(
                             HttpStatusCode.OK,
                             SuccessResponse()

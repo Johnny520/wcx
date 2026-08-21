@@ -21,8 +21,11 @@ inline val Context.androidUserId: Long
 inline fun <reified T : Any> Context.getSystemService(): T =
     getSystemService(T::class.java)!!
 
-tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
+inline val Context.baseActivity get() = _baseActivity(this)
+
+@Suppress("FunctionName")
+tailrec fun _baseActivity(baseContext: Context?): Activity? = when (baseContext) {
+    is Activity -> baseContext
+    is ContextWrapper -> _baseActivity(baseContext.baseContext)
     else -> null
 }

@@ -28,8 +28,8 @@ object WeAgent : ClickableFeature() {
     override fun onEnable() {
         WeAgentService.init()
         MainScope().launch(Dispatchers.Main) {
-            // Apply the foreground-only preference before mounting so the initial attach is gated.
-            WeAgentOverlayController.setForegroundOnly(WeAgentSettings.overlayForegroundOnly())
+            // Apply the overlay mode before mounting so the initial attach is gated.
+            WeAgentOverlayController.setMode(WeAgentSettings.overlayMode())
             // Mount the overlay on the main thread (WindowManager requirement).
             WeAgentOverlayController.show()
         }

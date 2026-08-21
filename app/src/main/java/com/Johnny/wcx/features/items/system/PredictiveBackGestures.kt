@@ -10,12 +10,14 @@ import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.features.items.system.PredictiveBackGestures.PRIVATE_FLAG_ENABLE_ON_BACK_INVOKED_CALLBACK
+import com.Johnny.wcx.features.items.system.PredictiveBackGestures.dispatching
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 
-// https://github.com/Johnny520/PandorasBox
+// https://github.com/Ujhhgtg/PandorasBox
 @Feature(name = "预见性返回动画", categories = ["系统与隐私"], description = "为微信的活动强制启用预见性返回动画\n需系统 Android SDK >= 33")
 object PredictiveBackGestures : ClickableFeature() {
 
@@ -94,7 +96,7 @@ object PredictiveBackGestures : ClickableFeature() {
         ActivityThread::class.reflekt()
             .firstMethod { name = "handleLaunchActivity" }
             .hookBefore {
-                val record = args[0]
+                val record = args[0]!!
                 val infoField =
                     record.reflekt().firstField { name = "activityInfo" }
                 val info = infoField.get() as ActivityInfo

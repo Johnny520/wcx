@@ -35,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tencent.mm.api.IEmojiInfo
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
-import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
@@ -48,19 +47,15 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.OriginalMethodInvoker
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.getSystemService
 import com.Johnny.wcx.utils.android.showToast
-import com.Johnny.wcx.utils.invokeOriginal
+import com.Johnny.wcx.utils.captureOriginalMethod
+import com.Johnny.wcx.utils.invokeOriginalMethod
 import com.Johnny.wcx.utils.reflection.int
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.luckypray.dexkit.query.enums.MatchType
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -72,6 +67,7 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
 
     private const val MD5_MORRA = "9bd1281af3a31710a45b84d736363691"
     private const val MD5_DICE = "08f223fa83f1ca34e143d1e580252c7c"
+    internal val GAME_EMOJI_MD5S = setOf(MD5_MORRA, MD5_DICE)
     private const val GRAVITY_EARTH = 9.81f
     private const val MOTION_THRESHOLD = 2.0f
     private const val TAG = "EmojiGameControl"
@@ -114,12 +110,6 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
     private var sensorManager: SensorManager? = null
     private var keepAliveTask: Runnable? = null
     private var keepAliveHandler: Handler? = null
-
-    // Bounded scope for the multi-send loop in sendMultiple(); cancelled in onDisable()
-    // so the background work can never outlive the feature (previously a raw Thread with no
-    // cancellation path, which leaked if the user toggled the feature off mid-burst).
-    private val featureScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var sendMultipleJob: Job? = null
 
     private val accelListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -248,17 +238,7 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
             val activity = ((args[0] as View).context as ContextThemeWrapper).baseContext as Activity
 
             if (stealthMode) {
-                try {
-                    // 仅当原方法返回 void 时才设置 result = null
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
-                        if (returnType == Void.TYPE) {
-                            this.result = null
-                        }
-                    }
-                } catch (e: Throwable) {
-                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-                }
+                result = null
                 ensureSensorAlive(10000L)
 
                 val (ax, ay, az) = latestAccel.let { Triple(it[0], it[1], it[2]) }
@@ -269,7 +249,7 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
                 else MorraType.entries[value].chineseName
                 showToast(activity, "${if (isDice) "骰子" else "猜拳"}: $name")
 
-                invokeOriginal()
+                invokeOriginalMethod()
             } else {
                 showSelectDialog(this, isDice, activity)
             }
@@ -277,8 +257,6 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
     }
 
     override fun onDisable() {
-        sendMultipleJob?.cancel()
-        sendMultipleJob = null
         keepAliveTask?.let { keepAliveHandler?.removeCallbacks(it) }
         keepAliveHandler?.removeCallbacksAndMessages(null)
         sensorManager?.unregisterListener(accelListener)
@@ -309,18 +287,9 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
         }
     }
 
-    private fun showSelectDialog(param: XC_MethodHook.MethodHookParam, isDice: Boolean, activity: Activity) {
-        try {
-            // 仅当原方法返回 void 时才设置 result = null
-            if (param.method is java.lang.reflect.Method) {
-                val returnType = (param.method as java.lang.reflect.Method).returnType
-                if (returnType == Void.TYPE) {
-                    param.result = null
-                }
-            }
-        } catch (e: Throwable) {
-            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-        }
+    private fun showSelectDialog(param: HookParam, isDice: Boolean, activity: Activity) {
+        val originalMethod = param.captureOriginalMethod()
+        param.result = null
 
         showComposeDialog(activity) {
             EmojiGameDialogContent(
@@ -328,14 +297,14 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
                 onSend = { isSingle, inputText ->
                     try {
                         if (isSingle) {
-                            param.invokeOriginal()
+                            originalMethod()
                         } else {
                             val values = parseMultipleInput(inputText, isDice)
                             if (values.isEmpty()) {
                                 showToast(activity, "输入格式错误!")
                                 return@EmojiGameDialogContent
                             }
-                            sendMultiple(param, values, isDice, activity)
+                            sendMultiple(originalMethod, values, isDice, activity)
                         }
                     } catch (e: Throwable) {
                         WeLogger.e(TAG, "failed to send", e)
@@ -347,13 +316,13 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
                         if (isSingle) {
                             if (isDice) valDice = Random.nextInt(0, 6)
                             else valMorra = Random.nextInt(0, 3)
-                            param.invokeOriginal()
+                            originalMethod()
                         } else {
                             val count = if (isDice) Random.nextInt(3, 10) else Random.nextInt(3, 8)
                             val values = List(count) {
                                 if (isDice) Random.nextInt(0, 6) else Random.nextInt(0, 3)
                             }
-                            sendMultiple(param, values, isDice, activity)
+                            sendMultiple(originalMethod, values, isDice, activity)
                         }
                     } catch (e: Throwable) {
                         WeLogger.e(TAG, "failed to send random", e)
@@ -480,15 +449,12 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
     }
 
     private fun sendMultiple(
-        param: XC_MethodHook.MethodHookParam,
+        originalMethod: OriginalMethodInvoker,
         values: List<Int>,
         isDice: Boolean,
         activity: Activity
     ) {
-        // Cancel any previous burst still in flight so two overlapping bursts can't race on
-        // valMorra/valDice; the scope itself is cancelled in onDisable().
-        sendMultipleJob?.cancel()
-        sendMultipleJob = featureScope.launch {
+        Thread {
             values.forEachIndexed { index, value ->
                 try {
                     if (isDice) {
@@ -497,11 +463,11 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
                         valMorra = value
                     }
 
-                    param.invokeOriginal()
+                    originalMethod()
 
                     // Add delay between sends (except for the last one)
                     if (index < values.size - 1) {
-                        delay(300)
+                        Thread.sleep(300)
                     }
                 } catch (e: Throwable) {
                     WeLogger.e(TAG, "failed to send at index $index", e)
@@ -514,6 +480,6 @@ object EmojiGameControl : ClickableFeature(), IResolveDex {
             activity.runOnUiThread {
                 showToast(activity, "已发送 ${values.size} 次")
             }
-        }
+        }.start()
     }
 }

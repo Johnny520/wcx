@@ -11,17 +11,18 @@ import com.Johnny.wcx.features.items.chat.panel.VoicePack
 import com.Johnny.wcx.features.items.chat.panel.customOrderIndex
 import com.Johnny.wcx.features.items.chat.panel.normalizedCustomOrder
 import com.Johnny.wcx.utils.AudioUtils
+import com.Johnny.wcx.utils.MediaFileTypeDetector
 import com.Johnny.wcx.utils.fs.asPath
 import com.Johnny.wcx.utils.serialization.DefaultJson
 import kotlinx.serialization.Serializable
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.UUID
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.div
-import kotlin.io.path.extension
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.listDirectoryEntries
@@ -32,7 +33,6 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 object VoicePanelRepository {
-    private val supportedExtensions = setOf("mp3", "m4a", "aac", "wav", "silk", "amr")
     private val statsFile get() = PanelPaths.voicePanelDir / ".stats.json"
     private val onlineRecentsFile get() = PanelPaths.voicePanelDir / ".online_recents.json"
     private val ordersFile get() = PanelPaths.voicePanelDir / ".orders.json"
@@ -203,13 +203,22 @@ object VoicePanelRepository {
     }
 
     fun importVoice(packId: String, displayName: String, input: InputStream): Result<VoiceItem> = runCatching {
-        val safeFile = sanitizeName(displayName).ifBlank { "voice.mp3" }
-        val extension = safeFile.substringAfterLast('.', "mp3").lowercase()
-        require(extension in supportedExtensions) { "不支持的音频格式: $extension" }
         val directory = packPath(requirePackName(packId)).also { it.createDirectories() }
-        val destination = uniquePath(directory, safeFile)
-        input.use { Files.copy(it, destination) }
-        destination.toItem(packId, PanelSource.IMPORTED, readStats())
+        val temporary = directory / ".import-${UUID.randomUUID()}.part"
+        try {
+            input.use { Files.copy(it, temporary, StandardCopyOption.REPLACE_EXISTING) }
+            require(Files.size(temporary) > 0L) { "语音文件为空" }
+            val format = MediaFileTypeDetector.detectAudio(temporary)
+                ?: throw IllegalArgumentException("不支持或无法识别的语音格式")
+            val destination = uniquePath(
+                directory,
+                "${importedFileStem(displayName, "voice")}.${format.extension}",
+            )
+            moveImportedFile(temporary, destination)
+            destination.toItem(packId, PanelSource.IMPORTED, readStats())
+        } finally {
+            temporary.deleteIfExists()
+        }
     }
 
     /**
@@ -219,33 +228,28 @@ object VoicePanelRepository {
     fun importOnlineVoice(packName: String, item: VoiceItem, input: InputStream): Result<VoiceItem> = runCatching {
         val safePack = requirePackName(packName)
         val directory = packPath(safePack).also { it.createDirectories() }
-        val extension = item.format.ifBlank { "mp3" }.lowercase().trimStart('.').ifBlank { "mp3" }
-        require(extension in supportedExtensions) { "不支持的音频格式: $extension" }
         val identity = sanitizeName(item.remoteObjectId ?: item.id).ifBlank { sanitizeName(item.title) }
-        val destination = directory / "${identity.take(96)}.$extension"
-        if (!destination.isRegularFile() || Files.size(destination) == 0L) {
-            val temporary = destination.resolveSibling("${destination.name}.part")
+        existingOnlinePath(directory, identity)?.let { existing ->
+            return@runCatching existing.toItem(safePack, PanelSource.IMPORTED, readStats())
+        }
+        val temporary = directory / "${identity.take(96)}.part"
+        try {
             input.use { Files.copy(it, temporary, StandardCopyOption.REPLACE_EXISTING) }
             require(Files.size(temporary) > 0L) { "服务器未返回语音数据" }
-            runCatching {
-                Files.move(
-                    temporary,
-                    destination,
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE,
-                )
-            }.getOrElse { Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING) }
+            val extension = MediaFileTypeDetector.detectAudio(temporary)?.extension
+                ?: throw IllegalArgumentException("服务器返回了不支持的语音格式")
+            val destination = directory / "${identity.take(96)}.$extension"
+            moveImportedFile(temporary, destination)
+            destination.toItem(safePack, PanelSource.IMPORTED, readStats())
+        } finally {
             temporary.deleteIfExists()
         }
-        destination.toItem(safePack, PanelSource.IMPORTED, readStats())
     }
 
     fun hasOnlineVoice(packName: String, item: VoiceItem): Boolean = runCatching {
         val safePack = requirePackName(packName)
-        val extension = item.format.ifBlank { "mp3" }.lowercase().trimStart('.').ifBlank { "mp3" }
         val identity = sanitizeName(item.remoteObjectId ?: item.id).ifBlank { sanitizeName(item.title) }
-        val destination = packPath(safePack) / "${identity.take(96)}.$extension"
-        destination.isRegularFile() && Files.size(destination) > 0L
+        existingOnlinePath(packPath(safePack), identity) != null
     }.getOrDefault(false)
 
     fun recordSent(filePath: String) {
@@ -293,7 +297,7 @@ object VoicePanelRepository {
             source = source,
             packId = packId,
             durationMs = AudioUtils.getDurationMs(path).coerceAtLeast(0L),
-            format = extension.lowercase(),
+            format = MediaFileTypeDetector.detectAudio(this)?.extension.orEmpty(),
             sendCount = itemStats.sendCount,
             lastSentAt = itemStats.lastSentAt,
         )
@@ -461,11 +465,20 @@ object VoicePanelRepository {
         )
     }
 
-    fun supportsFileName(fileName: String): Boolean =
-        fileName.substringAfterLast('.', "").lowercase() in supportedExtensions
-
     private fun isVoiceFile(path: java.nio.file.Path) =
-        path.isRegularFile() && supportsFileName(path.name)
+        path.isRegularFile() && !path.name.endsWith(".part") && MediaFileTypeDetector.detectAudio(path) != null
+
+    private fun existingOnlinePath(directory: java.nio.file.Path, identity: String): java.nio.file.Path? =
+        if (!directory.isDirectory()) null
+        else {
+            val stableIdentity = identity.take(96)
+            directory.listDirectoryEntries()
+            .firstOrNull { path ->
+                path.isRegularFile() &&
+                        (path.name == stableIdentity || path.name.startsWith("$stableIdentity.")) &&
+                        isVoiceFile(path)
+            }
+        }
 
     private fun sanitizeName(value: String) = value.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
@@ -492,6 +505,22 @@ object VoicePanelRepository {
             suffix++
         }
         return candidate
+    }
+
+    private fun importedFileStem(value: String, fallback: String): String {
+        val safeName = sanitizeName(value).ifBlank { fallback }
+        return safeName.substringBeforeLast('.', safeName).ifBlank { fallback }
+    }
+
+    private fun moveImportedFile(source: java.nio.file.Path, destination: java.nio.file.Path) {
+        runCatching {
+            Files.move(
+                source,
+                destination,
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        }.getOrElse { Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING) }
     }
 
     private val reservedNames = setOf(".", "..", "clone_voices", RECENT_PACK_ID)

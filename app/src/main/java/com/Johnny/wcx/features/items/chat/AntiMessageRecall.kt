@@ -12,7 +12,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.WeXmlParserApi
@@ -26,6 +25,7 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.formatEpoch
 
@@ -50,7 +50,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
 
     private const val TYPE_KEY = $$".sysmsg.$type"
 
-    override fun onParse(param: XC_MethodHook.MethodHookParam, result: MutableMap<String, Any?>) {
+    override fun onParse(param: HookParam, result: MutableMap<String, Any?>) {
         val args = param.args
         val xmlContent = args[0] as? String ?: ""
         val rootTag = args[1] as? String ?: ""

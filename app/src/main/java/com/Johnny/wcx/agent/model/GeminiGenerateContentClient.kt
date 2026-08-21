@@ -3,7 +3,7 @@ package com.Johnny.wcx.agent.model
 import com.Johnny.wcx.utils.WeLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
-import io.ktor.client.request.post
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
@@ -66,109 +66,113 @@ class GeminiGenerateContentClient(
         val endpoint = "${baseUrl.trimEnd('/')}/$modelPath:streamGenerateContent?alt=sse"
 
         val body = LlmJson.shallowMerge(buildBody(request), request.customJsonOverride)
-        val resp = http.post(endpoint) {
+        // The response is scoped to `execute { … }`: every early exit below (HTTP error, stream
+        // error, end of stream) previously abandoned an open SSE body channel, leaking the
+        // connection until GC. `execute` releases it on every path, including exceptions.
+        http.preparePost(endpoint) {
             header(GeminiCommon.API_KEY_HEADER, apiKey)
             contentType(ContentType.Application.Json)
             setBody(LlmJson.json.encodeToString(JsonObject.serializer(), body))
-        }
-        if (!resp.status.isSuccess()) {
-            emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
-            return@flow
-        }
-
-        val textBuf = StringBuilder()
-        val reasoningBuf = StringBuilder()
-        val toolCalls = mutableListOf<LlmToolCall>()
-        var finishReason: String? = null
-        var inputTokens: Int? = null
-        var outputTokens: Int? = null
-        var totalTokens: Int? = null
-
-        val channel = resp.bodyAsChannel()
-        while (true) {
-            @Suppress("DEPRECATION")
-            val line = channel.readUTF8Line() ?: break
-            val data = SseParser.dataOrNull(line) ?: continue
-            // generateContent SSE has no [DONE] marker — the channel just closes.
-            val chunk = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
-
-            // Usage metadata (present on every chunk, most complete on the last).
-            chunk["usageMetadata"]?.jsonObject?.let { u ->
-                u["promptTokenCount"]?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
-                u["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
-                u["totalTokenCount"]?.jsonPrimitive?.intOrNull?.let { totalTokens = it }
+        }.execute { resp ->
+            if (!resp.status.isSuccess()) {
+                emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
+                return@execute
             }
 
-            val candidate = chunk["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
-            candidate["finishReason"]?.jsonPrimitive?.contentOrNullSafe()
-                ?.takeIf { it.isNotEmpty() && it != "FINISH_REASON_UNSPECIFIED" }
-                ?.let { finishReason = it }
+            val textBuf = StringBuilder()
+            val reasoningBuf = StringBuilder()
+            val toolCalls = mutableListOf<LlmToolCall>()
+            var finishReason: String? = null
+            var inputTokens: Int? = null
+            var outputTokens: Int? = null
+            var totalTokens: Int? = null
 
-            val parts = candidate["content"]?.jsonObject?.get("parts")?.jsonArray ?: continue
+            val channel = resp.bodyAsChannel()
+            while (true) {
+                @Suppress("DEPRECATION")
+                val line = channel.readUTF8Line() ?: break
+                val data = SseParser.dataOrNull(line) ?: continue
+                // generateContent SSE has no [DONE] marker — the channel just closes.
+                val chunk = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
 
-            for (part in parts) {
-                val p = part.jsonObject
-                val isThought = p["thought"]?.jsonPrimitive?.contentOrNullSafe() == "true"
-                        || p["thought"]?.let { it is kotlinx.serialization.json.JsonPrimitive && it.content == "true" } == true
-
-                val fcObj = p["functionCall"]?.jsonObject
-                if (fcObj != null) {
-                    // Completed function call part — tool calls in generateContent arrive fully
-                    // formed (not streamed piecemeal like Chat Completions deltas).
-                    val id = fcObj["id"]?.jsonPrimitive?.contentOrNullSafe()
-                        ?: "call_${toolCalls.size}"
-                    val name = fcObj["name"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
-                    val argsJson = fcObj["args"]?.let {
-                        runCatching { LlmJson.json.encodeToString(JsonObject.serializer(), it.jsonObject) }.getOrElse { "{}" }
-                    } ?: "{}"
-                    // thoughtSignature lives alongside the functionCall part (Gemini 3).
-                    val sig = (p["thoughtSignature"] ?: p["thought_signature"])
-                        ?.jsonPrimitive?.contentOrNullSafe()
-                    toolCalls.add(LlmToolCall(id = id, name = name, argumentsJson = argsJson, providerSignature = sig))
-                    continue
+                // Usage metadata (present on every chunk, most complete on the last).
+                chunk["usageMetadata"]?.jsonObject?.let { u ->
+                    u["promptTokenCount"]?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
+                    u["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
+                    u["totalTokenCount"]?.jsonPrimitive?.intOrNull?.let { totalTokens = it }
                 }
 
-                val text = p["text"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
-                if (text.isEmpty()) continue
+                val candidate = chunk["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+                candidate["finishReason"]?.jsonPrimitive?.contentOrNullSafe()
+                    ?.takeIf { it.isNotEmpty() && it != "FINISH_REASON_UNSPECIFIED" }
+                    ?.let { finishReason = it }
 
-                if (isThought) {
-                    // Emit empty sentinel on first reasoning chunk so the UI shows "思考中…" immediately.
-                    if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
-                    reasoningBuf.append(text)
-                    emit(LlmStreamEvent.ReasoningDelta(text))
-                } else {
-                    textBuf.append(text)
-                    emit(LlmStreamEvent.TextDelta(text))
+                val parts = candidate["content"]?.jsonObject?.get("parts")?.jsonArray ?: continue
+
+                for (part in parts) {
+                    val p = part.jsonObject
+                    val isThought = p["thought"]?.jsonPrimitive?.contentOrNullSafe() == "true"
+                            || p["thought"]?.let { it is kotlinx.serialization.json.JsonPrimitive && it.content == "true" } == true
+
+                    val fcObj = p["functionCall"]?.jsonObject
+                    if (fcObj != null) {
+                        // Completed function call part — tool calls in generateContent arrive fully
+                        // formed (not streamed piecemeal like Chat Completions deltas).
+                        val id = fcObj["id"]?.jsonPrimitive?.contentOrNullSafe()
+                            ?: "call_${toolCalls.size}"
+                        val name = fcObj["name"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
+                        val argsJson = fcObj["args"]?.let {
+                            runCatching { LlmJson.json.encodeToString(JsonObject.serializer(), it.jsonObject) }.getOrElse { "{}" }
+                        } ?: "{}"
+                        // thoughtSignature lives alongside the functionCall part (Gemini 3).
+                        val sig = (p["thoughtSignature"] ?: p["thought_signature"])
+                            ?.jsonPrimitive?.contentOrNullSafe()
+                        toolCalls.add(LlmToolCall(id = id, name = name, argumentsJson = argsJson, providerSignature = sig))
+                        continue
+                    }
+
+                    val text = p["text"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
+                    if (text.isEmpty()) continue
+
+                    if (isThought) {
+                        // Emit empty sentinel on first reasoning chunk so the UI shows "思考中…" immediately.
+                        if (reasoningBuf.isEmpty()) emit(LlmStreamEvent.ReasoningDelta(""))
+                        reasoningBuf.append(text)
+                        emit(LlmStreamEvent.ReasoningDelta(text))
+                    } else {
+                        textBuf.append(text)
+                        emit(LlmStreamEvent.TextDelta(text))
+                    }
+                }
+
+                // Error parts embedded in the candidates structure.
+                chunk["error"]?.let {
+                    emit(LlmStreamEvent.Failed(LlmException("Gemini error: $data")))
+                    return@execute
                 }
             }
 
-            // Error parts embedded in the candidates structure.
-            chunk["error"]?.let {
-                emit(LlmStreamEvent.Failed(LlmException("Gemini error: $data")))
-                return@flow
-            }
+            val usage = if (inputTokens != null || outputTokens != null) {
+                LlmUsage(
+                    promptTokens = inputTokens,
+                    completionTokens = outputTokens,
+                    totalTokens = totalTokens,
+                )
+            } else null
+
+            emit(
+                LlmStreamEvent.Completed(
+                    LlmMessage(
+                        role = LlmRole.ASSISTANT,
+                        content = textBuf.toString().ifEmpty { null },
+                        reasoning = reasoningBuf.toString().ifEmpty { null },
+                        toolCalls = toolCalls,
+                    ),
+                    finishReason ?: if (toolCalls.isNotEmpty()) "STOP" else null,
+                    usage,
+                )
+            )
         }
-
-        val usage = if (inputTokens != null || outputTokens != null) {
-            LlmUsage(
-                promptTokens = inputTokens,
-                completionTokens = outputTokens,
-                totalTokens = totalTokens,
-            )
-        } else null
-
-        emit(
-            LlmStreamEvent.Completed(
-                LlmMessage(
-                    role = LlmRole.ASSISTANT,
-                    content = textBuf.toString().ifEmpty { null },
-                    reasoning = reasoningBuf.toString().ifEmpty { null },
-                    toolCalls = toolCalls,
-                ),
-                finishReason ?: if (toolCalls.isNotEmpty()) "STOP" else null,
-                usage,
-            )
-        )
     }
 
     // -- request body ---------------------------------------------------------

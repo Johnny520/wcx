@@ -7,20 +7,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
-import com.Johnny.wcx.ui.content.liquid.vibrancy
+import com.Johnny.wcx.ui.content.miuixAppBarBlur
+import com.Johnny.wcx.ui.content.miuixAppBarColor
+import com.Johnny.wcx.ui.content.rememberMiuixBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.blur.blur
-import top.yukonga.miuix.kmp.blur.drawBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -42,21 +39,12 @@ fun AgentSettingsScaffold(
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
-    val barBackdrop = rememberLayerBackdrop()
-    val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.67f)
+    val barBackdrop = rememberMiuixBlurBackdrop()
     Scaffold(
         topBar = {
             TopAppBar(
-                modifier = Modifier.drawBackdrop(
-                    backdrop = barBackdrop,
-                    shape = { RectangleShape },
-                    effects = {
-                        vibrancy()
-                        blur(24.dp.toPx(), 24.dp.toPx())
-                    },
-                    onDrawSurface = { drawRect(barTint) },
-                ),
-                color = Color.Transparent,
+                modifier = Modifier.miuixAppBarBlur(barBackdrop),
+                color = barBackdrop.miuixAppBarColor(),
                 title = title,
                 scrollBehavior = scrollBehavior,
                 navigationIcon = {
@@ -73,7 +61,7 @@ fun AgentSettingsScaffold(
         LazyColumn(
             modifier = Modifier
                 .fillMaxHeight()
-                .layerBackdrop(barBackdrop)
+                .then(barBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier)
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)

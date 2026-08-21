@@ -62,10 +62,7 @@ fun ListAdapter.iterator(parent: ViewGroup): Iterator<View> =
 
         private var index = 0
         override fun hasNext() = index < count
-        override fun next(): View {
-            index++
-            return getView(index, null, parent)
-        }
+        override fun next(): View = getView(index++, null, parent)
     }
 
 fun ListAdapter.iterable(parent: ViewGroup): Iterable<View> =

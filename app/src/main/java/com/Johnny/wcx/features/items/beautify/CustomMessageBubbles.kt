@@ -1,12 +1,14 @@
 package com.Johnny.wcx.features.items.beautify
 
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.NinePatchDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.View
@@ -15,22 +17,17 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -42,7 +39,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.get
 import androidx.core.graphics.toColorInt
@@ -51,38 +47,43 @@ import com.composables.icons.materialsymbols.outlined.Delete
 import com.composables.icons.materialsymbols.outlined.Upload_file
 import com.tencent.mm.ui.base.AnimImageView
 import com.tencent.mm.ui.widget.MMNeat7extView
-import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.activity.TransparentActivity
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.items.beautify.CustomMessageBubbles.ICON_TINT_TAG
+import com.Johnny.wcx.features.items.beautify.CustomMessageBubbles.bubbleCache
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.IconButton
 import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.content.WeColorField
 import com.Johnny.wcx.ui.utils.findViewWhich
 import com.Johnny.wcx.ui.utils.findViewsWhich
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.isDarkMode
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.fs.KnownPaths
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.div
 import kotlin.io.path.exists
-import androidx.compose.ui.graphics.Color as ComposeColor
+import kotlin.io.path.fileSize
+import kotlin.io.path.getLastModifiedTime
 
 @Feature(name = "自定义消息气泡", categories = ["界面美化", "聊天"], description = "自定义聊天中的消息气泡图片和颜色")
 object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
 
-    private val TAG = this::class.simpleName
+    private const val TAG = "CustomMessageBubbles"
 
     // Guards the parse-failure toast so it fires at most once per Feature lifecycle.
     private var colorParseErrorToasted = false
@@ -152,6 +153,25 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     private var bgThisLight by prefOption("custom_bubbles_bg_this_light", "#00000000")
     private var bgThisDark by prefOption("custom_bubbles_bg_this_dark", "#00000000")
 
+    // A nine-patch source must keep at least one interior pixel once the marker border is stripped.
+    private const val MIN_BUBBLE_SIZE_PX = 3
+
+    // Bubbles are tiny by nature; the cap exists so a full-resolution photo picked by mistake can
+    // never be installed (a 12MP ARGB_8888 decode is ~48MB, and applyBubble runs on every bind).
+    private const val MAX_BUBBLE_SIZE_PX = 1024
+
+    private const val ABSENT_STAMP = "absent"
+
+    /**
+     * A decoded bubble, reused across binds. [stamp] is the source file's mtime + size, so a
+     * re-import (or a deletion) invalidates the entry on the next bind. A null [state] is a cached
+     * negative result — no image, or one that failed validation — so a broken file isn't re-decoded
+     * for every message either.
+     */
+    private class CachedBubble(val stamp: String, val state: Drawable.ConstantState?)
+
+    private val bubbleCache = ConcurrentHashMap<String, CachedBubble>()
+
     private data class Range(val start: Int, val end: Int)
 
     private fun getRanges(bitmap: Bitmap, z: Boolean, z2: Boolean): ArrayList<Range> {
@@ -190,7 +210,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         view.javaClass == TextView::class.java
                 && view.tag?.javaClass?.name?.startsWith("com.tencent.mm.ui.chatting.viewitems") == true
 
-    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
+    override fun onCreateView(param: HookParam, view: View) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
 
         @Suppress("DEPRECATION")
@@ -265,13 +285,10 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         val color = parseColor(context, rawColor, label = "背景色", fallback = 0)
 
         val fileName = if (isSelfSender) RIGHT_BUBBLE_FILE else LEFT_BUBBLE_FILE
-        val file = KnownPaths.moduleAssets / fileName
+        val resources = bubbleView.resources
+        val constantState = bubbleConstantState(fileName, resources)
 
-        val bitmap = if (file.exists()) {
-            runCatching { BitmapFactory.decodeFile(file.absolutePathString()) }.getOrNull()
-        } else null
-
-        if (bitmap == null) {
+        if (constantState == null) {
             if (color != 0) {
                 bubbleView.background?.mutate()?.setTint(color)
             }
@@ -282,63 +299,24 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         val paddingTop = bubbleView.paddingTop
         val paddingRight = bubbleView.paddingRight
         val paddingBottom = bubbleView.paddingBottom
-        val resources = bubbleView.resources
 
-        val bitmapCreateBitmap = Bitmap.createBitmap(bitmap, 1, 1, bitmap.width - 2, bitmap.height - 2)
-        val arrayList1 = getRanges(bitmap, z = true, z2 = false)
-        val arrayList2 = getRanges(bitmap, z = false, z2 = false)
-        val range1 = getRanges(bitmap, z = true, z2 = true).firstOrNull()
-        val range2 = getRanges(bitmap, z = false, z2 = true).firstOrNull()
-        val rect = Rect(
-            range1?.start ?: 0,
-            range2?.start ?: 0,
-            if (range1 != null) bitmap.width - 2 - range1.end else 0,
-            if (range2 != null) bitmap.height - 2 - range2.end else 0
-        )
-
-        val byteBuffer = ByteBuffer.allocate((arrayList2.size + arrayList1.size) * 8 + 68).apply {
-            order(ByteOrder.nativeOrder())
-            put(1.toByte())
-            put((arrayList1.size * 2).toByte())
-            put((arrayList2.size * 2).toByte())
-            put(9.toByte())
-            putInt(0)
-            putInt(0)
-            putInt(rect.left)
-            putInt(rect.right)
-            putInt(rect.top)
-            putInt(rect.bottom)
-            putInt(0)
-            for (r in arrayList1) {
-                putInt(r.start)
-                putInt(r.end)
-            }
-            for (r in arrayList2) {
-                putInt(r.start)
-                putInt(r.end)
-            }
-            repeat(9) {
-                putInt(1)
-            }
-        }
-
-        val ninePatchDrawable = NinePatchDrawable(resources, bitmapCreateBitmap, byteBuffer.array(), rect, null).apply {
+        // The cached state is untinted; each bind gets its own mutated copies so the per-message
+        // background color (and the light/dark variant) never leaks into the shared state.
+        val normalDrawable = constantState.newDrawable(resources).mutate().apply {
             if (color != 0) setTint(color)
+        }
+        val pressedDrawable = constantState.newDrawable(resources).mutate().apply {
+            val fArr = FloatArray(3).apply {
+                Color.colorToHSV(if (color != 0) color else -1, this)
+                this[2] *= 0.8f
+            }
+            setTint(Color.HSVToColor(fArr))
         }
 
         val stateListDrawable = StateListDrawable().apply {
-            ninePatchDrawable.constantState?.let { constantState ->
-                val drawableMutate = constantState.newDrawable().mutate().apply {
-                    val fArr = FloatArray(3).apply {
-                        Color.colorToHSV(if (color != 0) color else -1, this)
-                        this[2] *= 0.8f
-                    }
-                    setTint(Color.HSVToColor(fArr))
-                }
-                addState(intArrayOf(android.R.attr.state_pressed), drawableMutate)
-                addState(intArrayOf(android.R.attr.state_focused), drawableMutate)
-                addState(intArrayOf(), ninePatchDrawable)
-            }
+            addState(intArrayOf(android.R.attr.state_pressed), pressedDrawable)
+            addState(intArrayOf(android.R.attr.state_focused), pressedDrawable)
+            addState(intArrayOf(), normalDrawable)
         }
 
         bubbleView.apply {
@@ -346,6 +324,81 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
             setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom)
         }
     }
+
+    /**
+     * Returns the cached nine-patch state for [fileName], decoding it at most once per file
+     * revision. Safe to call from the bind path: [bubbleCache] is concurrent, and a redundant
+     * concurrent rebuild would only cost a duplicate decode, never a corrupt entry.
+     */
+    private fun bubbleConstantState(fileName: String, resources: Resources): Drawable.ConstantState? {
+        val file = KnownPaths.moduleAssets / fileName
+        val stamp = runCatching {
+            if (file.exists()) "${file.getLastModifiedTime().toMillis()}:${file.fileSize()}" else ABSENT_STAMP
+        }.getOrDefault(ABSENT_STAMP)
+
+        bubbleCache[fileName]?.let { if (it.stamp == stamp) return it.state }
+
+        val state = if (stamp == ABSENT_STAMP) null else buildBubbleState(file, resources)
+        bubbleCache[fileName] = CachedBubble(stamp, state)
+        return state
+    }
+
+    private fun buildBubbleState(file: Path, resources: Resources): Drawable.ConstantState? = runCatching {
+        val bitmap = BitmapFactory.decodeFile(file.absolutePathString())
+            ?: error("failed to decode bubble image")
+
+        try {
+            require(bitmap.width >= MIN_BUBBLE_SIZE_PX && bitmap.height >= MIN_BUBBLE_SIZE_PX) {
+                "bubble image too small: ${bitmap.width}x${bitmap.height}"
+            }
+
+            val bitmapCreateBitmap = Bitmap.createBitmap(bitmap, 1, 1, bitmap.width - 2, bitmap.height - 2)
+            val arrayList1 = getRanges(bitmap, z = true, z2 = false)
+            val arrayList2 = getRanges(bitmap, z = false, z2 = false)
+            val range1 = getRanges(bitmap, z = true, z2 = true).firstOrNull()
+            val range2 = getRanges(bitmap, z = false, z2 = true).firstOrNull()
+            val rect = Rect(
+                range1?.start ?: 0,
+                range2?.start ?: 0,
+                if (range1 != null) bitmap.width - 2 - range1.end else 0,
+                if (range2 != null) bitmap.height - 2 - range2.end else 0
+            )
+
+            val byteBuffer = ByteBuffer.allocate((arrayList2.size + arrayList1.size) * 8 + 68).apply {
+                order(ByteOrder.nativeOrder())
+                put(1.toByte())
+                put((arrayList1.size * 2).toByte())
+                put((arrayList2.size * 2).toByte())
+                put(9.toByte())
+                putInt(0)
+                putInt(0)
+                putInt(rect.left)
+                putInt(rect.right)
+                putInt(rect.top)
+                putInt(rect.bottom)
+                putInt(0)
+                for (r in arrayList1) {
+                    putInt(r.start)
+                    putInt(r.end)
+                }
+                for (r in arrayList2) {
+                    putInt(r.start)
+                    putInt(r.end)
+                }
+                repeat(9) {
+                    putInt(1)
+                }
+            }
+
+            NinePatchDrawable(resources, bitmapCreateBitmap, byteBuffer.array(), rect, null).constantState
+        } finally {
+            // createBitmap copied the interior out, so the full-size source is dead weight; without
+            // this it used to be leaked once per message bind.
+            bitmap.recycle()
+        }
+    }.onFailure {
+        WeLogger.w(TAG, "failed to build bubble drawable from ${file.fileName}", it)
+    }.getOrNull()
 
     /**
      * Parses a user-entered color. Empty input means "no override" and returns [fallback] silently.
@@ -364,35 +417,32 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         }
     }
 
-    // 使用 Int.MIN_VALUE 作为"无覆盖"标记，避免与 Color.WHITE (-1) 冲突
-    private const val NO_FOREGROUND_COLOR = Int.MIN_VALUE
-
     private fun getForegroundColor(context: Context, isSelfSender: Boolean): Int {
         val rawColor = if (isSelfSender) {
             if (context.isDarkMode) thisDark else thisLight
         } else {
             if (context.isDarkMode) thatDark else thatLight
         }
-        return parseColor(context, rawColor, label = "前景色", fallback = NO_FOREGROUND_COLOR)
+        return parseColor(context, rawColor, label = "前景色", fallback = -1)
     }
 
     private fun applyForegroundColor(view: MMNeat7extView, isSelfSender: Boolean) {
         val color = getForegroundColor(view.context, isSelfSender)
-        if (color == NO_FOREGROUND_COLOR) return
+        if (color == -1) return
 
         view.setTextColor(color)
     }
 
     private fun applyForegroundColor(view: TextView, isSelfSender: Boolean) {
         val color = getForegroundColor(view.context, isSelfSender)
-        if (color == NO_FOREGROUND_COLOR) return
+        if (color == -1) return
 
         view.setTextColor(color)
     }
 
     private fun applyForegroundColorByBackgroundColorFilter(view: View, isSelfSender: Boolean) {
         val color = getForegroundColor(view.context, isSelfSender)
-        if (color == NO_FOREGROUND_COLOR) return
+        if (color == -1) return
 
         view.background?.mutate()?.colorFilter = PorterDuffColorFilter(
             color,
@@ -412,6 +462,10 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     /**
      * Launches a system image picker and copies the chosen file's raw bytes into [fileName] under
      * the module assets dir. Raw copy (not re-encode) preserves the nine-patch border markers.
+     *
+     * The picker accepts any image MIME type, so the dimensions are validated here rather than at
+     * bind time: applyBubble runs for every message view, and a full-resolution photo installed as
+     * a bubble would mean a multi-megabyte decode per row.
      */
     private fun importBubbleImage(context: Context, fileName: String, label: String, onDone: () -> Unit) {
         TransparentActivity.launch(context) {
@@ -419,16 +473,45 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                 finish()
                 if (uri == null) return@registerForActivityResult
 
+                val bytes = runCatching {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("failed to open input stream")
+                }.onFailure {
+                    WeLogger.e(TAG, "failed to read $label bubble image", it)
+                }.getOrNull()
+
+                if (bytes == null) {
+                    showToast(context, "$label 气泡图片导入失败!")
+                    return@registerForActivityResult
+                }
+
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                val width = bounds.outWidth
+                val height = bounds.outHeight
+
+                if (width < MIN_BUBBLE_SIZE_PX || height < MIN_BUBBLE_SIZE_PX) {
+                    showToast(context, "$label 气泡图片尺寸过小! 需为宽高至少 ${MIN_BUBBLE_SIZE_PX}px 的 .9.png")
+                    return@registerForActivityResult
+                }
+                if (width > MAX_BUBBLE_SIZE_PX || height > MAX_BUBBLE_SIZE_PX) {
+                    showToast(
+                        context,
+                        "$label 气泡图片尺寸过大 (${width}x${height})! " +
+                                "请导入宽高不超过 ${MAX_BUBBLE_SIZE_PX}px 的 .9.png, 而非原图照片"
+                    )
+                    return@registerForActivityResult
+                }
+
                 val ok = runCatching {
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        (KnownPaths.moduleAssets / fileName).toFile().outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    } ?: throw IllegalStateException("failed to open input stream")
+                    (KnownPaths.moduleAssets / fileName).toFile().outputStream().use { output ->
+                        output.write(bytes)
+                    }
                 }.onFailure {
                     WeLogger.e(TAG, "failed to import $label bubble image", it)
                 }.isSuccess
 
+                bubbleCache.remove(fileName)
                 showToast(context, if (ok) "$label 气泡图片导入成功" else "$label 气泡图片导入失败!")
                 if (ok) onDone()
             }
@@ -444,39 +527,9 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
             WeLogger.e(TAG, "failed to delete ${side.title} bubble image", it)
         }.getOrDefault(false)
 
+        bubbleCache.remove(side.fileName)
         showToast(context, if (ok) "${side.title}气泡图片已删除" else "${side.title}气泡图片删除失败!")
         return ok
-    }
-
-    @Composable
-    private fun ColorField(
-        label: String,
-        value: String,
-        onValueChange: (String) -> Unit,
-        modifier: Modifier = Modifier,
-    ) {
-        val parsedColor = remember(value) {
-            value.takeIf { it.isNotBlank() }?.let { runCatching { it.toColorInt() }.getOrNull() }
-        }
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text(label) },
-            singleLine = true,
-            isError = value.isNotBlank() && parsedColor == null,
-            trailingIcon = parsedColor?.let { color ->
-                {
-                    Box(
-                        Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(ComposeColor(color))
-                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                    )
-                }
-            },
-            modifier = modifier,
-        )
     }
 
     @Composable
@@ -495,13 +548,13 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ColorField(
+            WeColorField(
                 label = "亮色模式",
                 value = form.foregroundLight,
                 onValueChange = { onFormChange(form.copy(foregroundLight = it)) },
                 modifier = Modifier.weight(1f),
             )
-            ColorField(
+            WeColorField(
                 label = "暗色模式",
                 value = form.foregroundDark,
                 onValueChange = { onFormChange(form.copy(foregroundDark = it)) },
@@ -518,13 +571,13 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ColorField(
+            WeColorField(
                 label = "亮色模式",
                 value = form.backgroundLight,
                 onValueChange = { onFormChange(form.copy(backgroundLight = it)) },
                 modifier = Modifier.weight(1f),
             )
-            ColorField(
+            WeColorField(
                 label = "暗色模式",
                 value = form.backgroundDark,
                 onValueChange = { onFormChange(form.copy(backgroundDark = it)) },

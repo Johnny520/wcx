@@ -31,6 +31,7 @@ data class StickerPack(
     val title: String,
     val cover: String? = null,
     val source: PanelSource = PanelSource.LOCAL,
+    val onlineSourcePackId: String? = null,
     val order: Int = 0,
     val itemCount: Int = 0,
     val badge: String? = null,

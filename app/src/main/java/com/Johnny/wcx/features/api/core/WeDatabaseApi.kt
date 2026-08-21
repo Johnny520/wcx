@@ -391,6 +391,17 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
     @Suppress("NOTHING_TO_INLINE")
     inline fun execStatement(statement: String, args: Array<Any>? = null) = db.execSQL(statement, args)
 
+    inline fun <T> transaction(block: () -> T): T {
+        db.beginTransaction()
+        return try {
+            val result = block()
+            db.setTransactionSuccessful()
+            result
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     /**
      * 获取【全部联系人】
      * 返回所有账号

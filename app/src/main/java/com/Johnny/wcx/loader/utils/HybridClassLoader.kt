@@ -1,13 +1,22 @@
 package com.Johnny.wcx.loader.utils
 
 import com.Johnny.wcx.utils.reflection.ClassLoaders
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
 
 object HybridClassLoader : ClassLoader(ClassLoaders.BOOT) {
 
     private val bootClassLoader = ClassLoaders.BOOT
     lateinit var moduleParentClassLoader: ClassLoader
+    lateinit var moduleClassLoader: ClassLoader
     lateinit var hostClassLoader: ClassLoader
     val additionalLoaders = mutableListOf<ClassLoader>()
+
+    private val moduleFindClassMethod: Method by lazy {
+        ClassLoader::class.java.getDeclaredMethod("findClass", String::class.java).apply {
+            isAccessible = true
+        }
+    }
 
     private const val PREFIX_BOOT = "BOOT."
     private const val PREFIX_MODULE = "MODULE."
@@ -19,10 +28,7 @@ object HybridClassLoader : ClassLoader(ClassLoaders.BOOT) {
                 return bootClassLoader.loadClass(name.removePrefix(PREFIX_BOOT))
             }
             name.startsWith(PREFIX_MODULE) -> {
-                if (::moduleParentClassLoader.isInitialized) {
-                    return moduleParentClassLoader.loadClass(name.removePrefix(PREFIX_MODULE))
-                }
-                throw ClassNotFoundException("Forced MODULE route failed: moduleParentClassLoader is not initialized. Class: $name")
+                return loadModuleClass(name.removePrefix(PREFIX_MODULE))
             }
             name.startsWith(PREFIX_HOST) -> {
                 if (::hostClassLoader.isInitialized) {
@@ -42,6 +48,12 @@ object HybridClassLoader : ClassLoader(ClassLoaders.BOOT) {
             } catch (_: ClassNotFoundException) {}
         }
 
+        if (::moduleClassLoader.isInitialized) {
+            try {
+                return findModuleOwnClass(name)
+            } catch (_: ClassNotFoundException) {}
+        }
+
         if (::hostClassLoader.isInitialized) {
             try {
                 return hostClassLoader.loadClass(name)
@@ -55,5 +67,27 @@ object HybridClassLoader : ClassLoader(ClassLoaders.BOOT) {
         }
 
         throw ClassNotFoundException(name)
+    }
+
+    private fun loadModuleClass(name: String): Class<*> {
+        if (::moduleClassLoader.isInitialized) {
+            try {
+                return findModuleOwnClass(name)
+            } catch (_: ClassNotFoundException) {}
+        }
+
+        if (::moduleParentClassLoader.isInitialized) {
+            try {
+                return moduleParentClassLoader.loadClass(name)
+            } catch (_: ClassNotFoundException) {}
+        }
+
+        throw ClassNotFoundException("Forced MODULE route failed. Class: $name")
+    }
+
+    private fun findModuleOwnClass(name: String): Class<*> = try {
+        moduleFindClassMethod.invoke(moduleClassLoader, name) as Class<*>
+    } catch (e: InvocationTargetException) {
+        throw e.targetException
     }
 }

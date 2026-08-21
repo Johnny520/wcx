@@ -3,6 +3,8 @@ package com.Johnny.wcx.features.items.chat
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
@@ -82,17 +84,21 @@ import com.composables.icons.materialsymbols.outlined.Music_note
 import com.composables.icons.materialsymbols.outlined.Photo_library
 import com.composables.icons.materialsymbols.outlined.Redeem
 import com.composables.icons.materialsymbols.outlined.Settings
+import com.composables.icons.materialsymbols.outlined.Smart_toy
 import com.composables.icons.materialsymbols.outlined.Video_chat
 import com.composables.icons.materialsymbols.outlined.Voice_chat
+import com.tencent.mm.pluginsdk.ui.chat.AppPanel
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.createInstance
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.api.agent.WeAgentService
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.ui.WeCurrentConversationApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.features.items.system.agent.WeAgentOverlayController
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -115,7 +121,9 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.lang.ref.WeakReference
 import java.util.UUID
+import java.util.WeakHashMap
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 private enum class ToolbarDisplayMode(val preferenceValue: String, val label: String) {
     ICON_AND_TEXT("icon_and_text", "图标+文字"),
@@ -152,9 +160,10 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         "音乐" to MaterialSymbols.Outlined.Music_note
     )
 
-    // 快捷回复 is a wekit-injected item (not backed by a WeChat grid tool), so it lives
-    // outside NAME_TO_ICON_MAP. Its icon is resolved via iconFor().
+    // 快捷回复 and WeAgent are wekit-injected items (not backed by a WeChat grid tool), so they
+    // live outside NAME_TO_ICON_MAP. Their icons are resolved via iconFor().
     private const val QUICK_REPLY_NAME = "快捷回复"
+    private const val WEAGENT_NAME = "WeAgent"
 
     private val methodAppPanelInitAppGrid by dexMethod {
         matcher {
@@ -186,7 +195,29 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         val text: String,
     )
 
-    private val toolsState = MutableStateFlow<List<Pair<String, MenuItem>>>(emptyList())
+    private class PanelTools {
+        val flow = MutableStateFlow<List<Pair<String, MenuItem>>>(emptyList())
+
+        /** null until this panel's grid has been read at least once. */
+        var lastSnapshotTime: Instant? = null
+        var refreshScheduled = false
+    }
+
+    /**
+     * A tool list belongs to one AppPanel, not to the process: every chat footer builds its own
+     * panel, and WeChat builds more than one footer at a time (see [scheduleGridInitWatchdog]), so a
+     * background chat's panel must not be able to overwrite the visible chat's toolbar — nor hand it
+     * click targets that belong to another conversation.
+     *
+     * [MenuItem] only ever holds *weak* references to the panel's views, so a value can't pin its
+     * own key here.
+     */
+    private val panelTools = WeakHashMap<AppPanel, PanelTools>()
+
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    private fun toolsOf(appPanel: AppPanel): PanelTools =
+        synchronized(panelTools) { panelTools.getOrPut(appPanel) { PanelTools() } }
 
     private var itemsOrder by WePrefs.prefOption("chat_toolbar_order", NAME_TO_ICON_MAP.keys.joinToString(","))
     private var enabledItems by WePrefs.prefOption("chat_toolbar_enabled_items", NAME_TO_ICON_MAP.keys)
@@ -215,15 +246,20 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         quickRepliesRaw = Json.encodeToString(quickRepliesSerializer, replies)
     }
 
-    private fun iconFor(name: String): ImageVector =
-        if (name == QUICK_REPLY_NAME) MaterialSymbols.Outlined.Chat else NAME_TO_ICON_MAP.getValue(name)
+    private fun iconFor(name: String): ImageVector = when (name) {
+        QUICK_REPLY_NAME -> MaterialSymbols.Outlined.Chat
+        WEAGENT_NAME -> MaterialSymbols.Outlined.Smart_toy
+        else -> NAME_TO_ICON_MAP.getValue(name)
+    }
 
     // Ensures every supported item is present while preserving the user's saved order. Legacy
-    // configs that predate quick replies get that item inserted first.
+    // configs that predate quick replies get that item inserted first, and ones that predate the
+    // WeAgent entry get it inserted right before 快捷回复.
     private fun normalizeOrder(order: List<String>): List<String> {
-        val supportedItems = setOf(QUICK_REPLY_NAME) + NAME_TO_ICON_MAP.keys
+        val supportedItems = setOf(QUICK_REPLY_NAME, WEAGENT_NAME) + NAME_TO_ICON_MAP.keys
         val result = order.filter { it in supportedItems }.distinct().toMutableList()
         if (QUICK_REPLY_NAME !in result) result.add(0, QUICK_REPLY_NAME)
+        if (WEAGENT_NAME !in result) result.add(result.indexOf(QUICK_REPLY_NAME), WEAGENT_NAME)
         NAME_TO_ICON_MAP.keys.forEach { if (it !in result) result.add(it) }
         return result
     }
@@ -232,12 +268,102 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         WeMessageApi.sendText(WeCurrentConversationApi.value, text)
     }
 
-    private var lastToolListUpdateTime = now()
+    /**
+     * Reading a panel's grid inflates one item view per entry, and WeChat re-runs initAppGrid in
+     * bursts, so snapshots are debounced. The debounce is trailing-edge: a suppressed call schedules
+     * a single delayed refresh instead of being dropped, so the grid's final state always reaches the
+     * toolbar. (Dropping used to lose the *only* initAppGrid of a chat when it happened to land in
+     * the window — e.g. right after WeKit loaded, when the initial baseline was still "now".)
+     */
+    private val toolListDebounce = 2.seconds
+
+    /**
+     * AppPanel.t() schedules its grid data load with a 1000ms delay, so WeChat's own initAppGrid
+     * normally lands a bit after that; only step in once it clearly hasn't.
+     */
+    private const val GRID_INIT_WATCHDOG_DELAY_MS = 1500L
+
+    /** Reads the panel's grids into its [PanelTools.flow]. No-op while the grid isn't built yet. */
+    private fun snapshotTools(appPanel: AppPanel) {
+        val tools = mutableListOf<Pair<String, MenuItem>>()
+
+        // (0, 0, 0) is the MMFlipper holding one GridView per page; absent until AppPanel.init()
+        // has inflated the panel's layout.
+        val grids = appPanel.findViewByChildIndexes<ViewGroup>(0, 0, 0)
+            ?.children?.map { view -> view as GridView }
+            ?: return
+
+        grids.forEach { grid ->
+            val onClickListener = grid.reflekt()
+                .firstField { type = AdapterView.OnItemClickListener::class }.get()!! as AdapterView.OnItemClickListener
+            val onLongClickListener = grid.reflekt()
+                .firstField { type = AdapterView.OnItemLongClickListener::class }.get()!! as AdapterView.OnItemLongClickListener
+            val listAdapter = grid.adapter
+
+            listAdapter.iterable(grid).forEachIndexed { index, itemView ->
+                val name = (itemView.tag.reflekt()
+                    .firstField { type = TextView::class }
+                    .get()!! as TextView).text.toString()
+                tools.add(
+                    name to MenuItem(
+                        name,
+                        onClickListener,
+                        onLongClickListener,
+                        WeakReference(grid),
+                        WeakReference(itemView),
+                        index
+                    )
+                )
+            }
+        }
+
+        // An empty read means initAppGrid bailed out before building anything (it returns early
+        // while the grid dimensions are still unknown). Publishing that would clear a toolbar that
+        // already works and mark the panel as snapshotted.
+        if (tools.isEmpty()) return
+
+        val state = toolsOf(appPanel)
+        state.flow.value = tools
+        state.lastSnapshotTime = now()
+        WeLogger.d(TAG, "populated tool list with ${tools.size} items")
+    }
+
+    /**
+     * Makes sure a chat footer's grid gets built even when WeChat never asks for it.
+     *
+     * initAppGrid has exactly two triggers: the MMFlipper's onMeasure listener — which needs the
+     * panel to actually be laid out, i.e. the user tapping "+" — and AppPanel.loadData(), scheduled
+     * by AppPanel.init() with a 1000ms delay. loadData() is the one that makes the toolbar work
+     * without user interaction, but it runs on a *process-wide* task group tagged
+     * "AppPanel-loadinfo" that AppPanel.loadData() itself cancels on every call. So a second chat
+     * footer built within that 1s window silently cancels the first panel's pending load, and that
+     * panel's grid then stays empty until the user opens it by hand.
+     *
+     * Opening a chat from a notification or an external app share is exactly that case: WeChat
+     * builds more than one chat footer in quick succession. Kick the grid off ourselves rather than
+     * depending on WeChat's cancellable schedule.
+     */
+    private fun scheduleGridInitWatchdog(appPanel: AppPanel) {
+        mainHandler.postDelayed({
+            if (toolsOf(appPanel).lastSnapshotTime != null) return@postDelayed
+            // initAppGrid dereferences views that AppPanel.init() inflates, so only force it once
+            // the panel's layout is there.
+            if (appPanel.findViewByChildIndexes<ViewGroup>(0, 0, 0) == null) return@postDelayed
+
+            WeLogger.d(TAG, "grid was never initialized for this chat footer, forcing initAppGrid")
+            // R8 staticizes initAppGrid on current builds, which is why the hooks read the panel out
+            // of args[0]; tolerate the instance shape too, since this call is outside a hook and an
+            // argument mismatch would take the process down.
+            val method = methodAppPanelInitAppGrid.method
+            if (java.lang.reflect.Modifier.isStatic(method.modifiers)) method.invoke(null, appPanel)
+            else method.invoke(appPanel)
+        }, GRID_INIT_WATCHDOG_DELAY_MS)
+    }
 
     override fun onEnable() {
         methodAppPanelInitAppGrid.apply {
             hookBefore {
-                val appPanel = args[0] as LinearLayout
+                val appPanel = args[0] as AppPanel
                 // WeChat normally lets MMFlipper.onMeasure feed the real measured size into the
                 // measurer (g.a). We have to invoke initAppGrid before the panel is laid out, so we
                 // reproduce WeChat's own natural dimensions instead of hardcoding pixels.
@@ -265,44 +391,23 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             }
 
             hookAfter {
-                val now = now()
-                if (now - lastToolListUpdateTime < 2.seconds) return@hookAfter
+                val appPanel = args[0] as AppPanel
+                val state = toolsOf(appPanel)
 
-                val tools = mutableListOf<Pair<String, MenuItem>>()
-
-                val appPanel = args[0] as LinearLayout
-                val grids = appPanel.findViewByChildIndexes<ViewGroup>(0, 0, 0)!!
-                    .children.map { view -> view as GridView }
-
-                grids.forEach { grid ->
-                    val onClickListener = grid.reflekt()
-                        .firstField { type = AdapterView.OnItemClickListener::class }.get()!! as AdapterView.OnItemClickListener
-                    val onLongClickListener = grid.reflekt()
-                        .firstField { type = AdapterView.OnItemLongClickListener::class }.get()!! as AdapterView.OnItemLongClickListener
-                    val listAdapter = grid.adapter
-
-                    listAdapter.iterable(grid).forEachIndexed { index, itemView ->
-                        val name = (itemView.tag.reflekt()
-                            .firstField { type = TextView::class }
-                            .get()!! as TextView).text.toString()
-                        tools.add(
-                            name to MenuItem(
-                                name,
-                                onClickListener,
-                                onLongClickListener,
-                                WeakReference(grid),
-                                WeakReference(itemView),
-                                index
-                            )
-                        )
-                    }
+                val elapsed = state.lastSnapshotTime?.let { now() - it }
+                if (elapsed == null || elapsed >= toolListDebounce) {
+                    snapshotTools(appPanel)
+                    return@hookAfter
                 }
 
-                WeLogger.d(TAG, "populated tool list with ${tools.size} items")
-                toolsState.value = tools
-
-                // rate limit this since this method is called REALLY frequently
-                lastToolListUpdateTime = now()
+                // Inside the cooldown: coalesce into one trailing refresh so this update is delayed
+                // rather than lost — it may well be the one carrying the panel's final item set.
+                if (state.refreshScheduled) return@hookAfter
+                state.refreshScheduled = true
+                mainHandler.postDelayed({
+                    state.refreshScheduled = false
+                    snapshotTools(appPanel)
+                }, (toolListDebounce - elapsed).inWholeMilliseconds.coerceAtLeast(1))
             }
         }
 
@@ -318,12 +423,20 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             if (linearLayout.findViewWhich<View> { it is ComposeView } != null) return@hookAfter
             activity.window.decorView.setLifecycleOwner(lifecycleOwner)
 
+            // The panel is part of the footer's own layout and ChatFooter.initAppPanel() has already
+            // run inside the constructor, so it is reachable here. Bind this toolbar to that panel
+            // only, and make sure something initializes its grid.
+            val appPanel = chatFooter.findViewWhich<AppPanel> { it is AppPanel }
+            if (appPanel == null) WeLogger.w(TAG, "no AppPanel in this chat footer, toolbar will stay empty")
+            val toolsFlow = appPanel?.let { toolsOf(it).flow } ?: MutableStateFlow(emptyList())
+            appPanel?.let { scheduleGridInitWatchdog(it) }
+
             linearLayout.addView(ComposeView(activity).apply {
                 setLifecycleOwner(lifecycleOwner)
 
                 setContent {
                     InjectedUiTheme {
-                        val tools by toolsState.collectAsStateWithLifecycle()
+                        val tools by toolsFlow.collectAsStateWithLifecycle()
                         val itemsOrder = remember { itemsOrder }
                         val enabledItems = remember { enabledItems }
                         val displayMode = remember { ToolbarDisplayMode.fromPreference(displayModeValue) }
@@ -335,26 +448,35 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                             val orderList = normalizeOrder(itemsOrder.split(",").filter { it.isNotEmpty() })
                             val list = mutableListOf<Pair<String, () -> Unit>>()
 
+                            list.add(WEAGENT_NAME to {
+                                // The panel is a system overlay window, so it works from any
+                                // Activity — and stays reachable when the ball is disabled.
+                                WeAgentService.init()
+                                WeAgentOverlayController.openPanel()
+                            })
+
                             list.add(QUICK_REPLY_NAME to {
                                 showQuickReplyPicker(activity)
                             })
 
-                            list.add("相册" to {
-                                firstTool.onClickListener.onItemClick(firstTool.gridView.get()!!, firstTool.itemView.get()!!, 0, 0)
-                            })
+                            // 系统拍摄 is not a grid entry of its own: it is what long-pressing the
+                            // first item (相册, grid position 0) does. WeChat's long-click listener
+                            // only looks at the position, so the view arguments may stay null.
                             list.add("系统拍摄" to {
                                 firstTool.onLongClickListener.onItemLongClick(null, null, 0, 0)
                             })
 
                             tools.forEach { (name, menuItem) ->
-                                if (name in NAME_TO_ICON_MAP && name != "相册" && name != "系统拍摄") {
+                                if (name in NAME_TO_ICON_MAP && name != "系统拍摄") {
+                                    // item views are inflated by the snapshot and only held weakly,
+                                    // so they can be collected before the chip is ever tapped
                                     val gridView = menuItem.gridView.get() ?: return@forEach
                                     val itemView = menuItem.itemView.get() ?: return@forEach
                                     list.add(name to {
                                         menuItem.onClickListener.onItemClick(
                                             gridView,
                                             itemView,
-                                            menuItem.indexInGrid + 1,
+                                            menuItem.indexInGrid,
                                             0
                                         )
                                     })
@@ -385,7 +507,10 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
     }
 
     override fun onDisable() {
-        toolsState.value = emptyList()
+        synchronized(panelTools) {
+            panelTools.values.forEach { it.flow.value = emptyList() }
+            panelTools.clear()
+        }
     }
 
     @OptIn(ExperimentalFoundationApi::class)

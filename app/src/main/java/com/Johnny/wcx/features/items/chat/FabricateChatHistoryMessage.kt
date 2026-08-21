@@ -1,8 +1,5 @@
 package com.Johnny.wcx.features.items.chat
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
-import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,7 +35,6 @@ import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Add
 import com.composables.icons.materialsymbols.outlined.Delete
 import com.composables.icons.materialsymbols.outlined.Person_search
-import com.composables.icons.materialsymbols.outlined.Schedule
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.models.IWeContact
@@ -50,6 +46,10 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.IconButton
 import com.Johnny.wcx.ui.content.SingleContactSelector
 import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.content.WeDateTimeField
+import com.Johnny.wcx.ui.content.WeDateTimeMode
+import com.Johnny.wcx.ui.content.formatDateTime
+import com.Johnny.wcx.ui.content.parseDateTime
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.copyToClipboard
@@ -348,7 +348,6 @@ private fun MessageRowEditor(
     onPickSender: () -> Unit,
     onRemove: () -> Unit
 ) {
-    val context = LocalContext.current
     val selectedContact = remember(row.senderWxId, contactsByWxId) {
         row.senderWxId?.let { contactsByWxId[it] }
     }
@@ -397,68 +396,15 @@ private fun MessageRowEditor(
 
             Spacer(Modifier.height(8.dp))
 
-            OutlinedTextField(
+            WeDateTimeField(
                 value = row.timeText,
                 onValueChange = { row.timeText = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("发送时间 (yyyy-MM-dd HH:mm:ss)") },
-                isError = row.isTimeError,
-                supportingText = {
-                    if (row.isTimeError) {
-                        Text("时间格式不正确")
-                    }
-                },
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            showNativeDateTimePicker(context, row.parsedTimeMillis ?: System.currentTimeMillis()) { selectedMillis ->
-                                val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                                row.timeText = formatter.format(Date(selectedMillis))
-                            }
-                        }
-                    ) {
-                        Icon(MaterialSymbols.Outlined.Schedule, contentDescription = "Pick Date Time")
-                    }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default)
+                label = "发送时间 (yyyy-MM-dd HH:mm:ss)",
+                mode = WeDateTimeMode.DATE_TIME,
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
-}
-
-private fun showNativeDateTimePicker(
-    context: Context,
-    initialMillis: Long,
-    onDateTimeSelected: (Long) -> Unit
-) {
-    val calendar = Calendar.getInstance().apply { timeInMillis = initialMillis }
-
-    val datePickerDialog = DatePickerDialog(
-        context,
-        { _, year, month, dayOfMonth ->
-            calendar.set(Calendar.YEAR, year)
-            calendar.set(Calendar.MONTH, month)
-            calendar.set(Calendar.DAY_OF_MONTH, dayOfMonth)
-
-            TimePickerDialog(
-                context,
-                { _, hourOfDay, minute ->
-                    calendar.set(Calendar.HOUR_OF_DAY, hourOfDay)
-                    calendar.set(Calendar.MINUTE, minute)
-                    calendar.set(Calendar.SECOND, 0)
-                    calendar.set(Calendar.MILLISECOND, 0)
-                    onDateTimeSelected(calendar.timeInMillis)
-                },
-                calendar.get(Calendar.HOUR_OF_DAY),
-                calendar.get(Calendar.MINUTE),
-                true
-            ).show()
-        },
-        calendar.get(Calendar.YEAR),
-        calendar.get(Calendar.MONTH),
-        calendar.get(Calendar.DAY_OF_MONTH)
-    )
-    datePickerDialog.show()
 }
 
 @Stable
@@ -470,13 +416,9 @@ private class MessageRowState(
     var senderWxId by mutableStateOf(senderWxId)
     var text by mutableStateOf(text)
 
-    private val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    var timeText: String by mutableStateOf(formatDateTime(initialTimeMillis))
 
-    var timeText: String by mutableStateOf(formatter.format(Date(initialTimeMillis)))
-
-    val parsedTimeMillis: Long? by derivedStateOf {
-        runCatching { formatter.parse(timeText)?.time }.getOrNull()
-    }
+    val parsedTimeMillis: Long? by derivedStateOf { parseDateTime(timeText) }
 
     val isTimeError: Boolean by derivedStateOf {
         parsedTimeMillis == null

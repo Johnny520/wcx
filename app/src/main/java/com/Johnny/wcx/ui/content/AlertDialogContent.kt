@@ -2,10 +2,8 @@ package com.Johnny.wcx.ui.content
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.material3.HorizontalDivider
@@ -20,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+// drop-in replacement for AlertDialog that should be used in showComposeDialog()
+// to avoid creating multiple Windows
 @Composable
 fun AlertDialogContent(
     modifier: Modifier = Modifier,
@@ -33,12 +33,12 @@ fun AlertDialogContent(
         shape = MaterialTheme.shapes.extraLarge,
         tonalElevation = 6.dp,
         modifier = modifier
+//            .padding(12.dp)
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        DefaultColumn(
+            modifier = Modifier.padding(20.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -68,11 +68,7 @@ fun AlertDialogContent(
                 val bodyStyle = MaterialTheme.typography.bodyMedium
                 val bodyColor = MaterialTheme.colorScheme.onSurface
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 400.dp)
-                ) {
+                Box(modifier = Modifier.weight(1f, fill = false)) {
                     CompositionLocalProvider(
                         LocalTextStyle provides bodyStyle,
                         LocalContentColor provides bodyColor

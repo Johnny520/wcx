@@ -1,10 +1,10 @@
 package com.Johnny.wcx.features.api.core
 
-import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -14,7 +14,7 @@ object WeXmlParserApi : ApiFeature(), IResolveDex {
     private const val TAG = "WeXmlParserApi"
 
     fun interface IAfterParseListener {
-        fun onParse(param: XC_MethodHook.MethodHookParam, result: MutableMap<String, Any?>)
+        fun onParse(param: HookParam, result: MutableMap<String, Any?>)
     }
 
     private val listeners = CopyOnWriteArrayList<IAfterParseListener>()

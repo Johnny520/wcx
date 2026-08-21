@@ -677,6 +677,7 @@ object WeAgentService : com.Johnny.wcx.agent.trigger.TriggerManager.TriggerHost 
                             conditionalPrompts = config.conditionalPrompts,
                             toolLoadingMode = config.toolLoadingMode,
                             maxModelRequests = config.maxModelRequests,
+                            toolVisibility = config.toolVisibility,
                             onFetchSteerMessage = onFetchSteer,
                         ), priorHistory, userText
                     )
@@ -834,7 +835,7 @@ object WeAgentService : com.Johnny.wcx.agent.trigger.TriggerManager.TriggerHost 
         if (sessionId == currentSessionId.value) {
             withContext(Dispatchers.Main) { currentContextWindow.value = model.contextWindow }
         }
-        val provider = WeAgentRepository.getDecryptedModelProvider(model.providerId) ?: return null
+        val provider = WeAgentRepository.getModelProvider(model.providerId) ?: return null
         val client = runCatching { ModelProviderManager.clientFor(provider) }.getOrNull() ?: return null
         // systemPromptId semantics: null = "默认" (follow settings default), "" = "无" (explicitly none),
         // any other value = that specific prompt.
@@ -847,8 +848,15 @@ object WeAgentService : com.Johnny.wcx.agent.trigger.TriggerManager.TriggerHost 
         val perTurn = WeAgentRepository.getEnabledPerTurnPrompts().map { it.content }
         val conditionals = WeAgentRepository.getEnabledConditionalPrompts()
         val req = ModelProviderManager.buildRequest(model, emptyList(), emptyList())
-        // Gate ui-screenshot based on whether the session model declares vision support.
-        BuiltinToolProvider.visionToolsVisible = model.supportsVision
+        // Conditional tool gating is snapshotted onto the TurnConfig, never written to a shared flag:
+        // several sessions run concurrently (foreground chat + trigger-fired background turns) and the
+        // tool list is rebuilt on every request, so a global would let whichever session resolved last
+        // decide the vision gate for all of them — stripping ui-screenshot mid-turn from a vision
+        // session, or advertising it to a non-vision model whose provider then 400s on the images.
+        val toolVisibility = com.Johnny.wcx.agent.tool.ToolVisibility(
+            visionTools = model.supportsVision,
+            fsTools = WeAgentSettings.workspaceEnabled() || WeAgentSettings.memoryEnabled(),
+        )
         return TurnConfig(
             client = client,
             modelIdRemote = model.modelIdRemote,
@@ -860,6 +868,7 @@ object WeAgentService : com.Johnny.wcx.agent.trigger.TriggerManager.TriggerHost 
             conditionalPrompts = conditionals,
             toolLoadingMode = WeAgentSettings.toolLoadingMode(),
             maxModelRequests = WeAgentSettings.maxModelRequests(),
+            toolVisibility = toolVisibility,
         )
     }
 
@@ -875,7 +884,7 @@ object WeAgentService : com.Johnny.wcx.agent.trigger.TriggerManager.TriggerHost 
             ?: firstAvailableModelId()
             ?: return null
         val model = WeAgentRepository.getModel(modelId) ?: return null
-        val provider = WeAgentRepository.getDecryptedModelProvider(model.providerId) ?: return null
+        val provider = WeAgentRepository.getModelProvider(model.providerId) ?: return null
         val client = runCatching { ModelProviderManager.clientFor(provider) }.getOrNull() ?: return null
         return SmallModelRef(client, model.modelIdRemote, model.reasoningEffort, model.maxTokens)
     }

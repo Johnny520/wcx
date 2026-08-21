@@ -23,6 +23,13 @@ import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 
 /**
+ * 解析失败时写入的哨兵描述符，由 [DexMethodDelegate] 与 [DexConstructorDelegate] 共用。
+ * 注意与 [DexFieldDelegate] 的字段哨兵区分：两者指向同一个类但形态不同（方法 vs 字段）。
+ */
+private const val PLACEHOLDER_DESCRIPTOR =
+    "Lcom/tencent/mm/ui/LauncherUI;->getInstance()Lcom/tencent/mm/ui/LauncherUI;"
+
+/**
  * 所有 Dex 委托的公共接口，用于统一缓存读写。
  * 每个委托负责自己的序列化/反序列化。
  */
@@ -95,34 +102,18 @@ class DexClassDelegate internal constructor(
         multipleIndex: Int = 0,
         block: FindClass.() -> Unit
     ): Boolean {
-        val results = try {
-            dexKit.findClass(block)
-        } catch (e: Exception) {
-            WeLogger.w("DexClassDelegate", "DexKit findClass failed for key: $key, error: ${e.message}")
-            if (!allowFailure) setPlaceholderDescriptor()
-            return false
-        }
+        val results = dexKit.findClass(block)
 
         if (results.isEmpty()) {
-            if (!allowFailure) {
-                WeLogger.w("DexClassDelegate", "DexKit: No class found for key: $key")
-                setPlaceholderDescriptor()
-            } else {
-                setPlaceholderDescriptor()
-            }
+            if (!allowFailure) error("DexKit: No class found for key: $key")
+            setPlaceholderDescriptor()
             return false
         }
-        if (results.size > 1 && !allowMultiple) {
-            if (allowFailure) {
-                WeLogger.w("DexClassDelegate", "DexKit: Multiple classes found for key: $key, count: ${results.size}, using first match")
-                setDescriptor(results[0].name)
-                return true
-            }
+        if (results.size > 1 && !allowMultiple)
             error(
                 "DexKit: Multiple classes found for key: $key, count: ${results.size}, classes: ${
                 results.joinToString(",") { it.name }
             }")
-        }
 
         setDescriptor(results[multipleIndex].name)
         return true
@@ -155,7 +146,7 @@ class DexFieldDelegate internal constructor(
 
     val field: Field
         get() {
-            if (descriptorString == PLACEHOLDER_DESCRIPTOR)
+            if (descriptorString == PLACEHOLDER_FIELD_DESCRIPTOR)
                 error("Field resolution has failed: $key")
             if (cachedField == null && descriptorString != null)
                 cachedField = getFieldInstance(descriptorString!!)
@@ -174,11 +165,11 @@ class DexFieldDelegate internal constructor(
 
     fun setPlaceholderDescriptor() {
         WeLogger.w("DexFieldDelegate", "setting placeholder for $key")
-        setDescriptor(PLACEHOLDER_DESCRIPTOR)
+        setDescriptor(PLACEHOLDER_FIELD_DESCRIPTOR)
     }
 
     val isPlaceholder
-        get() = descriptorString == PLACEHOLDER_DESCRIPTOR
+        get() = descriptorString == PLACEHOLDER_FIELD_DESCRIPTOR
 
     override fun getDescriptorString(): String? = descriptorString
     override fun loadDescriptor(value: String) = setDescriptor(value)
@@ -190,33 +181,19 @@ class DexFieldDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindField.() -> Unit
     ): Boolean {
-        val results = try {
-            dexKit.findField(block)
-        } catch (e: Exception) {
-            WeLogger.w("DexFieldDelegate", "DexKit findField failed for key: $key, error: ${e.message}")
-            setPlaceholderDescriptor()
-            return false
-        }
+        val results = dexKit.findField(block)
 
         if (results.isEmpty()) {
-            if (!allowFailure) {
-                WeLogger.w("DexFieldDelegate", "DexKit: No field found for key: $key")
-            }
+            if (!allowFailure) error("DexKit: No field found for key: $key")
             setPlaceholderDescriptor()
             return false
         }
-        if (results.size > 1 && !allowMultiple) {
-            if (allowFailure) {
-                WeLogger.w("DexFieldDelegate", "DexKit: Multiple fields found for key: $key, count: ${results.size}, using first match")
-                setDescriptor(results[0].descriptor)
-                return true
-            }
+        if (results.size > 1 && !allowMultiple)
             error(
                 "DexKit: Multiple fields found for key: $key, count: ${results.size}, fields:${
                     results.map { "${it.className}::${it.fieldName}" }
                 }"
             )
-        }
 
         setDescriptor(results[resultIndex].descriptor)
         return true
@@ -246,7 +223,7 @@ class DexFieldDelegate internal constructor(
     }
 
     companion object {
-        private const val PLACEHOLDER_DESCRIPTOR =
+        private const val PLACEHOLDER_FIELD_DESCRIPTOR =
             "Lcom/tencent/mm/ui/LauncherUI;->INSTANCE:Lcom/tencent/mm/ui/LauncherUI;"
     }
 }
@@ -268,7 +245,7 @@ class DexMethodDelegate internal constructor(
 
     val method: Method
         get() {
-            if (descriptor != null && descriptor!!.name == "Lcom/tencent/mm/ui/LauncherUI;->()Lcom/tencent/mm/ui/LauncherUI;")
+            if (isPlaceholder)
                 error("Method resolution has failed: $key")
             if (cachedMethod == null && descriptor != null)
                 cachedMethod = descriptor!!.getMethodInstance(ClassLoaders.HOST)
@@ -287,15 +264,14 @@ class DexMethodDelegate internal constructor(
     inline fun setDescriptor(m: MethodData) = setDescriptor(DexMethodDescriptor(m.className, m.methodName, m.methodSign))
 
     val isPlaceholder
-        get() = descriptor != null &&
-                descriptor!!.name == "Lcom/tencent/mm/ui/LauncherUI;->getInstance()Lcom/tencent/mm/ui/LauncherUI;"
+        get() = descriptor?.descriptor == PLACEHOLDER_DESCRIPTOR
 
     fun setDescriptor(className: String, methodName: String, methodSign: String) =
         setDescriptor(DexMethodDescriptor(className, methodName, methodSign))
 
     fun setPlaceholderDescriptor() {
         WeLogger.w("DexMethodDelegate", "setting placeholder for $key")
-        setDescriptor(DexMethodDescriptor("Lcom/tencent/mm/ui/LauncherUI;->getInstance()Lcom/tencent/mm/ui/LauncherUI;"))
+        setDescriptor(DexMethodDescriptor(PLACEHOLDER_DESCRIPTOR))
     }
 
     override fun getDescriptorString(): String? = descriptor?.descriptor
@@ -315,28 +291,14 @@ class DexMethodDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindMethod.() -> Unit
     ): Boolean {
-        val results = try {
-            dexKit.findMethod(block)
-        } catch (e: Exception) {
-            WeLogger.w("DexMethodDelegate", "DexKit findMethod failed for key: $key, error: ${e.message}")
-            setPlaceholderDescriptor()
-            return false
-        }
+        val results = dexKit.findMethod(block)
 
         if (results.isEmpty()) {
-            if (!allowFailure) {
-                WeLogger.w("DexMethodDelegate", "DexKit: No method found for key: $key")
-            }
+            if (!allowFailure) error("DexKit: No method found for key: $key")
             setPlaceholderDescriptor()
             return false
         }
-        if (results.size > 1 && !allowMultiple) {
-            if (allowFailure) {
-                WeLogger.w("DexMethodDelegate", "DexKit: Multiple methods found for key: $key, count: ${results.size}, using first match: ${results[0].className}::${results[0].methodName}")
-                val m = results[0]
-                setDescriptor(DexMethodDescriptor(m.className, m.methodName, m.methodSign))
-                return true
-            }
+        if (results.size > 1 && !allowMultiple)
             error(
                 "DexKit: Multiple methods found for key: $key, count: ${results.size}, methods:${
                     results.map {
@@ -344,7 +306,6 @@ class DexMethodDelegate internal constructor(
                     }
                 }"
             )
-        }
 
         val m = results[resultIndex]
         setDescriptor(DexMethodDescriptor(m.className, m.methodName, m.methodSign))
@@ -375,10 +336,15 @@ class DexConstructorDelegate internal constructor(
 
     val constructor: Constructor<*>
         get() {
+            if (isPlaceholder)
+                error("Constructor resolution has failed: $key")
             if (cachedConstructor == null && descriptor != null)
                 cachedConstructor = descriptor!!.getConstructorInstance(ClassLoaders.HOST)
             return cachedConstructor ?: error("Constructor not found for key: $key")
         }
+
+    val isPlaceholder
+        get() = descriptor?.descriptor == PLACEHOLDER_DESCRIPTOR
 
     @Deprecated("You shouldn't call .reflekt() on a Constructor", level = DeprecationLevel.ERROR)
     fun reflekt(): Nothing = error("You shouldn't call .reflekt() on a Constructor")
@@ -391,8 +357,8 @@ class DexConstructorDelegate internal constructor(
     }
 
     fun setPlaceholderDescriptor() {
-        WeLogger.w("DexMethodDelegate", "setting placeholder for $key")
-        setDescriptor(DexMethodDescriptor("Lcom/tencent/mm/ui/LauncherUI;->getInstance()Lcom/tencent/mm/ui/LauncherUI;"))
+        WeLogger.w("DexConstructorDelegate", "setting placeholder for $key")
+        setDescriptor(DexMethodDescriptor(PLACEHOLDER_DESCRIPTOR))
     }
 
     @Suppress("unused")
@@ -416,34 +382,18 @@ class DexConstructorDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindMethod.() -> Unit
     ): Boolean {
-        val results = try {
-            dexKit.findMethod {
-                block()
-                if (matcher == null) matcher { name = "<init>" }
-                else matcher!!.name = "<init>"
-            }
-        } catch (e: Exception) {
-            WeLogger.w("DexConstructorDelegate", "DexKit findConstructor failed for key: $key, error: ${e.message}")
-            setPlaceholderDescriptor()
-            return false
+        val results = dexKit.findMethod {
+            block()
+            if (matcher == null) matcher { name = "<init>" }
+            else matcher!!.name = "<init>"
         }
 
         if (results.isEmpty()) {
-            if (!throwOnFailure) {
-                WeLogger.w("DexConstructorDelegate", "DexKit: No constructor found for key: $key")
-                setPlaceholderDescriptor()
-            }
+            if (throwOnFailure) error("DexKit: No constructor found for key: $key")
             return false
         }
-        if (results.size > 1 && !allowMultiple) {
-            if (!throwOnFailure) {
-                WeLogger.w("DexConstructorDelegate", "DexKit: Multiple constructors found for key: $key, count: ${results.size}, using first match")
-                val m = results[0]
-                setDescriptor(DexMethodDescriptor(m.className, "<init>", m.methodSign))
-                return true
-            }
+        if (results.size > 1 && !allowMultiple)
             error("DexKit: Multiple constructors found for key: $key, count: ${results.size}")
-        }
 
         val m = results[resultIndex]
         setDescriptor(DexMethodDescriptor(m.className, "<init>", m.methodSign))

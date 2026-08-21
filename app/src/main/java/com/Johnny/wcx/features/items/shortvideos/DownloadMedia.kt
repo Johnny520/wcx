@@ -153,7 +153,7 @@ object DownloadMedia : SwitchFeature(),
                 WeLogger.e(TAG, "failed to download ${index + 1}th image", it)
                 showToastSuspend("第 ${index + 1} 张图片下载成功")
             }.onSuccess {
-                showToastSuspend("已将图片下载到 /sdcard/Download/WCX/$fileName")
+                showToastSuspend("已将图片下载到 /sdcard/Download/WeKit/$fileName")
             }
         }
     }
@@ -184,7 +184,7 @@ object DownloadMedia : SwitchFeature(),
             WeLogger.e(TAG, "failed to download video", it)
             showToastSuspend("视频下载失败!")
         }.onSuccess {
-            showToastSuspend("已将视频下载到 /sdcard/Download/WCX/$fileName")
+            showToastSuspend("已将视频下载到 /sdcard/Download/WeKit/$fileName")
         }
     }
 
@@ -200,7 +200,7 @@ object DownloadMedia : SwitchFeature(),
             WeLogger.e(TAG, "failed to download video", it)
             showToastSuspend("视频下载失败")
         }.onSuccess {
-            showToastSuspend("已将视频下载到 /sdcard/Download/WCX/$fileName")
+            showToastSuspend("已将视频下载到 /sdcard/Download/WeKit/$fileName")
         }
     }
 

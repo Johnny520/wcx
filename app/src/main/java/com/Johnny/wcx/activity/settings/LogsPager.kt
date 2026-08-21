@@ -43,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,7 +60,9 @@ import com.composables.icons.materialsymbols.outlined.Share
 import com.composables.icons.materialsymbols.outlined.Vertical_align_bottom
 import com.composables.icons.materialsymbols.outlined.Vertical_align_top
 import com.Johnny.wcx.activity.TransparentActivity
-import com.Johnny.wcx.ui.content.liquid.vibrancy
+import com.Johnny.wcx.ui.content.miuixAppBarBlur
+import com.Johnny.wcx.ui.content.miuixAppBarColor
+import com.Johnny.wcx.ui.content.rememberMiuixBlurBackdrop
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToastSuspend
@@ -86,10 +87,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.blur
-import top.yukonga.miuix.kmp.blur.drawBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.menu.WindowIconDropdownMenu
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -296,22 +294,13 @@ fun LogsPager() {
     var isRefreshing by remember { mutableStateOf(false) }
 
     val scrollBehavior = MiuixScrollBehavior()
-    val barBackdrop = rememberLayerBackdrop()
-    val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.67f)
+    val barBackdrop = rememberMiuixBlurBackdrop()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                modifier = Modifier.drawBackdrop(
-                    backdrop = barBackdrop,
-                    shape = { RectangleShape },
-                    effects = {
-                        vibrancy()
-                        blur(24.dp.toPx(), 24.dp.toPx())
-                    },
-                    onDrawSurface = { drawRect(barTint) },
-                ),
-                color = Color.Transparent,
+                modifier = Modifier.miuixAppBarBlur(barBackdrop),
+                color = barBackdrop.miuixAppBarColor(),
                 title = "日志",
                 scrollBehavior = scrollBehavior,
                 actions = {
@@ -426,7 +415,7 @@ fun LogsPager() {
 private fun LogTabContent(
     kind: LogKind,
     listState: LazyListState,
-    barBackdrop: LayerBackdrop,
+    barBackdrop: LayerBackdrop?,
     scrollBehavior: ScrollBehavior,
     innerPadding: PaddingValues,
     refreshKey: Int,
@@ -499,7 +488,7 @@ private fun LogTabContent(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .layerBackdrop(barBackdrop)
+                .then(barBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier)
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .padding(horizontal = 12.dp),

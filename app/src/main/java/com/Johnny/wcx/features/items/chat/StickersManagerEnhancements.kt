@@ -313,7 +313,7 @@ object StickersManagerEnhancements : SwitchFeature() {
             selectedMd5s.forEachIndexed { index, md5 ->
                 WeMessageApi.saveStickerByMd5(md5, "sticker_${baseName}_$index.gif")
             }
-            showToastSuspend("已保存 ${selectedMd5s.size} 张贴纸到 /sdcard/Download/WCX")
+            showToastSuspend("已保存 ${selectedMd5s.size} 张贴纸到 /sdcard/Download/WeKit")
         }
     }
 }

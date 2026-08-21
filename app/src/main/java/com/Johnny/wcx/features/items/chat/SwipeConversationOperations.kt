@@ -37,8 +37,7 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.runOnUiThread
 import com.Johnny.wcx.utils.android.showToast
-import java.util.Collections
-import java.util.WeakHashMap
+import java.lang.ref.WeakReference
 import kotlin.math.abs
 
 @Feature(
@@ -110,8 +109,8 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
 
     // Per-row gesture + reveal state. The list recycles row views, so talker / conversation are
     // refreshed on every getView bind; the parked-open offset persists across binds of the SAME
-    // view object (WeakHashMap key) which is what we want — but we reset it on rebind because a
-    // recycled view now represents a different conversation.
+    // view object (the state is stamped on it, see VIEW_TAG_SWIPE_STATE) which is what we want —
+    // but we reset it on rebind because a recycled view now represents a different conversation.
     private class SwipeState(
         val touchSlop: Int,
         // Drag past this (leftwards) on release => fly the row out and delete.
@@ -147,17 +146,41 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
         var isDnd: Boolean = false,
     )
 
-    // WeakHashMap: entries are removed automatically once the recycled row view is GC'd.
-    private val states: MutableMap<View, SwipeState> =
-        Collections.synchronizedMap(WeakHashMap())
+    /**
+     * Integer tag key under which a row's [SwipeState] is stamped onto the row view itself.
+     *
+     * A module-level `WeakHashMap<View, SwipeState>` cannot be used here: a [SwipeState] holds the
+     * wrapper / content / panel / buttons, which all live inside the key row's own subtree, so the
+     * map's (strongly held) value reaches the key back through the view parent chain. The weak key
+     * would therefore never be cleared, the entry never expunged, and every row that was ever
+     * swipe-instrumented — and through it LauncherUI — would be pinned for the lifetime of the
+     * WeChat process. Stamped on the view, the state is intrinsically scoped to the row: when
+     * WeChat drops the row, the whole cluster becomes unreachable and is collected together.
+     *
+     * Placed in the 0x7E… range to avoid collisions with Android-generated R.id values (0x7F…),
+     * which is also what WeChat's own tags use. 0x7E000001 (DisplayGroupMemberRealName) and
+     * 0x7E000002 (ReadReceipts) are already taken.
+     */
+    private const val VIEW_TAG_SWIPE_STATE = 0x7E000003
 
-    // At most one row is open at a time (iOS behavior). Weak so it can't leak a row view.
-    @SuppressLint("StaticFieldLeak")
-    private var openState: SwipeState? = null
+    // At most one row is open at a time (iOS behavior). Held weakly so it can't leak a row view:
+    // a SwipeState transitively references the wrapper / content / panel / buttons, i.e. the whole
+    // row view tree and through it LauncherUI, so a strong static reference would pin the Activity
+    // until some other row happens to be opened.
+    private var openStateRef: WeakReference<SwipeState>? = null
+
+    // Null once the referenced row view tree has been collected — every read site treats that the
+    // same as "no row is open".
+    private var openState: SwipeState?
+        get() = openStateRef?.get()
+        set(value) {
+            openStateRef = value?.let { WeakReference(it) }
+        }
 
     private val settleInterpolator = DecelerateInterpolator()
 
-    private const val TAG = "SwipeToDeleteConversation"
+    private const val TAG = "SwipeConversationOperations"
+    private const val FOLD_CONVERSATION_TALKER = "message_fold"
 
     // WeChat has TWO home conversation-list adapters and picks one at runtime in MainUI.onCreate
     // (o75.s.f347101a.b()): the legacy ListView adapter com.tencent.mm.ui.conversation.p3
@@ -188,10 +211,15 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
     }
 
     override fun onDisable() {
-        states.clear()
+        // Row state lives on the row views (VIEW_TAG_SWIPE_STATE) and dies with them, so the only
+        // module-level reference to drop is the open-row pointer. The stamped state is left in
+        // place on purpose: rows we already wrapped keep their wrapper (teardown is best-effort),
+        // so a later re-enable must find the existing state and reuse that wrapper instead of
+        // wrapping the row a second time.
+        openState = null
     }
 
-    //── row binding: attach the swipe listener + keep talker / conversation fresh ─
+    // ── row binding: attach the swipe listener + keep talker / conversation fresh ─
 
     private fun hookAdapter(adapter: DexClassDelegate) {
         if (adapter.isPlaceholder) return
@@ -202,7 +230,7 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
 
                 // getItem(position) -> com.tencent.mm.storage.m3(rconversation model).
                 val conversation = runCatching {
-                    thisObject.reflekt()
+                    thisObject!!.reflekt()
                         .firstMethod { name = "getItem"; parameterCount = 1 }
                         .invoke(position)
                 }.getOrNull() ?: return@hookAfter
@@ -213,13 +241,17 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
                         ?.get() as? String
                 }.getOrNull()
 
+                if (talker == FOLD_CONVERSATION_TALKER) {
+                    disableSwipeForFoldConversation(view)
+                    return@hookAfter
+                }
+
                 val ctx = view.context
-                val state = states.getOrPut(view) {
-                    SwipeState(
+                val state = view.getTag(VIEW_TAG_SWIPE_STATE) as? SwipeState
+                    ?: SwipeState(
                         touchSlop = ViewConfiguration.get(ctx).scaledTouchSlop,
                         flyOutThreshold = FLY_OUT_THRESHOLD_DP.dpToPx(ctx).toFloat(),
-                    )
-                }
+                    ).also { view.setTag(VIEW_TAG_SWIPE_STATE, it) }
                 state.talker = talker
                 state.conversation = conversation
 
@@ -244,7 +276,12 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
     // per row and tagged so re-binds don't wrap twice.
     private fun setUpRow(row: View, s: SwipeState) {
         // Already wrapped this row (state is keyed by the row view, stable across recycles).
-        if (s.wrapper != null) return
+        if (s.wrapper != null) {
+            // A recycled row may previously have represented message_fold, whose sibling fold
+            // control needs this wrapper hidden to receive the full row width.
+            s.wrapper?.visibility = View.VISIBLE
+            return
+        }
 
         val group = row as? ViewGroup ?: return
 
@@ -279,6 +316,17 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
         s.panel = panel
         // Park the panel closed immediately.
         applyTranslation(s, 0f)
+    }
+
+    // message_fold shows the fold control (ciy), a sibling of the normal conversation content
+    // (cj0). The latter may already be inside our full-width wrapper from an earlier binding of
+    // this recycled row, so hiding the wrapper is necessary in addition to skipping swipe setup.
+    private fun disableSwipeForFoldConversation(row: View) {
+        val state = row.getTag(VIEW_TAG_SWIPE_STATE) as? SwipeState ?: return
+        resetRow(state)
+        state.talker = null
+        state.conversation = null
+        state.wrapper?.visibility = View.GONE
     }
 
     // Creates the action panel with ALL possible button slots. Buttons that are not currently
@@ -515,6 +563,11 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
     private fun settleClosed(s: SwipeState) {
         animateTo(s, 0f)
         s.isOpen = false
+        // The row is back at offset 0, so a previous fly-out is over — clear the latch here rather
+        // than only on rebind. Otherwise cancelling the delete dialog (which already settled the
+        // row closed) would leave flungOut set, and the next fly-out would bail out of
+        // flyOutAndDelete without ever animating, stranding the row half off-screen.
+        s.flungOut = false
         if (openState === s) openState = null
     }
 

@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -152,8 +153,19 @@ object ActivityProxy {
         const val SETTINGS_PROXY = "${PackageNames.WECHAT}.app.WeChatSplashActivity"
         const val TRANSPARENT_PROXY = "${PackageNames.WECHAT}.plugin.appbrand.ipc.AppBrandProxyTransparentUI"
 
+        /**
+         * 这些模块 Activity 不借宿主的 stub，直接在模块自己的进程里启动：
+         *  - MainActivity 本来就是从桌面启动的；
+         *  - PipVoipActivity 需要清单里的 `supportsPictureInPicture`。system_server 校验的是
+         *    被启动组件在清单里的 flag（见 `ActivityRecord.supportsPictureInPicture()`），
+         *    而宿主没有任何 Activity 声明过它，借壳就永远进不了画中画。也正因为如此，
+         *    对应的功能只能在 LSPosed 模式下用（Zygisk 模式下模块应用没有安装）。
+         */
+        private val NON_PROXY_ACTIVITIES = listOf("MainActivity", "PipVoipActivity")
+
         fun isModuleProxyActivity(className: String?): Boolean =
-            className?.startsWith(PackageNames.MODULE) == true
+            className?.startsWith(PackageNames.MODULE) == true &&
+                NON_PROXY_ACTIVITIES.none { className.contains(it) }
     }
 
     private class IActivityManagerHandler(private val origin: Any) : InvocationHandler {
@@ -206,6 +218,8 @@ object ActivityProxy {
     }
 
     private class ProxyHandlerCallback(private val next: Handler.Callback?) : Handler.Callback {
+        private data class RecoveredIntent(val token: String, val intent: Intent)
+
         override fun handleMessage(msg: Message): Boolean {
             when (msg.what) {
                 100 -> handleLaunchActivity(msg)     // LAUNCH_ACTIVITY (< Android 9)
@@ -216,20 +230,20 @@ object ActivityProxy {
                 .getOrDefault(false)
         }
 
-        private fun unwrapIntent(wrapper: Intent?): Intent? {
+        private fun recoverIntent(wrapper: Intent?): RecoveredIntent? {
             wrapper ?: return null
             val cl = ParcelableFixer.hybridClassLoader
             wrapper.setExtrasClassLoader(cl)
             if (!wrapper.hasExtra(ActProxyMgr.ACTIVITY_PROXY_INTENT_TOKEN)) return null
 
-            val token = wrapper.getStringExtra(ActProxyMgr.ACTIVITY_PROXY_INTENT_TOKEN)
-            val real = IntentTokenCache.getAndRemove(token) ?: run {
+            val token = wrapper.getStringExtra(ActProxyMgr.ACTIVITY_PROXY_INTENT_TOKEN) ?: return null
+            val real = IntentTokenCache.get(token) ?: run {
                 WeLogger.w(TAG, "token expired or lost in handler: $token")
                 return null
             }
             real.setExtrasClassLoader(cl)
             real.extras?.classLoader = cl
-            return real
+            return RecoveredIntent(token, real)
         }
 
         private fun handleLaunchActivity(msg: Message) {
@@ -238,7 +252,10 @@ object ActivityProxy {
                 val intentField =
                     record.javaClass.getDeclaredField("intent").makeAccessible()
                 val wrapper = intentField.get(record) as? Intent
-                unwrapIntent(wrapper)?.let { intentField.set(record, it) }
+                recoverIntent(wrapper)?.let { recovered ->
+                    intentField.set(record, recovered.intent)
+                    IntentTokenCache.remove(recovered.token)
+                }
             }.onFailure { WeLogger.e(TAG, "handleLaunchActivity error", it) }
         }
 
@@ -254,10 +271,33 @@ object ActivityProxy {
                         val intentField = item.javaClass.getDeclaredField("mIntent")
                             .makeAccessible()
                         val wrapper = intentField.get(item) as? Intent
-                        unwrapIntent(wrapper)?.let { intentField.set(item, it) }
+                        recoverIntent(wrapper)?.let { recovered ->
+                            intentField.set(item, recovered.intent)
+
+                            // Android 12 keeps a second ActivityClientRecord while launching.
+                            // Updating only LaunchActivityItem leaves the proxy intent in that
+                            // record, so ActivityThread instantiates the proxy activity instead.
+                            if (Build.VERSION.SDK_INT in Build.VERSION_CODES.S..Build.VERSION_CODES.S_V2) {
+                                updateLaunchingActivityIntent(transaction, recovered.intent)
+                            }
+
+                            IntentTokenCache.remove(recovered.token)
+                        }
                     }
                 }
             }.onFailure { WeLogger.e(TAG, "handleExecuteTransaction error", it) }
+        }
+
+        private fun updateLaunchingActivityIntent(transaction: Any, intent: Intent) {
+            val token = transaction.javaClass.getMethod("getActivityToken")
+                .invoke(transaction) as IBinder
+            val activityThread = ActivityThread.currentActivityThread()
+            val record = activityThread.javaClass
+                .getMethod("getLaunchingActivity", IBinder::class.java)
+                .invoke(activityThread, token) ?: return
+            record.javaClass.getDeclaredField("intent")
+                .makeAccessible()
+                .set(record, intent)
         }
     }
 
@@ -323,6 +363,7 @@ object ActivityProxy {
             )
 
         override fun callActivityOnCreate(activity: Activity, icicle: Bundle?) {
+            ResourcesInjector.injectModuleRes(activity.resources)
             if (ActProxyMgr.isModuleProxyActivity(activity.javaClass.name)) {
                 val cl = ParcelableFixer.hybridClassLoader
                 runCatching {
@@ -341,7 +382,10 @@ object ActivityProxy {
             activity: Activity,
             icicle: Bundle?,
             persistentState: PersistableBundle?
-        ) = base.callActivityOnCreate(activity, icicle, persistentState)
+        ) {
+            ResourcesInjector.injectModuleRes(activity.resources)
+            base.callActivityOnCreate(activity, icicle, persistentState)
+        }
 
         override fun onCreate(arguments: Bundle?) = base.onCreate(arguments)
         override fun start() = base.start()
@@ -533,6 +577,19 @@ object ActivityProxy {
             token ?: return null
             val entry = cache.remove(token) ?: return null
             return entry.intent.takeIf { System.currentTimeMillis() - entry.timestamp <= EXPIRE_MS }
+        }
+
+        fun get(token: String): Intent? {
+            val entry = cache[token] ?: return null
+            return entry.intent.takeIf { System.currentTimeMillis() - entry.timestamp <= EXPIRE_MS }
+                ?: run {
+                    cache.remove(token, entry)
+                    null
+                }
+        }
+
+        fun remove(token: String) {
+            cache.remove(token)
         }
 
         private fun cleanup() {

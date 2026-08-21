@@ -9,9 +9,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicInteger
 
-internal const val PANEL_BULK_DOWNLOAD_CONCURRENCY = 4
-internal const val PANEL_BULK_CONVERSION_CONCURRENCY = 2
-
 /** Runs independent work on a fixed worker pool and serializes its progress callbacks. */
 internal suspend fun <T, R> Iterable<T>.parallelForEachWithProgress(
     maxConcurrency: Int,

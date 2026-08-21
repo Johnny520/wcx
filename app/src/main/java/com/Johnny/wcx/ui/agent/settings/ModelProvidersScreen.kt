@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -16,7 +17,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlined.Visibility
+import com.composables.icons.materialsymbols.outlined.Visibility_off
 import com.Johnny.wcx.agent.data.WeAgentRepository
 import com.Johnny.wcx.agent.data.entity.ModelProviderEntity
 import com.Johnny.wcx.agent.data.entity.ModelProviderType
@@ -24,6 +31,8 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -90,6 +99,8 @@ private fun AddProviderDialog(
     var baseUrl by remember(show.value) { mutableStateOf("https://api.openai.com/v1") }
     var apiKey by remember(show.value) { mutableStateOf("") }
     var typeIndex by remember(show.value) { mutableIntStateOf(0) }
+    // API keys are stored in the clear, so at least don't render them in the clear.
+    var showApiKey by remember(show.value) { mutableStateOf(false) }
     val types = listOf(
         ModelProviderType.OPENAI_CHAT_COMPLETION,
         ModelProviderType.OPENAI_RESPONSES,
@@ -105,7 +116,24 @@ private fun AddProviderDialog(
             Spacer(Modifier.height(8.dp))
             TextField(value = baseUrl, onValueChange = { baseUrl = it }, label = "Base URL", useLabelAsPlaceholder = true, singleLine = true)
             Spacer(Modifier.height(8.dp))
-            TextField(value = apiKey, onValueChange = { apiKey = it }, label = "API Key", useLabelAsPlaceholder = true, singleLine = true)
+            TextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                label = "API Key",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(onClick = { showApiKey = !showApiKey }) {
+                        Icon(
+                            imageVector = if (showApiKey) MaterialSymbols.Outlined.Visibility_off
+                            else MaterialSymbols.Outlined.Visibility,
+                            contentDescription = if (showApiKey) "隐藏" else "显示",
+                        )
+                    }
+                },
+            )
             Spacer(Modifier.height(8.dp))
             WindowDropdownPreference(
                 title = "接口类型",

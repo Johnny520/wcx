@@ -11,24 +11,23 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Close
+import com.composables.icons.materialsymbols.outlined.Fiber_new
 import com.composables.icons.materialsymbols.outlined.Search
+import com.Johnny.wcx.features.core.BaseFeature
 import com.Johnny.wcx.features.core.FeaturesProvider
+import com.Johnny.wcx.features.core.NewFeatures
 import com.Johnny.wcx.features.core.SwitchFeature
-import com.Johnny.wcx.features.items.easter_egg.AprilFools
-import com.Johnny.wcx.features.items.easter_egg.isAprilFools
 import com.Johnny.wcx.preferences.WePrefs
-import com.Johnny.wcx.utils.android.showToastSuspend
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -36,8 +35,30 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import java.time.LocalDate
 
+
+// ---------------------------------------------------------------------------
+//  Shared switch state
+// ---------------------------------------------------------------------------
+
+/**
+ * Bumped on every feature toggle. Rows key their MMKV read on it, so the search list and a
+ * category screen — which the navigator keeps composed at the same time — can never drift apart,
+ * nor away from what MMKV actually holds.
+ */
+private var featureToggleRevision by mutableIntStateOf(0)
+
+/**
+ * Current switch state of [item], read straight from MMKV using the feature's own
+ * [SwitchFeature.defaultEnabled] — the very default `SwitchFeature.startup()` applies.
+ */
+@Composable
+private fun featureChecked(item: BaseFeature): Boolean {
+    val revision = featureToggleRevision
+    return remember(item.name, revision) {
+        WePrefs.getBoolOrDef(item.name, (item as? SwitchFeature)?.defaultEnabled == true)
+    }
+}
 
 // ---------------------------------------------------------------------------
 //  Page 1 — Features (search bar + category list)
@@ -45,8 +66,6 @@ import java.time.LocalDate
 
 @Composable
 fun FeaturesPager(onOpenCategory: (String) -> Unit) {
-    val showAprilFools = remember { LocalDate.now().isAprilFools }
-
     val queryState = rememberTextFieldState()
     val query = queryState.text.toString()
     val searching = query.isNotBlank()
@@ -59,7 +78,6 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                     it.description.contains(query, ignoreCase = true)
         }
     }
-    val switchStates = remember { mutableStateMapOf<String, Boolean>() }
 
     // A back press while searching clears the query first (after the IME's own
     // back has dismissed the keyboard) rather than exiting the module settings.
@@ -120,14 +138,15 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                     ) {
                         FeatureRow(
                             item = item,
-                            checked = switchStates[item.name] ?: WePrefs.getBoolOrFalse(item.name),
-                            onCheckedChange = { switchStates[item.name] = it },
+                            checked = featureChecked(item),
+                            onCheckedChange = { featureToggleRevision++ },
                         )
                     }
                 }
             }
         } else {
-            if (showAprilFools) {
+            // Its own card, so it reads as separate from the real categories below.
+            if (NEW_FEATURE_ITEMS.isNotEmpty()) {
                 item {
                     Card(
                         modifier = Modifier
@@ -135,12 +154,17 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                             .fillMaxWidth()
                     ) {
                         ArrowPreference(
-                            title = "🏳",
-                            summary = "投降喵投降喵",
-                            onClick = {
-                                WePrefs.putBool(AprilFools.KEY_SURRENDER, true)
-                                CoroutineScope(Dispatchers.Main).launch { showToastSuspend("重启生效") }
+                            title = NEW_FEATURES_CATEGORY,
+                            summary = "最近 ${NewFeatures.WINDOW_DAYS} 天新增 ${NEW_FEATURE_ITEMS.size} 项",
+                            startAction = {
+                                Icon(
+                                    imageVector = MaterialSymbols.Outlined.Fiber_new,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    tint = MiuixTheme.colorScheme.onBackground,
+                                )
                             },
+                            onClick = { onOpenCategory(NEW_FEATURES_CATEGORY) },
                         )
                     }
                 }
@@ -181,12 +205,8 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
 @Composable
 fun CategoryDetailScreen(categoryName: String, onBack: () -> Unit) {
     val items = remember(categoryName) {
-        FeaturesProvider.ALL_HOOK_ITEMS.filter { categoryName in it.categories }
-    }
-    val switchStates = remember(categoryName) {
-        mutableStateMapOf<String, Boolean>().apply {
-            items.forEach { put(it.name, WePrefs.getBoolOrFalse(it.name)) }
-        }
+        if (categoryName == NEW_FEATURES_CATEGORY) NEW_FEATURE_ITEMS
+        else FeaturesProvider.ALL_HOOK_ITEMS.filter { categoryName in it.categories }
     }
 
     MiuixListScaffold(
@@ -211,8 +231,8 @@ fun CategoryDetailScreen(categoryName: String, onBack: () -> Unit) {
             ) {
                 FeatureRow(
                     item = item,
-                    checked = switchStates[item.name] ?: false,
-                    onCheckedChange = { switchStates[item.name] = it },
+                    checked = featureChecked(item),
+                    onCheckedChange = { featureToggleRevision++ },
                 )
                 item.Ui()
             }

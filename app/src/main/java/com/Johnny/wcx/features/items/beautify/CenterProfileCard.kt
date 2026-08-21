@@ -46,6 +46,7 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.content.WeColorField
 import com.Johnny.wcx.ui.utils.findViewsWhich
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
@@ -241,18 +242,16 @@ object CenterProfileCard : ClickableFeature(), IResolveDex {
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        OutlinedTextField(
+                        WeColorField(
                             value = lightBg,
                             onValueChange = { lightBg = it },
-                            label = { Text("亮色背景 ARGB") },
-                            singleLine = true,
+                            label = "亮色背景",
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        OutlinedTextField(
+                        WeColorField(
                             value = darkBg,
                             onValueChange = { darkBg = it },
-                            label = { Text("暗色背景 ARGB") },
-                            singleLine = true,
+                            label = "暗色背景",
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

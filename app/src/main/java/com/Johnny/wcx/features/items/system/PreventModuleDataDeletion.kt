@@ -33,29 +33,19 @@ object PreventModuleDataDeletion : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodNativeFileSystemEntryDelete.hookBefore {
-            try {
-                val relPath = args[0] as String
-                if (!::basePathField.isInitialized) {
-                    basePathField = thisObject.reflekt()
-                        .firstField {
-                            type = String::class
-                            modifiers(Modifiers.FINAL)
-                        }.self
-                }
-                val basePath = basePathField.get(thisObject) as String
+            val relPath = args[0] as String
+            if (!::basePathField.isInitialized) {
+                basePathField = thisObject!!.reflekt()
+                    .firstField {
+                        type = String::class
+                        modifiers(Modifiers.FINAL)
+                    }.self
+            }
+            val basePath = basePathField.get(thisObject) as String
 
-                val path = "$basePath/$relPath"
-                if (path.contains(BuildConfig.TAG) || path.contains("Layout Inspect")) {
-                    // 仅当原方法返回 boolean 时才设置 result = true，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                    if (method is java.lang.reflect.Method) {
-                        val returnType = (method as java.lang.reflect.Method).returnType
-                        if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
-                            result = true
-                        }
-                    }
-                }
-            } catch (e: Throwable) {
-                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            val path = "$basePath/$relPath"
+            if (path.contains(BuildConfig.TAG) || path.contains("Layout Inspect")) {
+                result = true
             }
         }
     }

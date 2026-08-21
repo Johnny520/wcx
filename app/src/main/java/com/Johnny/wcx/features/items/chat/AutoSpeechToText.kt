@@ -1,7 +1,6 @@
 package com.Johnny.wcx.features.items.chat
 
 import android.view.View
-import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.WeServiceApi
@@ -9,6 +8,7 @@ import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.collections.LruCache
 import java.lang.reflect.InvocationTargetException
 
@@ -27,7 +27,7 @@ object AutoSpeechToText : SwitchFeature(),
     }
 
     override fun onCreateView(
-        param: XC_MethodHook.MethodHookParam,
+        param: HookParam,
         view: View
     ) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)

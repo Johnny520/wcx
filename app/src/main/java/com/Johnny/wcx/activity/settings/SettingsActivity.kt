@@ -2,7 +2,7 @@ package com.Johnny.wcx.activity.settings
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.Keep
@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -39,14 +40,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,14 +77,17 @@ import com.composables.icons.materialsymbols.outlinedfilled.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Tune
 import com.Johnny.wcx.features.core.BaseFeature
 import com.Johnny.wcx.features.core.ClickableFeature
+import com.Johnny.wcx.features.core.FeaturesProvider
+import com.Johnny.wcx.features.core.NewFeatures
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.FloatingBottomBar
 import com.Johnny.wcx.ui.content.FloatingBottomBarDefaults
 import com.Johnny.wcx.ui.content.FloatingBottomBarItem
 import com.Johnny.wcx.ui.content.MiuixStackNavigator
-import com.Johnny.wcx.ui.content.liquid.vibrancy
-import com.Johnny.wcx.ui.utils.CommonContextWrapper
+import com.Johnny.wcx.ui.content.miuixAppBarBlur
+import com.Johnny.wcx.ui.content.miuixAppBarColor
+import com.Johnny.wcx.ui.content.rememberMiuixBlurBackdrop
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
 import kotlinx.coroutines.launch
@@ -101,8 +101,6 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.blur.blur
-import top.yukonga.miuix.kmp.blur.drawBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -121,14 +119,8 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val context = CommonContextWrapper(this)
-        val resources = context.resources
-
         setContent {
             CompositionLocalProvider(
-                LocalContext provides context,
-                LocalResources provides resources,
-                LocalActivity provides this,
                 LocalComponentActivity provides this
             ) {
                 ModuleTheme {
@@ -165,6 +157,33 @@ val FEATURE_CATEGORIES = listOf(
     "联系人详情页面" to MaterialSymbols.Outlined.Contact_page,
 )
 
+/**
+ * Pseudo-category shown above the real ones. Deliberately kept out of [FEATURE_CATEGORIES] —
+ * it isn't something a feature can declare in its `@Feature(categories = ...)`.
+ */
+const val NEW_FEATURES_CATEGORY = "新功能"
+
+/**
+ * Features whose source file entered the repo within [NewFeatures.WINDOW_DAYS] days of the build's
+ * HEAD commit (collected at compile time by `GenerateNewFeaturesTask`), newest first.
+ *
+ * Features that belong to no real category — the `API` internals — are dropped: they carry no
+ * switch a user would meaningfully flip.
+ */
+val NEW_FEATURE_ITEMS: List<BaseFeature> by lazy {
+    val visibleCategories = FEATURE_CATEGORIES.mapTo(mutableSetOf()) { it.first }
+    FeaturesProvider.ALL_HOOK_ITEMS.associateBy { it.name }.values
+        .mapNotNull { item ->
+            NewFeatures.ADDED_AT_BY_NAME[item.name]?.let { addedAt -> item to addedAt }
+        }
+        .filter { (item, _) -> item.categories.any { it in visibleCategories } }
+        .sortedWith(
+            compareByDescending<Pair<BaseFeature, Long>> { it.second }
+                .thenBy { it.first.name },
+        )
+        .map { (item, _) -> item }
+}
+
 // ---------------------------------------------------------------------------
 //  Root: three-tab pager + floating bottom bar, with category drill-down
 // ---------------------------------------------------------------------------
@@ -174,19 +193,20 @@ private sealed interface SettingsNavTarget {
     data object Main : SettingsNavTarget
     data class Category(val name: String) : SettingsNavTarget
     data object License : SettingsNavTarget
-    data object Acknowledgements : SettingsNavTarget
 }
 
 @Composable
 private fun SettingsRoot(onFinish: () -> Unit) {
     val stack = remember { mutableStateListOf<SettingsNavTarget>(SettingsNavTarget.Main) }
+    val pagerState = rememberPagerState(pageCount = { TAB_ITEMS.size })
+    val scope = rememberCoroutineScope()
 
     MiuixStackNavigator(stack = stack, onExitRoot = onFinish) { screen, push, pop ->
         when (screen) {
             SettingsNavTarget.Main -> MainPagerScreen(
+                pagerState = pagerState,
                 onOpenCategory = { push(SettingsNavTarget.Category(it)) },
                 onOpenLicense = { push(SettingsNavTarget.License) },
-                onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
             )
 
             is SettingsNavTarget.Category -> CategoryDetailScreen(
@@ -197,21 +217,24 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             SettingsNavTarget.License -> LicenseScreen(
                 onBack = pop,
             )
-
-            SettingsNavTarget.Acknowledgements -> AcknowledgementsScreen(
-                onBack = pop,
-            )
         }
+    }
+
+    // Back unwinds one level at a time: sub-screens first (handled by the navigator's own
+    // predictive-back pop), then the home tab, then finish. Enabled only at the stack root so
+    // this handler never shadows the navigator's — it is registered later, so it would
+    // otherwise win and collapse the stack and the tab in a single press.
+    BackHandler(enabled = stack.size == 1 && pagerState.currentPage != 0) {
+        scope.launch { pagerState.animateScrollToPage(0) }
     }
 }
 
 @Composable
 private fun MainPagerScreen(
+    pagerState: PagerState,
     onOpenCategory: (String) -> Unit,
     onOpenLicense: () -> Unit,
-    onOpenAcknowledgements: () -> Unit,
 ) {
-    val pagerState = rememberPagerState(pageCount = { 4 })
     val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
     val scope = rememberCoroutineScope()
     val backdrop = rememberLayerBackdrop()
@@ -236,7 +259,7 @@ private fun MainPagerScreen(
                     0 -> HomePager(onOpenFeatures = { scope.launch { pagerState.animateScrollToPage(1) } })
                     1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                     2 -> LogsPager()
-                    else -> SettingsPager(onOpenLicense = onOpenLicense, onOpenAcknowledgements = onOpenAcknowledgements)
+                    else -> SettingsPager(onOpenLicense = onOpenLicense)
                 }
             }
         }
@@ -328,25 +351,14 @@ fun MiuixListScaffold(
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
-    // The LazyColumn is registered as the blur source; the top bar samples that captured
-    // layer through drawBackdrop and paints itself transparent, so scrolled content shows
-    // through blurred behind the collapsed bar (InstallerX's useBlur pattern, on miuix-blur glass).
-    val barBackdrop = rememberLayerBackdrop()
-    val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.67f)
+    // Match KernelSU / InstallerX's miuix app bar blur path: textureBlur uses a fixed pixel
+    // radius, avoiding the oversized dp->px blur that made section titles smear into blocks.
+    val barBackdrop = rememberMiuixBlurBackdrop()
     Scaffold(
         topBar = {
             TopAppBar(
-                modifier = Modifier.drawBackdrop(
-                    backdrop = barBackdrop,
-                    shape = { RectangleShape },
-                    effects = {
-                        vibrancy()
-                        blur(24.dp.toPx(), 24.dp.toPx())
-                    },
-                    onDrawSurface = { drawRect(barTint) },
-                ),
-                // Transparent so the miuix bar's own opaque surface doesn't hide the blur.
-                color = Color.Transparent,
+                modifier = Modifier.miuixAppBarBlur(barBackdrop),
+                color = barBackdrop.miuixAppBarColor(),
                 title = title,
                 scrollBehavior = scrollBehavior,
                 navigationIcon = { navigationIcon?.invoke() },
@@ -357,7 +369,7 @@ fun MiuixListScaffold(
         LazyColumn(
             modifier = Modifier
                 .fillMaxHeight()
-                .layerBackdrop(barBackdrop)
+                .then(barBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier)
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
@@ -467,9 +479,6 @@ fun FeatureRow(
         )
     }
 }
-
-
-
 
 
 

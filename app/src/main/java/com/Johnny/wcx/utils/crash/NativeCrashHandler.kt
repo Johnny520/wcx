@@ -9,7 +9,7 @@ object NativeCrashHandler {
     var isInstalled: Boolean = false
 
     // Native 方法声明
-    private external fun installNative(crashLogDir: String?): Boolean
+    private external fun installNative(crashLogDir: String?, crashLogFileNamePrefix: String): Boolean
 
     private external fun uninstallNative()
 
@@ -27,8 +27,12 @@ object NativeCrashHandler {
         }
 
         try {
-            val crashLogDir = CrashLogsManager.crashLogDirPath
-            val result = installNative(crashLogDir)
+            // CrashLogsManager owns the crash-log naming; hand the prefix down so native reports
+            // land under the same file names and stay visible to allCrashLogs / cleanOldLogs.
+            val result = installNative(
+                CrashLogsManager.crashLogDirPath,
+                CrashLogsManager.crashLogFileNamePrefix,
+            )
 
             if (result) {
                 isInstalled = true

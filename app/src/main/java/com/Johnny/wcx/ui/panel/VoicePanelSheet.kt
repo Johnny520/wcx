@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -74,8 +75,8 @@ import com.composables.icons.materialsymbols.outlined.Upload_file
 import com.Johnny.wcx.features.items.chat.panel.CloneExample
 import com.Johnny.wcx.features.items.chat.panel.CloneVoice
 import com.Johnny.wcx.features.items.chat.panel.LocalSortMode
-import com.Johnny.wcx.features.items.chat.panel.PANEL_BULK_DOWNLOAD_CONCURRENCY
 import com.Johnny.wcx.features.items.chat.panel.PanelSettings
+import com.Johnny.wcx.features.items.chat.panel.PanelSource
 import com.Johnny.wcx.features.items.chat.panel.PanelUiState
 import com.Johnny.wcx.features.items.chat.panel.RECENT_PACK_ID
 import com.Johnny.wcx.features.items.chat.panel.VoiceDestination
@@ -87,6 +88,7 @@ import com.Johnny.wcx.features.items.chat.panel.VoiceProviderPage
 import com.Johnny.wcx.features.items.chat.panel.parallelForEachWithProgress
 import com.Johnny.wcx.features.items.chat.panel.voice.VoiceProvider
 import com.Johnny.wcx.features.items.chat.panel.voice.VoiceProviderRegistry
+import com.Johnny.wcx.utils.MediaFileTypeDetector
 import com.Johnny.wcx.utils.android.showToastSuspend
 import com.Johnny.wcx.utils.fs.asPath
 import kotlinx.coroutines.CancellationException
@@ -96,7 +98,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.io.path.extension
 import kotlin.io.path.fileSize
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -217,6 +218,9 @@ private fun VoicePanelContent(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val rememberedNavigation = remember {
+        PanelNavigationMemory.voice.takeIf { PanelSettings.rememberPanelNavigation }
+    }
     val player = remember { MediaPlayer() }
     var playingId by remember { mutableStateOf<String?>(null) }
     var activePreviewId by remember { mutableStateOf<String?>(null) }
@@ -233,9 +237,9 @@ private fun VoicePanelContent(
     var localPacks by remember { mutableStateOf<List<VoicePack>>(emptyList()) }
     var localState by remember { mutableStateOf<PanelUiState<Unit>>(PanelUiState.Loading) }
     var selectedLocalId by remember {
-        mutableStateOf<String?>(null)
+        mutableStateOf(rememberedNavigation?.selectedLocalPackId)
     }
-    var localPackDetailId by remember { mutableStateOf<String?>(null) }
+    var localPackDetailId by remember { mutableStateOf(rememberedNavigation?.localPackDetailId) }
     var localPackLayout by remember { mutableStateOf(PanelSettings.localVoicePackLayout) }
     var wrapActions by remember { mutableStateOf(PanelSettings.wrapPanelActions) }
     var localQuery by remember { mutableStateOf("") }
@@ -243,49 +247,65 @@ private fun VoicePanelContent(
     var localPackFilterExpanded by remember { mutableStateOf(false) }
     var destination by remember {
         mutableStateOf(
-            VoiceDestination.entries.firstOrNull { it.name == PanelSettings.voiceLastDestination }
+            rememberedNavigation?.destination
+                ?: VoiceDestination.entries.firstOrNull { it.name == PanelSettings.voiceLastDestination }
                 ?: VoiceDestination.RECENT,
         )
     }
     var prompt by remember { mutableStateOf<VoicePrompt?>(null) }
     var operationMessage by remember { mutableStateOf<String?>(null) }
     var progressMessage by remember { mutableStateOf<String?>(null) }
-    var ttsMode by remember { mutableStateOf(TtsMode.EDGE) }
+    var ttsMode by remember { mutableStateOf(rememberedNavigation?.ttsMode ?: TtsMode.EDGE) }
     var ttsText by remember { mutableStateOf("") }
     var selectedEdgeVoice by remember { mutableStateOf(PanelSettings.selectedEdgeVoice) }
     var convertedTts by remember { mutableStateOf<VoicePreview?>(null) }
     var convertedTtsTitle by remember { mutableStateOf("") }
     var clones by remember { mutableStateOf<List<CloneVoice>>(emptyList()) }
     var selectedCloneId by remember { mutableStateOf("") }
-    var managingClones by remember { mutableStateOf(false) }
-    var cloneSource by remember { mutableStateOf<String?>(null) }
+    var managingClones by remember { mutableStateOf(rememberedNavigation?.managingClones == true) }
+    var cloneSource by remember { mutableStateOf(rememberedNavigation?.cloneSource) }
     var exampleGroups by remember { mutableStateOf<PanelUiState<List<String>>>(PanelUiState.Loading) }
-    var selectedExampleGroup by remember { mutableStateOf<String?>(null) }
+    var selectedExampleGroup by remember { mutableStateOf(rememberedNavigation?.selectedExampleGroup) }
     var examples by remember { mutableStateOf<PanelUiState<List<CloneExample>>>(PanelUiState.Loading) }
-    var provider by remember { mutableStateOf(VoiceProviderRegistry.get(PanelSettings.selectedVoiceProvider)) }
-    var providerParent by remember { mutableStateOf<VoiceItem?>(null) }
-    var providerPage by remember { mutableIntStateOf(0) }
+    var provider by remember {
+        mutableStateOf(
+            VoiceProviderRegistry.get(
+                rememberedNavigation?.providerId ?: PanelSettings.selectedVoiceProvider,
+            ),
+        )
+    }
+    var providerParent by remember { mutableStateOf(rememberedNavigation?.providerParent) }
+    var providerPage by remember { mutableIntStateOf(rememberedNavigation?.providerPage ?: 0) }
     var providerFilterQuery by remember { mutableStateOf("") }
     var providerSearchExpanded by remember { mutableStateOf(false) }
     var providerState by remember { mutableStateOf<PanelUiState<VoiceProviderPage>>(PanelUiState.Loading) }
     var providerRootSnapshot by remember { mutableStateOf<ProviderRootSnapshot?>(null) }
     var providerRequest by remember { mutableIntStateOf(0) }
-    var onlineSearchQuery by remember { mutableStateOf("") }
-    var onlineSearchParent by remember { mutableStateOf<VoiceItem?>(null) }
-    var onlineSearchPage by remember { mutableIntStateOf(0) }
+    var onlineSearchQuery by remember { mutableStateOf(rememberedNavigation?.onlineSearchQuery.orEmpty()) }
+    var onlineSearchParent by remember { mutableStateOf(rememberedNavigation?.onlineSearchParent) }
+    var onlineSearchPage by remember { mutableIntStateOf(rememberedNavigation?.onlineSearchPage ?: 0) }
+    var onlineSearchExecuted by remember {
+        mutableStateOf(rememberedNavigation?.onlineSearchExecuted == true)
+    }
     var onlineSearchState by remember {
-        mutableStateOf<PanelUiState<VoiceProviderPage>>(PanelUiState.Empty("输入关键词搜索在线语音"))
+        mutableStateOf<PanelUiState<VoiceProviderPage>>(
+            if (onlineSearchExecuted || onlineSearchParent != null) {
+                PanelUiState.Loading
+            } else {
+                PanelUiState.Empty("输入关键词搜索在线语音")
+            },
+        )
     }
     var onlineSearchRootSnapshot by remember { mutableStateOf<ProviderRootSnapshot?>(null) }
     var onlineSearchRequest by remember { mutableIntStateOf(0) }
     var sharedPacksState by remember { mutableStateOf<PanelUiState<List<VoicePack>>>(PanelUiState.Loading) }
     var sharedPacksRequest by remember { mutableIntStateOf(0) }
-    var selectedSharedPack by remember { mutableStateOf<VoicePack?>(null) }
+    var selectedSharedPack by remember { mutableStateOf(rememberedNavigation?.selectedSharedPack) }
     var sharedQuery by remember { mutableStateOf("") }
     var sharedSearchExpanded by remember { mutableStateOf(false) }
     var sharedItemsState by remember { mutableStateOf<PanelUiState<List<VoiceItem>>>(PanelUiState.Empty("选择一个语音包")) }
     var sharedItemsRequest by remember { mutableIntStateOf(0) }
-    var cloneSharedPack by remember { mutableStateOf<VoicePack?>(null) }
+    var cloneSharedPack by remember { mutableStateOf(rememberedNavigation?.cloneSharedPack) }
     var cloneSharedPacksState by remember { mutableStateOf<PanelUiState<List<VoicePack>>>(PanelUiState.Loading) }
     var cloneSharedPacksRequest by remember { mutableIntStateOf(0) }
     var cloneSharedItemsState by remember { mutableStateOf<PanelUiState<List<VoiceItem>>>(PanelUiState.Empty("选择一个共享语音包")) }
@@ -311,6 +331,36 @@ private fun VoicePanelContent(
     val localItemListState = rememberLazyListState()
     val sharedPackListState = rememberLazyListState()
     val sharedItemListState = rememberLazyListState()
+    val navigationSnapshot by rememberUpdatedState(
+        VoicePanelNavigation(
+            destination = destination,
+            selectedLocalPackId = selectedLocalId,
+            localPackDetailId = localPackDetailId,
+            ttsMode = ttsMode,
+            managingClones = managingClones,
+            cloneSource = cloneSource,
+            cloneSharedPack = cloneSharedPack,
+            selectedExampleGroup = selectedExampleGroup,
+            providerId = provider.id,
+            providerParent = providerParent,
+            providerPage = providerPage,
+            onlineSearchQuery = onlineSearchQuery,
+            onlineSearchParent = onlineSearchParent,
+            onlineSearchPage = onlineSearchPage,
+            onlineSearchExecuted = onlineSearchExecuted,
+            selectedSharedPack = selectedSharedPack,
+        ),
+    )
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (PanelSettings.rememberPanelNavigation) {
+                PanelNavigationMemory.voice = navigationSnapshot
+            } else {
+                PanelNavigationMemory.voice = null
+            }
+        }
+    }
 
     DisposableEffect(convertedTts) {
         val generated = convertedTts
@@ -384,9 +434,11 @@ private fun VoicePanelContent(
         val requestedPage = onlineSearchPage
         val requestedQuery = onlineSearchQuery.trim()
         if (requestedParent == null && requestedQuery.isBlank()) {
+            onlineSearchExecuted = false
             onlineSearchState = PanelUiState.Empty("输入关键词搜索在线语音")
             return
         }
+        onlineSearchExecuted = true
         onlineSearchState = PanelUiState.Loading
         scope.launch {
             val result = if (requestedParent == null) {
@@ -473,6 +525,20 @@ private fun VoicePanelContent(
             cloneSharedPacksState = result.fold(
                 { if (it.isEmpty()) PanelUiState.Empty("暂无可选共享语音包") else PanelUiState.Content(it) },
                 { PanelUiState.Error(it.message ?: "共享语音包加载失败") },
+            )
+        }
+    }
+
+    fun loadCloneSharedPack(pack: VoicePack) {
+        cloneSharedPack = pack
+        val request = ++cloneSharedItemsRequest
+        cloneSharedItemsState = PanelUiState.Loading
+        scope.launch {
+            val result = actions.loadSharedPack(pack.id)
+            if (request != cloneSharedItemsRequest || cloneSharedPack?.id != pack.id) return@launch
+            cloneSharedItemsState = result.fold(
+                { if (it.isEmpty()) PanelUiState.Empty("语音包中没有可用语音") else PanelUiState.Content(it) },
+                { PanelUiState.Error(it.message ?: "读取共享语音包失败") },
             )
         }
     }
@@ -620,11 +686,44 @@ private fun VoicePanelContent(
         }
     }
 
+    fun loadExamples(group: String) {
+        selectedExampleGroup = group
+        val request = ++examplesRequest
+        examples = PanelUiState.Loading
+        scope.launch {
+            val result = actions.loadExamples(group)
+            if (request != examplesRequest || selectedExampleGroup != group) return@launch
+            examples = result.fold(
+                { if (it.isEmpty()) PanelUiState.Empty("该目录下暂无 wav 语音") else PanelUiState.Content(it) },
+                { PanelUiState.Error(it.message ?: "读取语音示例失败") },
+            )
+        }
+    }
+
     LaunchedEffect(destination) {
         PanelSettings.voiceLastDestination = destination.name
         when (destination) {
-            VoiceDestination.TTS -> refreshClones()
-            VoiceDestination.ONLINE -> if (providerState == PanelUiState.Loading) loadProvider(true)
+            VoiceDestination.TTS -> {
+                refreshClones()
+                if (managingClones) {
+                    when (cloneSource) {
+                        SOURCE_SHARED -> {
+                            if (cloneSharedPacksState == PanelUiState.Loading) loadCloneSharedPacks()
+                            cloneSharedPack?.let(::loadCloneSharedPack)
+                        }
+
+                        SOURCE_EXAMPLES -> {
+                            if (exampleGroups == PanelUiState.Loading) loadExampleGroups()
+                            selectedExampleGroup?.let(::loadExamples)
+                        }
+                    }
+                }
+            }
+
+            VoiceDestination.ONLINE -> if (providerState == PanelUiState.Loading) loadProvider()
+            VoiceDestination.ONLINE_SEARCH -> if (onlineSearchState == PanelUiState.Loading) {
+                loadOnlineSearch()
+            }
             VoiceDestination.SHARED -> if (sharedPacksState == PanelUiState.Loading) loadMySharedPacks()
             else -> Unit
         }
@@ -753,7 +852,7 @@ private fun VoicePanelContent(
     val title = when (destination) {
         VoiceDestination.RECENT -> "最近使用"
         VoiceDestination.SEARCH -> "本地搜索"
-        VoiceDestination.LOCAL -> "本地语音包"
+        VoiceDestination.LOCAL -> localDetailPack?.title ?: "本地语音包"
         VoiceDestination.TTS -> "文字转语音"
         VoiceDestination.ONLINE -> "在线语音包"
         VoiceDestination.ONLINE_SEARCH -> "在线搜索"
@@ -811,7 +910,7 @@ private fun VoicePanelContent(
             var failed = 0
             try {
                 uniqueItems.parallelForEachWithProgress(
-                    maxConcurrency = PANEL_BULK_DOWNLOAD_CONCURRENCY,
+                    maxConcurrency = PanelSettings.effectivePanelDownloadConcurrency,
                     transform = { item -> actions.addToLocal(packId, item) },
                     onItemComplete = { _, total, _, result ->
                         if (result.isSuccess) succeeded++ else failed++
@@ -1333,6 +1432,7 @@ private fun VoicePanelContent(
                             providerSearchExpanded = false
                             onlineSearchParent = null
                             onlineSearchRootSnapshot = null
+                            onlineSearchExecuted = false
                             onlineSearchRequest++
                             onlineSearchState = PanelUiState.Empty(
                                 if (onlineSearchQuery.isBlank()) "输入关键词搜索在线语音"
@@ -1401,6 +1501,7 @@ private fun VoicePanelContent(
                             onlineSearchParent = null
                             onlineSearchRootSnapshot = null
                             onlineSearchPage = 0
+                            onlineSearchExecuted = false
                             onlineSearchState = PanelUiState.Empty(
                                 if (onlineSearchQuery.isBlank()) "输入关键词搜索在线语音"
                                 else "点击搜索查找在线语音",
@@ -1412,6 +1513,7 @@ private fun VoicePanelContent(
                             onlineSearchParent = null
                             onlineSearchRootSnapshot = null
                             onlineSearchPage = 0
+                            onlineSearchExecuted = false
                             onlineSearchState = PanelUiState.Empty(
                                 if (it.isBlank()) "输入关键词搜索在线语音"
                                 else "点击搜索查找在线语音",
@@ -1565,17 +1667,7 @@ private fun VoicePanelContent(
                     preview("clone-source:${item.id}", item.title) { actions.preview(item) }
                 },
                 onSelectSharedPack = { pack ->
-                    cloneSharedPack = pack
-                    val request = ++cloneSharedItemsRequest
-                    cloneSharedItemsState = PanelUiState.Loading
-                    scope.launch {
-                        val result = actions.loadSharedPack(pack.id)
-                        if (request != cloneSharedItemsRequest || cloneSharedPack?.id != pack.id) return@launch
-                        cloneSharedItemsState = result.fold(
-                            { if (it.isEmpty()) PanelUiState.Empty("语音包中没有可用语音") else PanelUiState.Content(it) },
-                            { PanelUiState.Error(it.message ?: "读取共享语音包失败") },
-                        )
-                    }
+                    loadCloneSharedPack(pack)
                 },
                 onBackSharedPacks = {
                     cloneSharedItemsRequest++
@@ -1602,17 +1694,7 @@ private fun VoicePanelContent(
                 onLoadGroups = ::loadExampleGroups,
                 exampleGroupsState = exampleGroups,
                 onSelectExampleGroup = { group ->
-                    selectedExampleGroup = group
-                    val request = ++examplesRequest
-                    examples = PanelUiState.Loading
-                    scope.launch {
-                        val result = actions.loadExamples(group)
-                        if (request != examplesRequest || selectedExampleGroup != group) return@launch
-                        examples = result.fold(
-                            { if (it.isEmpty()) PanelUiState.Empty("该目录下暂无 wav 语音") else PanelUiState.Content(it) },
-                            { PanelUiState.Error(it.message ?: "读取语音示例失败") },
-                        )
-                    }
+                    loadExamples(group)
                 },
                 onPreviewExample = { example ->
                     preview("example:${example.group}/${example.fileName}", example.title) {
@@ -1907,7 +1989,7 @@ private fun VoicePackList(
                         Text(pack.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     supportingContent = { Text("${pack.itemCount} 条语音") },
-                    leadingContent = { Icon(MaterialSymbols.Outlined.Folder, null) },
+                    leadingContent = { VoicePackIcon(pack) },
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
             }
@@ -1932,7 +2014,7 @@ private fun VoicePackReorderContent(
                 Text(pack.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
             },
             supportingContent = { Text("${pack.itemCount} 条语音") },
-            leadingContent = { Icon(MaterialSymbols.Outlined.Folder, null) },
+            leadingContent = { VoicePackIcon(pack) },
             trailingContent = {
                 Box(
                     modifier = Modifier
@@ -1948,6 +2030,22 @@ private fun VoicePackReorderContent(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun VoicePackIcon(pack: VoicePack) {
+    Box(
+        modifier = Modifier.size(40.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(MaterialSymbols.Outlined.Folder, contentDescription = null)
+        if (pack.source == PanelSource.LOCAL) {
+            SendCountBadge(
+                count = pack.items.sumOf(VoiceItem::sendCount),
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
     }
 }
 
@@ -2384,9 +2482,18 @@ private fun VoiceSettingsContent(
     onWrapActionsChange: (Boolean) -> Unit,
 ) {
     var maxHistory by remember { mutableLongStateOf(PanelSettings.voiceMaxHistory.coerceAtLeast(1L)) }
+    var downloadConcurrency by remember {
+        mutableIntStateOf(PanelSettings.effectivePanelDownloadConcurrency)
+    }
+    var conversionConcurrency by remember {
+        mutableIntStateOf(PanelSettings.effectivePanelConversionConcurrency)
+    }
     var autoClose by remember { mutableStateOf(PanelSettings.panelAutoClose) }
+    var rememberNavigation by remember { mutableStateOf(PanelSettings.rememberPanelNavigation) }
     var clientIdPrompt by remember { mutableStateOf(false) }
     var historyPrompt by remember { mutableStateOf(false) }
+    var downloadConcurrencyPrompt by remember { mutableStateOf(false) }
+    var conversionConcurrencyPrompt by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize()) {
             item { PanelFunBoxApiClientIdSetting { clientIdPrompt = true } }
@@ -2408,6 +2515,10 @@ private fun VoiceSettingsContent(
                     PanelSettings.voiceMaxHistory = it
                 },
                 onCustomHistory = { historyPrompt = true },
+                downloadConcurrency = downloadConcurrency,
+                onCustomDownloadConcurrency = { downloadConcurrencyPrompt = true },
+                conversionConcurrency = conversionConcurrency,
+                onCustomConversionConcurrency = { conversionConcurrencyPrompt = true },
                 autoClose = autoClose,
                 onAutoCloseChange = {
                     autoClose = it
@@ -2415,6 +2526,12 @@ private fun VoiceSettingsContent(
                 },
                 wrapActions = wrapActions,
                 onWrapActionsChange = onWrapActionsChange,
+                rememberNavigation = rememberNavigation,
+                onRememberNavigationChange = {
+                    rememberNavigation = it
+                    PanelSettings.rememberPanelNavigation = it
+                    if (!it) PanelNavigationMemory.clear()
+                },
             )
         }
         if (clientIdPrompt) PanelFunBoxApiClientIdPrompt(
@@ -2434,6 +2551,32 @@ private fun VoiceSettingsContent(
                 maxHistory = it
                 PanelSettings.voiceMaxHistory = it
                 historyPrompt = false
+            },
+        )
+        if (downloadConcurrencyPrompt) PanelNumberPrompt(
+            title = "下载并发",
+            label = "任务数（1-32）",
+            initialValue = downloadConcurrency.toLong(),
+            minValue = PanelSettings.MIN_PANEL_CONCURRENCY.toLong(),
+            maxValue = PanelSettings.MAX_PANEL_DOWNLOAD_CONCURRENCY.toLong(),
+            onDismiss = { downloadConcurrencyPrompt = false },
+            onConfirm = {
+                downloadConcurrency = it.toInt()
+                PanelSettings.panelDownloadConcurrency = downloadConcurrency
+                downloadConcurrencyPrompt = false
+            },
+        )
+        if (conversionConcurrencyPrompt) PanelNumberPrompt(
+            title = "转换并发",
+            label = "任务数（1-8）",
+            initialValue = conversionConcurrency.toLong(),
+            minValue = PanelSettings.MIN_PANEL_CONCURRENCY.toLong(),
+            maxValue = PanelSettings.MAX_PANEL_CONVERSION_CONCURRENCY.toLong(),
+            onDismiss = { conversionConcurrencyPrompt = false },
+            onConfirm = {
+                conversionConcurrency = it.toInt()
+                PanelSettings.panelConversionConcurrency = conversionConcurrency
+                conversionConcurrencyPrompt = false
             },
         )
     }
@@ -2718,11 +2861,13 @@ private fun resolveAudioMime(path: String): String {
     }
 }
 
-private fun fallbackAudioMime(path: String): String = when (path.asPath.extension.lowercase()) {
-    "mp3" -> "audio/mpeg"
-    "aac", "m4a" -> "audio/aac"
-    "wav" -> "audio/wav"
-    "amr" -> "audio/amr"
-    "silk" -> "audio/silk"
+private fun fallbackAudioMime(path: String): String = when (MediaFileTypeDetector.detectAudio(path.asPath)) {
+    MediaFileTypeDetector.AudioFormat.MP3 -> "audio/mpeg"
+    MediaFileTypeDetector.AudioFormat.M4A -> "audio/mp4"
+    MediaFileTypeDetector.AudioFormat.AAC -> "audio/aac"
+    MediaFileTypeDetector.AudioFormat.WAV -> "audio/wav"
+    MediaFileTypeDetector.AudioFormat.AMR -> "audio/amr"
+    MediaFileTypeDetector.AudioFormat.SILK -> "audio/silk"
+    MediaFileTypeDetector.AudioFormat.FLAC -> "audio/flac"
     else -> "application/octet-stream"
 }

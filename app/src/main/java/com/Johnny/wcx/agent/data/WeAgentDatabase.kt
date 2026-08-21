@@ -122,7 +122,13 @@ abstract class WeAgentDatabase : RoomDatabase() {
                 // external storage (moduleData lives on /sdcard); TRUNCATE is safe there.
                 .setJournalMode(JournalMode.TRUNCATE)
                 .addMigrations(MIGRATION_11_12)
-                .fallbackToDestructiveMigration(dropAllTables = true)
+                // Destructive fallback is scoped to the pre-release schemas (1–8) only, which no
+                // migration path was ever written for. From 9 onwards every step must have a
+                // migration: a missing one then fails loudly at open time instead of silently
+                // wiping every session, prompt, workspace, trigger and model provider (API keys
+                // included). If you bump `version`, add the matching migration — do NOT widen this
+                // list.
+                .fallbackToDestructiveMigrationFrom(true, 1, 2, 3, 4, 5, 6, 7, 8)
                 .build()
         }
     }

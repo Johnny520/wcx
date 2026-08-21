@@ -15,6 +15,10 @@ enum class ModelProviderType {
     GEMINI_INTERACTIONS
 }
 
+/**
+ * A configured LLM endpoint. [apiKey] is stored as-is (unencrypted) — see
+ * [com.Johnny.wcx.agent.data.WeAgentRepository.upsertModelProvider] for why.
+ */
 @Entity(tableName = "model_providers")
 data class ModelProviderEntity(
     @PrimaryKey val id: String,
@@ -43,9 +47,10 @@ data class ModelEntity(
     val maxTokens: Int? = null,
     /**
      * Whether this model accepts image input. Gates the `ui-screenshot` vision tool: it is only
-     * advertised to the model when the session's bound model has this set (see
-     * [com.Johnny.wcx.agent.tool.BuiltinToolProvider.visionToolsVisible]). Sending images to a
-     * non-vision model would error at the provider, so the tool is hidden rather than failing.
+     * advertised to the model when the session's bound model has this set (the turn snapshots it
+     * into [com.Johnny.wcx.agent.tool.ToolVisibility.visionTools], so concurrent sessions on
+     * different models can't clobber each other). Sending images to a non-vision model would error
+     * at the provider, so the tool is hidden rather than failing.
      */
     val supportsVision: Boolean = false,
 )

@@ -44,7 +44,7 @@ class UuidV4 private constructor(private val bytes: ByteArray) : Comparable<Uuid
                     "Invalid hexadecimal character in UUID: $uuidString"
                 }
 
-                bytes[i] = ((highNibble shl 4) or lowNibble).toByte()
+                bytes[i] = (highNibble shl 4 or lowNibble).toByte()
             }
             return UuidV4(bytes)
         }

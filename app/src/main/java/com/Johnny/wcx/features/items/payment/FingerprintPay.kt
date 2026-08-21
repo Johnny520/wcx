@@ -3,8 +3,6 @@ package com.Johnny.wcx.features.items.payment
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.view.View
 import androidx.activity.ComponentActivity
@@ -82,20 +80,11 @@ object FingerprintPay : ClickableFeature() {
             val encData = EncryptedData(splitRawEncData[0], splitRawEncData[1])
             decryptWithBiometric(context, encData) { plaintext ->
                 showToast("支付密码解密成功!")
-                val handler = Handler(Looper.getMainLooper())
-                var index = 0
-                fun typeNext() {
-                    if (index >= plaintext.length) return
-                    runCatching {
-                        val digit = plaintext[index].digitToInt()
-                        digitViews.getOrNull(digit)?.performClick()
-                    }
-                    index++
-                    if (index < plaintext.length) {
-                        handler.postDelayed(::typeNext, 20L)
-                    }
+                for (char in plaintext) {
+                    val digit = char.digitToInt()
+                    digitViews[digit].performClick()
+                    Thread.sleep(20)
                 }
-                typeNext()
             }
         }
 
