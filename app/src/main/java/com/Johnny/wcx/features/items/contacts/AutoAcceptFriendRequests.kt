@@ -29,11 +29,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.Johnny.wcx.dexkit.abc.IResolveDex
+import com.Johnny.wcx.dexkit.dsl.dexConstructor
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
+import com.Johnny.wcx.features.api.net.WeNetSceneApi
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -95,14 +97,31 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
 
     // ==================== DexKit — 好友验证接受方法 ====================
 
+    /**
+     * 8.0.76 起 NetSceneVerifyUser 混淆为 pluginsdk.model.m3，旧日志字符串
+     * "summerverify opcode[%s], verifyContent[%s], verifyScene[%s]" 被移除，
+     * 接受操作的 opcode 改为 MM_VERIFYUSER_VERIFYOK 语义。
+     * <init> 内含断言日志 "init MUST use opcode == MM_VERIFYUSER_VERIFYOK"，
+     * 以此定位构造器（首参为 opcode）。
+     */
+    private const val OPCODE_VERIFY_ACCEPT = 1 // 8.0.76: MM_VERIFYUSER_VERIFYOK
+
     // 好友验证接受方法：NetSceneVerifyUser / NetSceneAddFriend 等
     // 在 WeChat 中，接受好友验证的典型方法是 VerifyUserTask 或 NetSceneVerifyUser
     private val methodVerifyAccept by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
-                "MicroMsg.NetSceneVerifyUser",
-                "summerverify opcode[%s], verifyContent[%s], verifyScene[%s]"
+                "This NetSceneVerifyUser init MUST use opcode == MM_VERIFYUSER_VERIFYOK"
             )
+        }
+    }
+
+    // 8.0.76 的 NetSceneVerifyUser 构造器（m3.<init>），用于主动构造"接受"请求
+    // 使用内联查找版 dexConstructor（resolveInlineDex 时自动解析）
+    private val ctorVerifyUserAccept by dexConstructor {
+        searchPackages("com.tencent.mm.pluginsdk.model")
+        matcher {
+            usingEqStrings("This NetSceneVerifyUser init MUST use opcode == MM_VERIFYUSER_VERIFYOK")
         }
     }
 
@@ -118,23 +137,22 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
     }
 
     override fun resolveDex(dexKit: DexKitBridge) {
-        // 尝试新版特征（WeChat 8.0.76+）
+        // 8.0.76+：NetSceneVerifyUser 混淆为 m3，<init> 含 MM_VERIFYUSER_VERIFYOK 断言日志
         methodVerifyAccept.find(dexKit, allowFailure = true) {
             matcher {
                 usingEqStrings(
-                    "MicroMsg.NetSceneVerifyUser",
-                    "summerverify opcode[%s], verifyContent[%s], verifyScene[%s]"
+                    "This NetSceneVerifyUser init MUST use opcode == MM_VERIFYUSER_VERIFYOK"
                 )
             }
         }
 
-        // 如果新版特征未匹配，尝试旧版特征（NetSceneAddFriend）
+        // 旧版特征（8.0.7x 及更早）
         if (methodVerifyAccept.isPlaceholder) {
             methodVerifyAccept.find(dexKit, allowFailure = true) {
                 matcher {
                     usingEqStrings(
-                        "MicroMsg.NetSceneAddFriend",
-                        "verify ok clicked"
+                        "MicroMsg.NetSceneVerifyUser",
+                        "summerverify opcode[%s], verifyContent[%s], verifyScene[%s]"
                     )
                 }
             }
@@ -172,22 +190,27 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
         runCatching {
             if (!methodVerifyAccept.isPlaceholder) {
                 methodVerifyAccept.hookAfter {
-                    // 8.0.76 上 DexKit 可能把特征匹配到无参方法变体：hook 触发时 args 为空，
-                    // 直接取参会 ArrayIndexOutOfBoundsException，先防护再取参。
+                    // 8.0.76 的 <init>(opcode, userId, ticket, scene, ...) 与旧版
+                    // NetSceneVerifyUser 接受方法参数布局不同，先防护再取参。
                     if (args.size < 3) return@hookAfter
                     if (!masterEnabled) return@hookAfter
                     val opcode = args[0] as? Int ?: return@hookAfter
-                    // opcode == 2 表示"接受"操作
-                    if (opcode != 2) return@hookAfter
+                    // 8.0.76: MM_VERIFYUSER_VERIFYOK == 1；旧版接受 opcode == 2
+                    if (opcode != OPCODE_VERIFY_ACCEPT && opcode != 2) return@hookAfter
 
-                    val verifyContent = (args[1] as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
-                    val verifyScene = (args[2] as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
+                    // 8.0.76: args[1] = userId(encryptUsername), args[2] = ticket
+                    // 旧版: args[1] = verifyContent("v2_encrypt@ticket@scene"), args[2] = verifyScene
+                    val arg1 = (args[1] as? String)?.takeIf { it.isNotBlank() } ?: return@hookAfter
 
-                    WeLogger.i(TAG, "friend request accepted via verify: scene=$verifyScene")
+                    WeLogger.i(TAG, "friend request accepted via verify: arg1=$arg1")
 
                     // 发送欢迎语
                     if (sendWelcome && welcomeText.isNotBlank()) {
-                        val targetWxId = extractWxIdFromVerifyContent(verifyContent)
+                        val targetWxId = if (arg1.startsWith("v2_")) {
+                            extractWxIdFromVerifyContent(arg1)
+                        } else {
+                            findNewFriendWxId(arg1)
+                        }
                         if (targetWxId.isNotEmpty()) {
                             CoroutineScope(Dispatchers.IO).launch {
                                 delay(1500) // 等待好友关系建立
@@ -298,9 +321,29 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
     }
 
     private fun acceptFriendRequest(encryptUsername: String, ticket: String, scene: String) {
+        // 8.0.76：构造 NetSceneVerifyUser(m3) opcode=MM_VERIFYUSER_VERIFYOK，走 NetSceneManager 发送
+        runCatching {
+            if (!ctorVerifyUserAccept.isPlaceholder) {
+                val netScene = ctorVerifyUserAccept.newInstance(
+                    OPCODE_VERIFY_ACCEPT,
+                    encryptUsername,
+                    ticket,
+                    scene.toIntOrNull() ?: 0,
+                    "",
+                    0,
+                    null,
+                    null
+                )
+                WeNetSceneApi.sendNetScene(netScene)
+                WeLogger.i(TAG, "8.0.76: verify accept NetScene sent: encryptUsername=$encryptUsername")
+                return
+            }
+        }.onFailure { e ->
+            WeLogger.w(TAG, "8.0.76 accept via ctor failed, trying legacy path", e)
+        }
+
         if (!methodVerifyAccept.isPlaceholder) {
-            // opcode: 1=say hi, 2=accept, 3=add to blacklist, 4=delete
-            // 使用 WeChat 内部的 NetSceneVerifyUser 方法
+            // 旧版：直接调用接受方法（opcode 2）
             methodVerifyAccept.method.invoke(
                 null, // static method
                 2, // opcode = accept
