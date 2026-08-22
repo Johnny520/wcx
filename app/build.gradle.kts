@@ -153,7 +153,8 @@ android {
             "kotlin/**",
             "**.bin",
             "kotlin-tooling-metadata.json",
-            "META-INF/INDEX.LIST"
+            "META-INF/INDEX.LIST",
+            "google/protobuf/descriptor.proto"
         )
         resources.merges += listOf(
             "META-INF/io.netty.versions.properties",
@@ -212,14 +213,13 @@ androidComponents {
 
         val embedEruda = tasks.register<EmbedErudaTask>("embedEruda$variantName") {
             group = "wekit"
-            description = "Embed eruda.min.js as a String constant for $variantName"
+            description = "Download eruda.min.js into assets for $variantName"
 
             url.set("https://cdn.jsdelivr.net/npm/eruda@3.4.3/eruda.min.js")
-            outputDir.set(layout.buildDirectory.dir("generated/source/eruda/${variant.name}"))
-            namespace.set(libs.versions.namespace.get())
+            outputDir.set(layout.buildDirectory.dir("generated/eruda-assets/${variant.name}"))
         }
 
-        kotlinSources.addGeneratedSourceDirectory(
+        variant.sources.assets?.addGeneratedSourceDirectory(
             embedEruda,
             EmbedErudaTask::getOutputDir
         )
@@ -286,8 +286,8 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.coil.network.okhttp)
 
-    implementation(libs.composablehorizons.material.symbols.filled)
     implementation(libs.composablehorizons.material.symbols.outlined)
+    implementation(libs.composablehorizons.material.symbols.filled)
 
     implementation(libs.google.protobuf.javalite)
     implementation(libs.kotlinx.serialization.json)
@@ -317,8 +317,6 @@ dependencies {
     implementation(libs.jsoup)
 
     implementation(libs.rhino)
-
-    implementation(libs.fastjson2)
 
     compileOnly(libs.lombok)
     annotationProcessor(libs.lombok)
