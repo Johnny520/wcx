@@ -45,7 +45,8 @@
 -dontwarn androidx.room.paging.**
 
 # ─── Compose ────────────────────────────────────────────────────────
--keep class androidx.compose.** { *; }
+# No blanket -keep: compose artifacts ship their own consumer R8 rules, so unused
+# framework classes (hundreds of composables, layout internals) get stripped.
 -dontwarn androidx.compose.**
 
 # ─── Third-party (dontwarn only, allow R8 optimization) ──────────────
