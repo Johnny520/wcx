@@ -26,15 +26,16 @@ public class Xp51HookImpl implements IHookBridge, ILoaderService {
 
     private IClassLoaderHelper mClassLoaderHelper;
 
+    @NonNull
     @Override
-    public String getHookBridgeName() {
-        return "Xposed";
+    public String getLoaderName() {
+        return "旧式 Xposed API " + XposedBridge.getXposedVersion();
     }
 
     @NonNull
     @Override
-    public String getLoaderName() {
-        return "Xposed 加载器";
+    public String getHookBridgeName() {
+        return getLoaderName();
     }
 
     @NonNull

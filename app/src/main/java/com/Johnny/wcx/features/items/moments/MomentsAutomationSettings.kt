@@ -50,6 +50,62 @@ import kotlinx.serialization.Serializable
 import kotlin.io.path.div
 
 @Serializable
+internal enum class MomentAutomationAction {
+    LIKE,
+    UNLIKE
+}
+
+@Serializable
+internal enum class MomentAutomationMode {
+    WHEN_SEEN,
+    ALL_LOADED
+}
+
+@Serializable
+internal data class MomentActionRule(
+    val enabled: Boolean = true,
+    val action: MomentAutomationAction = MomentAutomationAction.LIKE
+)
+
+@Serializable
+internal data class MomentModeRule(
+    val enabled: Boolean = true,
+    val mode: MomentAutomationMode = MomentAutomationMode.WHEN_SEEN
+)
+
+@Serializable
+internal data class MomentIntervalRule(
+    val enabled: Boolean = false,
+    val milliseconds: String = "0"
+) {
+    fun value(): Long = if (enabled) {
+        (milliseconds.toLongOrNull() ?: 0L).coerceIn(0L, MAX_ACTION_DELAY_MS)
+    } else {
+        0L
+    }
+}
+
+@Serializable
+internal data class MomentTypeRule(
+    val enabled: Boolean = false,
+    val typeIds: Set<Int> = MomentsContentType.allTypeIds
+)
+
+@Serializable
+internal data class MomentAgeRule(
+    val enabled: Boolean = false,
+    val maximumHours: String = "24"
+) {
+    fun matches(createTimeSeconds: Int, nowMillis: Long = System.currentTimeMillis()): Boolean {
+        if (!enabled) return true
+        val hours = maximumHours.toLongOrNull()?.takeIf { it >= 0L } ?: return false
+        if (createTimeSeconds <= 0) return false
+        val ageSeconds = (nowMillis / 1000L - createTimeSeconds.toLong()).coerceAtLeast(0L)
+        return ageSeconds <= hours * 60L * 60L
+    }
+}
+
+@Serializable
 internal data class MomentAutomationRuleSet(
     val process: AutomationToggleRule = AutomationToggleRule(enabled = true),
     val action: MomentActionRule = MomentActionRule(),
