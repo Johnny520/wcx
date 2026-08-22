@@ -21,6 +21,37 @@ import java.util.Calendar
 
 private const val TAG = "HideContacts.Schedule"
 
+/** `Calendar.SUNDAY..Calendar.SATURDAY` — the default (and maximal) [HideSchedule.daysOfWeek]. */
+internal val ALL_DAYS_OF_WEEK: Set<Int> = (Calendar.SUNDAY..Calendar.SATURDAY).toSet()
+
+/**
+ * One user-defined "alarm" that flips 隐藏联系人's temporary-show state at a chosen time.
+ *
+ * [HideScheduleAction.SHOW] is exactly the `#show` state — it toggles [HideContacts]'s in-memory
+ * `temporarilyShown` flag and **never** rewrites the hidden-contact list, so a schedule can't lose
+ * the user's configuration.
+ */
+@Serializable
+internal data class HideSchedule(
+    /** Stable identity: the `AlarmManager` request code and the list key. See [newHideScheduleId]. */
+    val id: String,
+    val enabled: Boolean = true,
+    val action: HideScheduleAction,
+    val kind: HideScheduleKind,
+    /** [HideScheduleKind.REPEATING] only: 0..1439. */
+    val minuteOfDay: Int = 0,
+    /** [HideScheduleKind.REPEATING] only: `Calendar.SUNDAY`..`Calendar.SATURDAY`. */
+    val daysOfWeek: Set<Int> = ALL_DAYS_OF_WEEK,
+    /** [HideScheduleKind.ONCE] only: the full date-time. Deleted after it fires. */
+    val atEpochMillis: Long = 0L,
+)
+
+@Serializable
+internal enum class HideScheduleAction { HIDE, SHOW }
+
+@Serializable
+internal enum class HideScheduleKind { REPEATING, ONCE }
+
 /** Mirrors `ConversationGrouping`'s id scheme: monotonic and unique enough for a hand-edited list. */
 internal fun newHideScheduleId(): String = "hsched_${System.currentTimeMillis()}"
 

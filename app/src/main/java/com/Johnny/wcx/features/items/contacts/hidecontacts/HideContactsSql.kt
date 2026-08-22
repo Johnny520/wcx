@@ -40,6 +40,12 @@ internal fun HideContacts.installSqlHooks() {
  * inserted by [injectCondition], which handles joining onto an existing `WHERE` and staying ahead
  * of any `ORDER BY` / `GROUP BY` / `LIMIT` tail.
  */
+private class SqlRule(
+    val name: String,
+    val matches: (lowerSql: String) -> Boolean,
+    val condition: (hidden: Set<String>) -> String,
+)
+
 private val WRAPPER_RULES = listOf(
     SqlRule("conversation-list", ::looksLikeConversationListQuery) {
         "rconversation.username NOT IN (${it.toSqlList()})"
