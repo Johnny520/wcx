@@ -102,7 +102,14 @@ class DexClassDelegate internal constructor(
         multipleIndex: Int = 0,
         block: FindClass.() -> Unit
     ): Boolean {
-        val results = dexKit.findClass(block)
+        val results = try {
+            dexKit.findClass(block)
+        } catch (e: Throwable) {
+            if (!allowFailure) throw e
+            WeLogger.w("DexDelegates", "class matcher threw for $key, treating as placeholder: ${e.message}")
+            setPlaceholderDescriptor()
+            return false
+        }
 
         if (results.isEmpty()) {
             if (!allowFailure) error("DexKit: No class found for key: $key")
@@ -181,7 +188,14 @@ class DexFieldDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindField.() -> Unit
     ): Boolean {
-        val results = dexKit.findField(block)
+        val results = try {
+            dexKit.findField(block)
+        } catch (e: Throwable) {
+            if (!allowFailure) throw e
+            WeLogger.w("DexDelegates", "field matcher threw for $key, treating as placeholder: ${e.message}")
+            setPlaceholderDescriptor()
+            return false
+        }
 
         if (results.isEmpty()) {
             if (!allowFailure) error("DexKit: No field found for key: $key")
@@ -291,7 +305,14 @@ class DexMethodDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindMethod.() -> Unit
     ): Boolean {
-        val results = dexKit.findMethod(block)
+        val results = try {
+            dexKit.findMethod(block)
+        } catch (e: Throwable) {
+            if (!allowFailure) throw e
+            WeLogger.w("DexDelegates", "method matcher threw for $key, treating as placeholder: ${e.message}")
+            setPlaceholderDescriptor()
+            return false
+        }
 
         if (results.isEmpty()) {
             if (!allowFailure) error("DexKit: No method found for key: $key")
@@ -382,14 +403,22 @@ class DexConstructorDelegate internal constructor(
         resultIndex: Int = 0,
         block: FindMethod.() -> Unit
     ): Boolean {
-        val results = dexKit.findMethod {
-            block()
-            if (matcher == null) matcher { name = "<init>" }
-            else matcher!!.name = "<init>"
+        val results = try {
+            dexKit.findMethod {
+                block()
+                if (matcher == null) matcher { name = "<init>" }
+                else matcher!!.name = "<init>"
+            }
+        } catch (e: Throwable) {
+            if (throwOnFailure) throw e
+            WeLogger.w("DexDelegates", "constructor matcher threw for $key, treating as failed: ${e.message}")
+            setPlaceholderDescriptor()
+            return false
         }
 
         if (results.isEmpty()) {
             if (throwOnFailure) error("DexKit: No constructor found for key: $key")
+            setPlaceholderDescriptor()
             return false
         }
         if (results.size > 1 && !allowMultiple)

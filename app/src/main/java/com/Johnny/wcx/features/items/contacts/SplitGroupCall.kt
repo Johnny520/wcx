@@ -73,14 +73,14 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** com.tencent.mm.plugin.multitalk.model.e3 —— SubCoreMultiTalk. */
-    private val classSubCoreMultiTalk by dexClass {
+    private val classSubCoreMultiTalk by dexClass(allowFailure = true) {
         matcher {
             usingStrings("MicroMsg.SubCoreMultiTalk", "add , is running , forbid add")
         }
     }
 
     /** com.tencent.mm.plugin.multitalk.model.v0 —— MultiTalkManager. */
-    private val methodExitMultiTalk by dexMethod {
+    private val methodExitMultiTalk by dexMethod(allowFailure = true) {
         matcher {
             usingStrings("exitCurrentMultiTalk: isReject %b isMissCall %b isPhoneCall %b isNetworkError %b")
         }
@@ -89,37 +89,37 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     private val multiTalkManagerClass by lazy { methodExitMultiTalk.method.declaringClass }
 
     /** com.tencent.mm.plugin.multitalk.ilinkservice.i4 —— ILinkService (enum, 单例 INSTANCE). */
-    private val classILinkService by dexClass {
+    private val classILinkService by dexClass(allowFailure = true) {
         matcher {
             usingStrings("steve: initsession : mIsInitedEngine :%b mIsInitingEngine %b mCurrentStatus %d mIsJoiningRoom %b")
         }
     }
 
     /** com.tencent.mm.plugin.multitalk.ilinkservice.w —— ILinkMember. */
-    private val classILinkMember by dexClass {
+    private val classILinkMember by dexClass(allowFailure = true) {
         matcher {
             usingStrings("ILinkMember{memberId=")
         }
     }
 
     /** com.tencent.mm.plugin.multitalk.ilinkservice.n1 —— 邀请任务 (Runnable). */
-    private val classInviteTask by dexClass {
+    private val classInviteTask by dexClass(allowFailure = true) {
         matcher {
             usingStrings("enter inviteSync. %s, %s, %d, %b")
         }
     }
 
-    /** e3.Ri() —— 获取 MultiTalkManager 单例. */
-    private val methodGetMultiTalkManager by dexMethod {
+    /** 8.0.77: SubCoreMultiTalk 类已混淆/移除, 直接用已解析的 methodExitMultiTalk 所属类 (MultiTalkManager)。 */
+    private val methodGetMultiTalkManager by dexMethod(allowFailure = true) {
         matcher {
-            declaredClass = classSubCoreMultiTalk.getDescriptorString()!!
+            declaredClass(multiTalkManagerClass)
             modifiers = ReflectModifier.STATIC or ReflectModifier.PUBLIC
             returnType(multiTalkManagerClass)
         }
     }
 
     /** v0.D(e4) —— 设置通话状态 (onChangeMultiTalkStatus). */
-    private val methodSetStatus by dexMethod {
+    private val methodSetStatus by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(multiTalkManagerClass)
             paramCount = 1
@@ -128,7 +128,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** v0.O(String, int) —— setCurrentMTSDKMode, 记录群 -> 通话模式. */
-    private val methodSetMtSdkMode by dexMethod {
+    private val methodSetMtSdkMode by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(multiTalkManagerClass)
             paramCount = 2
@@ -137,7 +137,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** i4.N(long, String) —— 设置自身 uin 与用户名 (set name). */
-    private val methodSetName by dexMethod {
+    private val methodSetName by dexMethod(allowFailure = true) {
         matcher {
             declaredClass = classILinkService.getDescriptorString()!!
             paramCount = 2
@@ -146,7 +146,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** i4.J(Runnable) —— 投递任务到 ILink 串行工作线程. */
-    private val methodPostTask by dexMethod {
+    private val methodPostTask by dexMethod(allowFailure = true) {
         matcher {
             declaredClass = classILinkService.getDescriptorString()!!
             paramCount = 1
@@ -155,7 +155,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** n1(i4, ArrayList<w>, String) —— 邀请任务构造器. */
-    private val ctorInviteTask by dexConstructor {
+    private val ctorInviteTask by dexConstructor(throwOnFailure = false) {
         matcher {
             declaredClass = classInviteTask.getDescriptorString()!!
             paramCount = 3
@@ -168,7 +168,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
      * c1 与 i4 都含有字符串 "Hangup ret:", 但 i4 (enum) 的构造器签名是 (String, int),
      * 因此用 (i4, int) 的参数签名即可唯一命中 c1 的构造器。
      */
-    private val ctorHangupTask by dexConstructor {
+    private val ctorHangupTask by dexConstructor(throwOnFailure = false) {
         matcher {
             declaredClass {
                 usingStrings("Hangup ret:")
@@ -179,7 +179,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** i4.INSTANCE —— ILinkService 单例. */
-    private val fieldILinkInstance by dexField {
+    private val fieldILinkInstance by dexField(allowFailure = true) {
         matcher {
             declaredClass = classILinkService.getDescriptorString()!!
             type = classILinkService.getDescriptorString()!!
@@ -196,7 +196,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     private val fieldRoomId by dexField()
 
     /** TalkRoomServer.enterTalkRoom(String, int) —— 发起「实时对讲机」. */
-    private val methodEnterTalkRoom by dexMethod {
+    private val methodEnterTalkRoom by dexMethod(allowFailure = true) {
         matcher {
             usingStrings("enterTalkRoom %s scene %d")
             paramTypes("java.lang.String", "int")
@@ -207,7 +207,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     private val talkRoomServerClass by lazy { methodEnterTalkRoom.method.declaringClass }
 
     /** TalkRoomServer.exitTalkRoom() —— 终止当前「实时对讲机」. */
-    private val methodExitTalkRoom by dexMethod {
+    private val methodExitTalkRoom by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(talkRoomServerClass)
             usingStrings("exitTalkRoom", "exitTalkRoom: has exited")
@@ -217,7 +217,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** SubCoreTalkRoom 上返回 TalkRoomServer 单例的静态方法. */
-    private val methodGetTalkRoomServer by dexMethod {
+    private val methodGetTalkRoomServer by dexMethod(allowFailure = true) {
         matcher {
             modifiers = ReflectModifier.PUBLIC or ReflectModifier.STATIC
             paramCount = 0
@@ -226,7 +226,7 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     /** TalkRoomServer 当前房间 ID; 空值表示没有正在进行的实时对讲. */
-    private val fieldCurrentTalkRoom by dexField {
+    private val fieldCurrentTalkRoom by dexField(allowFailure = true) {
         matcher {
             declaredClass(methodEnterTalkRoom.method.declaringClass)
             type = "java.lang.String"
@@ -234,17 +234,23 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     override fun resolveDex(dexKit: DexKitBridge) {
-        val iLinkServiceName = classILinkService.clazz.name
-        val readerMethod = dexKit.findMethod {
-            matcher {
-                declaredClass = classILinkService.getDescriptorString()!!
-                usingStrings("start audio device failed")
-            }
-        }.single()
-        val roomIdField = readerMethod.usingFields
-            .map { it.field }
-            .single { it.className == iLinkServiceName && it.typeName == "java.lang.String" }
-        fieldRoomId.setDescriptor(roomIdField)
+        // 8.0.77: MultiTalk 系统重写, 手动查找部分可能不可用; 失败不阻塞缓存保存。
+        runCatching {
+            val iLinkServiceName = classILinkService.clazz.name
+            val readerMethod = dexKit.findMethod {
+                matcher {
+                    declaredClass = classILinkService.getDescriptorString()!!
+                    usingStrings("start audio device failed")
+                }
+            }.single()
+            val roomIdField = readerMethod.usingFields
+                .map { it.field }
+                .single { it.className == iLinkServiceName && it.typeName == "java.lang.String" }
+            fieldRoomId.setDescriptor(roomIdField)
+        }.onFailure {
+            WeLogger.w(TAG, "resolveDex manual lookup failed: ${it.message}")
+            fieldRoomId.setPlaceholderDescriptor()
+        }
     }
 
     override fun onClick(context: ComponentActivity) {
@@ -299,6 +305,14 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
     }
 
     private fun showSplitCallDialog(context: Activity, wxId: String) {
+        // 8.0.77: MultiTalk 系统重写, 特征全部失效; 降级为提示不可用。
+        if (methodExitMultiTalk.isPlaceholder || classILinkService.isPlaceholder || methodGetMultiTalkManager.isPlaceholder ||
+            ctorInviteTask.isPlaceholder || ctorHangupTask.isPlaceholder || fieldRoomId.isPlaceholder
+        ) {
+            WeLogger.w(TAG, "split group call unavailable on this wechat version")
+            showToast(context, "分裂群组通话暂不支持当前微信版本")
+            return
+        }
         showComposeDialog(context) {
             var repeatCount by remember { mutableStateOf("1") }
             var mode by remember { mutableStateOf(OperationMode.WALKIE_TALKIE) }

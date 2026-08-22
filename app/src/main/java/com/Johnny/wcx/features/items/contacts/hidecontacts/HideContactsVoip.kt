@@ -145,6 +145,10 @@ private fun rejectVoipMpCall(wxId: String) {
  * "not open multitalk receiver or black user" and returns without showing any UI).
  */
 private fun HideContacts.installMultiTalkHooks() {
+    if (methodMultiTalkOnInvite.isPlaceholder) {
+        WeLogger.w("HideContacts", "multitalk invite hook unavailable on this wechat version")
+        return
+    }
     methodMultiTalkOnInvite.hookBefore {
         val group = args[0] ?: return@hookBefore
         val (chatroom, inviter) = readMultiTalkInvite(group) ?: return@hookBefore
@@ -210,8 +214,9 @@ private fun HideContacts.installVoipRecordHooks() {
     // VoIPMP local insertion — the one that matters on 8.0.7x.
     methodVoipMpInsertMsg.hookBefore {
         voipMpLauncher = thisObject
-        val wxId = args[0] as? String ?: return@hookBefore
-        if (!isHiddenNow(wxId)) return@hookBefore
+        // 8.0.77: 方法在 ZIDL_DVO6HrxwB.ZIDL_DCV, 第 2 个参数是 toUser 的 UTF-8 字节。
+        val wxId = (args.getOrNull(1) as? ByteArray)?.toString(Charsets.UTF_8)
+        if (wxId == null || !isHiddenNow(wxId)) return@hookBefore
         result = null
     }
 

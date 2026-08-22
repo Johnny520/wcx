@@ -937,16 +937,16 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
     /** `mp5.q2.Ii(String toUser, ...)` — VoIPMP call-record insertion (未接听 / 已取消 / duration). */
     internal val methodVoipMpInsertMsg by dexMethod {
         matcher {
-            // The CoreV2 ZIDL stub logs the same text under a different tag; pairing with the
-            // Launcher tag picks out q2.Ii.
-            usingEqStrings("MicroMsg.VoIPMP.Launcher", "insertMsg() called with: toUser = ")
+            // 8.0.77: VoIPMP 通话记录插入移入 ZIDL 层, 不再打 Launcher tag;
+            // toUser 是第 2 个参数 (UTF-8 字节数组)。
+            usingEqStrings("insertMsg() called with: toUser = ")
         }
     }
 
     // ── multitalk (群通话), used when the VoIPMP multitalk experiment is off ───────────────────
 
     /** `v0.G(MultiTalkGroup)` — MultiTalkManager.onInviteMultiTalk. */
-    internal val methodMultiTalkOnInvite by dexMethod {
+    internal val methodMultiTalkOnInvite by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.MT.MultiTalkManager",
