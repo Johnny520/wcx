@@ -101,7 +101,7 @@ object WeAgentToolBindings {
 
     @AgentTool(
         name = "cache-image",
-        description = "Cache an image message into WeChat's own storage by its server id (equivalent to tapping the image to download from CDN). Does NOT decode or copy it to Download/WeKit/. Returns the internal WeChat image path. May take a while if not cached yet.",
+        description = "Cache an image message into WeChat's own storage by its server id (equivalent to tapping the image to download from CDN). Does NOT decode or copy it to Download/WCX/. Returns the internal WeChat image path. May take a while if not cached yet.",
         sideEffect = false
     )
     fun cacheImage(
@@ -110,7 +110,7 @@ object WeAgentToolBindings {
 
     @AgentTool(
         name = "download-image",
-        description = "Download the image of an image message by its server id: cache it from CDN if needed, then decode and save it to Download/WeKit/. Returns the saved local file path. May take a while if not cached yet.",
+        description = "Download the image of an image message by its server id: cache it from CDN if needed, then decode and save it to Download/WCX/. Returns the saved local file path. May take a while if not cached yet.",
         sideEffect = false
     )
     fun downloadImage(
@@ -119,7 +119,7 @@ object WeAgentToolBindings {
 
     @AgentTool(
         name = "download-sticker",
-        description = "Decode the sticker/emoji of a sticker message by its server id, convert it to GIF and save it to Download/WeKit/. Returns the saved local file path.",
+        description = "Decode the sticker/emoji of a sticker message by its server id, convert it to GIF and save it to Download/WCX/. Returns the saved local file path.",
         sideEffect = false
     )
     fun downloadSticker(
@@ -128,7 +128,7 @@ object WeAgentToolBindings {
 
     @AgentTool(
         name = "download-voice",
-        description = "Decode the voice of a voice message by its server id (silk → mp3) and save it to Download/WeKit/. Returns the saved local mp3 file path.",
+        description = "Decode the voice of a voice message by its server id (silk → mp3) and save it to Download/WCX/. Returns the saved local mp3 file path.",
         sideEffect = false
     )
     fun downloadVoice(
@@ -137,7 +137,7 @@ object WeAgentToolBindings {
 
     @AgentTool(
         name = "cache-file",
-        description = "Cache a file message into WeChat's own storage by its server id (equivalent to tapping the file bubble to download). Does NOT copy it to Download/WeKit/. Returns the internal WeChat file path. May take a while for large files.",
+        description = "Cache a file message into WeChat's own storage by its server id (equivalent to tapping the file bubble to download). Does NOT copy it to Download/WCX/. Returns the internal WeChat file path. May take a while for large files.",
         sideEffect = false
     )
     fun cacheFile(
@@ -147,7 +147,7 @@ object WeAgentToolBindings {
 
     @AgentTool(
         name = "download-file",
-        description = "Download a file message by its server id: cache it into WeChat's storage if needed, then copy it to Download/WeKit/. Returns the saved local file path. May take a while for large files.",
+        description = "Download a file message by its server id: cache it into WeChat's storage if needed, then copy it to Download/WCX/. Returns the saved local file path. May take a while for large files.",
         sideEffect = false
     )
     fun downloadFile(

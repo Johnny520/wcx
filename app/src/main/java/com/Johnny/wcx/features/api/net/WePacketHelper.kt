@@ -425,7 +425,7 @@ object WePacketHelper : ApiFeature(), IResolveDex {
                         when (method.name) {
                             "hashCode" -> return@newProxyInstance System.identityHashCode(proxy)
                             "equals" -> return@newProxyInstance proxy === args?.get(0)
-                            "toString" -> return@newProxyInstance "WeKitNativeCallback@${
+                            "toString" -> return@newProxyInstance "WCXNativeCallback@${
                                 Integer.toHexString(
                                     System.identityHashCode(proxy)
                                 )

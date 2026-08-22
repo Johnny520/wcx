@@ -524,7 +524,7 @@ object StickerPanel : SwitchFeature(), IResolveDex { // entry implementation in 
                     when (callbackMethod.name) {
                         "hashCode" -> System.identityHashCode(proxy)
                         "equals" -> proxy === args?.getOrNull(0)
-                        "toString" -> "WeKitEmojiLoadCallback"
+                        "toString" -> "WCXEmojiLoadCallback"
                         else -> {
                             if (
                                 callbackMethod.parameterCount == 1 &&
