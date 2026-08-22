@@ -6,6 +6,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Executable;
 import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.util.Collections;
@@ -26,8 +27,14 @@ public class Xp51HookImpl implements IHookBridge, ILoaderService {
     private IClassLoaderHelper mClassLoaderHelper;
 
     @Override
-    public int getApiLevel() {
-        return XposedBridge.getXposedVersion();
+    public String getHookBridgeName() {
+        return "Xposed";
+    }
+
+    @NonNull
+    @Override
+    public String getLoaderName() {
+        return "Xposed 加载器";
     }
 
     @NonNull
@@ -97,7 +104,7 @@ public class Xp51HookImpl implements IHookBridge, ILoaderService {
     }
 
     @Override
-    public boolean deoptimize(@NonNull Member member) {
+    public boolean deoptimize(@NonNull Executable executable) {
         return false;
     }
 
