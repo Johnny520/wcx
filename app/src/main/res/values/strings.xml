@@ -1,4 +1,5 @@
 <resources>
-    <string name="app_name">WCX</string>
+    <string name="app_name">WX2026</string>
     <string name="app_description">微信，解锁超能力\n重构你的微信使用体验\nJohnny520@github</string>
+    <string name="res_inject_success">inject_success</string>
 </resources>

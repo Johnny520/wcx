@@ -6,7 +6,7 @@ import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.hookAfterDirectly
 import com.Johnny.wcx.utils.hookBeforeDirectly
-import me.hd.wauxv.hook.HookHandle
+import com.Johnny.wcx.utils.HookHandle
 import java.lang.reflect.Executable
 import java.lang.reflect.Member
 import java.util.function.Consumer
@@ -25,7 +25,7 @@ object JavaHookApi : ApiFeature() {
                 result = consumer.accept(this)
             }.onFailure { WeLogger.e(TAG, "failed to execute script hookBefore action") }
         }
-        val handle = HookHandle(unhook)
+        val handle = unhook
         hooks.add(handle)
         return handle
     }
@@ -36,7 +36,7 @@ object JavaHookApi : ApiFeature() {
                 consumer.accept(this)
             }.onFailure { WeLogger.e(TAG, "failed to execute script hookAfter action") }
         }
-        val handle = HookHandle(unhook)
+        val handle = unhook
         hooks.add(handle)
         return handle
     }
@@ -47,14 +47,14 @@ object JavaHookApi : ApiFeature() {
                 result = function.apply(this)
             }.onFailure { WeLogger.e(TAG, "failed to execute script hookReplace action") }
         }
-        val handle = HookHandle(unhook)
+        val handle = unhook
         hooks.add(handle)
         return handle
     }
 
     fun unhook(handle: HookHandle) {
         if (hooks.remove(handle)) {
-            handle.unhook.unhook()
+            handle.unhook()
         }
     }
 
@@ -62,7 +62,7 @@ object JavaHookApi : ApiFeature() {
         val iterator = hooks.iterator()
         while (iterator.hasNext()) {
             val handle = iterator.next()
-            handle.unhook.unhook()
+            handle.unhook()
             iterator.remove()
         }
     }

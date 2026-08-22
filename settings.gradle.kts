@@ -57,7 +57,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "wekit"
+rootProject.name = "WX2026"
 
 include(
     ":app",

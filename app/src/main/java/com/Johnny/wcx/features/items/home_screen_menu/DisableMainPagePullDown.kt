@@ -18,6 +18,7 @@ import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.utils.InjectedUiTheme
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.android.runOnUiThread
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
@@ -119,7 +120,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
         }
     }
 
-    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         if (!showInPlusMenu) return emptyList()
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(

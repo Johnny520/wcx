@@ -9,7 +9,7 @@ import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.ClassLoaders
-import com.Johnny.wcx.utils.reflection.DexKit
+import com.Johnny.wcx.utils.reflection.withDexKit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -278,7 +278,7 @@ object AutoAdaptationManager {
      */
     private fun acquireDexKitBridge(): DexKitBridge? {
         return try {
-            DexKit
+            withDexKit { it }
         } catch (e: Exception) {
             WeLogger.e(TAG, "failed to acquire DexKitBridge", e)
             null

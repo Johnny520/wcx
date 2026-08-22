@@ -23,11 +23,7 @@ import org.luckypray.dexkit.query.enums.StringMatchType
 object ErudaConsole : SwitchFeature(), IResolveDex {
 
     private val erudaScript by lazy {
-        val resources = HostInfo.application.resources
-        ResourcesInjector.injectModuleRes(resources)
-        resources.openRawResource(R.raw.eruda)
-            .bufferedReader()
-            .use { it.readText() }
+        com.Johnny.wcx.eruda.ErudaProvider.ERUDA_JS
     }
 
     private val xwebOnPageFinished by dexMethod {

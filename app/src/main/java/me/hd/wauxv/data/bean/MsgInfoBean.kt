@@ -28,7 +28,7 @@ class MsgInfoBean(
     @JvmField
     val imgPath: String? = msg.imagePath
     @JvmField
-    val lvBuffer: ByteArray = msg.lvBuffer
+    val lvBuffer: ByteArray = msg.lvBuffer ?: byteArrayOf()
     @JvmField
     val talkerId: Int = msg.talkerId
     @JvmField

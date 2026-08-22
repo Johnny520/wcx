@@ -20,10 +20,6 @@ class LxpHookEntry : XposedModule() {
         if (PackageNames.isWeChat(param.packageName)) {
             if (param.isFirstPackage) {
                 val ai = param.applicationInfo
-                ModuleLoader.saveInitParams(
-                    param.classLoader,
-                    this.moduleApplicationInfo.sourceDir
-                )
                 ModuleLoader.init(
                     ai.dataDir,
                     param.classLoader,

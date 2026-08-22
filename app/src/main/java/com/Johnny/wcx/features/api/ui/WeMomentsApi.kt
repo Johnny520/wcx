@@ -856,6 +856,13 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     fun unlike(context: WeMomentsContextMenuApi.MomentsContext): ActionResult =
         unlike(context.snsInfo)
 
+    fun isAd(snsInfo: Any?): Boolean {
+        if (snsInfo == null) return false
+        // WeChat's ad model. RemoveMomentsAds blocks ads at construction; this is a cheap
+        // cross-classloader name check so filters (e.g. MomentsKeywordFilter) can skip ad feeds.
+        return snsInfo.javaClass.name == "com.tencent.mm.plugin.sns.storage.ADInfo"
+    }
+
     fun isLiked(snsInfo: Any?): Boolean {
         val normalized = normalizeSnsInfo(snsInfo) ?: return false
         return readLikeFlag(normalized) != 0

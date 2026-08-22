@@ -10,7 +10,7 @@ import com.Johnny.wcx.features.core.FeaturesLoader
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
-import com.Johnny.wcx.utils.reflection.DexKit
+import com.Johnny.wcx.utils.reflection.withDexKit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -252,7 +252,7 @@ object LocalAdaptationEngine {
         // 步骤 1: 获取 DexKitBridge
         val dexKit = withContext(Dispatchers.IO) {
             try {
-                DexKit
+                withDexKit { it }
             } catch (e: Exception) {
                 WeLogger.e(TAG, "failed to acquire DexKitBridge", e)
                 throw e

@@ -28,9 +28,11 @@ android {
 
     val gitHash = getGitHash()
 
-    // 版本号从环境变量 VER 读取（CI 用 v* tag 最大 +1 计算），本地构建默认 v226
-    val verTag = System.getenv("VER") ?: "v226"
-    val verCode = verTag.removePrefix("v").toIntOrNull() ?: 226
+    // 版本号从环境变量 VER 读取（CI 用 v* tag 最大 +1 计算），本地构建默认 v244.1
+    val verTag = System.getenv("VER") ?: "v244.1"
+    // "v244.1" -> 24401；纯数字 "v245" -> 24500。保证数值单调递增。
+    val verCode = verTag.removePrefix("v").split(".")
+        .fold(0) { acc, part -> acc * 100 + (part.toIntOrNull() ?: 0) }
 
     defaultConfig {
         applicationId = libs.versions.namespace.get()

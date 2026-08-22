@@ -90,6 +90,7 @@ import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.serialization.DefaultJson
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import android.os.SystemClock
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.div
 import kotlin.io.path.exists
@@ -125,7 +126,14 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
     @Volatile
     private var groupsCache: List<ChatGroup>? = null
 
-    private val groupMembersCache = ConcurrentHashMap<String, List<String>>()
+    private const val GROUP_MEMBERS_TTL_MS = 30_000L
+    private const val HIDDEN_CLAUSE_TTL_MS = 1000L
+    // SQL/预置分组的成员来自微信数据库，微信数据变化（新好友、新群成员）后需要定期重新解析，
+    // 缓存带时间戳，30s 内复用、过期自动重查。
+    private val groupMembersCache = ConcurrentHashMap<String, Pair<Long, List<String>>>()
+    // HideContacts.hiddenContacts 每次 getter 都从 prefs 反序列化整个集合，而列表查询 hook 每屏
+    // 都会执行；缓存拼好的 NOT IN 子句（短 TTL，隐藏列表变化 1s 内生效）。
+    private var hiddenClauseCache: Triple<Long, Set<String>, String>? = null
 
     override fun onEnable() {
         hookConversationListQuery()
@@ -267,15 +275,28 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
         val predicate = activePredicate ?: return null
         if (!looksLikeConversationListQuery(sql)) return null
 
-        val hidden = if (HideContacts.isEnabled) HideContacts.hiddenContacts else emptySet()
-        val hiddenClause = if (hidden.isEmpty()) {
-            ""
-        } else {
-            " AND rconversation.username NOT IN (" +
-                    hidden.joinToString(",") { "'${it.replace("'", "''")}'" } + ")"
-        }
+        return injectCondition(sql, "($predicate)${cachedHiddenClause()}")
+    }
 
-        return injectCondition(sql, "($predicate)$hiddenClause")
+    /**
+     * HideContacts.hiddenContacts re-reads (and deserializes) the whole hidden set from prefs on
+     * every getter call, and the list query hook runs per rendered frame; cache the built NOT IN
+     * clause with a short TTL so a hide/unhide is picked up within a second instead of paying the
+     * deserialization + join cost on every query.
+     */
+    private fun cachedHiddenClause(): String {
+        if (!HideContacts.isEnabled) return ""
+        val hidden = HideContacts.hiddenContacts
+        if (hidden.isEmpty()) return ""
+        val now = SystemClock.elapsedRealtime()
+        val cached = hiddenClauseCache
+        if (cached != null && now - cached.first < HIDDEN_CLAUSE_TTL_MS && cached.second == hidden) {
+            return cached.third
+        }
+        val built = " AND rconversation.username NOT IN (" +
+                hidden.joinToString(",") { "'${it.replace("'", "''")}'" } + ")"
+        hiddenClauseCache = Triple(now, hidden, built)
+        return built
     }
 
     private fun looksLikeConversationListQuery(sql: String): Boolean {
@@ -1069,15 +1090,17 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
         if (group.type == GroupType.MANUAL) {
             return group.members
         }
-        val cached = groupMembersCache[group.id]
-        if (cached != null) return cached
+        val now = SystemClock.elapsedRealtime()
+        groupMembersCache[group.id]?.let { (ts, cached) ->
+            if (now - ts < GROUP_MEMBERS_TTL_MS) return cached
+        }
 
         if (!WeDatabaseApi.isReady) {
             return emptyList()
         }
         val resolved = resolveGroupMembers(group)
         if (resolved.isNotEmpty()) {
-            groupMembersCache[group.id] = resolved
+            groupMembersCache[group.id] = now to resolved
         }
         return resolved
     }

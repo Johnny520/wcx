@@ -21,6 +21,18 @@ public final class SQLiteDatabase {
         throw new RuntimeException("Stub!");
     }
 
+    public void beginTransaction() {
+        throw new RuntimeException("Stub!");
+    }
+
+    public void setTransactionSuccessful() {
+        throw new RuntimeException("Stub!");
+    }
+
+    public void endTransaction() {
+        throw new RuntimeException("Stub!");
+    }
+
     public interface CursorFactory {
         Cursor newCursor(SQLiteDatabase sQLiteDatabase, SQLiteCursorDriver sQLiteCursorDriver, String str, SQLiteProgram sQLiteProgram);
 

@@ -11,3 +11,7 @@ panic = "abort"
 
 [profile.release.package.wekit-zygisk]
 strip = "none"
+
+# mp3lame-sys 0.1.11: on Windows host cross-compiling to Android/iOS it wrongly uses the MSVC config.h that clashes with the NDK sysroot; fixed in the vendored copy.
+[patch.crates-io]
+mp3lame-sys = { path = "vendor/mp3lame-sys" }
