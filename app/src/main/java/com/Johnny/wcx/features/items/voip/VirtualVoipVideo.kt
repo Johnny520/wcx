@@ -165,7 +165,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
             "com.tencent.mm.plugin.voip.ui.VideoActivity",
             "com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI"
         ).forEach { className ->
-            className.toClass().apply {
+            runCatching { className.toClass() }.getOrNull()?.apply {
                 firstMethod { name = "onCreate" }.hookBefore {
                     isVoipUiActive = true
                     WeLogger.d(TAG, "entered voip ui: $className")

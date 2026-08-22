@@ -320,7 +320,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
         override fun restore() {
             val service = voipMpService ?: error("voipmp service is unavailable")
-            methodVoipMpLaunchPage.method.invoke(service, HostInfo.application, false)
+            methodVoipMpLaunchPage.method.invoke(service, HostInfo.application, true, false, false)
         }
 
         private fun sendAppCmd(cmd: Int, value: Int) {
@@ -401,11 +401,11 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    /** `launchPage(context, needAnimation)`：把通话界面重新拉起来 */
+    /** `launchPage(context, needAnimation)`：把通话界面重新拉起来；8.0.77 签名变为 (Context, ZZ Z) */
     private val methodVoipMpLaunchPage by dexMethod {
         matcher {
             declaredClass(classVoipMpService.clazz)
-            paramTypes(Context::class.java.name, "boolean")
+            paramTypes(Context::class.java.name, "boolean", "boolean", "boolean")
             returnType = "void"
         }
     }
@@ -627,7 +627,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
     // -------------------------------------------------------------------- 多人通话
 
-    private val classMultiTalkViewModel by dexClass {
+    private val classMultiTalkViewModel by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.MT.MultiTalkUIViewModel",
@@ -637,7 +637,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val fieldMultiTalkViewModel by dexField {
+    private val fieldMultiTalkViewModel by dexField(allowFailure = true) {
         matcher {
             declaredClass(MultiTalkMainUI::class.java)
             type(classMultiTalkViewModel.clazz)
@@ -663,7 +663,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkMinimize by dexMethod {
+    private val methodMultiTalkMinimize by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(MultiTalkMainUI::class.java)
             paramCount = 0
@@ -672,7 +672,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkExit by dexMethod {
+    private val methodMultiTalkExit by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(MultiTalkMainUI::class.java)
             paramCount = 0
@@ -681,7 +681,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkMic by dexMethod {
+    private val methodMultiTalkMic by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classMultiTalkViewModel.clazz)
             paramTypes("boolean")
@@ -690,13 +690,13 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkCamera by dexMethod {
+    private val methodMultiTalkCamera by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onCameraClick, cur state: ")
         }
     }
 
-    private val fieldMultiTalkMicState by dexField {
+    private val fieldMultiTalkMicState by dexField(allowFailure = true) {
         matcher {
             declaredClass(classMultiTalkViewModel.clazz)
             type(classObservableState.clazz)
@@ -706,7 +706,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val fieldMultiTalkCameraState by dexField {
+    private val fieldMultiTalkCameraState by dexField(allowFailure = true) {
         matcher {
             declaredClass(classMultiTalkViewModel.clazz)
             type(classObservableState.clazz)
@@ -744,24 +744,26 @@ object PipVoip : SwitchFeature(), IResolveDex {
         methodFlutterVoipAttachedToActivity.hookAfter { registerLegacySession(thisObject!!) }
         methodFlutterVoipReattachedToActivity.hookAfter { registerLegacySession(thisObject!!) }
 
-        MultiTalkMainUI::class.reflekt()
-            .firstMethod {
-                name = "onCreate"
-                parameterCount = 1
-            }
-            .hookAfter {
-                val activity = thisObject as Activity
-                sessions[activity] = GroupSession(activity)
-            }
-
-        listOf(MultiTalkMainUI::class.java, VideoActivity::class.java).forEach { clazz ->
-            clazz.reflekt()
+        runCatching {
+            MultiTalkMainUI::class.reflekt()
                 .firstMethod {
-                    name = "onDestroy"
-                    parameterCount = 0
+                    name = "onCreate"
+                    parameterCount = 1
                 }
-                .hookBefore { removeSession(thisObject as Activity) }
-        }
+                .hookAfter {
+                    val activity = thisObject as Activity
+                    sessions[activity] = GroupSession(activity)
+                }
+
+            listOf(MultiTalkMainUI::class.java, VideoActivity::class.java).forEach { clazz ->
+                clazz.reflekt()
+                    .firstMethod {
+                        name = "onDestroy"
+                        parameterCount = 0
+                    }
+                    .hookBefore { removeSession(thisObject as Activity) }
+            }
+        }.onFailure { WeLogger.w(TAG, "multitalk main ui hooks unavailable (8.0.77 rewrite)", it) }
 
         // 用户按 home / 切走时提前进入画中画：此时微信还在前台，启动 Activity 不会被拦
         Activity::class.reflekt()
@@ -770,11 +772,13 @@ object PipVoip : SwitchFeature(), IResolveDex {
                 parameterCount = 0
             }
             .hookBefore {
-                when (val activity = thisObject) {
-                    is VideoActivity -> currentSession().enterPip()
+                runCatching {
+                    when (val activity = thisObject) {
+                        is VideoActivity -> currentSession().enterPip()
 
-                    is MultiTalkMainUI -> activitySession()?.enterPip()
-                        ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
+                        is MultiTalkMainUI -> activitySession()?.enterPip()
+                            ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
+                    }
                 }
             }
 
@@ -791,11 +795,13 @@ object PipVoip : SwitchFeature(), IResolveDex {
         methodVoipMpDismissSmallWindow.hookBefore { closeActivePip() }
 
         // 多人通话有自己的悬浮球 helper，直接拦最小化本身
-        methodMultiTalkMinimize.hookBefore {
-            val session = activitySession() ?: return@hookBefore
-            session.enterPip()
-            result = null
-        }
+        runCatching {
+            methodMultiTalkMinimize.hookBefore {
+                val session = activitySession() ?: return@hookBefore
+                session.enterPip()
+                result = null
+            }
+        }.onFailure { WeLogger.w(TAG, "multitalk minimize hook unavailable", it) }
     }
 
     override fun onBeforeToggle(newState: Boolean, context: Context): Boolean {

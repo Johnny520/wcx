@@ -18,6 +18,7 @@ import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.utils.InjectedUiTheme
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.android.runOnUiThread
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
@@ -80,7 +81,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
     private var showInTitleBar by WePrefs.prefOption("disable_main_page_pull_down_show_in_title_bar", false)
 
     // DexKit 方法：查找 LauncherUI 中处理下拉手势的方法
-    private val methodOnTouchEvent by dexMethod {
+    private val methodOnTouchEvent by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.ui")
         matcher {
             usingEqStrings("MicroMsg.LauncherUI", "onTouchEvent")
@@ -88,7 +89,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
     }
 
     // DexKit 方法：查找打开小程序面板的方法
-    private val methodOpenMiniProgramPanel by dexMethod {
+    private val methodOpenMiniProgramPanel by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm")
         matcher {
             usingEqStrings("MicroMsg.LauncherUI", "openTaskList")
@@ -119,7 +120,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
         }
     }
 
-    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         if (!showInPlusMenu) return emptyList()
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(
@@ -159,7 +160,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
 
             // 方式2：尝试通过 DexKit 解析的方法
             try {
-                if (methodOpenMiniProgramPanel.method != null) {
+                if (!methodOpenMiniProgramPanel.isPlaceholder) {
                     methodOpenMiniProgramPanel.method.invoke(launcherUI)
                     WeLogger.i(TAG, "triggered via dexMethod")
                     return

@@ -15,7 +15,6 @@ import java.nio.file.Files;
 
 public abstract class EmbedErudaTask extends DefaultTask {
 
-    private static final int MAX_PART_LENGTH = 64000;
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 5000;
 
@@ -30,9 +29,6 @@ public abstract class EmbedErudaTask extends DefaultTask {
 
     @OutputDirectory
     public abstract DirectoryProperty getOutputDir();
-
-    @Input
-    public abstract Property<String> getNamespace();
 
     private byte[] downloadWithRetry(String primaryUrl) throws IOException {
         String[] urls = new String[FALLBACK_URLS.length + 1];
@@ -148,41 +144,13 @@ public abstract class EmbedErudaTask extends DefaultTask {
                 jsBytes = downloadWithRetry(getUrl().get());
             }
         }
-        String jsContent = new String(jsBytes);
-        String pkg = getNamespace().get();
+
+        // Write the raw minified JS into the variant's assets instead of embedding it as a
+        // Kotlin string constant: a 500KB constant inflates the dex, while an assets entry is
+        // stored deflated in the APK and read at runtime by ErudaConsole.
         File outDir = getOutputDir().get().getAsFile();
-        File outputFile = new File(outDir, pkg.replace(".", "/") + "/eruda/ErudaProvider.kt");
-
-        // Use \u0024 (Unicode escape for $) instead of ${'$'}
-        // to avoid template expression parsing issues in Kotlin raw strings
-        String escaped = jsContent.replace("$", "\\u0024");
-
-        int partCount = (escaped.length() + MAX_PART_LENGTH - 1) / MAX_PART_LENGTH;
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(pkg).append(".eruda\n");
-        sb.append("\n");
-        sb.append("@Suppress(\"unused\")\n");
-        sb.append("object ErudaProvider {\n");
-
-        for (int i = 0; i < partCount; i++) {
-            int start = i * MAX_PART_LENGTH;
-            int end = Math.min(start + MAX_PART_LENGTH, escaped.length());
-            String part = escaped.substring(start, end);
-            sb.append("    private const val PART_").append(i).append(" = \"\"\"").append(part).append("\"\"\"\n");
-        }
-
-        StringBuilder parts = new StringBuilder();
-        for (int i = 0; i < partCount; i++) {
-            if (i > 0) parts.append(" + ");
-            parts.append("PART_").append(i);
-        }
-
-        sb.append("\n");
-        sb.append("    val ERUDA_JS: String by lazy { ").append(parts).append(" }\n");
-        sb.append("}\n");
-
+        File outputFile = new File(outDir, "eruda/eruda.min.js");
         outputFile.getParentFile().mkdirs();
-        Files.writeString(outputFile.toPath(), sb.toString());
+        Files.write(outputFile.toPath(), jsBytes);
     }
 }

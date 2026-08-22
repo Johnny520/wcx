@@ -256,8 +256,8 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
         matcher {
             declaredClass(classUploadPackHelper.clazz)
             returnType(bool)
-            paramCount(4)
-            paramTypes(String::class.java, String::class.java, String::class.java, String::class.java)
+            paramCount(5)
+            paramTypes(String::class.java, String::class.java, String::class.java, String::class.java, String::class.java)
             usingStrings("addSightObjectByPath", "com.tencent.mm.plugin.sns.model.UploadPackHelper")
         }
     }
@@ -807,7 +807,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             if (copyExistingFile(videoPath, tempVideoPath)) {
                 val helper = ctorUploadPackHelper.constructor.newInstance(15, null)
                 methodSetContentDes.method.invoke(helper, text)
-                methodAddSightObjectByPath.method.invoke(helper, tempVideoPath, tempThumbPath, "", "")
+                methodAddSightObjectByPath.method.invoke(helper, tempVideoPath, tempThumbPath, "", "", "")
                 if (!sdkId.isNullOrEmpty()) {
                     methodSetSdkId.method.invoke(helper, sdkId)
                 }
@@ -855,6 +855,13 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
 
     fun unlike(context: WeMomentsContextMenuApi.MomentsContext): ActionResult =
         unlike(context.snsInfo)
+
+    fun isAd(snsInfo: Any?): Boolean {
+        if (snsInfo == null) return false
+        // WeChat's ad model. RemoveMomentsAds blocks ads at construction; this is a cheap
+        // cross-classloader name check so filters (e.g. MomentsKeywordFilter) can skip ad feeds.
+        return snsInfo.javaClass.name == "com.tencent.mm.plugin.sns.storage.ADInfo"
+    }
 
     fun isLiked(snsInfo: Any?): Boolean {
         val normalized = normalizeSnsInfo(snsInfo) ?: return false

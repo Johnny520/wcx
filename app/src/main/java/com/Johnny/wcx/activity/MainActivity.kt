@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
                     RESULT_CANCELED,
                     Intent().putExtra(
                         TelegramDatabaseImportContract.EXTRA_ERROR,
-                        "只允许从微信内的 WeKit 面板启动此操作",
+                        "只允许从微信内的 WCX 面板启动此操作",
                     ),
                 )
                 finish()
@@ -623,14 +623,14 @@ class MainActivity : ComponentActivity() {
                 LinkCard(
                     icon = GitHubIcon,
                     title = "GitHub",
-                    subtitle = "Ujhhgtg/WeKit",
-                    onClick = { onUrlClick("https://github.com/Ujhhgtg/WeKit") }
+                    subtitle = "Kimjaejiang/WCXLC",
+                    onClick = { onUrlClick("https://github.com/Kimjaejiang/WCXLC") }
                 )
                 LinkCard(
                     icon = TelegramIcon,
                     title = "Telegram",
-                    subtitle = "https://t.me/+7j5dJ6g16B43OWVl",
-                    onClick = { onUrlClick("https://t.me/+7j5dJ6g16B43OWVl") }
+                    subtitle = "https://t.me/wcx12138",
+                    onClick = { onUrlClick("https://t.me/wcx12138") }
                 )
             }
 

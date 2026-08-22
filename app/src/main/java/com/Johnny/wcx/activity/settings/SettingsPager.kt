@@ -289,14 +289,14 @@ fun SettingsPager(onOpenLicense: () -> Unit) {
                 )
                 PrefArrow(
                     title = "GitHub",
-                    summary = "Ujhhgtg/WeKit",
+                    summary = "Kimjaejiang/WCXLC",
                     icon = GitHubIcon,
-                    onClick = { "https://github.com/Ujhhgtg/WeKit".toUri().openInSystem(context, true) })
+                    onClick = { "https://github.com/Kimjaejiang/WCXLC".toUri().openInSystem(context, true) })
                 PrefArrow(
                     title = "Telegram",
-                    summary = "https://t.me/+7j5dJ6g16B43OWVl",
+                    summary = "https://t.me/wcx12138",
                     icon = TelegramIcon,
-                    onClick = { "https://t.me/+7j5dJ6g16B43OWVl".toUri().openInSystem(context, true) })
+                    onClick = { "https://t.me/wcx12138".toUri().openInSystem(context, true) })
             }
         }
 

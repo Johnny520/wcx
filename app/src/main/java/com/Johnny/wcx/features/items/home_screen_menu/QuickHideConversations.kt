@@ -32,6 +32,7 @@ import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.utils.VisibilityOffIcon
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.android.showToastSuspend
@@ -68,7 +69,7 @@ object QuickHideConversations : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuI
         }
     }
 
-    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(
                 777020, "一键隐藏对话", VisibilityOffIcon

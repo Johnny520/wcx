@@ -17,6 +17,8 @@ public class ChatFooter extends FrameLayout {
         super(context, attrs, defStyleAttr);
     }
 
+    public int keyBordHeightPX;
+
     public String getLastText() {
         throw new RuntimeException("Stub!");
     }

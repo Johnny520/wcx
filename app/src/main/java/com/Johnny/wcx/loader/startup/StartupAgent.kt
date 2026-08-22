@@ -43,6 +43,10 @@ object StartupAgent {
         HybridClassLoader.hostClassLoader = realClassLoader
         ReflectionClassLoader.value = realClassLoader
 
+        // WeChat host uses package id 0x7f; a module built with the default id would
+        // shadow host resources after injection and crash WeChat UI. The build pins
+        // aapt2 --package-id 0x80 (see androidResources.additionalParameters); fail
+        // loudly instead of silently breaking WeChat if that ever regresses.
         if (R.string.res_inject_success ushr 24 == 0x7f) {
             throw AssertionError("module resource package ID must not be 0x7f")
         }

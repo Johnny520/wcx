@@ -28,9 +28,11 @@ android {
 
     val gitHash = getGitHash()
 
-    // 版本号从环境变量 VER 读取（CI 用 v* tag 最大 +1 计算），本地构建默认 v226
-    val verTag = System.getenv("VER") ?: "v226"
-    val verCode = verTag.removePrefix("v").toIntOrNull() ?: 226
+    // 版本号从环境变量 VER 读取（CI 用 v* tag 最大 +1 计算），本地构建默认 v244.1
+    val verTag = System.getenv("VER") ?: "v244.1"
+    // "v244.1" -> 24401；纯数字 "v245" -> 24500。保证数值单调递增。
+    val verCode = verTag.removePrefix("v").split(".")
+        .fold(0) { acc, part -> acc * 100 + (part.toIntOrNull() ?: 0) }
 
     defaultConfig {
         applicationId = libs.versions.namespace.get()
@@ -43,15 +45,6 @@ android {
         buildConfigField("String", "TAG", "\"WCX\"")
         buildConfigField("long", "BUILD_TIMESTAMP", "${System.currentTimeMillis()}L")
         buildConfigField("boolean", "BEAUTIFY_ENABLED", "true")
-    }
-
-    splits {
-        abi {
-            reset()
-            isEnable = true
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
-        }
     }
 
     // Two entry-point variants:
@@ -128,6 +121,10 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName(if (foundKeystore) "release" else "debug")
+            // Keep both ABIs on debug for testing on older hardware.
+            ndk {
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
         }
 
         release {
@@ -137,6 +134,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Distribution builds target arm64-v8a only (modern devices); the debug
+            // variant keeps both ABIs for testing on older hardware.
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
             signingConfig = signingConfigs.getByName(if (foundKeystore) "release" else "debug")
         }
     }
@@ -151,7 +153,8 @@ android {
             "kotlin/**",
             "**.bin",
             "kotlin-tooling-metadata.json",
-            "META-INF/INDEX.LIST"
+            "META-INF/INDEX.LIST",
+            "google/protobuf/descriptor.proto"
         )
         resources.merges += listOf(
             "META-INF/io.netty.versions.properties",
@@ -163,6 +166,7 @@ android {
     @Suppress("UnstableApiUsage")
     androidResources {
         localeFilters += setOf("zh")
+        additionalParameters += listOf("--package-id", "0x80")
     }
 
     buildFeatures {
@@ -210,14 +214,13 @@ androidComponents {
 
         val embedEruda = tasks.register<EmbedErudaTask>("embedEruda$variantName") {
             group = "wekit"
-            description = "Embed eruda.min.js as a String constant for $variantName"
+            description = "Download eruda.min.js into assets for $variantName"
 
             url.set("https://cdn.jsdelivr.net/npm/eruda@3.4.3/eruda.min.js")
-            outputDir.set(layout.buildDirectory.dir("generated/source/eruda/${variant.name}"))
-            namespace.set(libs.versions.namespace.get())
+            outputDir.set(layout.buildDirectory.dir("generated/eruda-assets/${variant.name}"))
         }
 
-        kotlinSources.addGeneratedSourceDirectory(
+        variant.sources.assets?.addGeneratedSourceDirectory(
             embedEruda,
             EmbedErudaTask::getOutputDir
         )
@@ -284,8 +287,8 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.coil.network.okhttp)
 
-    implementation(libs.composablehorizons.material.symbols.filled)
     implementation(libs.composablehorizons.material.symbols.outlined)
+    implementation(libs.composablehorizons.material.symbols.filled)
 
     implementation(libs.google.protobuf.javalite)
     implementation(libs.kotlinx.serialization.json)
@@ -315,8 +318,6 @@ dependencies {
     implementation(libs.jsoup)
 
     implementation(libs.rhino)
-
-    implementation(libs.fastjson2)
 
     compileOnly(libs.lombok)
     annotationProcessor(libs.lombok)

@@ -127,20 +127,33 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
         }
     }
 
-    private val classAvatarDrawable by dexClass {
-        searchPackages("com.tencent.mm.feature.avatar")
+    private val classAvatarDrawable by dexClass(allowMultiple = true) {
         matcher {
-            usingEqStrings("MicroMsg.AvatarDrawable", "imageView is null", "?access_token=")
+            usingEqStrings("MicroMsg.AvatarDrawable", "imageView is null")
+            // 8.0.77: pluginsdk.ui.u 与 feature.avatar.w 都含这两个字符串; 用 u.b(ImageView,String,F,Z) 限定
+            methods {
+                add {
+                    name = "b"
+                    paramTypes(
+                        "android.widget.ImageView",
+                        "java.lang.String",
+                        "float",
+                        "boolean"
+                    )
+                }
+            }
         }
     }
 
     // com.tencent.mm.feature.avatar.w.pg; an exception: this doesn't call methodMvvmLoadAvatar
-    private val methodFeatureAvatarSimple1 by dexMethod {
+    private val methodFeatureAvatarSimple1 by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classAvatarDrawable.clazz)
             paramTypes(
                 "android.widget.ImageView",
-                "java.lang.String"
+                "java.lang.String",
+                "float",
+                "boolean"
             )
             returnType(Void.TYPE)
 
@@ -185,7 +198,7 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     }
 
     // com.tencent.mm.pluginsdk.ui.u.b
-    private val methodConversationAvatar by dexMethod {
+    private val methodConversationAvatar by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.pluginsdk.ui")
         matcher {
             usingEqStrings("MicroMsg.AvatarDrawable", "imageView is null")
@@ -243,6 +256,7 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
             methodFeatureAvatarSimple1,
             methodPluginsdkLoadAvatar
         ).forEach {
+            if (it.isPlaceholder) return@forEach
             it.method.hookBefore {
                 val imageView = args.getOrNull(0) as? ImageView ?: return@hookBefore
 //            var wxId = args.getOrNull(1) as? String ?: return@hookBefore

@@ -83,7 +83,7 @@ internal object RootTelegramStickerSetRepository {
 
     @SuppressLint("SdCardPath")
     fun discoverInstances(androidUserId: Int): Result<List<RootTelegramInstance>> = runCatching {
-        require(Shell.isAppGrantedRoot() == true) { "需要授予 WeKit 模块应用 Root 权限" }
+        require(Shell.isAppGrantedRoot() == true) { "需要授予 WCX 模块应用 Root 权限" }
         val userDataDir = "/data/user/$androidUserId"
         val appDirectoryGlob = "${userDataDir.shellLiteral()}/*"
         val scan = executeRootCommand(
