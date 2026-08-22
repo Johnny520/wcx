@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.os.Build
 import dev.ujhhgtg.reflekt.utils.ReflectionClassLoader
-import com.Johnny.wcx.R
 import com.Johnny.wcx.loader.abc.IHookBridge
 import com.Johnny.wcx.loader.abc.ILoaderService
 import com.Johnny.wcx.loader.entry.zygisk.ArtHookBridge
@@ -42,10 +41,6 @@ object StartupAgent {
         val realClassLoader = application.baseContext.classLoader
         HybridClassLoader.hostClassLoader = realClassLoader
         ReflectionClassLoader.value = realClassLoader
-
-        if (R.string.res_inject_success ushr 24 == 0x7f) {
-            throw AssertionError("module resource package ID must not be 0x7f")
-        }
 
         StartupInfo.modulePath = modulePath
         StartupInfo.loaderService = loaderService
