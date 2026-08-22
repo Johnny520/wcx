@@ -47,15 +47,6 @@ android {
         buildConfigField("boolean", "BEAUTIFY_ENABLED", "true")
     }
 
-    splits {
-        abi {
-            reset()
-            isEnable = true
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
-        }
-    }
-
     // Two entry-point variants:
     //  - standard: ships the modern libxposed entry point (entry/lxp/* sources +
     //              META-INF/xposed/*), placed in the `standard` flavor source set.
@@ -130,6 +121,10 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName(if (foundKeystore) "release" else "debug")
+            // Keep both ABIs on debug for testing on older hardware.
+            ndk {
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
         }
 
         release {
@@ -139,6 +134,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Distribution builds target arm64-v8a only (modern devices); the debug
+            // variant keeps both ABIs for testing on older hardware.
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
             signingConfig = signingConfigs.getByName(if (foundKeystore) "release" else "debug")
         }
     }
