@@ -131,13 +131,77 @@ fn configure_android_libvpx(source: &Path, build: &Path) {
         "i686-linux-android" => "x86-android-gcc",
         other => panic!("unsupported Android target for libvpx: {other}"),
     };
-    let cc = target_tool("CC", &rust_target);
-    let cxx = target_tool("CXX", &rust_target);
-    let ar = target_tool("AR", &rust_target);
-    let toolchain = cc
-        .parent()
-        .expect("Android compiler has no parent directory");
-    let status = Command::new(source.join("configure"))
+    // On Windows, libvpx's Makefile runs $(CC) through /bin/sh, which cannot
+    // cope with the NDK's `.cmd` wrappers (backslashes are eaten). Use the
+    // extension-less triplet clang binaries instead: they are real PE files
+    // with the Android target baked in and `sh` can exec them directly.
+    #[cfg(windows)]
+    let (cc, cxx, toolchain) = {
+        let triplet = match rust_target.as_str() {
+            "aarch64-linux-android" => "aarch64-linux-android28",
+            "armv7-linux-androideabi" => "armv7a-linux-androideabi28",
+            "x86_64-linux-android" => "x86_64-linux-android28",
+            "i686-linux-android" => "i686-linux-android28",
+            other => panic!("unsupported Android target for libvpx: {other}"),
+        };
+        let ndk_bin = target_tool("CC", &rust_target)
+            .parent()
+            .expect("Android compiler has no parent directory")
+            .to_path_buf();
+        (
+            ndk_bin.join(format!("{triplet}-clang")),
+            ndk_bin.join(format!("{triplet}-clang++")),
+            ndk_bin,
+        )
+    };
+    #[cfg(not(windows))]
+    let (cc, cxx, toolchain) = {
+        let cc = target_tool("CC", &rust_target);
+        let cxx = target_tool("CXX", &rust_target);
+        let toolchain = cc.parent().expect("Android compiler has no parent directory");
+        (cc, cxx, toolchain)
+    };
+    let ar = toolchain.join("llvm-ar.exe");
+    // MSYS `sh`/`dash` treat backslashes as escapes, so pass POSIX-style
+    // tool paths to libvpx configure (it writes them verbatim into *.mk).
+    #[cfg(windows)]
+    let (cc, cxx, ar, nm, strip) = {
+        let to_msys = |p: &std::path::Path| -> String {
+            let s = p.to_string_lossy();
+                if s.len() >= 2 && s.as_bytes()[1] == b':' {
+                    format!("/{}{}", s[..1].to_lowercase(), &s[2..].replace('\\', "/"))
+            } else {
+                s.into_owned()
+            }
+        };
+        (
+            to_msys(&cc),
+            to_msys(&cxx),
+            to_msys(&ar),
+            to_msys(&toolchain.join("llvm-nm.exe")),
+            to_msys(&toolchain.join("llvm-strip.exe")),
+        )
+    };
+    #[cfg(not(windows))]
+    let (cc, cxx, ar, nm, strip) = (cc, cxx, ar, toolchain.join("llvm-nm"), toolchain.join("llvm-strip"));
+    // executed via `sh` (e.g. from MSYS2 / Git Bash).
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        let cfg_path = source.join("configure");
+        let cfg = cfg_path.to_string_lossy();
+        // Convert C:\... to /c/... so MSYS `sh` sees a POSIX path.
+        let msys_cfg = if cfg.len() >= 2 && cfg.as_bytes()[1] == b':' {
+            format!("/{}{}", cfg[..1].to_lowercase(), &cfg[2..].replace("\\", "/"))
+        } else {
+            cfg.into_owned()
+        };
+        c.arg(msys_cfg);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = Command::new(source.join("configure"));
+    let status = cmd
         .arg(format!("--target={vpx_target}"))
         .args([
             "--disable-examples",
@@ -159,8 +223,8 @@ fn configure_android_libvpx(source: &Path, build: &Path) {
         .env("LD", &cc)
         .env("AR", &ar)
         .env("AS", &cc)
-        .env("NM", toolchain.join("llvm-nm"))
-        .env("STRIP", toolchain.join("llvm-strip"))
+        .env("NM", &nm)
+        .env("STRIP", &strip)
         .current_dir(build)
         .status()
         .expect("failed to configure libvpx");

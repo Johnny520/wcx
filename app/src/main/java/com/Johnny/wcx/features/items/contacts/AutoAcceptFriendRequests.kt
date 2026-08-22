@@ -172,6 +172,9 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
         runCatching {
             if (!methodVerifyAccept.isPlaceholder) {
                 methodVerifyAccept.hookAfter {
+                    // 8.0.76 上 DexKit 可能把特征匹配到无参方法变体：hook 触发时 args 为空，
+                    // 直接取参会 ArrayIndexOutOfBoundsException，先防护再取参。
+                    if (args.size < 3) return@hookAfter
                     if (!masterEnabled) return@hookAfter
                     val opcode = args[0] as? Int ?: return@hookAfter
                     // opcode == 2 表示"接受"操作
