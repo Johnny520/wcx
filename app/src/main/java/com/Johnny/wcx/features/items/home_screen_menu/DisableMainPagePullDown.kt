@@ -148,8 +148,7 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
             // +号位于标题栏右侧，搜索框位于标题栏下方一行，这两个交互区放行，其余顶部区域直接消费 DOWN
             val plusTopPx = (72 * density).toInt()
             val searchTopPx = (90 * density).toInt()
-            val searchBottomPx = (150 * density).toInt()
-            val minDistance = (10 * density).toInt()
+            val minDistance = (5 * density).toInt()
             dispatchUnhook = XposedBridge.hookMethod(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (simulatingSwipe) return
@@ -157,20 +156,9 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
                     val ev = param.args.getOrNull(0) as? MotionEvent ?: return
                     when (ev.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
-                            if (ev.rawY < topThreshold) {
-                                val inPlusArea = ev.rawX > metrics.widthPixels * 0.68f && ev.rawY < plusTopPx
-                                val inSearchRow = ev.rawY >= searchTopPx && ev.rawY <= searchBottomPx
-                                if (inPlusArea || inSearchRow) {
-                                    // 交互区放行，用 MOVE 兜底
-                                    swipeStartY = ev.rawY
-                                } else {
-                                    // 立即消费 DOWN，微信收不到按下事件，面板动画不会触发
-                                    param.result = true
-                                    WeLogger.i(TAG, "blocked main page pull-down (down)")
-                                }
-                            } else {
-                                swipeStartY = null
-                            }
+                            // 放行按下事件，保证顶栏手势（展开/收起）、+号与搜索框交互正常；
+                            // 下拉距离超过 minDistance 时由 MOVE 分支消费，面板几乎不会跟手
+                            swipeStartY = if (ev.rawY < topThreshold) ev.rawY else null
                         }
                         MotionEvent.ACTION_MOVE -> {
                             val startY = swipeStartY ?: return
@@ -243,24 +231,26 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
             try {
                 val metrics = launcherUI.resources.displayMetrics
                 val startX = metrics.widthPixels / 2f
-                val startY = 0f
-                val endY = metrics.heightPixels / 3f
+                val startY = (55 * metrics.density).toFloat()
+                val endY = metrics.heightPixels * 0.6f
 
                 val handler = Handler(Looper.getMainLooper())
                 val downTime = SystemClock.uptimeMillis()
                 simulatingSwipe = true
-                val steps = 12
-                val stepInterval = 20L
+                val steps = 15
+                val stepInterval = 25L
 
                 handler.post {
                     val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, startY, 0)
                     launcherUI.dispatchTouchEvent(downEvent)
                     downEvent.recycle()
                 }
+                // 按下后停顿 60ms 再开始滑动，更接近真实下拉手势
+                val firstMoveDelay = 60L
                 for (i in 1..steps) {
                     val progress = i.toFloat() / steps
                     val currentY = startY + (endY - startY) * progress
-                    val delay = i * stepInterval
+                    val delay = firstMoveDelay + i * stepInterval
                     handler.postDelayed({
                         val moveEvent = MotionEvent.obtain(downTime, downTime + delay, MotionEvent.ACTION_MOVE, startX, currentY, 0)
                         launcherUI.dispatchTouchEvent(moveEvent)
@@ -268,12 +258,12 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
                     }, delay)
                 }
                 handler.postDelayed({
-                    val upTime = downTime + steps * stepInterval + 40
+                    val upTime = downTime + firstMoveDelay + steps * stepInterval + 40
                     val upEvent = MotionEvent.obtain(downTime, upTime, MotionEvent.ACTION_UP, startX, endY, 0)
                     launcherUI.dispatchTouchEvent(upEvent)
                     upEvent.recycle()
                     simulatingSwipe = false
-                }, steps * stepInterval + 40)
+                }, firstMoveDelay + steps * stepInterval + 40)
 
                 WeLogger.i(TAG, "triggered via simulated touch event (async)")
             } catch (e: Exception) {
