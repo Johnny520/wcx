@@ -18,7 +18,7 @@ import com.Johnny.wcx.utils.android.showToast
 import kotlin.concurrent.thread
 
 @Feature(
-    name = "删除假群组",
+    name = "删除分裂假群",
     categories = ["娱乐"],
     description = "彻底清除由「分裂群组」功能产生的假群 (仅清除本地数据库，不影响原群)"
 )

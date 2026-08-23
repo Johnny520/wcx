@@ -130,7 +130,7 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                     }
                 }
             } else {
-                itemsIndexed(filteredItems, key = { _, item -> item.name }) { index, item ->
+                itemsIndexed(filteredItems, key = { _, item -> item::class.qualifiedName ?: item.name }) { index, item ->
                     Column(
                         modifier = Modifier
                             .then(if (index == 0) Modifier.padding(top = 12.dp) else Modifier)
@@ -223,7 +223,7 @@ fun CategoryDetailScreen(categoryName: String, onBack: () -> Unit) {
     ) {
         if (items.isEmpty()) return@MiuixListScaffold
 
-        itemsIndexed(items, key = { _, item -> item.name }) { index, item ->
+        itemsIndexed(items, key = { _, item -> item::class.qualifiedName ?: item.name }) { index, item ->
             Column(
                 modifier = Modifier
                     .then(if (index == 0) Modifier.padding(top = 12.dp) else Modifier)
