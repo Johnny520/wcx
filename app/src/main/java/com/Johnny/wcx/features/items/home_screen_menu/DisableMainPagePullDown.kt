@@ -2,6 +2,9 @@ package com.Johnny.wcx.features.items.home_screen_menu
 
 import android.app.Activity
 import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -9,6 +12,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import com.tencent.mm.ui.LauncherUI
 import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -98,12 +102,19 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
 
     private var titleBarIconView: View? = null
 
+    /** 程序模拟下滑手势时为 true，放行拦截，保证 +号/图标入口可正常唤起面板 */
+    @Volatile
+    private var simulatingSwipe = false
+    private var swipeStartY: Float? = null
+    private var dispatchUnhook: XC_MethodHook.Unhook? = null
+
     override fun onEnable() {
         try {
             // 注册到首页右上角菜单
             if (showInPlusMenu) {
                 WeHomeScreenPopupMenuApi.addProvider(this)
             }
+            hookDispatchTouchEvent()
             WeLogger.i(TAG, "enabled, showInPlusMenu=$showInPlusMenu, showInTitleBar=$showInTitleBar")
         } catch (e: Exception) {
             WeLogger.e(TAG, "failed to enable", e)
@@ -114,9 +125,68 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
         try {
             WeHomeScreenPopupMenuApi.removeProvider(this)
             removeTitleBarIcon()
+            dispatchUnhook?.unhook()
+            dispatchUnhook = null
             WeLogger.i(TAG, "disabled")
         } catch (e: Exception) {
             WeLogger.e(TAG, "failed to disable", e)
+        }
+    }
+
+    /**
+     * Hook LauncherUI.dispatchTouchEvent，拦截从屏幕顶部开始的下滑手势，真正禁止主页下滑拉出最近页面。
+     * 程序模拟的手势（simulatingSwipe=true）直接放行，不影响 +号/标题栏图标入口。
+     */
+    private fun hookDispatchTouchEvent() {
+        if (dispatchUnhook != null) return
+        try {
+            val method = LauncherUI::class.java.getMethod("dispatchTouchEvent", MotionEvent::class.java)
+            val metrics = LauncherUI.getInstance()?.resources?.displayMetrics
+                ?: android.content.res.Resources.getSystem().displayMetrics
+            val density = metrics.density
+            val topThreshold = (150 * density).toInt()
+            // +号位于标题栏右侧，搜索框位于标题栏下方一行，这两个交互区放行，其余顶部区域直接消费 DOWN
+            val plusTopPx = (72 * density).toInt()
+            val searchTopPx = (90 * density).toInt()
+            val searchBottomPx = (150 * density).toInt()
+            val minDistance = (10 * density).toInt()
+            dispatchUnhook = XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (simulatingSwipe) return
+                    if (param.thisObject !is LauncherUI) return
+                    val ev = param.args.getOrNull(0) as? MotionEvent ?: return
+                    when (ev.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            if (ev.rawY < topThreshold) {
+                                val inPlusArea = ev.rawX > metrics.widthPixels * 0.68f && ev.rawY < plusTopPx
+                                val inSearchRow = ev.rawY >= searchTopPx && ev.rawY <= searchBottomPx
+                                if (inPlusArea || inSearchRow) {
+                                    // 交互区放行，用 MOVE 兜底
+                                    swipeStartY = ev.rawY
+                                } else {
+                                    // 立即消费 DOWN，微信收不到按下事件，面板动画不会触发
+                                    param.result = true
+                                    WeLogger.i(TAG, "blocked main page pull-down (down)")
+                                }
+                            } else {
+                                swipeStartY = null
+                            }
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val startY = swipeStartY ?: return
+                            if (ev.rawY - startY > minDistance) {
+                                param.result = true
+                                swipeStartY = null
+                                WeLogger.i(TAG, "blocked main page pull-down (move)")
+                            }
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> swipeStartY = null
+                    }
+                }
+            })
+            WeLogger.i(TAG, "dispatchTouchEvent hooked, topThreshold=$topThreshold")
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "hook dispatchTouchEvent failed", e)
         }
     }
 
@@ -169,38 +239,46 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
                 WeLogger.d(TAG, "dexMethod trigger failed", e)
             }
 
-            // 方式3：模拟 dispatchTouchEvent 发送下拉手势
+            // 方式3：模拟 dispatchTouchEvent 发送下拉手势 (异步逐步发送, 不阻塞主线程)
             try {
                 val metrics = launcherUI.resources.displayMetrics
                 val startX = metrics.widthPixels / 2f
                 val startY = 0f
                 val endY = metrics.heightPixels / 3f
 
-                val downTime = android.os.SystemClock.uptimeMillis()
-                val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, startY, 0)
-                launcherUI.dispatchTouchEvent(downEvent)
-                downEvent.recycle()
+                val handler = Handler(Looper.getMainLooper())
+                val downTime = SystemClock.uptimeMillis()
+                simulatingSwipe = true
+                val steps = 12
+                val stepInterval = 20L
 
-                val moveSteps = 10
-                val moveDuration = 300L / moveSteps
-                for (i in 1..moveSteps) {
-                    val progress = i.toFloat() / moveSteps
-                    val currentY = startY + (endY - startY) * progress
-                    val moveTime = downTime + moveDuration * i
-                    val moveEvent = MotionEvent.obtain(downTime, moveTime, MotionEvent.ACTION_MOVE, startX, currentY, 0)
-                    launcherUI.dispatchTouchEvent(moveEvent)
-                    moveEvent.recycle()
-                    Thread.sleep(moveDuration)
+                handler.post {
+                    val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, startY, 0)
+                    launcherUI.dispatchTouchEvent(downEvent)
+                    downEvent.recycle()
                 }
+                for (i in 1..steps) {
+                    val progress = i.toFloat() / steps
+                    val currentY = startY + (endY - startY) * progress
+                    val delay = i * stepInterval
+                    handler.postDelayed({
+                        val moveEvent = MotionEvent.obtain(downTime, downTime + delay, MotionEvent.ACTION_MOVE, startX, currentY, 0)
+                        launcherUI.dispatchTouchEvent(moveEvent)
+                        moveEvent.recycle()
+                    }, delay)
+                }
+                handler.postDelayed({
+                    val upTime = downTime + steps * stepInterval + 40
+                    val upEvent = MotionEvent.obtain(downTime, upTime, MotionEvent.ACTION_UP, startX, endY, 0)
+                    launcherUI.dispatchTouchEvent(upEvent)
+                    upEvent.recycle()
+                    simulatingSwipe = false
+                }, steps * stepInterval + 40)
 
-                val upTime = downTime + 300
-                val upEvent = MotionEvent.obtain(downTime, upTime, MotionEvent.ACTION_UP, startX, endY, 0)
-                launcherUI.dispatchTouchEvent(upEvent)
-                upEvent.recycle()
-
-                WeLogger.i(TAG, "triggered via simulated touch event")
+                WeLogger.i(TAG, "triggered via simulated touch event (async)")
             } catch (e: Exception) {
-                WeLogger.e(TAG, "all trigger methods failed", e)
+                simulatingSwipe = false
+                WeLogger.e(TAG, "simulated touch failed", e)
             }
         } catch (e: Exception) {
             WeLogger.e(TAG, "triggerMiniProgramPanel failed", e)
