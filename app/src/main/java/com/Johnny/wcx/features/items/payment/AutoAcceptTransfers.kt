@@ -5,7 +5,20 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
@@ -15,20 +28,30 @@ import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.ContactsSelector
+import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
-import java.math.BigDecimal
-import java.math.RoundingMode
 import kotlin.concurrent.thread
+import kotlin.random.Random
 
 @Feature(name = "自动接收转账", categories = ["红包与支付"], description = "监听消息并自动接收转账")
 object AutoAcceptTransfers : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
     private const val TAG = "AutoAcceptTransfers"
+
+    private var transferNotif by WePrefs.prefOption("transfer_notification", false)
+    private var transferUseWhitelist by WePrefs.prefOption("transfer_use_whitelist", false)
+    private var transferWhitelist by WePrefs.prefOption("transfer_whitelist", emptySet())
+    private var transferBlacklist by WePrefs.prefOption("transfer_blacklist", emptySet())
+    private var transferDelayCustom by WePrefs.prefOption("transfer_delay_custom", "500")
+    private var transferDelayRandomRange by WePrefs.prefOption("transfer_delay_random_range", "300")
+    private var transferAutoReply by WePrefs.prefOption("transfer_auto_reply", "")
 
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
@@ -62,6 +85,13 @@ object AutoAcceptTransfers : ClickableFeature(), WeDatabaseListenerApi.IInsertLi
 
     private fun handleTransfer(values: ContentValues) {
         val talker = values.getAsString("talker") ?: ""
+
+        if (transferUseWhitelist) {
+            if (talker !in transferWhitelist) return
+        } else {
+            if (talker in transferBlacklist) return
+        }
+
         val content = values.getAsString("content") ?: return
 
         val subtype = parsePaySubtypeFromXml(content)
@@ -90,21 +120,24 @@ object AutoAcceptTransfers : ClickableFeature(), WeDatabaseListenerApi.IInsertLi
             return
         }
 
-        val rules = TransferSettings.resolve(talker, payerUsername)
-        val totalFeeCents = transferMsg.totalFee.takeIf { it > 0L }
-            ?: parseFeedescCents(transferMsg.feedesc)
-        if (rules.amountRange.enabled && totalFeeCents == null) {
-            WeLogger.w(TAG, "amount rule is enabled but transfer amount cannot be parsed; feedesc=${transferMsg.feedesc}")
-            return
-        }
-        if (!rules.accepts(totalFeeCents ?: 0L, transferMsg.payMemo)) return
+        val customDelay = transferDelayCustom.toLongOrNull() ?: 0L
+        val randomRange = (transferDelayRandomRange.toLongOrNull() ?: 300L).coerceAtLeast(0)
 
-        val delayTime = rules.delay.millis()
-        WeLogger.i(
-            TAG,
-            "matched transfer rules: talker=$talker, payer=$payerUsername, totalFee=$totalFeeCents, " +
-                    "feeType=${transferMsg.feeType}, delay=$delayTime"
-        )
+        WeLogger.i(TAG, "config: customDelay=$customDelay, randomRange=$randomRange")
+
+        val delayTime = if (randomRange > 0) {
+            val baseDelay = if (customDelay > 0) customDelay else 1000L
+            val randomOffset = Random.nextLong(-randomRange, randomRange)
+            val finalDelay = (baseDelay + randomOffset).coerceAtLeast(0)
+            WeLogger.i(
+                TAG,
+                "random delay mode: baseDelay=$baseDelay, randomOffset=$randomOffset, finalDelay=$finalDelay"
+            )
+            finalDelay
+        } else {
+            WeLogger.i(TAG, "fixed delay mode: finalDelay=$customDelay")
+            customDelay
+        }
 
         thread(name = "AcceptTransferThread") {
             try {
@@ -116,14 +149,12 @@ object AutoAcceptTransfers : ClickableFeature(), WeDatabaseListenerApi.IInsertLi
                 WePaymentApi.confirmTransfer(transferMsg.transactionId, transferMsg.transferId, payerUsername, transferMsg.invalidTime)
                 WeLogger.i(TAG, "called WePaymentApi.confirmTransfer")
 
-                if (rules.autoReply.enabled) {
-                    WeMessageApi.sendText(
-                        msgInfo.talker,
-                        rules.autoReply.text.replace($$"$amount", transferMsg.feedesc)
-                    )
+                val autoReply = transferAutoReply
+                if (autoReply.isNotBlank()) {
+                    WeMessageApi.sendText(msgInfo.talker, autoReply.replace($$"$amount", transferMsg.feedesc))
                 }
 
-                if (!rules.notification.enabled) return@thread
+                if (!transferNotif) return@thread
 
                 val displayName = WeDatabaseApi.getDisplayName(payerUsername)
 
@@ -137,17 +168,92 @@ object AutoAcceptTransfers : ClickableFeature(), WeDatabaseListenerApi.IInsertLi
     }
 
     override fun onClick(context: ComponentActivity) {
-        TransferSettings.showMainDialog(context)
-    }
+        showComposeDialog(context) {
+            var notification by remember { mutableStateOf(transferNotif) }
+            var delayInput by remember { mutableStateOf(transferDelayCustom) }
+            var useWhitelist by remember { mutableStateOf(transferUseWhitelist) }
+            var randomRangeInput by remember { mutableStateOf(transferDelayRandomRange) }
+            var autoReplyInput by remember { mutableStateOf(transferAutoReply) }
 
-    private fun parseFeedescCents(feedesc: String): Long? {
-        val amount = Regex("\\d+(?:\\.\\d{1,2})?").find(feedesc)?.value ?: return null
-        return runCatching {
-            BigDecimal(amount)
-                .movePointRight(2)
-                .setScale(0, RoundingMode.HALF_UP)
-                .longValueExact()
-        }.getOrNull()
+            AlertDialogContent(
+                title = { Text("自动接收转账") },
+                text = {
+                    DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                        ListItem(
+                            modifier = Modifier.clickable { useWhitelist = !useWhitelist },
+                            trailingContent = { Switch(checked = useWhitelist, onCheckedChange = { useWhitelist = it }) },
+                            supportingContent = { Text(if (useWhitelist) "仅对选中联系人接收转账" else "对选中联系人跳过接收转账") },
+                            headlineContent = { Text(if (useWhitelist) "黑名单 [> 白名单 <]" else "[> 黑名单 <] 白名单") },
+                        )
+                        ListItem(
+                            modifier = Modifier.clickable {
+                                val regularContacts = WeDatabaseApi.getFriends() + WeDatabaseApi.getGroups()
+                                val currentList = if (useWhitelist) transferWhitelist else transferBlacklist
+
+                                showComposeDialog(context) {
+                                    ContactsSelector(
+                                        title = if (useWhitelist) "选择白名单" else "选择黑名单",
+                                        contacts = regularContacts,
+                                        initialSelectedWxIds = currentList,
+                                        onDismiss = onDismiss
+                                    ) { selected ->
+                                        if (useWhitelist) {
+                                            transferWhitelist = selected
+                                        } else {
+                                            transferBlacklist = selected
+                                        }
+                                        showToast("已保存 ${selected.size} 个联系人")
+                                        onDismiss()
+                                    }
+                                }
+                            },
+                            supportingContent = { Text("点击选择联系人") },
+                            headlineContent = { Text(if (useWhitelist) "配置白名单" else "配置黑名单") },
+                        )
+                        ListItem(
+                            modifier = Modifier.clickable { notification = !notification },
+                            leadingContent = null,
+                            trailingContent = { Switch(checked = notification, onCheckedChange = { notification = it }) },
+                            supportingContent = { Text("使用 Toast 显示收到的金额") },
+                            headlineContent = { Text("接收后通知") },
+                        )
+                        TextField(
+                            value = delayInput,
+                            onValueChange = { delayInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("基础延迟 (毫秒)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                        )
+                        TextField(
+                            value = randomRangeInput,
+                            onValueChange = { randomRangeInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("随机偏移范围 (±毫秒)") },
+                            supportingText = { Text("在基础延迟上增加随机偏移, 防止风控, 设 0 固定使用基础延迟") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                        )
+                        TextField(
+                            value = autoReplyInput,
+                            onValueChange = { autoReplyInput = it.trim() },
+                            label = { Text("接收后自动回复 (留空禁用)") },
+                            supportingText = { Text($$"自动接收转账后向来源对话发送自定义消息\n(使用占位符 $amount 表示金额)") },
+                            singleLine = true,
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        transferNotif = notification
+                        transferDelayCustom = delayInput.ifBlank { "500" }
+                        transferUseWhitelist = useWhitelist
+                        transferDelayRandomRange = randomRangeInput.ifBlank { "300" }
+                        transferAutoReply = autoReplyInput
+                        onDismiss()
+                    }) { Text("确定") }
+                },
+                dismissButton = { TextButton(onDismiss) { Text("取消") } }
+            )
+        }
     }
 
     override fun onBeforeToggle(newState: Boolean, context: Context): Boolean {

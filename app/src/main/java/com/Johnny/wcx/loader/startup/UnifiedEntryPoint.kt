@@ -2,7 +2,6 @@ package com.Johnny.wcx.loader.startup
 
 import android.app.Application
 import android.content.Context
-import dalvik.system.InMemoryDexClassLoader
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.loader.abc.IHookBridge
@@ -22,15 +21,8 @@ object UnifiedEntryPoint {
         initialClassLoader: ClassLoader,
         modulePath: String
     ) {
-        StartupInfo.hookBridge = hookBridge
-
         val self = ClassLoaders.MODULE
         val selfParent = self.parent
-        if (self is InMemoryDexClassLoader) {
-            // The Zygisk payload's parent is the system loader. Keep the payload loader
-            // separately so HybridClassLoader can search its DEX without parent delegation.
-            HybridClassLoader.moduleClassLoader = self
-        }
         HybridClassLoader.moduleParentClassLoader = selfParent
         self.reflekt()
             .firstField { name = "parent"; superclass() }

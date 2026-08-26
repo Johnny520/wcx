@@ -179,11 +179,6 @@ object EdgeTtsClient : AutoCloseable {
                         // 二进制帧格式: [2字节大端长度][头部文本][音频数据]
                         val headerLength =
                             data[0].toInt() and 0xFF shl 8 or (data[1].toInt() and 0xFF)
-                        // 帧被截断/损坏时长度字段会越界, 直接跳过, 否则 String(...) 会抛越界异常。
-                        if (headerLength !in 0..(data.size - 2)) {
-                            WeLogger.w(TAG, "skipping malformed binary frame: headerLength=$headerLength size=${data.size}")
-                            continue
-                        }
                         val headers = parseHeaderBlock(
                             String(data, 2, headerLength, Charsets.UTF_8),
                         )
@@ -311,9 +306,8 @@ object EdgeTtsClient : AutoCloseable {
         var remaining = text
         while (remaining.size > byteLength) {
             var splitAt = findLastNewlineOrSpace(remaining, byteLength)
-            if (splitAt <= 0) {
-                // 限长内无换行/空格, 或唯一的空白恰好在第 0 字节 (断在 0 处不会有任何进展):
-                // 在 [0, byteLength] 内退到合法 UTF-8 边界。
+            if (splitAt < 0) {
+                // 限长内无换行/空格: 在 [0, byteLength] 内退到合法 UTF-8 边界。
                 splitAt = findSafeUtf8SplitPoint(remaining, byteLength)
             }
             splitAt = adjustSplitPointForXmlEntity(remaining, splitAt)
@@ -322,8 +316,7 @@ object EdgeTtsClient : AutoCloseable {
             }
             val chunk = remaining.copyOfRange(0, splitAt).trimAscii()
             if (chunk.isNotEmpty()) result.add(chunk)
-            // 断点处的空白留在了下一段开头, 先去掉, 否则下一轮的 findLastNewlineOrSpace 又会返回 0。
-            remaining = remaining.copyOfRange(splitAt, remaining.size).trimAsciiStart()
+            remaining = remaining.copyOfRange(splitAt, remaining.size)
         }
         val last = remaining.trimAscii()
         if (last.isNotEmpty()) result.add(last)
@@ -395,23 +388,15 @@ object EdgeTtsClient : AutoCloseable {
         return -1
     }
 
-    private fun isAsciiWhitespace(b: Byte): Boolean = b == ' '.code.toByte() ||
-            b == '\t'.code.toByte() || b == '\n'.code.toByte() || b == '\r'.code.toByte()
-
     /** 去掉两端 ASCII 空白 (空格/制表符/换行/回车), 对齐原库 bytes.strip()。 */
     private fun ByteArray.trimAscii(): ByteArray {
         var start = 0
         var end = size
-        while (start < end && isAsciiWhitespace(this[start])) start++
-        while (end > start && isAsciiWhitespace(this[end - 1])) end--
+        fun isWs(b: Byte): Boolean = b == ' '.code.toByte() || b == '\t'.code.toByte() ||
+                b == '\n'.code.toByte() || b == '\r'.code.toByte()
+        while (start < end && isWs(this[start])) start++
+        while (end > start && isWs(this[end - 1])) end--
         return copyOfRange(start, end)
-    }
-
-    /** 只去掉开头的 ASCII 空白, 对齐原库 bytes.lstrip()。 */
-    private fun ByteArray.trimAsciiStart(): ByteArray {
-        var start = 0
-        while (start < size && isAsciiWhitespace(this[start])) start++
-        return if (start == 0) this else copyOfRange(start, size)
     }
 
     private fun parseHeaderBlock(block: String): Map<String, String> =

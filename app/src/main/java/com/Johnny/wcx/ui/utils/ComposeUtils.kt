@@ -5,13 +5,14 @@ import android.content.Context
 import android.graphics.Color
 import android.view.View
 import android.view.Window
-import androidx.activity.ComponentDialog
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
@@ -30,10 +31,11 @@ fun showComposeDialog(
 ) {
     val context = CommonContextWrapper(context)
 
-    val dialog = ComponentDialog(
+    val dialog = Dialog(
         context,
         android.R.style.Theme_DeviceDefault_Light_Dialog_NoActionBar_MinWidth
     )
+    val lifecycleOwner = XposedLifecycleOwner.create()
 
     dialog.apply {
         window!!.apply {
@@ -47,13 +49,24 @@ fun showComposeDialog(
 
         setContentView(
             ComposeView(context).apply {
+                setLifecycleOwner(lifecycleOwner)
+
+                // Disable view state saving to prevent NotSerializableException.
+                // Dialogs shown via showComposeDialog are ephemeral and don't need
+                // state restoration. When the host Activity's onSaveInstanceState
+                // fires, the ComposeView would try to serialize its SavedStateRegistry
+                // which may contain non-serializable Compose internal objects.
+                isSaveEnabled = false
+
                 setContent {
-                    ModuleTheme {
-                        Box(
-                            modifier = Modifier.wrapContentSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            scope.content()
+                    CompositionLocalProvider(LocalContext provides context) {
+                        ModuleTheme {
+                            Box(
+                                modifier = Modifier.wrapContentSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                scope.content()
+                            }
                         }
                     }
                 }
@@ -61,6 +74,7 @@ fun showComposeDialog(
         )
 
         window!!.setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
+        setOnDismissListener { lifecycleOwner.onDestroy() }
         show()
     }
 }

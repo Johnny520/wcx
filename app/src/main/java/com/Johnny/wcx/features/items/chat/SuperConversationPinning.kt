@@ -1,6 +1,8 @@
 package com.Johnny.wcx.features.items.chat
 
 import android.content.Context
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Slider
@@ -10,13 +12,17 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
+import com.Johnny.wcx.dexkit.dsl.data
 import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
 import com.Johnny.wcx.features.api.ui.WeConversationContextMenuApi
 import com.Johnny.wcx.features.core.Feature
+
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
@@ -92,7 +98,7 @@ object SuperConversationPinning : SwitchFeature(),
     override fun getMenuItems(): List<WeConversationContextMenuApi.MenuItem> = listOf(
         WeConversationContextMenuApi.MenuItem(
             id = MENU_ITEM_ID,
-            text = "设置优先级",
+            text = ("设置优先级"),
             drawable = EditIcon,
             shouldShow = { context, _ -> context.talker.isNotEmpty() },
             onClick = { context -> showPriorityDialog(context.activity, context.talker) }
@@ -120,14 +126,14 @@ object SuperConversationPinning : SwitchFeature(),
                 title = { Text("设置优先级") },
                 text = {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Text("置顶优先级: $priority")
+                        Text("置顶优先级：".format(priority))
                         Slider(
                             value = priority.toFloat(),
                             onValueChange = { priority = it.toInt() },
                             valueRange = 0f..10f,
-                            steps = 11
+                            steps = 9
                         )
-                        Text("优先级越高, 在同一置顶状态内越靠前。0 为微信默认排序。")
+                        Text("优先级越高，在同一置顶状态内越靠前。0 为微信默认排序。")
                     }
                 },
                 dismissButton = { TextButton(onDismiss) { Text("取消") } },
@@ -192,7 +198,7 @@ object SuperConversationPinning : SwitchFeature(),
             }
 
             addField {
-                type(classConversation.clazz)
+                type(classConversation.data.name)
             }
         }
     }
@@ -261,7 +267,7 @@ object SuperConversationPinning : SwitchFeature(),
     }
 
     private fun loadPriorities(): Map<String, Int> = runCatching {
-        DefaultJson.decodeFromString<Map<String, Int>>(storedPriorities)
+        DefaultJson.decodeFromString(MapSerializer(String.serializer(), Int.serializer()), storedPriorities)
             .filter { (talker, priority) -> talker.isNotBlank() && priority in 1..10 }
     }.getOrDefault(emptyMap())
 

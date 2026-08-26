@@ -1,0 +1,282 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+<plurals name="sticker_telegram_batch_result">
+        <item quantity="other">已导入 %1$d 个 Telegram 表情包，%2$d 个失败；%3$s：%4$s</item>
+    </plurals>
+<plurals name="sticker_telegram_import_result">
+        <item quantity="other">已导入 %1$d 个表情到“%2$s”，%3$d 个无需更新，%4$d 个失败</item>
+    </plurals>
+<plurals name="panel_concurrency_summary">
+        <item quantity="other">同时运行 %1$d 个任务 · 点击修改</item>
+    </plurals>
+<plurals name="sticker_count">
+        <item quantity="other">%1$d 个表情</item>
+    </plurals>
+<plurals name="sticker_panel_delete_selected_message">
+        <item quantity="other">从本地表情包中删除选中的 %1$d 个表情？</item>
+    </plurals>
+<plurals name="sticker_panel_upload_pack_message">
+        <item quantity="other">将“%1$s”中的 %2$d 个表情上传到 FunBox？</item>
+    </plurals>
+<plurals name="sticker_sent_count">
+        <item quantity="other">已发送 %1$d 次</item>
+    </plurals>
+<plurals name="voice_count">
+        <item quantity="other">%1$d 条语音</item>
+    </plurals>
+<plurals name="voice_sent_count">
+        <item quantity="other">已发送 %1$d 次</item>
+    </plurals>
+<plurals name="voice_panel_delete_selected_message">
+        <item quantity="other">从本地语音包中删除选中的 %1$d 条语音？</item>
+    </plurals>
+<plurals name="chat_batch_revoke_result">
+        <item quantity="other">已撤回 %1$d/%2$d 条消息</item>
+    </plurals>
+<plurals name="chat_stickers_saved_locally">
+        <item quantity="other">已保存 %1$d/%2$d 条贴纸到本地</item>
+    </plurals>
+<plurals name="chat_voices_saved_locally">
+        <item quantity="other">已保存 %1$d/%2$d 条语音到本地</item>
+    </plurals>
+<plurals name="chat_auto_cache_contacts_saved">
+        <item quantity="other">已保存 %1$d 个联系人，重启微信以使更改生效</item>
+    </plurals>
+<plurals name="chat_forwarded_to_recipients">
+        <item quantity="other">已转发到 %1$d 个对象</item>
+    </plurals>
+<plurals name="chat_forwarded_partial_recipients">
+        <item quantity="other">已转发 %1$d/%2$d 个对象</item>
+    </plurals>
+<plurals name="chat_forwarding_messages">
+        <item quantity="other">正在转发 %1$d 条消息到 %2$d 个对象…</item>
+    </plurals>
+<plurals name="chat_forwarded_partial_messages">
+        <item quantity="other">已转发 %1$d/%2$d 条（部分失败）</item>
+    </plurals>
+<plurals name="chat_emoji_game_sent_count">
+        <item quantity="other">已发送 %1$d 次</item>
+    </plurals>
+<plurals name="chat_save_to_panel_sticker_count">
+        <item quantity="other">%1$d 张表情</item>
+    </plurals>
+<plurals name="chat_save_to_panel_voice_count">
+        <item quantity="other">%1$d 条语音</item>
+    </plurals>
+<plurals name="chat_save_to_panel_messages_result">
+        <item quantity="other">已保存 %1$d/%2$d 条消息到面板</item>
+    </plurals>
+<plurals name="chat_save_to_panel_stickers_result">
+        <item quantity="other">已保存 %1$d/%2$d 张贴纸到「%3$s」</item>
+    </plurals>
+<plurals name="chat_save_to_panel_voices_result">
+        <item quantity="other">已保存 %1$d/%2$d 条语音到「%3$s」</item>
+    </plurals>
+<plurals name="chat_sticker_manager_exported">
+        <item quantity="other">已保存 %1$d 张贴纸到 %2$s</item>
+    </plurals>
+<plurals name="mention_members_message_count">
+        <item quantity="other">你@了 %1$d 个人</item>
+    </plurals>
+<plurals name="chat_auto_reply_group_overridden_count">
+        <item quantity="other">群聊设置 · 已覆盖 %1$d 项</item>
+    </plurals>
+<plurals name="chat_auto_reply_overridden_count">
+        <item quantity="other">已覆盖 %1$d 项</item>
+    </plurals>
+<plurals name="chat_auto_reply_configured_member_count">
+        <item quantity="other">已配置 %1$d 个成员</item>
+    </plurals>
+<plurals name="chat_auto_reply_task_count_summary">
+        <item quantity="other">长按拖动手柄调整顺序 · %1$d 个任务</item>
+    </plurals>
+<plurals name="chat_auto_reply_keyword_list_summary">
+        <item quantity="other">匹配字符串列表中的任意一项（%1$d）</item>
+    </plurals>
+<plurals name="chat_auto_reply_keyword_exact_summary">
+        <item quantity="other">完全匹配字符串列表中的任意一项（%1$d）</item>
+    </plurals>
+<plurals name="chat_message_time_days_ago">
+        <item quantity="other">%1$d 天前</item>
+    </plurals>
+<plurals name="chat_message_time_minutes_ago">
+        <item quantity="other">%1$d 分钟前</item>
+    </plurals>
+<plurals name="chat_message_time_hours_ago">
+        <item quantity="other">%1$d 小时前</item>
+    </plurals>
+<plurals name="chat_message_time_mentioned_people">
+        <item quantity="other">@%1$d 人</item>
+    </plurals>
+<plurals name="chat_real_name_bruteforce_aborted">
+        <item quantity="other">已终止（尝试了 %1$d 个）</item>
+    </plurals>
+<plurals name="chat_real_name_bruteforce_paused">
+        <item quantity="other">已暂停（触发风控，尝试了 %1$d 个）。进度已保存，下次打开将从“%2$s”继续。</item>
+    </plurals>
+<plurals name="chat_fabricate_record_loaded_count">
+        <item quantity="other">已从剪贴板加载 %1$d 条消息</item>
+    </plurals>
+<plurals name="chat_aggregation_manual_conversation_count">
+        <item quantity="other">手动选择：%1$d 个对话</item>
+    </plurals>
+<plurals name="chat_aggregation_groups_conversation_count">
+        <item quantity="other">所有群聊：%1$d 个对话</item>
+    </plurals>
+<plurals name="chat_aggregation_officials_conversation_count">
+        <item quantity="other">所有公众号：%1$d 个对话</item>
+    </plurals>
+<plurals name="chat_aggregation_sql_conversation_count">
+        <item quantity="other">SQL 规则：%1$d 个对话</item>
+    </plurals>
+<plurals name="chat_aggregation_selected_count">
+        <item quantity="other">已选择 %1$d 个对话</item>
+    </plurals>
+<plurals name="chat_aggregation_auto_groups_count">
+        <item quantity="other">自动归拢所有群聊（当前匹配到 %1$d 个对话）</item>
+    </plurals>
+<plurals name="chat_aggregation_auto_officials_count">
+        <item quantity="other">自动归拢所有公众号（当前匹配到 %1$d 个对话）</item>
+    </plurals>
+<plurals name="chat_aggregation_current_match_count">
+        <item quantity="other">当前匹配到 %1$d 个对话</item>
+    </plurals>
+<plurals name="chat_voice_import_partial_failed">
+        <item quantity="other">已导入 %1$d 个语音文件，%2$d 个失败；%3$s：%4$s</item>
+    </plurals>
+<plurals name="chat_sticker_import_partial_failed">
+        <item quantity="other">已导入 %1$d 张图片，%2$d 个失败；%3$s：%4$s</item>
+    </plurals>
+<plurals name="chat_wechat_sticker_import_result">
+        <item quantity="other">已更新「%1$s」：新增 %2$d 个，%3$d 个无需更新，%4$d 个失败</item>
+    </plurals>
+<plurals name="batch_add_label_done">
+        <item quantity="other">已为 %1$d/%2$d 位好友添加标签“%3$s”</item>
+    </plurals>
+<plurals name="batch_add_label_progress">
+        <item quantity="other">正在添加标签“%1$s”，请稍等…\n已完成：%2$d/%3$d</item>
+    </plurals>
+<plurals name="batch_delete_friends_confirm_message">
+        <item quantity="other">确定要删除选中的 %1$d 位好友吗？此操作不可逆！可选择同时将其拉黑。</item>
+    </plurals>
+<plurals name="batch_delete_friends_progress">
+        <item quantity="other">正在删除 %1$d 位好友…</item>
+    </plurals>
+<plurals name="batch_delete_friends_done">
+        <item quantity="other">已删除 %1$d 位好友</item>
+    </plurals>
+<plurals name="batch_delete_friends_partial">
+        <item quantity="other">已删除 %1$d/%2$d 位好友</item>
+    </plurals>
+<plurals name="batch_delete_history_confirm">
+        <item quantity="other">确定要删除选中的 %1$d 个对话的全部聊天记录吗？此操作不可逆！</item>
+    </plurals>
+<plurals name="batch_delete_history_progress">
+        <item quantity="other">正在删除 %1$d 个对话的聊天记录…</item>
+    </plurals>
+<plurals name="batch_delete_history_done">
+        <item quantity="other">已删除 %1$d 个对话的聊天记录（共 %2$d 条消息）</item>
+    </plurals>
+<plurals name="batch_hide_conversations_confirm">
+        <item quantity="other">确定要从对话列表移除选中的 %1$d 个对话吗？聊天记录将保留，重新收到消息时对话会再次出现。</item>
+    </plurals>
+<plurals name="batch_hide_conversations_done">
+        <item quantity="other">已隐藏 %1$d/%2$d 个对话</item>
+    </plurals>
+<plurals name="batch_mark_read_done">
+        <item quantity="other">已将 %1$d 个对话标为已读</item>
+    </plurals>
+<plurals name="batch_mute_progress">
+        <item quantity="other">正在对 %1$d 个对话设置免打扰…</item>
+    </plurals>
+<plurals name="batch_mute_enabled">
+        <item quantity="other">已对 %1$d 个对话开启免打扰</item>
+    </plurals>
+<plurals name="batch_mute_disabled">
+        <item quantity="other">已对 %1$d 个对话关闭免打扰</item>
+    </plurals>
+<plurals name="batch_mass_send_progress">
+        <item quantity="other">正在群发到 %1$d 个对象…</item>
+    </plurals>
+<plurals name="batch_mass_send_done">
+        <item quantity="other">已群发到 %1$d 个对象</item>
+    </plurals>
+<plurals name="batch_mass_send_partial">
+        <item quantity="other">已群发到 %1$d/%2$d 个对象</item>
+    </plurals>
+<plurals name="contacts_delete_fake_select_title">
+        <item quantity="other">删除假群组（共 %1$d 个）</item>
+    </plurals>
+<plurals name="contacts_delete_fake_confirm_message">
+        <item quantity="other">确定要删除选中的 %1$d 个假群组吗？此操作不可逆，原群不受影响。</item>
+    </plurals>
+<plurals name="contacts_delete_fake_done">
+        <item quantity="other">已清除 %1$d 个假群组</item>
+    </plurals>
+<plurals name="contacts_detect_delete_done">
+        <item quantity="other">删除完成：成功 %1$d，失败 %2$d</item>
+    </plurals>
+<plurals name="contacts_detect_scanning">
+        <item quantity="other">正在扫描，请稍等…\n已完成：%1$d/%2$d</item>
+    </plurals>
+<plurals name="contacts_detect_scan_done">
+        <item quantity="other">扫描完成，有 %1$d 个状态异常的好友</item>
+    </plurals>
+<plurals name="contacts_detect_confirm_delete">
+        <item quantity="other">确定要删除选中的 %1$d 个好友吗？\n此操作不可逆，删除后聊天记录将被清除，需对方重新添加。</item>
+    </plurals>
+<plurals name="contacts_detect_deleting">
+        <item quantity="other">正在删除好友，请稍等…\n已完成：%1$d/%2$d</item>
+    </plurals>
+<plurals name="contacts_detect_select_label">
+        <item quantity="other">选择一个标签，将应用到全部 %1$d 个异常好友</item>
+    </plurals>
+<plurals name="contacts_detect_marking">
+        <item quantity="other">正在标记为“%1$s”，请稍等…\n已完成：%2$d/%3$d</item>
+    </plurals>
+<plurals name="contacts_hide_saved">
+        <item quantity="other">已保存 %1$d 个联系人</item>
+    </plurals>
+<plurals name="contacts_schedule_dropped">
+        <item quantity="other">%1$d 个单次定时在编辑期间已触发并自动删除，对它们的修改未保存</item>
+    </plurals>
+<plurals name="contacts_split_call_done_cleaned">
+        <item quantity="other">任务结束：成功 %1$d 次，失败 %2$d 次，已自动清理 %3$d 个假群</item>
+    </plurals>
+<plurals name="contacts_split_call_done_cleanup_failed">
+        <item quantity="other">任务结束：成功 %1$d 次，失败 %2$d 次，自动清理 %3$d 个假群失败</item>
+    </plurals>
+<plurals name="moments_fake_likes_set_count">
+        <item quantity="other">已设置 %1$d 个伪点赞</item>
+    </plurals>
+<plurals name="moments_fake_likes_random_set_count">
+        <item quantity="other">已随机设置 %1$d 个伪点赞</item>
+    </plurals>
+<plurals name="moments_automation_overridden_count">
+        <item quantity="other">已覆盖 %1$d 项</item>
+    </plurals>
+<plurals name="moments_automation_selected_type_count">
+        <item quantity="other">已选择 %1$d 种类型</item>
+    </plurals>
+<plurals name="automation_keyword_contains_summary">
+        <item quantity="other">匹配字符串列表中的任意一项 (%1$d)</item>
+    </plurals>
+<plurals name="automation_keyword_exact_summary">
+        <item quantity="other">完全匹配字符串列表中的任意一项 (%1$d)</item>
+    </plurals>
+<plurals name="automation_overrides">
+        <item quantity="other">已覆盖 %1$d 项</item>
+    </plurals>
+<plurals name="automation_group_overrides">
+        <item quantity="other">群聊设置 - 已覆盖 %1$d 项</item>
+    </plurals>
+<plurals name="automation_configured_members">
+        <item quantity="other">已配置 %1$d 个成员</item>
+    </plurals>
+<plurals name="debug_send_packet_byte_count">
+        <item quantity="other">%1$d 字节</item>
+    </plurals>
+<plurals name="noncompose_message_menu_selected_title">
+        <item quantity="other">WeKit（%1$d 条消息）</item>
+    </plurals>
+</resources>

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -23,13 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.composables.icons.materialsymbols.MaterialSymbols
-import com.composables.icons.materialsymbols.outlined.Visibility
-import com.composables.icons.materialsymbols.outlined.Visibility_off
 import com.Johnny.wcx.agent.data.WeAgentRepository
 import com.Johnny.wcx.agent.data.entity.ModelEntity
 import com.Johnny.wcx.agent.data.entity.ModelProviderEntity
@@ -40,8 +33,6 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -59,13 +50,12 @@ fun ModelProviderDetailScreen(providerId: String, onBack: () -> Unit) {
     var provider by remember { mutableStateOf<ModelProviderEntity?>(null) }
 
     // Connection fields are hoisted to screen scope so both "保存" and "自动导入模型" read the live,
-    // possibly-unsaved values. The API key field holds the key exactly as stored — there is no
-    // encryption anywhere in the pipeline, so nothing has to be encoded/decoded around it.
+    // possibly-unsaved values (no API-key encryption exists, so no round-trip is needed).
     var name by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     LaunchedEffect(providerId) {
-        val fresh = WeAgentRepository.getModelProvider(providerId)
+        val fresh = WeAgentRepository.getDecryptedModelProvider(providerId)
         provider = fresh
         if (fresh != null) {
             name = fresh.name; baseUrl = fresh.baseUrl; apiKey = fresh.apiKey
@@ -78,8 +68,6 @@ fun ModelProviderDetailScreen(providerId: String, onBack: () -> Unit) {
     // Auto-import state: fetched ids to pick from, plus loading/error.
     var importCandidates by remember { mutableStateOf<List<String>?>(null) }
     var importing by remember { mutableStateOf(false) }
-    // API keys are stored in the clear, so at least don't render them in the clear.
-    var showApiKey by remember { mutableStateOf(false) }
 
     val p = provider
 
@@ -97,24 +85,7 @@ fun ModelProviderDetailScreen(providerId: String, onBack: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     TextField(value = baseUrl, onValueChange = { baseUrl = it }, label = "Base URL", useLabelAsPlaceholder = true, singleLine = true)
                     Spacer(Modifier.height(8.dp))
-                    TextField(
-                        value = apiKey,
-                        onValueChange = { apiKey = it },
-                        label = "API Key",
-                        useLabelAsPlaceholder = true,
-                        singleLine = true,
-                        visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        trailingIcon = {
-                            IconButton(onClick = { showApiKey = !showApiKey }) {
-                                Icon(
-                                    imageVector = if (showApiKey) MaterialSymbols.Outlined.Visibility_off
-                                    else MaterialSymbols.Outlined.Visibility,
-                                    contentDescription = if (showApiKey) "隐藏" else "显示",
-                                )
-                            }
-                        },
-                    )
+                    TextField(value = apiKey, onValueChange = { apiKey = it }, label = "API Key", useLabelAsPlaceholder = true, singleLine = true)
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth()) {
                         TextButton(
@@ -127,12 +98,8 @@ fun ModelProviderDetailScreen(providerId: String, onBack: () -> Unit) {
                             text = "保存",
                             onClick = {
                                 scope.launch {
-                                    val updated = p.copy(name = name, baseUrl = baseUrl, apiKey = apiKey)
-                                    WeAgentRepository.upsertModelProvider(updated)
+                                    WeAgentRepository.upsertModelProvider(p.copy(name = name, baseUrl = baseUrl, apiKey = apiKey))
                                     ModelProviderManager.invalidate(p.id)
-                                    // Keep the local copy in sync so the scaffold title reflects a rename
-                                    // (LaunchedEffect(providerId) only runs once, on first composition).
-                                    provider = updated
                                 }
                             },
                             colors = ButtonDefaults.textButtonColorsPrimary(),
@@ -252,12 +219,8 @@ private fun ImportModelsDialog(
     onDismiss: () -> Unit,
     onImport: (List<String>) -> Unit,
 ) {
-    // Pre-select every not-yet-added id. Keyed on [candidates] because the dialog is composed
-    // unconditionally: on first composition nothing has been fetched yet, so an unkeyed remember
-    // would freeze an empty selection (and carry the previous run's ticks into the next import).
-    val selected = remember(candidates) {
-        mutableStateListOf<String>().apply { addAll(candidates.filter { it !in existingRemoteIds }) }
-    }
+    // Pre-select every not-yet-added id.
+    val selected = remember { mutableStateListOf<String>().apply { addAll(candidates.filter { it !in existingRemoteIds }) } }
 
     WindowDialog(show = show, title = "导入模型（${candidates.size}）", onDismissRequest = onDismiss) {
         Column {
@@ -310,16 +273,13 @@ private fun ModelDialog(
     onDelete: (() -> Unit)?,
     onSave: (remoteId: String, display: String, effort: String?, customJson: String?, contextWindow: Int?, maxTokens: Int?, supportsVision: Boolean) -> Unit,
 ) {
-    // Every field is keyed on [existing] (and [show]): the dialog is composed unconditionally, with a
-    // blank placeholder entity while nothing is being edited, so unkeyed state would capture those
-    // blanks and 保存 would then overwrite the stored model's whole config with them.
-    var remoteId by remember(existing, show) { mutableStateOf(existing.modelIdRemote) }
-    var display by remember(existing, show) { mutableStateOf(existing.displayName) }
-    var customJson by remember(existing, show) { mutableStateOf(existing.customJsonOverride.orEmpty()) }
-    var contextWindow by remember(existing, show) { mutableStateOf(existing.contextWindow?.toString().orEmpty()) }
-    var maxTokens by remember(existing, show) { mutableStateOf(existing.maxTokens?.toString().orEmpty()) }
-    var supportsVision by remember(existing, show) { mutableStateOf(existing.supportsVision) }
-    var effortIndex by remember(existing, show) { mutableIntStateOf(EFFORT_GEARS.indexOf(existing.reasoningEffort ?: "off").coerceAtLeast(0)) }
+    var remoteId by remember { mutableStateOf(existing.modelIdRemote) }
+    var display by remember { mutableStateOf(existing.displayName) }
+    var customJson by remember { mutableStateOf(existing.customJsonOverride.orEmpty()) }
+    var contextWindow by remember { mutableStateOf(existing.contextWindow?.toString().orEmpty()) }
+    var maxTokens by remember { mutableStateOf(existing.maxTokens?.toString().orEmpty()) }
+    var supportsVision by remember { mutableStateOf(existing.supportsVision) }
+    var effortIndex by remember { mutableIntStateOf(EFFORT_GEARS.indexOf(existing.reasoningEffort ?: "off").coerceAtLeast(0)) }
 
     WindowDialog(show = show, title = if (existing.id.isEmpty()) "添加模型" else "编辑模型", onDismissRequest = onDismiss) {
         Column {

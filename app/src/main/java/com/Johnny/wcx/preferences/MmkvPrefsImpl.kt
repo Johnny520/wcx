@@ -96,7 +96,12 @@ class MmkvPrefsImpl(name: String) : WePrefs() {
                 ObjectOutputStream(outputStream).writeObject(obj)
                 mmkvInstance.putBytes(key, outputStream.toByteArray())
                 mmkvInstance.putInt(key + TYPE_SUFFIX, TYPE_SERIALIZABLE)
-            }.onFailure { throw RuntimeException(it) }
+            }.onFailure {
+                // Never throw — serialization failures (e.g. nested non-Serializable
+                // lambdas/states captured by data classes) must not crash the host.
+                // Log and fall through silently so the UI keeps working.
+                WeLogger.e("MmkvPrefsImpl", "failed to serialize object for key=$key", it)
+            }
 
             else -> throw IllegalArgumentException("unsupported type ${obj::class}")
         }

@@ -6,6 +6,7 @@ import android.content.ContentValues
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.serialization.NativeXmlParser
 import com.Johnny.wcx.utils.serialization.XmlObject
 import com.Johnny.wcx.utils.serialization.asInt
@@ -26,10 +27,8 @@ class MessageInfo(val instance: Any) {
     val serverId by lazy { getFieldByName<Long>(instance, "field_msgSvrId") }
     val isSend by lazy { getFieldByName<Int>(instance, "field_isSend") }
     val createTime by lazy { getFieldByName<Long>(instance, "field_createTime") }
-    // field_talker / field_content 均由 `cursor.getString()` 或 `contentValues.getAsString()` 填充,
-    // 微信在缺失时会留 null, 故此处降级为空串而非抛 NPE
-    val talker by lazy { getFieldByName<String?>(instance, "field_talker").orEmpty() }
-    val content by lazy { getFieldByName<String?>(instance, "field_content").orEmpty() }
+    val talker by lazy { getFieldByName<String>(instance, "field_talker") }
+    val content by lazy { getFieldByName<String>(instance, "field_content") }
 
     val actualContent: String
         get() {
@@ -65,13 +64,12 @@ class MessageInfo(val instance: Any) {
         }
 
     val imagePath by lazy { getFieldByName<String?>(instance, "field_imgPath") }
-    /** 微信在没有该列 (或 ContentValues 中无 `lvbuffer` 键) 时会留 null, 因此必须可空 */
-    val lvBuffer by lazy { getFieldByName<ByteArray?>(instance, "field_lvbuffer") }
+    val lvBuffer by lazy { getFieldByName<ByteArray>(instance, "field_lvbuffer") }
     val talkerId by lazy { getFieldByName<Int>(instance, "field_talkerId") }
     val seq by lazy { getFieldByName<Long>(instance, "field_msgSeq") }
 
     val msgSource: String by lazy {
-        val buffer = lvBuffer ?: return@lazy ""
+        val buffer = lvBuffer
         if (buffer.isEmpty()) return@lazy ""
         if (buffer[0] != '{'.code.toByte() || buffer.last() != '}'.code.toByte()) return@lazy ""
 
@@ -266,15 +264,6 @@ class MessageInfo(val instance: Any) {
         val receiverUsername by lazy { xml.getByPath("msg.appmsg.wcpayinfo.receiver_username")!!.asString }
         val invalidTime by lazy { xml.getByPath("msg.appmsg.wcpayinfo.invalidtime")!!.asString.toInt() }
         val feedesc by lazy { xml.getByPath("msg.appmsg.wcpayinfo.feedesc")!!.asString }
-        val totalFee by lazy {
-            xml.getByPath("msg.appmsg.wcpayinfo.total_fee")?.asString?.toLongOrNull() ?: 0L
-        }
-        val feeType by lazy {
-            xml.getByPath("msg.appmsg.wcpayinfo.fee_type")?.asString.orEmpty()
-        }
-        val payMemo by lazy {
-            xml.getByPath("msg.appmsg.wcpayinfo.pay_memo")?.asString.orEmpty()
-        }
     }
 
     companion object {

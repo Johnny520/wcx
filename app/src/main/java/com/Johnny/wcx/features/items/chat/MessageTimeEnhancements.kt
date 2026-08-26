@@ -37,6 +37,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.core.view.isVisible
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
@@ -47,9 +48,7 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
-import com.Johnny.wcx.ui.content.WeColorField
 import com.Johnny.wcx.ui.utils.showComposeDialog
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.android.isDarkMode
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.formatEpoch
@@ -140,7 +139,7 @@ object MessageTimeEnhancements : ClickableFeature(),
 
     @SuppressLint("SetTextI18n")
     override fun onCreateView(
-        param: HookParam,
+        param: XC_MethodHook.MethodHookParam,
         view: View
     ) {
         val tag = view.tag ?: return
@@ -312,17 +311,17 @@ object MessageTimeEnhancements : ClickableFeature(),
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        WeColorField(
+                        TextField(
                             value = textColorLightInput,
                             onValueChange = { textColorLightInput = it },
-                            label = "字体颜色 (亮色模式)",
+                            label = { Text("字体颜色 (亮色模式)") },
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        WeColorField(
+                        TextField(
                             value = textColorDarkInput,
                             onValueChange = { textColorDarkInput = it },
-                            label = "字体颜色 (暗色模式)",
+                            label = { Text("字体颜色 (暗色模式)") },
                             modifier = Modifier.fillMaxWidth()
                         )
 

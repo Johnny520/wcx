@@ -12,9 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -42,27 +39,16 @@ object McpClientManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // providerId -> live provider
-    private val providerMap = ConcurrentHashMap<String, McpToolProvider>()
+    private val providers = ConcurrentHashMap<String, McpToolProvider>()
 
     // providerId -> its reconnect loop job
     private val reconnectJobs = ConcurrentHashMap<String, Job>()
-
-    /**
-     * The live provider set, observable so the settings UI recomposes when a server is added or
-     * removed. Each provider's own connection state / tools live in [McpToolProvider.status].
-     */
-    private val _providers = MutableStateFlow<List<McpToolProvider>>(emptyList())
-    val providers: StateFlow<List<McpToolProvider>> = _providers.asStateFlow()
-
-    private fun publishProviders() {
-        _providers.value = providerMap.values.toList()
-    }
 
     /** Called when the connected-provider set changes, so the caller can refresh the tool registry. */
     @Volatile
     var onProvidersChanged: (() -> Unit)? = null
 
-    fun connectedProviders(): List<McpToolProvider> = _providers.value
+    fun connectedProviders(): List<McpToolProvider> = providers.values.toList()
 
     /**
      * Reconciles the live provider set against the enabled MCP rows in Room. New enabled servers get
@@ -76,16 +62,15 @@ object McpClientManager {
         val wantedIds = rows.map { it.id }.toSet()
 
         // Tear down removed/disabled providers.
-        providerMap.keys.filter { it !in wantedIds }.forEach { removeProvider(it) }
+        providers.keys.filter { it !in wantedIds }.forEach { removeProvider(it) }
 
         // Add/keep wanted ones.
         for (row in rows) {
-            if (providerMap.containsKey(row.id)) continue
+            if (providers.containsKey(row.id)) continue
             val provider = build(row) ?: continue
-            providerMap[row.id] = provider
+            providers[row.id] = provider
             startReconnectLoop(provider)
         }
-        publishProviders()
         onProvidersChanged?.invoke()
     }
 
@@ -135,26 +120,12 @@ object McpClientManager {
 
     private fun removeProvider(id: String) {
         reconnectJobs.remove(id)?.cancel()
-        providerMap.remove(id)?.let { p -> scope.launch { p.disconnect() } }
-        publishProviders()
+        providers.remove(id)?.let { p -> scope.launch { p.disconnect() } }
     }
 
-    /**
-     * Manually re-fetch a server's tools/list (§4 "refresh tools"). A server that isn't connected is
-     * connected first, so the button also works as "retry now" instead of silently no-op'ing while
-     * the backoff loop sleeps. Both paths publish to [McpToolProvider.status], so the UI follows.
-     */
-    suspend fun refreshTools(providerId: String): Boolean {
-        val provider = providerMap[providerId] ?: return false
-        if (provider.state != McpConnectionState.CONNECTED) {
-            provider.connect()
-            if (provider.state != McpConnectionState.CONNECTED) return false
-            seedPermissions(provider)
-            onProvidersChanged?.invoke()
-            return true // connect() already refreshed tools/list
-        }
-        return provider.refreshTools().also { onProvidersChanged?.invoke() }
-    }
+    /** Manually re-fetch a server's tools/list (§4 "refresh tools"). */
+    suspend fun refreshTools(providerId: String): Boolean =
+        providers[providerId]?.refreshTools()?.also { onProvidersChanged?.invoke() } ?: false
 
     private fun parseHeaders(headersJson: String?): Map<String, String> {
         if (headersJson.isNullOrBlank()) return emptyMap()

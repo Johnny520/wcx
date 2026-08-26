@@ -1,9 +1,10 @@
 package com.Johnny.wcx.features.api.ui
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.drawable.Drawable
 import android.view.View
-import android.widget.PopupWindow
+import java.lang.ref.WeakReference
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -33,8 +34,8 @@ import com.Johnny.wcx.ui.utils.ExtensionIcon
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
-import java.lang.ref.WeakReference
 
+@SuppressLint("StaticFieldLeak")
 @Feature(name = "聊天界面消息菜单扩展", categories = ["API"], description = "为聊天界面消息长按菜单提供添加菜单项功能")
 object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
 
@@ -124,40 +125,6 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    // 只弱引用被长按的聊天条目 View：菜单被返回键取消时不会触发选中回调，
-    // 强引用会一路把 View → parent → ChattingUI 留到进程结束
-    private var currentViewRef: WeakReference<View>? = null
-
-    // 用返回键/点外部关掉菜单时不会走选中回调，所以还要在菜单关闭时把记录清掉。
-    // 建菜单的对象持有长按监听器，长按监听器上有一个声明类型正好是
-    // PopupWindow.OnDismissListener 的字段，所有关闭路径最终都汇聚到它的 onDismiss()。
-    // 这是 Method 级别的 Hook，覆盖全部实例，因此只注册一次。
-    private var menuDismissHooked = false
-
-    private fun hookMenuDismissOnce(menuBuilder: Any) {
-        if (menuDismissHooked) return
-
-        val longClickListener = menuBuilder.reflekt()
-            .firstFieldOrNull {
-                type {
-                    it isSubclassOf View.OnLongClickListener::class
-                }
-            }
-            ?.get() ?: return
-        val dismissListener = longClickListener.reflekt()
-            .firstFieldOrNull { type = PopupWindow.OnDismissListener::class }
-            ?.get() ?: return
-
-        // 先置位，解析失败时也不要每次建菜单都重试并刷日志
-        menuDismissHooked = true
-
-        dismissListener.javaClass.reflekt()
-            .firstMethod { name = "onDismiss"; parameterCount = 0 }
-            .hookAfter {
-                currentViewRef = null
-            }
-    }
-
     private fun getChattingContextFromOnSelectHandler(thisObject: Any): ChattingContext {
         val viewOnLongClickListener = thisObject.reflekt()
             .firstField {
@@ -221,6 +188,17 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         error("could not resolve ChattingContext from multi-select handler")
     }
 
+    // Held via WeakReference so a stale View (and the Activity/window it indirectly retains)
+    // can still be garbage-collected if WeChat tears down the chat UI between menu creation and
+    // menu item selection. Null-out happens eagerly in the select handler and in onDisable().
+    private var currentView: WeakReference<View?>? = null
+
+    private fun setCurrentView(view: View?) {
+        currentView = if (view == null) null else WeakReference(view)
+    }
+
+    private fun getCurrentView(): View? = currentView?.get()
+
     @Suppress("UNCHECKED_CAST")
     private fun getSelectedMsgInfos(thisObject: Any): List<MessageInfo> {
         val list = thisObject.reflekt().firstField {
@@ -239,11 +217,11 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
 
     override fun onEnable() {
         methodCreateMenu.hookBefore {
-            val menu = args[0]!!
+            val menu = args[0]
 
             val curView = args[1] as View
             val tag = curView.tag
-            currentViewRef = WeakReference(curView)
+            setCurrentView(curView)
 
             val msgInfo = WeMessageApi.getMsgInfoFromTag(tag)
             val msgInfoWrapper = MessageInfo(msgInfo)
@@ -259,9 +237,9 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     .filter { it.isSupported(msgInfoWrapper) }
 
                 if (MergeChatMessageContextMenuItems.isEnabled) {
-                    // collapse everything into a single "WeKit" entry backed by a Compose dialog
+                    // collapse everything into a single "WCX" entry backed by a Compose dialog
                     if (applicableItems.isNotEmpty()) {
-                        addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WeKit", ExtensionIcon)
+                        addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
                     }
                 } else {
                     for (item in applicableItems) {
@@ -275,21 +253,13 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     ex
                 )
             }
-
-            // 放在最后，即使解析失败也不会影响菜单项注入
-            try {
-                hookMenuDismissOnce(thisObject!!)
-            } catch (ex: Throwable) {
-                WeLogger.e(TAG, "failed to hook context menu dismiss", ex)
-            }
         }
 
         methodSelectMenuItem.hookBefore {
-            // 没有配对的建菜单回调(或 View 已被回收)时直接放行，交回微信自己处理
-            val curView = currentViewRef?.get()
-            currentViewRef = null
+            val curView = getCurrentView()
+            setCurrentView(null)
             if (curView == null) {
-                WeLogger.w(TAG, "menu item selected without a recorded chat item view, ignoring")
+                WeLogger.w(TAG, "select handler fired but currentView was already collected/cleared")
                 return@hookBefore
             }
             val tag = curView.tag
@@ -297,20 +267,32 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
 
             val menuItem = args[0] as android.view.MenuItem
             val msgInfoWrapper = MessageInfo(msgInfo)
-            val context = getChattingContextFromOnSelectHandler(thisObject!!)
+            val context = getChattingContextFromOnSelectHandler(thisObject)
             try {
                 if (menuItem.itemId == MERGED_MENU_ITEM_ID) {
                     val applicableItems = menuItems.values.flatten()
                         .filter { it.isSupported(msgInfoWrapper) }
                     showMergedMenuDialog(curView, context, msgInfoWrapper, applicableItems)
-                    result = null
+                    // 仅当原方法返回 void 时才设置 result = null
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            result = null
+                        }
+                    }
                     return@hookBefore
                 }
 
                 for (item in menuItems.values.flatten()) {
                     if (item.id == menuItem.itemId) {
                         item.onClick(curView, context, msgInfoWrapper)
-                        result = null
+                        // 仅当原方法返回 void 时才设置 result = null
+                        if (method is java.lang.reflect.Method) {
+                            val returnType = (method as java.lang.reflect.Method).returnType
+                            if (returnType == Void.TYPE) {
+                                result = null
+                            }
+                        }
                         return@hookBefore
                     }
                 }
@@ -324,7 +306,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
 
         methodMultiCreateMenu.hookBefore {
-            val menu = args[0]!!
+            val menu = args[0]
 
             try {
                 // nothing to offer if no provider supports multi-select
@@ -338,8 +320,8 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                         returnType = android.view.MenuItem::class
                     }
 
-                // collapse everything into a single "WeKit" entry backed by a Compose dialog
-                addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WeKit", ExtensionIcon)
+                // collapse everything into a single "WCX" entry backed by a Compose dialog
+                addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
             } catch (ex: Throwable) {
                 WeLogger.e(
                     TAG,
@@ -355,12 +337,18 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
             if (menuItem.itemId != MERGED_MENU_ITEM_ID) return@hookBefore
 
             try {
-                val msgInfos = getSelectedMsgInfos(thisObject!!)
-                val chattingContext = resolveChattingContextByWalk(thisObject!!)
-                val view = getViewFromMultiSelectHandler(thisObject!!)
+                val msgInfos = getSelectedMsgInfos(thisObject)
+                val chattingContext = resolveChattingContextByWalk(thisObject)
+                val view = getViewFromMultiSelectHandler(thisObject)
 
                 showMultiSelectMenuDialog(view, chattingContext, msgInfos)
-                result = null
+                // 仅当原方法返回 void 时才设置 result = null
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
             } catch (ex: Throwable) {
                 WeLogger.e(
                     TAG,
@@ -381,7 +369,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
     ) {
         showComposeDialog(view.context) {
             AlertDialogContent(
-                title = { Text("WeKit") },
+                title = { Text("WCX") },
                 text = {
                     LazyColumn(
                         Modifier
@@ -458,13 +446,13 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
 
         if (adaptedRows.isEmpty() && autoRows.isEmpty()) {
-            showToast("没有可用于所选消息的 WeKit 菜单项")
+            showToast("没有可用于所选消息的 WCX 菜单项")
             return
         }
 
         showComposeDialog(view.context) {
             AlertDialogContent(
-                title = { Text("WeKit (${msgInfos.size} 条消息)") },
+                title = { Text("WCX (${msgInfos.size} 条消息)") },
                 text = {
                     LazyColumn(
                         Modifier
@@ -521,8 +509,6 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
     }
 
     override fun onDisable() {
-        currentViewRef = null
-        // Hook 已被 unhookAll 撤销，重新启用时需要允许再次注册
-        menuDismissHooked = false
+        setCurrentView(null)
     }
 }

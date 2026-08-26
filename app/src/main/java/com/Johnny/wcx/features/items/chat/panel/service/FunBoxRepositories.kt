@@ -207,7 +207,7 @@ object FunBoxStickerRepository {
 
     private fun decodeSticker(item: FunBoxBinaryReader): StickerItem {
         val md5 = item.string().uppercase()
-        val packId = item.string()
+        item.string()
         val imageId = item.string()
         val ocr = item.string()
         val thumbId = item.string()
@@ -217,7 +217,6 @@ object FunBoxStickerRepository {
             remoteObjectId = imageId,
             thumbnailUrl = thumbId,
             source = PanelSource.ONLINE,
-            packId = packId,
         )
     }
 

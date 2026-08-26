@@ -29,11 +29,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.cache.DexCacheManager
+import com.Johnny.wcx.dexkit.resolution.resolveAllDex
 import com.Johnny.wcx.features.core.BaseFeature
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.copyToClipboard
 import com.Johnny.wcx.utils.android.showToast
-import com.Johnny.wcx.utils.reflection.withDexKitSuspending
+import com.Johnny.wcx.utils.reflection.DexKit
 import com.Johnny.wcx.utils.restartHost
 import com.Johnny.wcx.utils.unreachable
 import kotlinx.coroutines.CoroutineScope
@@ -108,8 +109,7 @@ fun DexResolver(
         return try {
             progressChannel.send(ScanProgress.Start(displayName))
 
-            item.resolveInlineDex(dexKit)
-            item.resolveDex(dexKit)
+            item.resolveAllDex(dexKit)
 
             DexCacheManager.saveItemCache(item)
             progressChannel.send(ScanProgress.Complete(displayName))
@@ -133,21 +133,19 @@ fun DexResolver(
                 }
 
                 // parallel scan — same flow/buffer/async structure
-                val results = withDexKitSuspending { dexKit ->
-                    outdatedItems.asFlow()
-                        .map { item ->
-                            async(Dispatchers.IO) {
-                                scanItem(
-                                    item,
-                                    dexKit,
-                                    progressChannel
-                                )
-                            }
+                val results = outdatedItems.asFlow()
+                    .map { item ->
+                        async(Dispatchers.IO) {
+                            scanItem(
+                                item,
+                                DexKit,
+                                progressChannel
+                            )
                         }
-                        .buffer(8)
-                        .map { it.await() }
-                        .toList()
-                }
+                    }
+                    .buffer(8)
+                    .map { it.await() }
+                    .toList()
 
                 progressChannel.close()
 
@@ -316,7 +314,7 @@ private fun ErrorDetailsSection(
 }
 
 private fun buildErrorReport(failedResults: List<ScanResult.Failed>) = buildString {
-    append("=== WeKit Dex 扫描错误报告 ===\n\n")
+    append("=== WCX Dex 扫描错误报告 ===\n\n")
     failedResults.forEachIndexed { i, r ->
         append("${i + 1}. ${r.displayName}\n")
         append("   错误信息: ${r.error.message}\n")

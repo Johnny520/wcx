@@ -246,7 +246,7 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
     }
 
     override fun onTextChanged(chatFooter: ChatFooter, text: String) {
-        if (text != "#wekit") return
+        if (text != "#wcx") return
         chatFooter.lastText = ""
         openSettingsDialog(chatFooter.context)
     }
@@ -281,17 +281,31 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
         clsSettingsUi.reflekt().firstMethod { name = "onPreferenceTreeClick" }
             .hookBefore {
-                if (args.size < 2) return@hookBefore
-                val preference = args[1] ?: return@hookBefore
+                try {
+                    if (args.size < 2) return@hookBefore
+                    val preference = args[1] ?: return@hookBefore
 
-                val key = methodGetKey.method.invoke(preference) as? String
+                    val key = methodGetKey.method.invoke(preference) as? String
 
-                if (PREFS_KEY == key) {
-                    val activity = thisObject as Activity
+                    if (PREFS_KEY == key) {
+                        val activity = thisObject as Activity
 
-                    openSettingsDialog(activity)
+                        openSettingsDialog(activity)
 
-                    result = true
+                        try {
+                            // 仅当原方法返回 boolean 时才设置 result = true
+                            if (method is java.lang.reflect.Method) {
+                                val returnType = (method as java.lang.reflect.Method).returnType
+                                if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                                    result = true
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                        }
+                    }
+                } catch (e: Throwable) {
+                    WeLogger.e(TAG, "onPreferenceTreeClick hook 异常", e)
                 }
             }
     }
@@ -361,15 +375,33 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
         settingsManager.createItem {
             key = "SettingGroup_Main_WeKitTest1"
-            title = "WeKit 设置"
+            title = "WCX 设置"
             level = 1
             groupTitle = "插件"
             pageClass = SettingGroupMain::class.java
             parentClass = SettingAdditionHeaderSearch::class.java
             childClass = SettingGroupPersonalInfo::class.java
-            onClick = { openSettingsDialog(it) }
+            onClick = {
+                try {
+                    openSettingsDialog(it)
+                } catch (e: Throwable) {
+                    WeLogger.e(TAG, "modern settings onClick 异常", e)
+                }
+            }
         }
-
+//
+//        val item3 = settingsManager.createItem {
+//            key = "SettingGroup_Main_WeKitTest3"
+//            title = "测试 2 - WeKit 设置 - 详细日志"
+//            level = 1
+//            isSwitch = true
+//            pageClass = SettingGroupMain::class.java
+//            parentClass = item2
+//
+//            switchState = { Preferences.verboseLog }
+//            onSwitchChanged = { Preferences.verboseLog = it }
+//        }
+//
         settingsManager.install()
     }
 
@@ -377,34 +409,48 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
         LauncherUI::class.reflekt().apply {
             firstMethod { name = "onCreate" }
                 .hookBefore {
-                    val activity = thisObject as Activity
-                    val intent = activity.intent ?: return@hookBefore
-                    intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
-                    // 消费掉标记，否则 getIntent() 会一直带着它，
-                    // 之后每次 onNewIntent 都会重新弹出设置界面
-                    intent.removeExtra(BuildConfig.TAG)
-                    // wait for resources & theme to init
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        openSettingsDialog(activity)
-                    }, 500)
+                    try {
+                        val activity = thisObject as Activity
+                        val intent = activity.intent ?: return@hookBefore
+                        intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
+                        // wait for resources & theme to init
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            openSettingsDialog(activity)
+                        }, 500)
+                    } catch (e: Throwable) {
+                        WeLogger.e(TAG, "hookLauncherUi onCreate 异常", e)
+                    }
                 }
 
             firstMethod { name = "onNewIntent" }
                 .hookBefore {
-                    val activity = thisObject as Activity
-                    // LauncherUI 是 singleTop，新的 Intent 在 args[0] 里；
-                    // 此时 getIntent() 还是旧的那一个
-                    val intent = args.getOrNull(0) as? Intent ?: return@hookBefore
-                    intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
-                    intent.removeExtra(BuildConfig.TAG)
-                    openSettingsDialog(activity)
+                    try {
+                        val activity = thisObject as Activity
+                        val intent = activity.intent ?: return@hookBefore
+                        intent.getStringExtra(BuildConfig.TAG) ?: return@hookBefore
+                        openSettingsDialog(activity)
+                    } catch (e: Throwable) {
+                        WeLogger.e(TAG, "hookLauncherUi onNewIntent 异常", e)
+                    }
                 }
         }
     }
 
     @Suppress("NOTHING_TO_INLINE")
     fun openSettingsDialog(context: Context) {
-        context.startActivity(Intent(context, SettingsActivity::class.java))
+        // Bug Fix (v201): 对齐上游 WeKit 的最简 Intent 启动方式。
+        // 配合 WeLauncher.init() 中 ActivityProxy.init() 注入的 IActivityManager /
+        // Instrumentation / Handler.Callback 钩子，模块 Activity 会被代理到
+        // WeChatSplashActivity 中转并最终通过 setClassName 启动真实 Activity。
+        // ActivityProxy.ActProxyMgr.isModuleProxyActivity() 通过
+        //   className.startsWith(PackageNames.MODULE)
+        // 判定模块 Activity 并走代理路由；manifest 中 SettingsActivity
+        // 已声明 exported="true"，因此经代理路由后能正常拉起。
+        try {
+            context.startActivity(Intent(context, SettingsActivity::class.java))
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "openSettingsDialog 启动失败", e)
+        }
     }
 
 //    private class SettingsMenuItemClickListener(val context: Context) :

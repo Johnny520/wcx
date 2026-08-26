@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.contacts.hidecontacts
 
+import com.Johnny.wcx.R
+
 import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,7 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
+import com.Johnny.wcx.ui.utils.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -21,6 +23,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -28,10 +31,14 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import androidx.annotation.StringRes
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Add
 import com.composables.icons.materialsymbols.outlined.Delete
 import com.Johnny.wcx.features.items.contacts.HideContacts
+import com.Johnny.wcx.features.items.contacts.localizedContactsQuantity
+
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
@@ -69,28 +76,47 @@ private val DAY_LABELS: List<Pair<Int, String>> = listOf(
 /** One hour out, so a freshly added 单次 entry is never already in the past when it is saved. */
 private const val DEFAULT_ONCE_OFFSET_MILLIS = 60L * 60L * 1000L
 
+@Composable
 private fun actionLabel(action: HideScheduleAction): String =
-    if (action == HideScheduleAction.HIDE) "隐藏" else "显示"
+    if (action == HideScheduleAction.HIDE) "隐藏"
+    else "显示"
 
+@Composable
 private fun kindLabel(kind: HideScheduleKind): String =
-    if (kind == HideScheduleKind.REPEATING) "每周重复" else "单次"
+    if (kind == HideScheduleKind.REPEATING) "每周重复"
+    else "单次"
 
+@Composable
 private fun daysLabel(days: Set<Int>): String = when {
     days.isEmpty() -> "从不"
     days.containsAll(ALL_DAYS_OF_WEEK) -> "每天"
-    else -> DAY_LABELS.filter { it.first in days }.joinToString(" ") { it.second }
+    else -> {
+        val labels = mutableListOf<String>()
+        for ((day, labelRes) in DAY_LABELS) {
+            if (day in days) labels += labelRes
+        }
+        labels.joinToString(" ")
+    }
 }
 
 /**
  * The one-line row summary: `每天 22:00 · 隐藏` / `周一 周三 09:30 · 显示` /
  * `2026-08-01 12:00:00 · 隐藏（单次）`.
  */
+@Composable
 private fun HideSchedule.summary(): String = when (kind) {
     HideScheduleKind.REPEATING ->
-        "${daysLabel(daysOfWeek)} ${formatMinuteOfDay(minuteOfDay)} · ${actionLabel(action)}"
+        "%1\$s %2\$s · %3\$s".format(
+            daysLabel(daysOfWeek),
+            formatMinuteOfDay(minuteOfDay),
+            actionLabel(action),
+        )
 
     HideScheduleKind.ONCE ->
-        "${formatDateTime(atEpochMillis)} · ${actionLabel(action)}（单次）"
+        "%1\$s · %2\$s（单次）".format(
+            formatDateTime(atEpochMillis),
+            actionLabel(action),
+        )
 }
 
 /** The local minute-of-day [millis] falls in — the [HideSchedule.minuteOfDay] a 单次 entry fires at. */
@@ -189,7 +215,7 @@ internal fun HideContacts.showSchedulesDialog(context: Context) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("定时任务", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "到点自动临时显示或恢复隐藏, 不会改动隐藏列表",
+                                "到点自动临时显示或恢复隐藏，不会改动隐藏列表",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -198,7 +224,7 @@ internal fun HideContacts.showSchedulesDialog(context: Context) {
                             onClick = {
                                 showScheduleEditor(
                                     context = context,
-                                    title = "添加定时",
+                                    titleRes = "添加定时",
                                     initial = newSchedule(),
                                     others = schedules.toList(),
                                 ) { added ->
@@ -214,7 +240,7 @@ internal fun HideContacts.showSchedulesDialog(context: Context) {
 
                     if (schedules.isEmpty()) {
                         Text(
-                            "暂无定时任务, 点击右上角“添加”创建",
+                            "暂无定时任务，点击右上角“添加”创建",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 28.dp),
                         )
@@ -229,7 +255,7 @@ internal fun HideContacts.showSchedulesDialog(context: Context) {
                                     modifier = Modifier.clickable {
                                         showScheduleEditor(
                                             context = context,
-                                            title = "编辑定时",
+                                            titleRes = "编辑定时",
                                             initial = schedule,
                                             others = schedules.toList(),
                                         ) { edited ->
@@ -237,7 +263,7 @@ internal fun HideContacts.showSchedulesDialog(context: Context) {
                                             if (index >= 0) schedules[index] = edited
                                         }
                                     },
-                                    headlineContent = { Text(schedule.summary()) },
+                                    content = { Text(schedule.summary()) },
                                     // Only for 每周重复: a 单次 headline already ends in （单次）.
                                     supportingContent = if (schedule.kind == HideScheduleKind.REPEATING) {
                                         { Text(kindLabel(schedule.kind)) }
@@ -294,7 +320,14 @@ internal fun HideContacts.showSchedulesDialog(context: Context) {
                             "dropped ${dropped.size} schedule(s) that the scheduler consumed while the " +
                                     "dialog was open: ${dropped.map { it.id }}"
                         )
-                        showToast(context, "${dropped.size} 个单次定时在编辑期间已触发并自动删除, 对它们的修改未保存")
+                        showToast(
+                            context,
+                            localizedContactsQuantity(
+                                R.plurals.contacts_schedule_dropped,
+                                dropped.size,
+                                dropped.size,
+                            ),
+                        )
                     }
                     onDismiss()
                 }) {
@@ -336,7 +369,7 @@ internal fun HideContacts.showSchedulesDialog(context: Context) {
  */
 private fun showScheduleEditor(
     context: Context,
-    title: String,
+    titleRes: String,
     initial: HideSchedule,
     others: List<HideSchedule>,
     onSave: (HideSchedule) -> Unit,
@@ -371,7 +404,7 @@ private fun showScheduleEditor(
 
         AlertDialogContent(
             modifier = Modifier.fillMaxWidth(),
-            title = { Text(title) },
+            title = { Text(titleRes) },
             text = {
                 DefaultColumn {
                     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
@@ -412,7 +445,7 @@ private fun showScheduleEditor(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                DAY_LABELS.forEach { (day, label) ->
+                                DAY_LABELS.forEach { (day, labelRes) ->
                                     val selected = day in draft.daysOfWeek
                                     FilterChip(
                                         selected = selected,
@@ -421,7 +454,7 @@ private fun showScheduleEditor(
                                             if (selected) days -= day else days += day
                                             draft = draft.copy(daysOfWeek = days)
                                         },
-                                        label = { Text(label) },
+                                        label = { Text(labelRes) },
                                     )
                                 }
                             }
@@ -451,7 +484,7 @@ private fun showScheduleEditor(
 
                             if (isOncePast) {
                                 Text(
-                                    "该时间已过, 请选择一个将来的时间",
+                                    "该时间已过，请选择一个将来的时间",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error,
                                 )
@@ -461,7 +494,7 @@ private fun showScheduleEditor(
 
                     if (conflict) {
                         Text(
-                            "已有定时任务会在同一时间触发, 请换一个时间",
+                            "已有定时任务会在同一时间触发，请换一个时间",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

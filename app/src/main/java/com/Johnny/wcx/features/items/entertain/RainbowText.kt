@@ -15,13 +15,18 @@ import com.Johnny.wcx.features.core.SwitchFeature
 import java.lang.reflect.Field
 import java.util.WeakHashMap
 
-@Feature(name = "彩虹文本", categories = ["娱乐"], description = "让微信中的文字显示为动态彩虹渐变")
+@Feature(
+    name = "彩虹文本",
+    categories = ["娱乐"],
+    description = "让微信中的文字显示为动态彩虹渐变"
+)
 object RainbowText : SwitchFeature() {
 
     private data class TextViewAnimationState(
         val matrix: Matrix,
         val paint: TextPaint,
         val originalShader: Shader?,
+        val originalColor: Int,
         var offset: Float,
     )
 
@@ -62,6 +67,7 @@ object RainbowText : SwitchFeature() {
     override fun onDisable() {
         viewStateMap.forEach { (view, state) ->
             state.paint.shader = state.originalShader
+            state.paint.color = state.originalColor
             view.invalidate()
         }
         viewStateMap.clear()
@@ -72,7 +78,7 @@ object RainbowText : SwitchFeature() {
         if (width <= 0f || text.isEmpty()) return
 
         val state = viewStateMap.getOrPut(view) {
-            TextViewAnimationState(Matrix(), paint, paint.shader, 0f)
+            TextViewAnimationState(Matrix(), paint, paint.shader, paint.color, 0f)
         }
         val rainbowWidth = width.coerceAtLeast(400f)
         val shader = LinearGradient(

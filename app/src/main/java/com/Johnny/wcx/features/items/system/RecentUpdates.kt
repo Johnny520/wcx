@@ -19,11 +19,6 @@ data class RecentUpdateItem(
  */
 val RECENT_UPDATES = listOf(
     RecentUpdateItem(
-        name = "对话分组多场景过滤体验修复",
-        description = "彻底修复停留在特定分组时新消息跨组窜入的问题，以及未读分组中会话读完返回后已读消息自动消失",
-        featureKey = "对话分组"
-    ),
-    RecentUpdateItem(
         name = "禁止主页下滑进入最近页面",
         description = "禁止主页下滑手势，同时支持通过加号菜单和标题栏图标唤起微信原生小程序面板",
         featureKey = "禁止主页下滑进入最近页面"

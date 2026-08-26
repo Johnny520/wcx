@@ -5,7 +5,6 @@ import com.Johnny.wcx.loader.abc.ILoaderService
 
 object StartupInfo {
 
-    lateinit var modulePath: String
     lateinit var loaderService: ILoaderService
     var hookBridge: IHookBridge? = null
 }

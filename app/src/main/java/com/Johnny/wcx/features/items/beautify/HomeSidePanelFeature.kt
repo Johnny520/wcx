@@ -16,11 +16,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -29,7 +29,23 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.appcompat.app.AlertDialog
+import android.app.AlertDialog
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentManager
@@ -38,18 +54,76 @@ import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.features.items.beautify.home_screen_panel.HomeSidePanel
 import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.DefaultColumn
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.showComposeDialog
+import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.hookBeforeDirectly
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.runtime.key
+import com.Johnny.wcx.ui.utils.InjectedUiTheme
+import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
+import com.Johnny.wcx.ui.utils.setLifecycleOwner
+import com.composables.icons.materialsymbols.MaterialSymbols
+import com.composables.icons.materialsymbols.outlinedfilled.Add
+import com.composables.icons.materialsymbols.outlinedfilled.Bookmark
+import com.composables.icons.materialsymbols.outlinedfilled.Camera
+import com.composables.icons.materialsymbols.outlinedfilled.Check_circle
+import com.composables.icons.materialsymbols.outlinedfilled.Close
+import com.composables.icons.materialsymbols.outlinedfilled.Favorite
+import com.composables.icons.materialsymbols.outlinedfilled.Movie
+import com.composables.icons.materialsymbols.outlinedfilled.Person
+import com.composables.icons.materialsymbols.outlinedfilled.Qr_code_scanner
+import com.composables.icons.materialsymbols.outlinedfilled.Settings
+import com.composables.icons.materialsymbols.outlinedfilled.Update
+import com.composables.icons.materialsymbols.outlinedfilled.Wallet
 
 /**
  * 微信主页侧滑侧边栏功能（XML+原生 View 实现）
@@ -69,9 +143,9 @@ import java.util.UUID
  * ✅ 所有 UI 逻辑 try-catch 包裹，异常仅记日志，绝不闪退
  */
 @Feature(
-    name = "微信主页侧滑侧边栏",
+    name = "微信主页侧边栏",
     categories = ["界面美化"],
-    description = "在微信主页左侧添加侧滑面板：头像/签名/天气/每日一言/4 槽快捷"
+    description = "在微信主页添加左侧侧滑边栏：方式一为内置面板（头像/签名/天气/每日一言/4 槽快捷），方式二为 WeKit 负一屏全家桶，两者互斥见设置"
 )
 object HomeSidePanelFeature : ClickableFeature() {
 
@@ -79,9 +153,30 @@ object HomeSidePanelFeature : ClickableFeature() {
     override val noSwitchWidget = false
 
     // ==================== 视图引用 ====================
-    @Volatile private var triggerView: View? = null
+    @Volatile private var triggerButtonView: View? = null
     @Volatile private var panelRootView: View? = null
     @Volatile private var attachedActivity: Activity? = null
+
+    // ==================== 全屏右滑跟手手势状态（WeKit 式：主界面任意位置右滑）====================
+    @Volatile private var gestureHookInstalled = false
+    private const val GESTURE_IDLE = 0
+    private const val GESTURE_ARMED = 1
+    private const val GESTURE_DRAGGING = 2
+    @Volatile private var gestureState = GESTURE_IDLE
+    @Volatile private var gestureDownX = 0f
+    @Volatile private var gestureDownY = 0f
+
+    // 入口按钮可见性轮询：微信 Tab 切换不产生可 hook 的触摸事件（日志确认无 GEST DOWN home=false），
+    // 仅靠 ACTION_DOWN 时的 updateVisibility 无法及时隐藏「我」Tab 等非首页上的入口，因此定时对账。
+    @Volatile private var visibilityPollerRunning = false
+    private var visibilityPollerHandler: Handler? = null
+    private var lastPollerHome = false
+
+    // ==================== 左边缘右滑触摸条状态 ====================
+    @Volatile private var edgeZoneStripView: View? = null
+    @Volatile private var zoneDownX = 0f
+    @Volatile private var zoneDownY = 0f
+    @Volatile private var zoneSwipeTriggered = false
 
     // ==================== ActivityLifecycleCallbacks ====================
     private val activityCallbacks = object : Application.ActivityLifecycleCallbacks {
@@ -100,7 +195,7 @@ object HomeSidePanelFeature : ClickableFeature() {
                     updateVisibility()
                 } else {
                     // 非 LauncherUI（如 ChattingUI 等子 Activity）进入前台，强制移除侧滑栏
-                    if (attachedActivity === activity || triggerView != null) {
+                    if (attachedActivity === activity || panelRootView != null) {
                         removeAllViews()
                         attachedActivity = null
                     }
@@ -160,8 +255,8 @@ object HomeSidePanelFeature : ClickableFeature() {
 
     /**
      * 统一出口：根据当前 Activity + Fragment 判断 show/hide。
-     * - 在 LauncherUI 首页 Tab：创建或保留侧滑栏
-     * - 在 LauncherUI 其它 Tab / 其它 Activity：立即 removeView
+     * - 在 LauncherUI 首页 Tab：按打开方式挂载触发（全屏右滑跟手 / 左边缘右滑 / 左上角按钮，可组合）
+     * - 在 LauncherUI 其它 Tab / 其它 Activity：立即 removeView 移除已打开的面板与触发视图
      */
     private fun updateVisibility() {
         val act = attachedActivity ?: return
@@ -169,21 +264,52 @@ object HomeSidePanelFeature : ClickableFeature() {
             removeAllViews()
             return
         }
-        val shouldShow = isHomePageActive(act)
-        if (shouldShow) {
-            if (triggerView == null && panelRootView == null) {
-                attachTriggerButton(act)
-            }
+        if (isHomePageActive(act)) {
+            runCatching { diagFile("UPDATE true panel=${panelRootView != null} trigger=${triggerButtonView != null} trigParent=${triggerButtonView?.parent?.javaClass?.name}") }
+            // 首页 Tab：按打开方式挂载手势/按钮（幂等）
+            if (panelRootView != null) return
+            val mode = migratedTriggerMode()
+            if ((mode and MODE_FULL_SWIPE) != 0 && !gestureHookInstalled) attachEdgeZone(act)
+            if ((mode and MODE_EDGE_STRIP) != 0 && edgeZoneStripView == null) attachEdgeZoneStrip(act)
+            if ((mode and MODE_TRIGGER_BUTTON) != 0 &&
+                (triggerButtonView == null || triggerButtonView!!.parent == null)
+            ) attachTriggerButton(act)
         } else {
-            if (triggerView != null || panelRootView != null) {
-                removeAllViews()
-            }
+            runCatching { diagFile("UPDATE false panel=${panelRootView != null} trigger=${triggerButtonView != null} trigParent=${triggerButtonView?.parent?.javaClass?.name}") }
+            // 离开首页 Tab：隐藏入口按钮/触摸条（保留挂载，轮询负责恢复），并关闭可能残留的面板
+            triggerButtonView?.visibility = View.GONE
+            edgeZoneStripView?.visibility = View.GONE
+            if (panelRootView != null) removePanelInternal()
         }
     }
     @Volatile private var callbacksRegistered = false
 
     // ==================== 主开关 ====================
     private var masterEnabled by WePrefs.prefOption("${PREFS_PREFIX}master", false)
+
+    // ==================== 打开方式（位掩码，三种可组合）====================
+    // 1=全屏右滑跟手，2=左边缘右滑触摸条，4=左上角按钮；默认 7=全部开启
+    private val MODE_FULL_SWIPE = 1
+    private val MODE_EDGE_STRIP = 2
+    private val MODE_TRIGGER_BUTTON = 4
+    private var triggerMode by WePrefs.prefOption("${PREFS_PREFIX}trigger_mode", 7)
+    // 左边缘触摸条宽度（dp，仅开启左边缘右滑时生效；10~80，默认 28）
+    private var edgeZoneWidthDp by WePrefs.prefOption("${PREFS_PREFIX}edge_zone_width_dp", 28)
+    // 侧边栏实现方式：1=方式一（本模块原版），2=方式二（WeKit 侧边栏）；默认 1
+    private var sidePanelMode by WePrefs.prefOption("hsp_side_mode", 1)
+
+    /** 旧版本编码（0=全屏,1=按钮,2=全屏+按钮）迁移到新位掩码（首次读取时写回一次）。 */
+    private fun migratedTriggerMode(): Int {
+        val v = triggerMode
+        val m = when (v) {
+            0 -> MODE_FULL_SWIPE
+            1 -> MODE_TRIGGER_BUTTON
+            2 -> MODE_FULL_SWIPE or MODE_TRIGGER_BUTTON
+            else -> v
+        }
+        if (m != v) triggerMode = m
+        return m
+    }
 
     // ==================== 卡片显示开关 ====================
     var headerEnabled by WePrefs.prefOption("${PREFS_PREFIX}header_enabled", true)
@@ -206,7 +332,7 @@ object HomeSidePanelFeature : ClickableFeature() {
     var quoteMode by WePrefs.prefOption("${PREFS_PREFIX}quote_mode", 2)
     var quoteManual by WePrefs.prefOption("${PREFS_PREFIX}quote_manual", "")
     var useSignature by WePrefs.prefOption("${PREFS_PREFIX}use_signature", false)
-    var quoteApiUrl by WePrefs.prefOption("${PREFS_PREFIX}quote_api_url", "https://api.03c3.cn/api/yl")
+    var quoteApiUrl by WePrefs.prefOption("${PREFS_PREFIX}quote_api_url", "https://v1.hitokoto.cn/")
     var quoteApiKey by WePrefs.prefOption("${PREFS_PREFIX}quote_api_key", "")
     var quoteRefreshInterval by WePrefs.prefOption("${PREFS_PREFIX}quote_refresh_interval", 3600)
     var quoteFallback by WePrefs.prefOption("${PREFS_PREFIX}quote_fallback", "每一天都是新的开始")
@@ -217,16 +343,20 @@ object HomeSidePanelFeature : ClickableFeature() {
 
     // ==================== 天气配置 ====================
     var weatherCity by WePrefs.prefOption("${PREFS_PREFIX}weather_city", "北京")
-    var weatherApiUrl by WePrefs.prefOption("${PREFS_PREFIX}weather_api_url", "https://api.03c3.cn/api/weather")
+    var weatherApiUrl by WePrefs.prefOption("${PREFS_PREFIX}weather_api_url", "")  // blank = built-in Open-Meteo
     var weatherApiKey by WePrefs.prefOption("${PREFS_PREFIX}weather_api_key", "")
     var weatherRefreshInterval by WePrefs.prefOption("${PREFS_PREFIX}weather_refresh_interval", 1800)
     var weatherFallbackCity by WePrefs.prefOption("${PREFS_PREFIX}weather_fallback_city", "北京")
 
     // ==================== 每日一言配置 ====================
-    var dailyQuoteApiUrl by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_api_url", "https://api.03c3.cn/api/yl")
+    var dailyQuoteApiUrl by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_api_url", "https://v1.hitokoto.cn/")
     var dailyQuoteApiKey by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_api_key", "")
     var dailyQuoteRefreshInterval by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_refresh_interval", 3600)
     var dailyQuoteFallback by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_fallback", "生活不止眼前的苟且，还有诗和远方")
+    var dailyQuoteCacheText by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_cache_text", "")
+    var dailyQuoteCacheTime by WePrefs.prefOption("${PREFS_PREFIX}daily_quote_cache_time", 0L)
+    var quoteCacheText by WePrefs.prefOption("${PREFS_PREFIX}quote_cache_text", "")
+    var quoteCacheTime by WePrefs.prefOption("${PREFS_PREFIX}quote_cache_time", 0L)
 
     // ==================== 4 插槽固定（SlotConfig）====================
     /**
@@ -270,7 +400,7 @@ object HomeSidePanelFeature : ClickableFeature() {
         val json = quickSlotsJson
         if (json.isBlank()) return defaultSlotConfigs
         return try {
-            val parsed = Json.decodeFromString<List<SlotConfig>>(json)
+            val parsed = Json.decodeFromString(ListSerializer(SlotConfig.serializer()), json)
             // 保证 4 个 slot，缺失时回退
             val result = defaultSlotConfigs.toMutableList()
             for (i in 0..3) {
@@ -291,7 +421,7 @@ object HomeSidePanelFeature : ClickableFeature() {
         val json = customFeaturesJson
         if (json.isBlank()) return emptyList()
         return try {
-            Json.decodeFromString<List<CustomFeature>>(json)
+            Json.decodeFromString(ListSerializer(CustomFeature.serializer()), json)
         } catch (e: Exception) {
             WeLogger.e(TAG, "解析自定义功能配置失败", e)
             emptyList()
@@ -356,17 +486,34 @@ object HomeSidePanelFeature : ClickableFeature() {
         val windSpeed: String, val weather: String, val updateTime: String, val weatherIcon: String
     )
 
+    // ==================== Compose 渲染状态 ====================
+    private var panelRefresh by mutableStateOf(0)
+    private var uiAvatar by mutableStateOf<Bitmap?>(null)
+    private var uiNickname by mutableStateOf("")
+    private var uiTime by mutableStateOf("")
+    private var uiDate by mutableStateOf("")
+    private var uiWeather by mutableStateOf<WeatherData?>(null)
+    private var uiSignature by mutableStateOf("")
+    private var uiDailyQuote by mutableStateOf("")
+
     // ==================== 生命周期入口 ====================
     override fun onEnable() {
         if (!BuildConfig.BEAUTIFY_ENABLED) {
             WeLogger.w(TAG, "侧边栏功能编译开关已关闭，跳过启用"); return
+        }
+        if (sidePanelMode == 2) {
+            WeLogger.i(TAG, "侧边栏实现方式为方式二（WeKit 版），启用 WeKit 负一屏面板")
+            HomeSidePanel.installPanel()
+            return
         }
         masterEnabled = true
         registerActivityCallbacks()
     }
 
     override fun onDisable() {
+        HomeSidePanel.uninstallPanel()
         masterEnabled = false
+        gestureHookInstalled = false
         unregisterActivityCallbacks()
         removeAllViews()
         attachedActivity = null
@@ -400,14 +547,205 @@ object HomeSidePanelFeature : ClickableFeature() {
  * 因此必须同时校验 Activity 是 LauncherUI && 当前 resumed Fragment 是首页 Tab。
  * 进入其它 Tab、私聊/群聊 Activity（ChattingUI）时返回 false。
  */
-private fun isHomePageActive(act: Activity): Boolean = try {
+fun isHomePageActive(act: Activity): Boolean = try {
     if (act.isFinishing) return false
     if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return false
-    val fragAct = act as? FragmentActivity ?: return true  // 不是 FragmentActivity 时，仅靠 Activity 校验
+    // 微信 LauncherUI 可能不继承 androidx FragmentActivity（自研 Activity 基类），
+    // 此时无法枚举 Fragment；仅凭 LauncherUI 类名放行，非 LauncherUI 的全局
+    // 误触发由 handleDispatchTouch 里的类名精确检查兜底。
+    val fragAct = act as? FragmentActivity
+    if (fragAct == null) {
+        dumpLauncherDiagnostics(act)
+        dumpTopBar(act)
+        // 微信 LauncherUI 非 androidx FragmentActivity（classloader 隔离），无法枚举 Fragment；
+        // 「微信」Tab 用 AppCompat ActionBar（ActionBarOverlayLayout），其余 Tab（通讯录/发现/我）
+        // 是 MultiTaskContainerView 容器、无 ActionBar —— 用 ActionBarOverlayLayout 可见性识别「微信」Tab。
+        val isWeChatTab = runCatching {
+            var found = false
+            var actionBarShown = false
+            val decorAttached = act.window?.decorView?.isAttachedToWindow == true
+            fun scan(v: View, depth: Int) {
+                if (found || depth > 16) return
+                val n = v.javaClass.name
+                // 微信 Tab 独有特征：主会话列表（聊天列表）。通讯录/发现/我 Tab 顶栏也有
+                // ActionBar，仅靠 ActionBar 会全部误判；以会话列表屏幕可见为准。
+                if (n == "com.tencent.mm.ui.conversation.ConversationListView") {
+                    var onScreen = false
+                    if (v.isAttachedToWindow && v.isShown) {
+                        val r = android.graphics.Rect()
+                        onScreen = v.getGlobalVisibleRect(r) && r.width() > 80 && r.height() > 80
+                    }
+                    runCatching { diagFile("CONV v=$n onScreen=$onScreen attached=${v.isAttachedToWindow} shown=${v.isShown}") }
+                    if (onScreen) {
+                        found = true
+                        return
+                    }
+                }
+                // 诊断：记录各列表容器类名（去重），用于确认微信会话列表的真实类名
+                if (n.contains("RecyclerView") || n.contains("ListView")) {
+                    runCatching {
+                        if (listDiagSet.add(n)) diagFile("LIST v=$n shown=${v.isShown}")
+                    }
+                }
+                if (!found && !decorAttached &&
+                    (n == "androidx.appcompat.widget.ActionBarOverlayLayout" ||
+                        n == "android.widget.ActionBarOverlayLayout")
+                ) {
+                    // ActionBar 仅作启动早期兜底：decor 未 attached（会话列表尚未渲染）时挂入口，
+                    // attached 后一律以会话列表为准（否则通讯录/发现/我 Tab 会全部误判）。
+                    if (isVisibleTree(v)) actionBarShown = true
+                }
+                if (v is ViewGroup) for (i in 0 until v.childCount) scan(v.getChildAt(i), depth + 1)
+            }
+            scan(act.window.decorView, 0)
+            found || actionBarShown
+        }.getOrDefault(false)
+        diagIsHome(act, null, isWeChatTab, null)
+        return isWeChatTab
+    }
     val current = fragAct.supportFragmentManager.fragments.find { it.isResumed && it.isVisible && !it.isHidden }
-        ?: return false
-    isHomeTabClass(current.javaClass.name)
+    if (current == null) {
+        diagIsHome(act, null, false, null)
+        return false
+    }
+    if (!isHomeTabClass(current.javaClass.name)) {
+        diagIsHome(act, current.javaClass.name, false, null)
+        return false
+    }
+    // 屏幕可见性校验（宽松）：ViewPager 预加载的非当前 Tab view 位于屏幕外；
+    // 未完成布局（width==0）或 rect 不可用时不判定，避免误伤首页。
+    val v = current.view
+    if (v != null && v.isShown) {
+        val r = android.graphics.Rect()
+        if (v.getGlobalVisibleRect(r)) {
+            val visibleArea = r.width().toLong() * r.height()
+            val totalArea = v.width.toLong() * v.height
+            if (totalArea > 0 && visibleArea * 10 < totalArea) {
+                diagIsHome(act, current.javaClass.name, true, false)
+                return false
+            }
+        }
+    }
+    diagIsHome(act, current.javaClass.name, true, true)
+    true
 } catch (e: Throwable) { WeLogger.e(TAG, "isHomePageActive 异常", e); false }
+
+/** 判断 view 及其祖先链是否全部 VISIBLE（不要求 attached/已布局，排除父容器 GONE） */
+private fun isVisibleTree(v: View): Boolean {
+    if (v.visibility != View.VISIBLE) return false
+    var p = v.parent
+    while (p is View) {
+        if (p.visibility != View.VISIBLE) return false
+        p = p.parent
+    }
+    return true
+}
+
+/** 诊断：isHomePageActive 判定变化时写一次 diag.log（限频） */
+@Volatile private var lastDiagHomeKey = ""
+private val listDiagSet = java.util.Collections.synchronizedSet(java.util.HashSet<String>())
+private fun diagIsHome(act: Activity, fragCls: String?, isHome: Boolean, visible: Boolean?) {
+    val key = "${act.javaClass.name}|$fragCls|$isHome|$visible"
+    if (key == lastDiagHomeKey) return
+    lastDiagHomeKey = key
+    runCatching {
+        val f = java.io.File("/sdcard/Android/data/com.tencent.mm/WCX/diag.log")
+        f.parentFile?.mkdirs()
+        f.appendText(System.currentTimeMillis().toString() +
+            " isHomePageActive act=${act.javaClass.name} super=${act.javaClass.superclass?.name}" +
+            " frag=$fragCls isHome=$isHome visible=$visible\n")
+    }
+}
+
+/** 诊断：记录 LauncherUI decor 顶层 view 结构签名（去重）。用户在 4 个 Tab 间切换时，
+ *  每个 Tab 的顶栏（搜索/+ 栏等）结构不同，据此识别「微信」Tab 以控制侧边栏入口显隐。 */
+private val topBarDiagSet = java.util.Collections.synchronizedSet(java.util.HashSet<String>())
+private fun diagFile(msg: String) {
+    runCatching {
+        val f = java.io.File("/sdcard/Android/data/com.tencent.mm/WCX/diag.log")
+        f.parentFile?.mkdirs()
+        f.appendText(System.currentTimeMillis().toString() + " " + msg + "\n")
+    }
+}
+private fun dumpTopBar(act: Activity) {
+    if (topBarDiagSet.size > 40) return
+    try {
+        val decor = act.window.decorView
+        val sb = StringBuilder()
+        fun walk(v: View, depth: Int) {
+            if (depth > 5 || sb.length > 2000) return
+            val vis = if (v.visibility == View.VISIBLE) "V" else "G"
+            val idName = runCatching { v.resources.getResourceEntryName(v.id) }.getOrNull()
+            val txt = if (v is TextView) (v.text?.toString() ?: "").take(8) else ""
+            sb.append(v.javaClass.simpleName).append('#').append(idName).append('#').append(vis).append('[').append(txt).append("] ")
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i), depth + 1)
+        }
+        walk(decor, 0)
+        val sig = sb.toString()
+        if (sig.isNotBlank() && topBarDiagSet.add(sig)) {
+            val f = java.io.File("/sdcard/Android/data/com.tencent.mm/WCX/diag.log")
+            f.parentFile?.mkdirs()
+            f.appendText(System.currentTimeMillis().toString() + " TOPBAR " + sig.take(1500) + "\n")
+        }
+    } catch (e: Throwable) {
+        runCatching {
+            val f = java.io.File("/sdcard/Android/data/com.tencent.mm/WCX/diag.log")
+            f.parentFile?.mkdirs()
+            f.appendText(System.currentTimeMillis().toString() + " TOPBAR ERR $e\n")
+        }
+    }
+}
+
+/** 诊断：LauncherUI 非 androidx FragmentActivity 时，dump 继承链与 fragment 反射信息（限频一次） */
+@Volatile private var launcherDiagDone = false
+private fun dumpLauncherDiagnostics(act: Activity) {
+    if (launcherDiagDone) return
+    launcherDiagDone = true
+    runCatching {
+        val f = java.io.File("/sdcard/Android/data/com.tencent.mm/WCX/diag.log")
+        f.parentFile?.mkdirs()
+        val append: (String) -> Unit = { s -> f.appendText(System.currentTimeMillis().toString() + " " + s + "\n") }
+
+        val sb = StringBuilder()
+        var cls: Class<*>? = act.javaClass
+        while (cls != null) {
+            sb.append(cls.name).append(" > ")
+            cls = cls.superclass
+        }
+        append("LauncherUI chain: $sb")
+
+        val supportCls = runCatching { Class.forName("android.support.v4.app.FragmentActivity") }.getOrNull()
+        append("old-support-FragmentActivity present=${supportCls != null} isInstance=${supportCls?.isInstance(act)}")
+        val androidxCls = runCatching { Class.forName("androidx.fragment.app.FragmentActivity") }.getOrNull()
+        append("androidx-FragmentActivity isInstance=${androidxCls?.isInstance(act)}")
+
+        // 反射尝试各种 fragment 管理器
+        val candidates = listOf(
+            "getSupportFragmentManager", "getFragmentManager",
+            "getMMFragmentManager", "getChildFragmentManager"
+        )
+        for (mName in candidates) {
+            runCatching {
+                val m = act.javaClass.getMethod(mName)
+                val fm = m.invoke(act) ?: return@runCatching
+                val getFrags = fm.javaClass.methods.firstOrNull { it.name == "getFragments" }
+                    ?: return@runCatching
+                val frags = getFrags.invoke(fm) as? List<*> ?: return@runCatching
+                val desc = frags.mapNotNull { fr ->
+                    runCatching {
+                        val fcls = fr?.javaClass ?: return@runCatching
+                        val r = runCatching { fcls.getMethod("isResumed").invoke(fr) as Boolean }.getOrDefault(false)
+                        val v = runCatching { fcls.getMethod("isVisible").invoke(fr) as Boolean }.getOrDefault(false)
+                        val h = runCatching { fcls.getMethod("isHidden").invoke(fr) as Boolean }.getOrDefault(false)
+                        val vw = runCatching { fcls.getMethod("getView").invoke(fr) }.getOrNull()
+                        "${fcls.name}(r=$r,v=$v,h=$h,view=${vw?.javaClass?.name})"
+                    }.getOrNull()
+                }
+                append("fragmentManager($mName) size=${frags.size}: $desc")
+            }
+        }
+    }
+}
 
 /**
  * 首页 Tab Fragment 类名匹配（兼容多版本微信）：
@@ -433,19 +771,7 @@ private fun isHomeTabClass(className: String): Boolean {
            className == "com.tencent.mm.ui.LandingPageUI"
 }
 
-    private fun findLauncherUI(): Activity? = try {
-        val atClass = Class.forName("android.app.ActivityThread")
-        val at = atClass.getDeclaredMethod("currentActivityThread").invoke(null)
-        val activitiesField = atClass.getDeclaredField("mActivities").apply { isAccessible = true }
-        val activities = activitiesField.get(at) as? Map<*, *> ?: return null
-        for (record in activities.values) {
-            val activity = record?.javaClass?.getDeclaredField("activity")
-                ?.apply { isAccessible = true }?.get(record) as? Activity ?: continue
-            if (activity.javaClass.name == "com.tencent.mm.ui.LauncherUI") return activity
-        }
-        null
-    } catch (_: Throwable) { null }
-
+    // ==================== 左上角触发按钮 ====================
     private fun detectWeChatOfficialEntry(act: Activity): Int = try {
         val root = act.window?.decorView ?: return 0
         val queue = ArrayDeque<View>()
@@ -463,9 +789,22 @@ private fun isHomeTabClass(className: String): Boolean {
         offsetCandidates.maxOrNull() ?: 0
     } catch (_: Throwable) { 0 }
 
-    // ==================== 视图管理（依赖 decorView）====================
+    /** 找「微信」Tab 顶栏 Toolbar（AppCompat ActionBar 容器内），用于把触发按钮对齐到顶栏左缘 */
+    private fun findWeChatToolbar(root: View): View? {
+        if (root.javaClass.name == "androidx.appcompat.widget.Toolbar" ||
+            root.javaClass.name == "android.widget.Toolbar"
+        ) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val r = findWeChatToolbar(root.getChildAt(i)) ?: continue
+                return r
+            }
+        }
+        return null
+    }
+
     private fun attachTriggerButton(act: Activity) {
-        if (triggerView != null) return
+        if (triggerButtonView != null) return
         val decorView = act.window?.decorView as? ViewGroup ?: return
         try {
             val d = act.resources.displayMetrics.density
@@ -494,25 +833,330 @@ private fun isHomeTabClass(className: String): Boolean {
                 iconHost.addView(bar)
             }
             trigger.addView(iconHost)
-            val lp = FrameLayout.LayoutParams(triggerSizePx, triggerSizePx).apply {
-                gravity = Gravity.TOP or Gravity.START
-                leftMargin = (16 * d).toInt() + extraOffset
-                topMargin = statusBarH + (8 * d).toInt()
+            // 入口按钮采用 WindowManager 悬浮窗（参考 ALink「获」入口）：直挂 Activity window，
+            // 完全独立于页面容器，显隐由轮询按当前 Tab 控制，不会因共享 Toolbar 在「我」Tab 残留。
+            // FLAG_NOT_TOUCH_MODAL + FLAG_NOT_FOCUSABLE：按钮外触摸穿透（不拦截右滑等页面手势）。
+            val wm = act.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+            var attached = false
+            if (wm != null) {
+                runCatching {
+                    val winToken = act.window.attributes.token ?: act.window.decorView.windowToken
+                    val winLp = android.view.WindowManager.LayoutParams(
+                        triggerSizePx, triggerSizePx,
+                        android.view.WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                        android.graphics.PixelFormat.TRANSLUCENT
+                    ).apply {
+                        gravity = Gravity.TOP or Gravity.START
+                        x = (4 * d).toInt()
+                        y = statusBarH + (8 * d).toInt()
+                        token = winToken
+                        windowAnimations = 0
+                    }
+                    if (trigger.parent != null) (trigger.parent as? ViewGroup)?.removeView(trigger)
+                    wm.addView(trigger, winLp)
+                    attached = true
+                    runCatching { diagFile("ATTACH WIN token=${winToken != null}") }
+                }.onFailure { runCatching { diagFile("ATTACH WIN 失败: ${it.javaClass.simpleName} ${it.message?.take(80)}") } }
             }
-            if (trigger.parent != null) (trigger.parent as? ViewGroup)?.removeView(trigger)
-            decorView.addView(trigger, lp)
-            triggerView = trigger
+            if (!attached) {
+                runCatching { diagFile("ATTACH FALLBACK decor（WindowManager 挂载失败）") }
+                // 回退：直接挂 decorView 左上角（与悬浮窗同位置语义）
+                val lp = FrameLayout.LayoutParams(triggerSizePx, triggerSizePx).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    leftMargin = (16 * d).toInt() + extraOffset
+                    topMargin = statusBarH + (8 * d).toInt()
+                }
+                if (trigger.parent != null) (trigger.parent as? ViewGroup)?.removeView(trigger)
+                decorView.addView(trigger, lp)
+            }
+            triggerButtonView = trigger
+            startVisibilityPoller(act)
         } catch (e: Throwable) {
             WeLogger.e(TAG, "attachTriggerButton 异常", e)
-            try { triggerView?.let { if (it.parent != null) (it.parent as? ViewGroup)?.removeView(it) } } catch (_: Throwable) {}
-            triggerView = null
+            try { triggerButtonView?.let { if (it.parent != null) (it.parent as? ViewGroup)?.removeView(it) } } catch (_: Throwable) {}
+            triggerButtonView = null
         }
     }
 
-    private fun showPanel(act: Activity) {
-        if (panelRootView != null) return
-        val decorView = act.window?.decorView as? ViewGroup ?: return
+    // ==================== 入口可见性轮询（微信 Tab 才显示入口/面板） ====================
+    private fun startVisibilityPoller(act: Activity) {
+        visibilityPollerRunning = false
+        visibilityPollerHandler?.removeCallbacksAndMessages(null)
+        visibilityPollerRunning = true
+        val h = Handler(android.os.Looper.getMainLooper())
+        visibilityPollerHandler = h
+        h.post(object : Runnable {
+            override fun run() {
+                if (!visibilityPollerRunning) return
+                runCatching { syncLauncherUi(act) }
+                h.postDelayed(this, 400L)
+            }
+        })
+    }
+
+    private fun stopVisibilityPoller() {
+        visibilityPollerRunning = false
+        visibilityPollerHandler?.removeCallbacksAndMessages(null)
+        visibilityPollerHandler = null
+    }
+
+    /** 定时对账：非「微信」Tab 时隐藏入口、移除残留面板；回到「微信」Tab 时恢复入口。 */
+    private fun syncLauncherUi(act: Activity) {
+        val home = isHomePageActive(act)
+        if (home != lastPollerHome) {
+            lastPollerHome = home
+            runCatching { diagFile("POLL home=$home btn=${triggerButtonView != null} panel=${panelRootView != null}") }
+        }
+        val btn = triggerButtonView
+        if (btn != null) {
+            val hidden = !home || panelRootView != null || gestureState != GESTURE_IDLE
+            val target = if (hidden) View.GONE else View.VISIBLE
+            if (btn.visibility != target) btn.visibility = target
+        }
+        // 触摸条跟随入口显隐（非「微信」Tab 隐藏，避免残留拦截区域）
+        if (edgeZoneStripView != null) {
+            val stripTarget = if (home) View.VISIBLE else View.GONE
+            if (edgeZoneStripView!!.visibility != stripTarget) edgeZoneStripView!!.visibility = stripTarget
+        }
+        if (!home && panelRootView != null) {
+            removePanelInternal()
+        }
+    }
+
+    private fun hideTrigger() {
+        val tv = triggerButtonView ?: return
         try {
+            val wm = tv.context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+            if (wm != null && tv.isAttachedToWindow) {
+                runCatching { wm.removeView(tv) }
+            }
+            if (tv.parent != null) (tv.parent as? ViewGroup)?.removeView(tv)
+        } catch (e: Throwable) { WeLogger.w(TAG, "移除触发按钮失败", e) }
+        triggerButtonView = null
+    }
+
+    private fun removeTriggerButton() {
+        hideTrigger()
+    }
+
+    // ==================== 全屏右滑跟手（WeKit 式：主界面任意位置右滑，面板跟随手指呼出）====================
+    /**
+     * 挂载全屏右滑跟手手势：Hook 首页 Activity 的 dispatchTouchEvent（getMethod 命中
+     * LauncherUI 自身或父类最近的重写）。按下不消费（微信正常处理），判定为水平右滑后向
+     * 内容发送 ACTION_CANCEL 取消微信原生手势，随后接管为侧栏跟手拖拽，完全跟随手指。
+     */
+    private fun attachEdgeZone(act: Activity) {
+        if (gestureHookInstalled) return
+        try {
+            val method = act.javaClass.getMethod("dispatchTouchEvent", MotionEvent::class.java)
+            registerUnhook(
+                method.hookBeforeDirectly {
+                    handleDispatchTouch(this)
+                }
+            )
+            gestureHookInstalled = true
+            WeLogger.i(TAG, "全屏右滑跟手手势已挂载（${act.javaClass.name}）")
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "attachEdgeZone 挂载手势异常", e)
+            gestureHookInstalled = false
+        }
+    }
+
+    private fun removeEdgeZone() {
+        // 全屏跟手手势由 Xposed Hook 实现，禁用功能时经 unhookAll() 统一移除
+    }
+
+    // ==================== 左边缘右滑触摸条（隐形 View，挂到 decorView 左缘）====================
+    private fun attachEdgeZoneStrip(act: Activity) {
+        if (edgeZoneStripView != null) return
+        try {
+            val decorView = act.window?.decorView as? ViewGroup ?: return
+            val d = act.resources.displayMetrics.density
+            val zone = View(act).apply {
+                tag = "home_side_panel_edge_zone"
+                setOnTouchListener { _, ev -> handleZoneTouch(act, ev) }
+            }
+            val zoneWidth = edgeZoneWidthDp.coerceIn(10, 80)
+            val lp = FrameLayout.LayoutParams((zoneWidth * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+                gravity = Gravity.START or Gravity.TOP
+            }
+            if (zone.parent != null) (zone.parent as? ViewGroup)?.removeView(zone)
+            decorView.addView(zone, lp)
+            edgeZoneStripView = zone
+            WeLogger.i(TAG, "左边缘右滑触摸条已挂载（宽 ${zoneWidth}dp）")
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "attachEdgeZoneStrip 异常", e)
+            edgeZoneStripView = null
+        }
+    }
+
+    private fun removeEdgeZoneStrip() {
+        val zone = edgeZoneStripView ?: return
+        try {
+            if (zone.parent != null) (zone.parent as? ViewGroup)?.removeView(zone)
+        } catch (e: Throwable) { WeLogger.w(TAG, "移除左边缘触摸条失败", e) }
+        edgeZoneStripView = null
+    }
+
+    /** 触摸条事件：右滑超过 72dp 且基本水平 → 打开侧栏（面板平滑展开 + 收尾，与全屏右滑一致）。 */
+    private fun handleZoneTouch(act: Activity, ev: MotionEvent): Boolean {
+        if (!masterEnabled) return false
+        if (!isHomePageActive(act)) return false
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                zoneDownX = ev.rawX
+                zoneDownY = ev.rawY
+                zoneSwipeTriggered = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (zoneSwipeTriggered) return true
+                val dx = ev.rawX - zoneDownX
+                val dy = ev.rawY - zoneDownY
+                val thresholdPx = (72 * act.resources.displayMetrics.density).toFloat()
+                if (dx >= thresholdPx && Math.abs(dy) <= dx * 0.8f) {
+                    zoneSwipeTriggered = true
+                    try { openPanelFromEdgeZone(act) } catch (e: Throwable) { WeLogger.e(TAG, "左边缘手势打开面板异常", e) }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> zoneSwipeTriggered = true
+        }
+        return true
+    }
+
+    /** 左边缘滑动触发：与全屏右滑一致地把面板展开并收尾加载。 */
+    private fun openPanelFromEdgeZone(act: Activity) {
+        runCatching { diagFile("EDGE PANEL home=${runCatching { isHomePageActive(act) }.getOrDefault(false)}") }
+        ensureDragPanel(act)
+        val panel = panelRootView as? FrameLayout ?: return
+        panel.getChildAt(1)?.animate()?.translationX(0f)?.setDuration(220)?.start()
+        panel.getChildAt(0)?.animate()?.alpha(0.66f)?.setDuration(220)?.start()
+        hideTrigger()
+        loadPanelData(act)
+    }
+
+    private fun handleDispatchTouch(param: XC_MethodHook.MethodHookParam) {
+        if (!masterEnabled) return
+        val mode = migratedTriggerMode()
+        if ((mode and MODE_FULL_SWIPE) == 0) return
+        // 面板已展开（非拖拽中）：不劫持，面板内交互由面板自身处理
+        if (panelRootView != null && gestureState != GESTURE_DRAGGING) return
+        val act = param.thisObject as? Activity ?: return
+        // 精确限定只响应微信主页 Activity，杜绝 hook 命中基类 dispatchTouchEvent
+        // 时在 ChattingUI 等其它页面全局呼出侧边栏。
+        if (act.javaClass.name != "com.tencent.mm.ui.LauncherUI") return
+        val ev = param.args[0] as? MotionEvent ?: return
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val homeDown = isHomePageActive(act)
+                runCatching { diagFile("GEST DOWN home=$homeDown state=$gestureState x=${ev.rawX.toInt()} y=${ev.rawY.toInt()}") }
+                // Tab 切换后刷新入口显隐（切到非「微信」Tab 时移除按钮/面板）
+                runCatching { updateVisibility() }
+                if (gestureState == GESTURE_IDLE && homeDown) {
+                    gestureDownX = ev.rawX
+                    gestureDownY = ev.rawY
+                    gestureState = GESTURE_ARMED
+                } else {
+                    gestureState = GESTURE_IDLE
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.rawX - gestureDownX
+                when (gestureState) {
+                    GESTURE_ARMED -> {
+                        val dy = ev.rawY - gestureDownY
+                        val slopPx = (18 * act.resources.displayMetrics.density).toFloat()
+                        if (dx > slopPx && Math.abs(dy) <= dx * 1.35f) {
+                            // 判定为朝右的水平拖拽 → 接管为侧栏跟手拖拽
+                            gestureState = GESTURE_DRAGGING
+                            cancelContentGesture(act, ev)
+                            ensureDragPanel(act)
+                            updateDragPanel(act, dx)
+                            param.result = true
+                        } else if (Math.abs(dx) > slopPx * 8 || Math.abs(dy) > slopPx * 8) {
+                            // 明显不是右滑手势（上下滚动/左滑等），放弃本次跟踪
+                            gestureState = GESTURE_IDLE
+                        }
+                    }
+                    GESTURE_DRAGGING -> {
+                        updateDragPanel(act, dx)
+                        param.result = true
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (gestureState == GESTURE_DRAGGING) {
+                    finishDrag(act, ev.rawX - gestureDownX)
+                    param.result = true
+                }
+                gestureState = GESTURE_IDLE
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (gestureState == GESTURE_DRAGGING) closeDragPanel(act)
+                gestureState = GESTURE_IDLE
+            }
+        }
+    }
+
+    /** 向微信内容视图发送 ACTION_CANCEL，取消其正在跟踪的原生手势（滚动/长按/翻页）。 */
+    private fun cancelContentGesture(act: Activity, ev: MotionEvent) {
+        val decor = act.window?.decorView as? ViewGroup ?: return
+        if (decor.childCount == 0) return
+        val cancel = MotionEvent.obtain(ev.downTime, ev.eventTime, MotionEvent.ACTION_CANCEL, ev.x, ev.y, ev.metaState)
+        runCatching { decor.getChildAt(0).dispatchTouchEvent(cancel) }
+        cancel.recycle()
+    }
+
+    /** 跟手拖拽时确保面板已创建（先置于屏幕外，不播动画），并隐藏左上角触发按钮。 */
+    private fun ensureDragPanel(act: Activity) {
+        if (panelRootView != null) return
+        runCatching { diagFile("ENSURE PANEL act=${act.javaClass.simpleName} home=${runCatching { isHomePageActive(act) }.getOrDefault(false)}") }
+        buildPanel(act)
+        hideTrigger()
+    }
+
+    /** 更新跟手位置：面板随手指平移，遮罩随开合比例渐变。 */
+    private fun updateDragPanel(act: Activity, posPx: Float) {
+        val panel = panelRootView as? FrameLayout ?: return
+        val widthPx = dp(300, act).toFloat()
+        val clamped = posPx.coerceIn(0f, widthPx)
+        val progress = clamped / widthPx
+        panel.getChildAt(1)?.translationX = clamped - widthPx
+        panel.getChildAt(0)?.alpha = 0.66f * progress
+    }
+
+    /** 跟手到阈值以上：平滑展开到全开，并执行与按钮打开一致的收尾（隐藏触发按钮 + 加载面板数据）。 */
+    private fun finishDrag(act: Activity, dx: Float) {
+        val panel = panelRootView as? FrameLayout ?: return
+        val widthPx = dp(300, act).toFloat()
+        if (dx >= widthPx * 0.45f) {
+            panel.getChildAt(1)?.animate()?.translationX(0f)?.setDuration(180)?.start()
+            panel.getChildAt(0)?.animate()?.alpha(0.66f)?.setDuration(180)?.start()
+            hideTrigger()
+            loadPanelData(act)
+        } else {
+            closeDragPanel(act)
+        }
+    }
+
+    /** 跟手未达阈值：平滑收回并清理。 */
+    private fun closeDragPanel(act: Activity) {
+        val panel = panelRootView as? FrameLayout ?: return
+        val composeView = panel.getChildAt(1)
+        val scrim = panel.getChildAt(0)
+        composeView?.animate()?.translationX(-dp(300, act).toFloat())?.setDuration(180)
+            ?.withEndAction {
+                removePanelInternal()
+                reattachTriggers()
+            }?.start() ?: run { removePanelInternal(); reattachTriggers() }
+        scrim?.animate()?.alpha(0f)?.setDuration(150)?.start()
+    }
+
+    /** 构建侧栏面板（遮罩 + 300dp ComposeView），初始置于屏幕外，不做开启动画。 */
+    private fun buildPanel(act: Activity): FrameLayout? {
+        val decorView = act.window?.decorView as? ViewGroup ?: return null
+        return try {
             val dark = isDarkMode(act)
             val panel = FrameLayout(act).apply { tag = "home_side_panel_overlay" }
             val scrim = View(act).apply {
@@ -521,79 +1165,68 @@ private fun isHomeTabClass(className: String): Boolean {
                 setOnClickListener { try { hidePanel() } catch (e: Throwable) { WeLogger.e(TAG, "scrim 异常", e) } }
             }
             panel.addView(scrim)
-            val container = LinearLayout(act).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = FrameLayout.LayoutParams(dp(280, act), ViewGroup.LayoutParams.MATCH_PARENT).apply { gravity = Gravity.START or Gravity.TOP }
-                setBackgroundColor(AndroidColor.parseColor(if (dark) "#1E1E1E" else "#F5F5F5"))
+            val composeView = ComposeView(act).apply {
+                tag = "home_side_panel_compose"
+                layoutParams = FrameLayout.LayoutParams(dp(300, act), ViewGroup.LayoutParams.MATCH_PARENT).apply { gravity = Gravity.START or Gravity.TOP }
+                try { setLifecycleOwner(LifecycleOwnerProvider.lifecycleOwner) } catch (e: Throwable) { WeLogger.w(TAG, "setLifecycleOwner 失败", e) }
+                setContent {
+                    InjectedUiTheme(darkTheme = dark) {
+                        val primary = Color(if (dark) 0xFF64B5F6 else 0xFF1976D2)
+                        val onPrimary = Color(if (dark) 0xFF003057 else 0xFFFFFFFF)
+                        val primaryContainer = Color(if (dark) 0xFF00497A else 0xFFE3F2FD)
+                        val onPrimaryContainer = Color(if (dark) 0xFFCDE5FF else 0xFF0D47A1)
+                        val scheme = MaterialTheme.colorScheme.copy(
+                            primary = primary,
+                            onPrimary = onPrimary,
+                            primaryContainer = primaryContainer,
+                            onPrimaryContainer = onPrimaryContainer,
+                            secondary = primary,
+                            onSecondary = onPrimary,
+                            secondaryContainer = primaryContainer,
+                            onSecondaryContainer = onPrimaryContainer
+                        )
+                        MaterialTheme(colorScheme = scheme) {
+                            SidePanelContent(act)
+                        }
+                    }
+                }
             }
-            panel.addView(container)
-            val sbH = getStatusBarHeight(act)
-            val headerBar = LinearLayout(act).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(16, act), sbH, dp(8, act), dp(8, act)) }
-            }
-            val title = TextView(act).apply {
-                text = "侧边栏"; textSize = 18f; setTypeface(typeface, android.graphics.Typeface.BOLD)
-                setTextColor(AndroidColor.parseColor(if (dark) "#E0E0E0" else "#212121"))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val btnSettings = makeIconButton(act, "⚙", dp(40, act)) {
-                try { showPanelSettingsDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "设置按钮异常", e); showToast("配置面板打开失败：" + e.message) }
-            }
-            val btnClose = makeIconButton(act, "✕", dp(40, act)) {
-                try { hidePanel() } catch (e: Throwable) { WeLogger.e(TAG, "关闭按钮异常", e) }
-            }
-            btnSettings.setTextColor(AndroidColor.parseColor(if (dark) "#64B5F6" else "#1976D2"))
-            btnClose.setTextColor(AndroidColor.parseColor(if (dark) "#AAAAAA" else "#999999"))
-            headerBar.addView(title); headerBar.addView(btnSettings); headerBar.addView(btnClose)
-            container.addView(headerBar)
-            val divider = View(act).apply {
-                setBackgroundColor(AndroidColor.parseColor(if (dark) "#3A3A3A" else "#E0E0E0"))
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
-            }
-            container.addView(divider)
-            val scroll = ScrollView(act).apply {
-                isFillViewport = true
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
-            }
-            val content = LinearLayout(act).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(12, act), dp(8, act), dp(12, act), dp(24, act)) }
-            }
-            scroll.addView(content)
-            container.addView(scroll)
+            panel.addView(composeView)
+            composeView.translationX = -dp(300, act).toFloat()
+            scrim.alpha = 0f
             val panelLp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             if (panel.parent != null) (panel.parent as? ViewGroup)?.removeView(panel)
             decorView.addView(panel, panelLp)
             panelRootView = panel
-            content.tag = "wcx_panel_content"
-            hideTrigger()
-            fillPanelContent(act, content)
-        } catch (e: Throwable) { WeLogger.e(TAG, "showPanel 异常", e); try { removePanelInternal() } catch (_: Throwable) {} }
+            panel
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "buildPanel 异常", e)
+            try { removePanelInternal() } catch (_: Throwable) {}
+            null
+        }
     }
 
-    private fun makeIconButton(act: Activity, char: String, sizePx: Int, onClick: () -> Unit): TextView {
-        return TextView(act).apply {
-            text = char; textSize = 20f; gravity = Gravity.CENTER
-            width = sizePx; height = sizePx
-            isClickable = true; isFocusable = true
-            setOnClickListener { onClick() }
-            background = makeRippleBg(AndroidColor.parseColor("#22000000"))
-        }
+    private fun showPanel(act: Activity) {
+        if (panelRootView != null) return
+        try {
+            buildPanel(act) ?: return
+            val panel = panelRootView as? FrameLayout ?: return
+            val composeView = panel.getChildAt(1)
+            val scrim = panel.getChildAt(0)
+            // 开启动画：ComposeView 从左边滑入 + 遮罩渐显
+            composeView?.translationX = -dp(300, act).toFloat()
+            scrim?.alpha = 0f
+            composeView?.animate()?.translationX(0f)?.setDuration(350)?.start()
+            scrim?.animate()?.alpha(1f)?.setDuration(300)?.start()
+            hideTrigger()
+            loadPanelData(act)
+        } catch (e: Throwable) { WeLogger.e(TAG, "showPanel 异常", e); try { removePanelInternal() } catch (_: Throwable) {} }
     }
 
     private fun makeRippleBg(color: Int): android.graphics.drawable.Drawable {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             RippleDrawable(android.content.res.ColorStateList.valueOf(color), null, null)
         } else GradientDrawable().apply { setColor(color) }
-    }
-
-    private fun hideTrigger() {
-        val tv = triggerView ?: return
-        try { if (tv.parent != null) (tv.parent as? ViewGroup)?.removeView(tv) }
-        catch (e: Throwable) { WeLogger.w(TAG, "移除触发按钮失败", e) }
-        triggerView = null
     }
 
     private fun removePanelInternal() {
@@ -604,289 +1237,241 @@ private fun isHomeTabClass(className: String): Boolean {
     }
 
     private fun hidePanel() {
-        removePanelInternal()
-        val act = attachedActivity ?: findLauncherUI()
-        if (act != null && triggerView == null) attachTriggerButton(act)
+        val panel = panelRootView ?: return
+        val vg = panel as? ViewGroup
+        val composeView = vg?.getChildAt(1)
+        val scrim = vg?.getChildAt(0)
+        val widthPx = dp(300, panel.context)
+        composeView?.animate()?.translationX(-widthPx.toFloat())?.setDuration(250)?.withEndAction {
+            removePanelInternal()
+            reattachTriggers()
+        }?.start() ?: run { removePanelInternal(); reattachTriggers() }
+        scrim?.animate()?.alpha(0f)?.setDuration(200)?.start()
+    }
+
+    private fun reattachTriggers() {
+        try {
+            val act = attachedActivity ?: return
+            if (!isHomePageActive(act)) return
+            val mode = migratedTriggerMode()
+            if ((mode and MODE_FULL_SWIPE) != 0 && !gestureHookInstalled) attachEdgeZone(act)
+            if ((mode and MODE_EDGE_STRIP) != 0 && edgeZoneStripView == null) attachEdgeZoneStrip(act)
+            if ((mode and MODE_TRIGGER_BUTTON) != 0 &&
+                (triggerButtonView == null || triggerButtonView!!.parent == null)
+            ) attachTriggerButton(act)
+        } catch (e: Throwable) { WeLogger.e(TAG, "hidePanel 重挂触发视图异常", e) }
     }
 
     private fun removeAllViews() {
         try {
+            stopVisibilityPoller()
             removePanelInternal()
-            val tv = triggerView; triggerView = null
-            if (tv != null && tv.parent != null) (tv.parent as? ViewGroup)?.removeView(tv)
+            removeEdgeZone()
+            removeEdgeZoneStrip()
+            removeTriggerButton()
         } catch (e: Throwable) { WeLogger.e(TAG, "removeAllViews 异常", e) }
     }
 
-    // ==================== 面板内容填充 ====================
-    private fun fillPanelContent(act: Activity, content: LinearLayout) {
-        try {
-            content.removeAllViews()
-            if (headerEnabled) {
-                try { content.addView(makeHeaderCard(act)) } catch (e: Throwable) { WeLogger.e(TAG, "头部卡片异常", e) }
-            }
-            if (weatherEnabled) {
-                try { content.addView(makeWeatherCard(act)) } catch (e: Throwable) { WeLogger.e(TAG, "天气卡片异常", e) }
-            }
-            if (quickButtonsEnabled) {
-                try { content.addView(makeQuickButtonsGrid(act)) } catch (e: Throwable) { WeLogger.e(TAG, "快捷栏异常", e) }
-            }
-            try { fillFeatureList(act, content) } catch (e: Throwable) { WeLogger.e(TAG, "功能列表异常", e) }
-            if (dailyQuoteEnabled) {
-                try { content.addView(makeQuoteCard(act)) } catch (e: Throwable) { WeLogger.e(TAG, "每日一言异常", e) }
-            }
-        } catch (e: Throwable) { WeLogger.e(TAG, "fillPanelContent 异常", e) }
-    }
-
-    // ==================== 头部卡片（头像 + 签名）====================
-    private fun makeHeaderCard(act: Activity): View {
-        val card = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            background = makeCardBg(act)
-            setPadding(dp(16, act), dp(16, act), dp(16, act), dp(16, act))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { val m = dp(8, act); setMargins(0, m, 0, m) }
-        }
-        val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val avatar = ImageView(act).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(56, act), dp(56, act))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(AndroidColor.parseColor(if (isDarkMode(act)) "#555555" else "#E0E0E0"))
-            }
-            contentDescription = "头像"
-            tag = "wcx_header_avatar"
-            // 长按头像 → 弹配置；单击无动作
-            isLongClickable = true
-            setOnLongClickListener {
-                try { showAvatarConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "头像配置异常", e); showToast("头像配置失败：" + e.message) }
-                true
-            }
-        }
-        val infoCol = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12, act) }
-        }
-        val statusRow = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            isClickable = true; isFocusable = true
-            setOnLongClickListener {
-                try { showStatusConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "状态配置异常", e); showToast("状态配置失败：" + e.message) }
-                true
-            }
-        }
-        val dot = View(act).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(8, act), dp(8, act))
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(AndroidColor.parseColor(if (isOnline) "#4CAF50" else "#9E9E9E")) }
-        }
-        val statusText = TextView(act).apply {
-            text = onlineStatus; textSize = 13f
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#AAAAAA" else "#999999"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6, act) }
-        }
-        statusRow.addView(dot); statusRow.addView(statusText)
-        infoCol.addView(statusRow)
-
-        val nickname = TextView(act).apply {
-            text = ""; textSize = 14f; setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#E0E0E0" else "#212121"))
-            setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4, act) }
-            tag = "wcx_header_nickname"
-        }
-        infoCol.addView(nickname)
-
-        val timeText = TextView(act).apply {
-            text = try { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) } catch (_: Throwable) { "00:00" }
-            textSize = 22f; setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#E0E0E0" else "#212121"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            tag = "wcx_header_time"
-        }
-        infoCol.addView(timeText)
-
-        val dateText = TextView(act).apply {
-            text = try { SimpleDateFormat("yyyy年MM月dd日 EEEE", Locale.CHINESE).format(Date()) } catch (_: Throwable) { "" }
-            textSize = 12f
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#888888" else "#999999"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2, act) }
-            tag = "wcx_header_date"
-        }
-        infoCol.addView(dateText)
-
-        val refreshBtn = TextView(act).apply {
-            text = "↻"; textSize = 18f; gravity = Gravity.CENTER
-            width = dp(32, act); height = dp(32, act)
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#888888" else "#999999"))
-            isClickable = true; isFocusable = true
-            background = makeRippleBg(AndroidColor.parseColor("#22000000"))
-            setOnClickListener {
-                try { refreshHeader(act, nickname, timeText, dateText, avatar) } catch (e: Throwable) { WeLogger.e(TAG, "刷新异常", e) }
-            }
-        }
-
-        row.addView(avatar); row.addView(infoCol); row.addView(refreshBtn)
-        card.addView(row)
-
-        // 签名/语录（长按配置）
-        val quote = TextView(act).apply {
-            val qText = try { fetchQuoteText() } catch (_: Throwable) { quoteFallback }
-            text = qText
-            textSize = 13f
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#888888" else "#999999"))
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8, act) }
-            isLongClickable = true
-            setOnLongClickListener {
-                try { showSignatureConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "签名配置异常", e); showToast("签名配置失败：" + e.message) }
-                true
-            }
-        }
-        card.addView(quote)
-
-        // 异步加载头像 + 昵称
-        mainHandler.post {
-            try {
-                val bmp = loadAvatarBitmap(act)
-                if (bmp != null) avatar.setImageBitmap(bmp)
-                nickname.text = loadWeChatNickname(act)
-            } catch (e: Throwable) { WeLogger.e(TAG, "异步加载头像失败", e) }
-        }
-        return card
-    }
-
-    private fun refreshHeader(act: Activity, nickname: TextView, timeText: TextView, dateText: TextView, avatar: ImageView) {
+    // ==================== 面板数据加载（异步喂给 Compose 状态） ====================
+    private fun loadPanelData(act: Activity) {
         try {
             mainHandler.post {
+                uiTime = try { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) } catch (_: Throwable) { "00:00" }
+                uiDate = try { SimpleDateFormat("yyyy年MM月dd日 EEEE", Locale.CHINESE).format(Date()) } catch (_: Throwable) { "" }
+            }
+            Thread {
+                try { val v = fetchQuoteText(); mainHandler.post { uiSignature = v } } catch (_: Throwable) {}
+            }.start()
+            Thread {
+                try { val v = fetchDailyQuote(); mainHandler.post { uiDailyQuote = v } } catch (_: Throwable) {}
+            }.start()
+            Thread {
                 try {
-                    val bmp = loadAvatarBitmap(act)
-                    if (bmp != null) avatar.setImageBitmap(bmp)
-                    nickname.text = loadWeChatNickname(act)
-                } catch (e: Throwable) { WeLogger.e(TAG, "刷新头像失败", e) }
-            }
-            timeText.text = try { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) } catch (_: Throwable) { timeText.text }
-            dateText.text = try { SimpleDateFormat("yyyy年MM月dd日 EEEE", Locale.CHINESE).format(Date()) } catch (_: Throwable) { dateText.text }
-            showToast("已刷新")
-        } catch (e: Throwable) { WeLogger.e(TAG, "refreshHeader 异常", e) }
+                    val w = fetchWeatherData()
+                    if (w != null) mainHandler.post { uiWeather = w }
+                } catch (e: Throwable) { WeLogger.e(TAG, "weather async error", e) }
+            }.start()
+            Thread {
+                try {
+                    var bmp: Bitmap? = null
+                    var attempts = 0
+                    while (bmp == null && attempts < 3) {
+                        bmp = loadAvatarBitmap(act)
+                        if (bmp == null) { try { Thread.sleep(1500) } catch (_: Throwable) {}; attempts++ }
+                    }
+                    val nick = loadWeChatNickname(act)
+                    val finalBmp = bmp
+                    mainHandler.post {
+                        try {
+                            if (finalBmp != null) uiAvatar = finalBmp
+                            if (nick.isNotBlank()) uiNickname = nick
+                        } catch (_: Throwable) {}
+                    }
+                } catch (e: Throwable) { WeLogger.e(TAG, "loadPanelData avatar 失败", e) }
+            }.start()
+        } catch (e: Throwable) { WeLogger.e(TAG, "loadPanelData 异常", e) }
     }
 
-    // ==================== 天气卡片（长按配置）====================
-    private fun makeWeatherCard(act: Activity): View {
-        val card = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            background = makeCardBg(act)
-            setPadding(dp(16, act), dp(16, act), dp(16, act), dp(16, act))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { val m = dp(8, act); setMargins(0, m, 0, m) }
-            // 仅长按触发配置，单击无动作
-            isLongClickable = true
-            setOnLongClickListener {
-                try { showWeatherConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "天气配置异常", e); showToast("天气配置失败：" + e.message) }
-                true
-            }
-        }
-        val configured = weatherApiUrl.isNotBlank()
-        card.alpha = if (configured) 1f else 0.4f
-
-        if (!configured) {
-            val txt = TextView(act).apply {
-                text = "长按卡片配置天气 API 地址"
-                textSize = 14f
-                setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#AAAAAA" else "#999999"))
-                gravity = Gravity.CENTER
-            }
-            card.addView(txt)
-            return card
-        }
-
-        val row1 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val cityCol = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
-        val city = TextView(act).apply { text = "--"; textSize = 16f; setTypeface(typeface, android.graphics.Typeface.BOLD); setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#E0E0E0" else "#212121")) }
-        val update = TextView(act).apply { text = ""; textSize = 11f; setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#888888" else "#999999")) }
-        cityCol.addView(city); cityCol.addView(update)
-        val icon = TextView(act).apply { text = "☁"; textSize = 28f; setTextColor(AndroidColor.parseColor("#1976D2")) }
-        row1.addView(cityCol); row1.addView(icon)
-        card.addView(row1)
-
-        val row2 = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8, act) }
-        }
-        val temp = TextView(act).apply { text = "--"; textSize = 36f; setTypeface(typeface, android.graphics.Typeface.BOLD); setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#E0E0E0" else "#212121")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
-        val sideCol = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
-        val feels = TextView(act).apply { text = "体感 --"; textSize = 12f; setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#888888" else "#999999")) }
-        val hl = TextView(act).apply { text = "-- / --"; textSize = 12f; setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#888888" else "#999999")) }
-        val hw = TextView(act).apply { text = "湿度 -- 风速 --"; textSize = 11f; setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#888888" else "#999999")) }
-        sideCol.addView(feels); sideCol.addView(hl); sideCol.addView(hw)
-        row2.addView(temp); row2.addView(sideCol)
-        card.addView(row2)
-
-        val typeText = TextView(act).apply {
-            textSize = 13f
-            setTextColor(AndroidColor.parseColor("#1976D2"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4, act) }
-        }
-        card.addView(typeText)
-
-        mainHandler.post {
-            try {
-                val w = fetchWeatherData()
-                if (w != null) {
-                    city.text = w.city
-                    update.text = w.updateTime
-                    temp.text = w.temperature
-                    feels.text = "体感 ${w.feelsLike}"
-                    hl.text = "${w.tempHigh} / ${w.tempLow}"
-                    hw.text = "湿度 ${w.humidity} 风速 ${w.windSpeed}"
-                    typeText.text = w.weather
+    // ==================== 头部卡片（头像 + 签名） ====================
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun HeaderCard(act: Activity) {
+        val cs = MaterialTheme.colorScheme
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cs.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val bmp = uiAvatar
+                    if (bmp != null) {
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = "头像",
+                            modifier = Modifier.size(56.dp).clip(CircleShape)
+                                .combinedClickable(onClick = {}, onLongClick = { try { showAvatarConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "头像配置异常", e); showToast("头像配置失败：" + e.message) } }),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.size(56.dp).clip(CircleShape).background(cs.primaryContainer)
+                                .combinedClickable(onClick = {}, onLongClick = { try { showAvatarConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "头像配置异常", e); showToast("头像配置失败：" + e.message) } }),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(MaterialSymbols.OutlinedFilled.Person, "头像", tint = cs.onPrimaryContainer)
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { try { showStatusConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "状态配置异常", e); showToast("状态配置失败：" + e.message) } })
+                        ) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(Color(if (isOnline) 0xFF4CAF50 else 0xFF9E9E9E))) {}
+                            Spacer(Modifier.width(6.dp))
+                            Text(onlineStatus, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(uiNickname.ifBlank { "微信" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(4.dp))
+                        Text(uiTime, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = cs.onSurface)
+                        Text(uiDate, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { loadPanelData(act) }) {
+                        Icon(MaterialSymbols.OutlinedFilled.Update, "刷新", tint = cs.onSurfaceVariant)
+                    }
                 }
-            } catch (e: Throwable) { WeLogger.e(TAG, "异步天气异常", e) }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    uiSignature.ifBlank { quoteFallback },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { try { showSignatureConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "签名配置异常", e); showToast("签名配置失败：" + e.message) } })
+                )
+            }
         }
-        return card
     }
 
-    // ==================== 4 槽快捷栏（固定 4 个，支持替换）====================
-    private fun makeQuickButtonsGrid(act: Activity): View {
-        val card = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            background = makeCardBg(act)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { val m = dp(8, act); setMargins(0, m, 0, m) }
-            setPadding(dp(8, act), dp(8, act), dp(8, act), dp(8, act))
+    // ==================== 天气卡片 — WeKit 风格（长按配置） ====================
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun WeatherCard(act: Activity) {
+        val cs = MaterialTheme.colorScheme
+        val w = uiWeather
+        Card(
+            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { try { showWeatherConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "天气配置异常", e); showToast("天气配置失败：" + e.message) } }),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cs.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                if (w == null) {
+                    // 加载占位：紧凑单行，避免 "--" 大字占位撑高卡片
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(weatherCity.ifBlank { weatherFallbackCity }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.width(8.dp))
+                        Text("天气加载中…", style = MaterialTheme.typography.bodySmall, color = cs.primary)
+                    }
+                } else {
+                    // 城市+天气描述+更新时间
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(w.city, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (!w.weather.isNullOrBlank()) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(w.weather, style = MaterialTheme.typography.bodySmall, color = cs.primary, maxLines = 1)
+                                }
+                            }
+                            Text(w.updateTime, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
+                        }
+                        Text(w.weatherIcon?.takeIf { it.isNotBlank() } ?: "☁", fontSize = 26.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    // 温度区：温度大字 + 高低/体感；湿度/风速独立一行左右分布，避免窄面板右侧挤压遮挡
+                    Column(
+                        modifier = Modifier.fillMaxWidth().background(cs.primaryContainer.copy(alpha = 0.6f), RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(w.temperature, fontSize = 40.sp, fontWeight = FontWeight.Bold, color = cs.onPrimaryContainer)
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text("${w.tempHigh} / ${w.tempLow}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = cs.onPrimaryContainer, maxLines = 1)
+                                if (!w.feelsLike.isNullOrBlank()) {
+                                    Text("体感 ${w.feelsLike}", style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer.copy(alpha = 0.7f), maxLines = 1)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("湿度 ${formatHumidity(w.humidity)}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
+                            Spacer(Modifier.weight(1f))
+                            Text("风速 ${formatWindSpeed(w.windSpeed)}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // ==================== 4 槽快捷栏（固定 4 个，支持替换） ====================
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun QuickButtonsGrid(act: Activity) {
+        val cs = MaterialTheme.colorScheme
         val slots = loadQuickSlots().take(4)
-        for (slot in slots) {
-            val item = LinearLayout(act).apply {
-                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(dp(4, act), 0, dp(4, act), 0) }
-                isClickable = true; isFocusable = true
-                background = makeRippleBg(AndroidColor.parseColor("#11000000"))
-                setOnClickListener {
-                    try { executeSlotTarget(act, slot) } catch (e: Throwable) { WeLogger.e(TAG, "slot ${slot.slotId} 点击异常", e) }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cs.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                slots.forEach { slot ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
+                            .combinedClickable(
+                                onClick = { try { executeSlotTarget(act, slot) } catch (e: Throwable) { WeLogger.e(TAG, "slot ${slot.slotId} 点击异常", e) } },
+                                onLongClick = { try { showSlotPickerDialog(act, slot.slotId, slot) } catch (e: Throwable) { WeLogger.e(TAG, "slot ${slot.slotId} 选择异常", e); showToast("快捷栏选择失败：" + e.message) } }
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(CircleShape).background(cs.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(iconFor(slot.iconName), slot.name, tint = cs.primary)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(slot.name, style = MaterialTheme.typography.labelMedium, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
-                setOnLongClickListener {
-                    try { showSlotPickerDialog(act, slot.slotId, slot) } catch (e: Throwable) { WeLogger.e(TAG, "slot ${slot.slotId} 选择异常", e); showToast("快捷栏选择失败：" + e.message) }
-                    true
-                }
             }
-            val iconBg = FrameLayout(act).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(40, act), dp(40, act))
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(AndroidColor.parseColor("#E3F2FD")) }
-            }
-            val icon = TextView(act).apply {
-                text = iconPool[slot.iconName] ?: "+"; textSize = 22f
-                setTextColor(AndroidColor.parseColor("#1976D2")); gravity = Gravity.CENTER
-                layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-            }
-            iconBg.addView(icon)
-            val label = TextView(act).apply {
-                text = slot.name; textSize = 11f
-                setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#E0E0E0" else "#212121"))
-                gravity = Gravity.CENTER
-                setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4, act) }
-            }
-            item.addView(iconBg); item.addView(label)
-            card.addView(item)
         }
-        return card
     }
 
     /** 执行 slot 绑定的功能跳转 */
@@ -904,15 +1489,16 @@ private fun isHomeTabClass(className: String): Boolean {
         }
     }
 
-    private fun fillFeatureList(act: Activity, container: LinearLayout) {
-        data class Entry(val icon: String, val label: String, val onClick: () -> Unit)
-        val entries = mutableListOf<Entry>()
-        if (momentsEntryEnabled) entries.add(Entry("♥", "朋友圈") { startActivityByName(act, "com.tencent.mm.plugin.sns.ui.improve.ImproveSnsTimelineUI") })
-        if (videoEntryEnabled) entries.add(Entry("▶", "视频号") { startActivityByName(act, "com.tencent.mm.plugin.finder.ui.FinderHomeUI") })
-        if (clearUnreadEnabled) entries.add(Entry("✓", "清空未读") {
+    private class FeatureEntry(val icon: ImageVector, val label: String, val onClick: () -> Unit)
+
+    private fun buildFeatureEntries(act: Activity): List<FeatureEntry> {
+        val list = mutableListOf<FeatureEntry>()
+        if (momentsEntryEnabled) list.add(FeatureEntry(MaterialSymbols.OutlinedFilled.Favorite, "朋友圈") { startActivityByName(act, "com.tencent.mm.plugin.sns.ui.improve.ImproveSnsTimelineUI") })
+        if (videoEntryEnabled) list.add(FeatureEntry(MaterialSymbols.OutlinedFilled.Movie, "视频号") { startActivityByName(act, "com.tencent.mm.plugin.finder.ui.FinderHomeUI") })
+        if (clearUnreadEnabled) list.add(FeatureEntry(MaterialSymbols.OutlinedFilled.Check_circle, "清空未读") {
             try { Toast.makeText(act, "已尝试清空未读（占位）", Toast.LENGTH_SHORT).show() } catch (e: Throwable) { WeLogger.e(TAG, "清空未读异常", e) }
         })
-        if (wcxSettingsEnabled) entries.add(Entry("⚙", "WCX 设置") {
+        if (wcxSettingsEnabled) list.add(FeatureEntry(MaterialSymbols.OutlinedFilled.Settings, "WCX 设置") {
             try {
                 val intent = Intent(act, Class.forName("com.Johnny.wcx.activity.settings.SettingsActivity")).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                 act.startActivity(intent)
@@ -920,7 +1506,7 @@ private fun isHomeTabClass(className: String): Boolean {
         })
         val customs = loadCustomFeatures()
         customs.forEach { cf ->
-            entries.add(Entry(iconPool[cf.iconName] ?: "+", cf.name) {
+            list.add(FeatureEntry(iconFor(cf.iconName), cf.name) {
                 if (cf.isCustomIntent) {
                     try {
                         val intent = Intent().apply { setClassName(act.packageName, cf.targetActivity); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
@@ -929,70 +1515,115 @@ private fun isHomeTabClass(className: String): Boolean {
                 } else startActivityByName(act, cf.targetActivity, false)
             })
         }
-        entries.forEach { e ->
-            val item = LinearLayout(act).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                isClickable = true; isFocusable = true
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { val m = dp(2, act); setMargins(0, m, 0, m) }
-                setPadding(dp(16, act), dp(12, act), dp(16, act), dp(12, act))
-                background = makeRippleBg(AndroidColor.parseColor("#11000000"))
-                setOnClickListener { e.onClick() }
+        return list
+    }
+
+    @Composable
+    private fun FeatureList(act: Activity) {
+        val cs = MaterialTheme.colorScheme
+        val entries = buildFeatureEntries(act)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cs.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column {
+                entries.forEachIndexed { index, e ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable { e.onClick() }.padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Icon(e.icon, e.label, tint = cs.primary, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(e.label, style = MaterialTheme.typography.bodyLarge, color = cs.onSurface, modifier = Modifier.weight(1f))
+                        Text("›", color = cs.outlineVariant, fontSize = 20.sp)
+                    }
+                    if (index < entries.lastIndex) {
+                        Box(Modifier.fillMaxWidth().padding(start = 50.dp).height(1.dp).background(cs.outlineVariant.copy(alpha = 0.25f))) {}
+                    }
+                }
             }
-            val icon = TextView(act).apply {
-                text = e.icon; textSize = 20f; setTextColor(AndroidColor.parseColor("#1976D2"))
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(dp(28, act), dp(28, act))
-            }
-            val label = TextView(act).apply {
-                text = e.label; textSize = 15f
-                setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#E0E0E0" else "#212121"))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12, act) }
-            }
-            val arrow = TextView(act).apply { text = "›"; textSize = 20f; setTextColor(AndroidColor.parseColor("#CCCCCC")) }
-            item.addView(icon); item.addView(label); item.addView(arrow)
-            container.addView(item)
         }
     }
 
-    // ==================== 每日一言卡片（长按配置）====================
-    private fun makeQuoteCard(act: Activity): View {
-        val card = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            background = makeCardBg(act)
-            setPadding(dp(16, act), dp(16, act), dp(16, act), dp(16, act))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { val m = dp(8, act); setMargins(0, m, 0, m) }
-            isLongClickable = true
-            setOnLongClickListener {
-                try { showDailyQuoteConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "每日一言配置异常", e); showToast("每日一言配置失败：" + e.message) }
-                true
+    // ==================== 每日一言卡片（长按配置） ====================
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun QuoteCard(act: Activity) {
+        val cs = MaterialTheme.colorScheme
+        Card(
+            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { try { showDailyQuoteConfigDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "每日一言配置异常", e); showToast("每日一言配置失败：" + e.message) } }),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = cs.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("❝", color = cs.primary, fontSize = 20.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("每日一言", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = cs.onSurface)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(uiDailyQuote.ifBlank { dailyQuoteFallback }, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             }
         }
-        val titleRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val q = TextView(act).apply { text = "❝"; textSize = 20f; setTextColor(AndroidColor.parseColor("#1976D2")) }
-        val t = TextView(act).apply {
-            text = "每日一言（长按配置）"; textSize = 14f; setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#E0E0E0" else "#212121"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6, act) }
-        }
-        titleRow.addView(q); titleRow.addView(t); card.addView(titleRow)
-
-        val text = TextView(act).apply {
-            text = try { fetchDailyQuote() } catch (_: Throwable) { dailyQuoteFallback }
-            textSize = 13f
-            setTextColor(AndroidColor.parseColor(if (isDarkMode(act)) "#BBBBBB" else "#666666"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8, act) }
-        }
-        card.addView(text)
-        return card
     }
 
-    private fun makeCardBg(act: Activity): android.graphics.drawable.Drawable {
-        val dark = isDarkMode(act)
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(12, act).toFloat()
-            setColor(AndroidColor.parseColor(if (dark) "#2C2C2C" else "#FFFFFF"))
+    // ==================== 面板整体 Compose 内容（悬浮液态玻璃） ====================
+    @Composable
+    private fun SidePanelContent(act: Activity) {
+        val cs = MaterialTheme.colorScheme
+        key(panelRefresh) {
+            val panelShape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)
+            Surface(
+                modifier = Modifier.fillMaxSize()
+                    .clip(panelShape)
+                    .border(1.dp, cs.outlineVariant.copy(alpha = 0.3f), panelShape),
+                color = cs.surfaceVariant
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    Spacer(Modifier.height((getStatusBarHeight(act) * 0.4).toInt().dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("侧边栏", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = cs.onSurface, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { try { showPanelSettingsDialog(act) } catch (e: Throwable) { WeLogger.e(TAG, "设置按钮异常", e); showToast("配置面板打开失败：" + e.message) } }) {
+                            Icon(MaterialSymbols.OutlinedFilled.Settings, "设置", tint = cs.primary)
+                        }
+                        IconButton(onClick = { try { hidePanel() } catch (e: Throwable) { WeLogger.e(TAG, "关闭按钮异常", e) } }) {
+                            Icon(MaterialSymbols.OutlinedFilled.Close, "关闭", tint = cs.onSurfaceVariant)
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(cs.outlineVariant)) {}
+                    Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (headerEnabled) HeaderCard(act)
+                        if (weatherEnabled) WeatherCard(act)
+                        if (quickButtonsEnabled) QuickButtonsGrid(act)
+                        FeatureList(act)
+                        if (dailyQuoteEnabled) QuoteCard(act)
+                        Spacer(Modifier.height(16.dp))
+                    }
+                }
+            }
         }
+    }
+
+    private fun iconFor(iconName: String): ImageVector = when (iconName) {
+        "Qr_code_scanner" -> MaterialSymbols.OutlinedFilled.Qr_code_scanner
+        "Wallet" -> MaterialSymbols.OutlinedFilled.Wallet
+        "Collections_bookmark" -> MaterialSymbols.OutlinedFilled.Bookmark
+        "Favorite" -> MaterialSymbols.OutlinedFilled.Favorite
+        "Person" -> MaterialSymbols.OutlinedFilled.Person
+        "Settings" -> MaterialSymbols.OutlinedFilled.Settings
+        "Camera" -> MaterialSymbols.OutlinedFilled.Camera
+        "Video_call" -> MaterialSymbols.OutlinedFilled.Movie
+        "Movie" -> MaterialSymbols.OutlinedFilled.Movie
+        else -> MaterialSymbols.OutlinedFilled.Add
     }
 
     // ==================== 设置面板（开关 + 4 插槽选择 + 卡片配置入口）====================
@@ -1005,10 +1636,10 @@ private fun isHomeTabClass(className: String): Boolean {
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4, act); bottomMargin = dp(4, act) }
             }
             container.addView(cardHeader)
-            addSwitchRow(container, act, "头部卡片（头像/签名/状态）", headerEnabled) { headerEnabled = it }
-            addSwitchRow(container, act, "天气卡片", weatherEnabled) { weatherEnabled = it }
-            addSwitchRow(container, act, "快捷功能栏", quickButtonsEnabled) { quickButtonsEnabled = it }
-            addSwitchRow(container, act, "每日一言卡片", dailyQuoteEnabled) { dailyQuoteEnabled = it }
+            addSwitchRow(container, act, "头部卡片（头像/签名/状态）", headerEnabled) { headerEnabled = it; refreshPanelContent(act) }
+            addSwitchRow(container, act, "天气卡片", weatherEnabled) { weatherEnabled = it; refreshPanelContent(act) }
+            addSwitchRow(container, act, "快捷功能栏", quickButtonsEnabled) { quickButtonsEnabled = it; refreshPanelContent(act) }
+            addSwitchRow(container, act, "每日一言卡片", dailyQuoteEnabled) { dailyQuoteEnabled = it; refreshPanelContent(act) }
 
             // 2. 卡片独立配置入口
             val configHeader = TextView(act).apply {
@@ -1062,17 +1693,8 @@ private fun isHomeTabClass(className: String): Boolean {
 
     private fun refreshPanelContent(act: Activity) {
         try {
-            val panel = panelRootView ?: return
-            val scroll = findScrollView(panel)
-            val content = scroll?.getChildAt(0) as? LinearLayout ?: return
-            fillPanelContent(act, content)
+            panelRefresh = panelRefresh + 1
         } catch (e: Throwable) { WeLogger.e(TAG, "refreshPanelContent 异常", e) }
-    }
-
-    private fun findScrollView(root: View): ScrollView? {
-        if (root is ScrollView) return root
-        if (root is ViewGroup) for (i in 0 until root.childCount) findScrollView(root.getChildAt(i))?.let { return it }
-        return null
     }
 
     private fun addSwitchRow(container: LinearLayout, act: Activity, label: String, initial: Boolean, onChange: (Boolean) -> Unit) {
@@ -1085,7 +1707,7 @@ private fun isHomeTabClass(className: String): Boolean {
                 text = label; textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            val sw = Switch(act).apply {
+            val sw = android.widget.Switch(act).apply {
                 isChecked = initial
                 setOnCheckedChangeListener { _, c -> try { onChange(c) } catch (e: Throwable) { WeLogger.e(TAG, "switch 异常", e) } }
             }
@@ -1329,7 +1951,7 @@ private fun isHomeTabClass(className: String): Boolean {
             val fbHolder = arrayOf(weatherFallbackCity)
             val container = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20, act), dp(12, act), dp(20, act), dp(12, act)) }
             container.addView(EditText(act).apply { setText(cityHolder[0]); hint = "城市（如 北京）" })
-            container.addView(EditText(act).apply { setText(urlHolder[0]); hint = "天气 API 地址" })
+            container.addView(EditText(act).apply { setText(urlHolder[0]); hint = "天气 API 地址（留空=内置 Open-Meteo）" })
             container.addView(EditText(act).apply { setText(keyHolder[0]); hint = "API Key（可选）" })
             container.addView(EditText(act).apply { setText(fbHolder[0]); hint = "兜底城市（API 失败时显示）" })
             val inputs = (0 until container.childCount).map { container.getChildAt(it) as EditText }
@@ -1385,6 +2007,8 @@ private fun isHomeTabClass(className: String): Boolean {
                         dailyQuoteFallback = inputs[2].text.toString().ifBlank { "生活不止眼前的苟且，还有诗和远方" }
                         cachedDailyQuote = ""
                         lastDailyQuoteFetchTime = 0L
+                        dailyQuoteCacheText = ""
+                        dailyQuoteCacheTime = 0L
                         refreshPanelContent(act)
                         showToast("每日一言配置已保存")
                     } catch (e: Throwable) { WeLogger.e(TAG, "保存每日一言异常", e) }
@@ -1419,32 +2043,212 @@ private fun isHomeTabClass(className: String): Boolean {
     }
 
     // ==================== 数据获取（带超时 + 兜底）====================
+    /** weather data: Open-Meteo primary, wttr.in fallback, custom API optional */
     private fun fetchWeatherData(): WeatherData? {
-        val apiUrl = weatherApiUrl
-        if (apiUrl.isBlank()) return null
         val city = if (weatherCity.isBlank()) weatherFallbackCity else weatherCity
         val now = System.currentTimeMillis()
-        if (cachedWeather != null && now - lastWeatherFetchTime < weatherRefreshInterval * 1000L) return cachedWeather
+        // cache is keyed by city so a city change always invalidates it
+        val cachedW = cachedWeather
+        if (cachedW != null && cachedW.city == city &&
+            now - lastWeatherFetchTime < weatherRefreshInterval * 1000L) return cachedW
         return try {
-            val json = httpGet(apiUrl, weatherApiKey) ?: return cachedWeather
-            val data = org.json.JSONObject(json).optJSONObject("data") ?: org.json.JSONObject(json)
-            val weather = WeatherData(
-                city = data.optString("city", city),
-                temperature = data.optString("wendu", "--"),
-                feelsLike = data.optString("ganmao", "--"),
-                tempHigh = data.optString("high", "--"),
-                tempLow = data.optString("low", "--"),
-                humidity = data.optString("shidu", "--"),
-                windSpeed = data.optString("fengli", "--"),
-                weather = data.optString("type", ""),
-                updateTime = try { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) } catch (_: Throwable) { "" },
-                weatherIcon = data.optString("type", "")
-            )
-            cachedWeather = weather; lastWeatherFetchTime = now; weather
+            val w = if (useOpenMeteoSource()) {
+                fetchOpenMeteoWeather(city) ?: fetchWttrWeather(city)
+            } else {
+                fetchCustomApiWeather(city)
+            }
+            if (w != null) { cachedWeather = w; lastWeatherFetchTime = now }
+            w ?: cachedWeather
         } catch (e: Throwable) {
-            WeLogger.e(TAG, "获取天气失败", e)
+            WeLogger.e(TAG, "get weather failed", e)
             cachedWeather
         }
+    }
+
+    /** true when using the built-in Open-Meteo source (URL blank or still old default) */
+    private fun useOpenMeteoSource(): Boolean {
+        val u = weatherApiUrl.trim()
+        return u.isEmpty() || u == DEFAULT_WEATHER_API_URL
+    }
+
+    /** custom API source ({city} placeholder is replaced with the city name) */
+    private fun fetchCustomApiWeather(city: String): WeatherData? {
+        var apiUrl = weatherApiUrl
+        if (apiUrl.isBlank()) return null
+        if (apiUrl.contains(DEAD_API_DOMAIN)) apiUrl = DEFAULT_WEATHER_API_URL
+        val finalUrl = apiUrl.replace("{city}", URLEncoder.encode(city, "UTF-8"))
+        val json = httpGet(finalUrl, weatherApiKey) ?: return null
+        return parseWeatherJson(json, city)
+    }
+
+    /** Open-Meteo: geocode (supports Chinese city names) + current/daily forecast */
+    private fun fetchOpenMeteoWeather(city: String): WeatherData? {
+        val geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" +
+            URLEncoder.encode(city, "UTF-8") + "&count=1&language=zh&format=json"
+        val geoJson = httpGet(geoUrl) ?: return null
+        val geo = org.json.JSONObject(geoJson)
+        val results = geo.optJSONArray("results") ?: return null
+        val first = results.optJSONObject(0) ?: return null
+        val displayCity = first.optString("name", city).ifBlank { city }
+        val lat = first.optDouble("latitude", Double.NaN)
+        val lon = first.optDouble("longitude", Double.NaN)
+        if (lat.isNaN() || lon.isNaN()) return null
+        val fcUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m" +
+            "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"
+        val fcJson = httpGet(fcUrl) ?: return null
+        val fc = org.json.JSONObject(fcJson)
+        val cur = fc.optJSONObject("current") ?: return null
+        val daily = fc.optJSONObject("daily") ?: return null
+        val code = cur.optInt("weather_code", -1)
+        val maxArr = daily.optJSONArray("temperature_2m_max")
+        val minArr = daily.optJSONArray("temperature_2m_min")
+        return WeatherData(
+            city = displayCity,
+            temperature = omTemp(cur.optDouble("temperature_2m", Double.NaN)),
+            feelsLike = omTemp(cur.optDouble("apparent_temperature", Double.NaN)),
+            tempHigh = omTemp(if (maxArr != null && maxArr.length() > 0) maxArr.optDouble(0, Double.NaN) else Double.NaN),
+            tempLow = omTemp(if (minArr != null && minArr.length() > 0) minArr.optDouble(0, Double.NaN) else Double.NaN),
+            humidity = cur.optString("relative_humidity_2m", "--"),
+            windSpeed = cur.optString("wind_speed_10m", "--") + " km/h",
+            weather = openMeteoDesc(code),
+            updateTime = try { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) } catch (_: Throwable) { "" },
+            weatherIcon = openMeteoEmoji(code)
+        )
+    }
+
+    /** wttr.in fallback source */
+    private fun fetchWttrWeather(city: String): WeatherData? {
+        val url = DEFAULT_WEATHER_API_URL.replace("{city}", URLEncoder.encode(city, "UTF-8"))
+        val json = httpGet(url) ?: return null
+        return parseWeatherJson(json, city)
+    }
+
+    private fun omTemp(v: Double): String =
+        if (v.isNaN()) "--" else (Math.round(v)).toString() + "\u00b0"
+
+    /** 湿度补全百分号（"--"/空值原样返回） */
+    private fun formatHumidity(v: String?): String {
+        if (v.isNullOrBlank() || v == "--") return "--"
+        return if (v.endsWith("%")) v else "$v%"
+    }
+
+    /** 风速补全单位（"--"/空值原样返回） */
+    private fun formatWindSpeed(v: String?): String {
+        if (v.isNullOrBlank() || v == "--") return "--"
+        return if (v.contains("km/h")) v else "$v km/h"
+    }
+
+    private fun openMeteoDesc(code: Int): String = when (code) {
+        0 -> "\u6674\u6717"
+        1 -> "\u6674\u4e91"
+        2 -> "\u591a\u4e91"
+        3 -> "\u9690\u9634"
+        45, 48 -> "\u96fe"
+        51, 53, 55 -> "\u6bdb\u6bdb\u96e8"
+        56, 57 -> "\u51bb\u96e8"
+        61, 63, 65 -> "\u5c0f\u5230\u4e2d\u96e8"
+        66, 67 -> "\u51bb\u96e8"
+        71, 73, 75 -> "\u5c0f\u5230\u4e2d\u96ea"
+        77 -> "\u96ea\u7c92"
+        80, 81, 82 -> "\u9635\u96e8"
+        85, 86 -> "\u9635\u96ea"
+        95 -> "\u96f7\u66b4\u96e8"
+        96, 99 -> "\u96f7\u66b4\u96e8\u4f34\u51b0\u96f9"
+        else -> "\u672a\u77e5"
+    }
+
+    private fun openMeteoEmoji(code: Int): String = when (code) {
+        0 -> "\u2600\ufe0f"
+        1 -> "\uD83C\uDF24\ufe0f"
+        2, 3 -> "\u2601\ufe0f"
+        45, 48 -> "\uD83C\uDF2B\ufe0f"
+        51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 -> "\uD83C\uDF27\ufe0f"
+        71, 73, 75, 77, 85, 86 -> "\u2744\ufe0f"
+        95, 96, 99 -> "\u26c8\ufe0f"
+        else -> "\u2601"
+    }
+
+
+    /** parse weather JSON (wttr.in j1 + legacy 03c3 formats) */
+    private fun parseWeatherJson(json: String, city: String): WeatherData {
+        val root = org.json.JSONObject(json)
+        if (root.has("current_condition")) {
+            val cur = root.optJSONArray("current_condition")?.optJSONObject(0)
+            val today = root.optJSONArray("weather")?.optJSONObject(0)
+            val area = root.optJSONArray("nearest_area")?.optJSONObject(0)
+            val areaName = area?.optJSONArray("areaName")?.optJSONObject(0)?.optString("value", "")
+            val desc = cur?.optJSONArray("lang_zh")?.optJSONObject(0)?.optString("value", "")?.takeIf { it.isNotBlank() }
+                ?: cur?.optJSONArray("weatherDesc")?.optJSONObject(0)?.optString("value", "")
+                ?: ""
+            return WeatherData(
+                city = areaName?.takeIf { it.isNotBlank() } ?: city,
+                temperature = cur?.optString("temp_C", "--") ?: "--",
+                feelsLike = cur?.optString("FeelsLikeC", "--") ?: "--",
+                tempHigh = today?.optString("maxtempC", "--") ?: "--",
+                tempLow = today?.optString("mintempC", "--") ?: "--",
+                humidity = (cur?.optString("humidity", "--") ?: "--"),
+                windSpeed = (cur?.optString("windspeedKmph", "--") ?: "--"),
+                weather = desc,
+                updateTime = cur?.optString("observation_time", "") ?: "",
+                weatherIcon = weatherEmoji(cur?.optString("weatherCode", "") ?: "")
+            )
+        }
+        // Open-Meteo 格式（自定义 API 直接填 Open-Meteo URL 时按此解析，兼容 humidity/wind 字段）
+        val curOM = root.optJSONObject("current")
+        if (curOM != null && curOM.has("temperature_2m")) {
+            val daily = root.optJSONObject("daily")
+            val maxArr = daily?.optJSONArray("temperature_2m_max")
+            val minArr = daily?.optJSONArray("temperature_2m_min")
+            val code = curOM.optInt("weather_code", -1)
+            return WeatherData(
+                city = city,
+                temperature = omTemp(curOM.optDouble("temperature_2m", Double.NaN)),
+                feelsLike = if (curOM.has("apparent_temperature")) omTemp(curOM.optDouble("apparent_temperature", Double.NaN)) else "",
+                tempHigh = omTemp(if (maxArr != null && maxArr.length() > 0) maxArr.optDouble(0, Double.NaN) else Double.NaN),
+                tempLow = omTemp(if (minArr != null && minArr.length() > 0) minArr.optDouble(0, Double.NaN) else Double.NaN),
+                humidity = curOM.optString("relative_humidity_2m", "--"),
+                windSpeed = curOM.optString("wind_speed_10m", "--") + " km/h",
+                weather = openMeteoDesc(code),
+                updateTime = try { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) } catch (_: Throwable) { "" },
+                weatherIcon = openMeteoEmoji(code)
+            )
+        }
+        val data = root.optJSONObject("data") ?: root
+        val type = data.optString("type", "")
+        return WeatherData(
+            city = data.optString("city", city),
+            temperature = data.optString("wendu", "--"),
+            feelsLike = data.optString("ganmao", "--"),
+            tempHigh = data.optString("high", "--"),
+            tempLow = data.optString("low", "--"),
+            humidity = data.optString("shidu", "--"),
+            windSpeed = data.optString("fengli", "--"),
+            weather = type,
+            updateTime = try { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) } catch (_: Throwable) { "" },
+            weatherIcon = weatherEmojiForType(type)
+        )
+    }
+
+    private fun weatherEmoji(code: String): String = when (code) {
+        "113" -> "\u2600\ufe0f"
+        "116" -> "\uD83C\uDF24\ufe0f"
+        "119", "122", "143" -> "\u2601\ufe0f"
+        "176", "263", "266", "293", "296", "299", "302", "305", "308", "353", "356", "359" -> "\uD83C\uDF27\ufe0f"
+        "179", "182", "185", "227", "230", "320", "323", "326", "329", "332", "335", "338", "368", "371", "374", "377" -> "\u2744\ufe0f"
+        "200", "386", "389", "392", "395" -> "\u26c8\ufe0f"
+        "248", "260" -> "\uD83C\uDF2B\ufe0f"
+        else -> "\u2601"
+    }
+
+    private fun weatherEmojiForType(type: String): String = when {
+        type.contains("\u6674") -> "\u2600\ufe0f"
+        type.contains("\u96f7") -> "\u26c8\ufe0f"
+        type.contains("\u96ea") -> "\u2744\ufe0f"
+        type.contains("\u96e8") -> "\uD83C\uDF27\ufe0f"
+        type.contains("\u96fe") -> "\uD83C\uDF2B\ufe0f"
+        type.contains("\u4e91") || type.contains("\u9634") -> "\u2601\ufe0f"
+        else -> "\u2601"
     }
 
     /** 签名/语录文案（3 模式分发） */
@@ -1453,14 +2257,29 @@ private fun isHomeTabClass(className: String): Boolean {
             when (quoteMode) {
                 0 -> fetchWeChatSignature()  // 微信原生签名
                 1 -> quoteManual.ifBlank { quoteFallback }  // 手动
-                2 -> {  // API+Key
-                    val url = quoteApiUrl
-                    if (url.isBlank()) quoteFallback
+                2 -> {  // API+Key (cached within refresh interval)
+                    val nowQ = System.currentTimeMillis()
+                    val cachedQ = quoteCacheText
+                    if (cachedQ.isNotBlank() && nowQ - quoteCacheTime < quoteRefreshInterval * 1000L) cachedQ
                     else {
-                        val json = httpGet(url, quoteApiKey) ?: quoteFallback
-                        try {
-                            org.json.JSONObject(json).optString("data", quoteFallback)
-                        } catch (_: Throwable) { quoteFallback }
+                        var url = quoteApiUrl
+                        if (url.isBlank()) quoteFallback
+                        else {
+                            if (url.contains(DEAD_API_DOMAIN)) url = DEFAULT_QUOTE_API_URL
+                            val json = httpGet(url, quoteApiKey) ?: cachedQ.ifBlank { quoteFallback }
+                            val q = try {
+                                val obj = org.json.JSONObject(json)
+                                obj.optString("data", "").takeIf { it.isNotBlank() }
+                                    ?: obj.optString("hitokoto", "").takeIf { it.isNotBlank() }
+                                    ?: obj.optString("content", "").takeIf { it.isNotBlank() }
+                                    ?: quoteFallback
+                            } catch (_: Throwable) {
+                                json.trim().takeIf { it.isNotBlank() && !it.startsWith("<") } ?: quoteFallback
+                            }
+                            quoteCacheText = q
+                            quoteCacheTime = nowQ
+                            q
+                        }
                     }
                 }
                 else -> quoteFallback
@@ -1472,17 +2291,34 @@ private fun isHomeTabClass(className: String): Boolean {
     }
 
     /** 每日一言文案（API+Key，异常兜底） */
+    /** daily quote text (API+Key, persistent cache within interval, fallback on error) */
     private fun fetchDailyQuote(): String {
-        val url = dailyQuoteApiUrl
+        var url = dailyQuoteApiUrl
         if (url.isBlank()) return dailyQuoteFallback
+        val now = System.currentTimeMillis()
+        val cached = dailyQuoteCacheText
+        if (cached.isNotBlank() && now - dailyQuoteCacheTime < dailyQuoteRefreshInterval * 1000L) return cached
         return try {
-            val json = httpGet(url, dailyQuoteApiKey) ?: return dailyQuoteFallback
-            org.json.JSONObject(json).optString("data", dailyQuoteFallback)
+            if (url.contains(DEAD_API_DOMAIN)) url = DEFAULT_QUOTE_API_URL
+            val json = httpGet(url, dailyQuoteApiKey) ?: return cached.ifBlank { dailyQuoteFallback }
+            val q = try {
+                val obj = org.json.JSONObject(json)
+                obj.optString("data", "").takeIf { it.isNotBlank() }
+                    ?: obj.optString("hitokoto", "").takeIf { it.isNotBlank() }
+                    ?: obj.optString("content", "").takeIf { it.isNotBlank() }
+                    ?: dailyQuoteFallback
+            } catch (_: Throwable) {
+                json.trim().takeIf { it.isNotBlank() && !it.startsWith("<") } ?: dailyQuoteFallback
+            }
+            dailyQuoteCacheText = q
+            dailyQuoteCacheTime = now
+            q
         } catch (e: Throwable) {
-            WeLogger.e(TAG, "fetchDailyQuote 失败", e)
-            dailyQuoteFallback
+            WeLogger.e(TAG, "fetchDailyQuote failed", e)
+            cached.ifBlank { dailyQuoteFallback }
         }
     }
+
 
     /** 微信个人签名（反射获取，缓存 1 小时） */
     private fun fetchWeChatSignature(): String {
@@ -1547,7 +2383,7 @@ private fun isHomeTabClass(className: String): Boolean {
                     if (path.isBlank()) loadWeChatAvatar(act)
                     else {
                         val f = File(path)
-                        if (f.exists() && f.canRead()) BitmapFactory.decodeFile(path) else loadWeChatAvatar(act)
+                        if (f.exists() && f.canRead()) decodeScaledBitmapFile(f, MAX_AVATAR_SIZE) else loadWeChatAvatar(act)
                     }
                 }
                 2 -> {  // 网络 URL
@@ -1563,6 +2399,32 @@ private fun isHomeTabClass(className: String): Boolean {
         }
     }
 
+    /** 按目标尺寸缩小解码本地文件（头像仅显示 56dp，避免原图大图解码慢/占内存） */
+    private fun decodeScaledBitmapFile(f: File, maxSize: Int): Bitmap? = try {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.absolutePath, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+        var sample = 1
+        while (opts.outWidth / (sample * 2) >= maxSize && opts.outHeight / (sample * 2) >= maxSize) sample *= 2
+        BitmapFactory.decodeFile(f.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+    } catch (e: Throwable) {
+        WeLogger.w(TAG, "decodeScaledBitmapFile 失败", e)
+        null
+    }
+
+    /** 按目标尺寸缩小解码字节数组（网络头像） */
+    private fun decodeScaledBitmapBytes(bytes: ByteArray, maxSize: Int): Bitmap? = try {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+        var sample = 1
+        while (opts.outWidth / (sample * 2) >= maxSize && opts.outHeight / (sample * 2) >= maxSize) sample *= 2
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    } catch (e: Throwable) {
+        WeLogger.w(TAG, "decodeScaledBitmapBytes 失败", e)
+        null
+    }
+
     private fun getAvatarCacheFile(act: Activity): File {
         val dir = File(act.cacheDir, AVATAR_CACHE_DIR)
         if (!dir.exists()) dir.mkdirs()
@@ -1574,14 +2436,21 @@ private fun isHomeTabClass(className: String): Boolean {
         val cacheFile = getAvatarCacheFile(act)
         if (cacheFile.exists() && cacheFile.length() > 0) {
             try {
-                val bmp = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                val bmp = decodeScaledBitmapFile(cacheFile, MAX_AVATAR_SIZE)
                 if (bmp != null) return bmp
             } catch (e: Throwable) { WeLogger.w(TAG, "头像缓存读取失败", e) }
         }
         return try {
-            val selfWxId = WeApi.selfWxId
+            var selfWxId = WeApi.selfWxId
+            var waited = 0
+            while (selfWxId.isBlank() && waited < 4) {
+                try { Thread.sleep(1000) } catch (_: Throwable) {}
+                selfWxId = WeApi.selfWxId
+                waited++
+            }
             if (selfWxId.isNotEmpty()) {
-                val avatarUrl = WeDatabaseApi.getAvatarUrl(selfWxId)
+                var avatarUrl = WeDatabaseApi.getAvatarUrl(selfWxId)
+                if (avatarUrl.isBlank()) avatarUrl = queryContactAvatarFallback(selfWxId)
                 if (avatarUrl.isNotEmpty()) {
                     val bmp = downloadBitmap(avatarUrl)
                     if (bmp != null) {
@@ -1595,6 +2464,14 @@ private fun isHomeTabClass(className: String): Boolean {
             null
         }
     }
+
+    /** fallback: read avatar URL from rcontact table */
+    private fun queryContactAvatarFallback(wxid: String): String = try {
+        val rows = WeDatabaseApi.executeQuery(
+            "SELECT COALESCE(bigHeadImgUrl, smallHeadImgUrl, avatarUrl, '') AS u FROM rcontact WHERE username='" + wxid.replace("'", "''") + "'"
+        )
+        if (rows.isNotEmpty()) (rows[0]["u"]?.toString() ?: "") else ""
+    } catch (_: Throwable) { "" }
 
     private fun bitmapToBytes(bmp: Bitmap): ByteArray = try {
         val baos = java.io.ByteArrayOutputStream()
@@ -1614,10 +2491,15 @@ private fun isHomeTabClass(className: String): Boolean {
             val url = URL(urlStr)
             connection = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10000; readTimeout = 10000; doInput = true
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "Mozilla/5.0")
             }
             connection.connect()
             if (connection.responseCode != HttpURLConnection.HTTP_OK) null
-            else { input = connection.inputStream; BitmapFactory.decodeStream(input) }
+            else {
+                input = connection.inputStream
+                decodeScaledBitmapBytes(input.readBytes(), MAX_AVATAR_SIZE)
+            }
         } catch (e: Throwable) {
             WeLogger.w(TAG, "downloadBitmap 失败: ${e.message}")
             null
@@ -1648,41 +2530,143 @@ private fun isHomeTabClass(className: String): Boolean {
             showToast("侧边栏功能编译开关已关闭"); return
         }
         try {
-            val stateHolder = booleanArrayOf(masterEnabled)
-            val container = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20, context), dp(12, context), dp(20, context), dp(12, context)) }
-            val swRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            val swLabel = TextView(context).apply {
-                text = "启用侧边栏"; textSize = 14f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val sw = Switch(context).apply {
-                isChecked = stateHolder[0]
-                setOnCheckedChangeListener { _, c -> stateHolder[0] = c }
-            }
-            swRow.addView(swLabel); swRow.addView(sw); container.addView(swRow)
+            showComposeDialog(context) {
+                var localEnable by remember { mutableStateOf(masterEnabled) }
+                val initMode = remember { migratedTriggerMode() }
+                var localFull by remember { mutableStateOf((initMode and MODE_FULL_SWIPE) != 0) }
+                var localEdge by remember { mutableStateOf((initMode and MODE_EDGE_STRIP) != 0) }
+                var localButton by remember { mutableStateOf((initMode and MODE_TRIGGER_BUTTON) != 0) }
+                var localEdgeWidth by remember { mutableStateOf(edgeZoneWidthDp.toFloat()) }
+                var localSideMode by remember { mutableStateOf(sidePanelMode) }
 
-            val desc = TextView(context).apply {
-                text = "开启后在微信主页左上角显示唤起按钮，点击可打开侧滑面板。\n面板内可配置：头像/签名/天气/每日一言/快捷功能 4 槽。\n长按对应卡片可触发配置弹窗。"
-                textSize = 12f
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8, context) }
-            }
-            container.addView(desc)
-
-            AlertDialog.Builder(context)
-                .setTitle("微信主页侧滑侧边栏")
-                .setView(container)
-                .setPositiveButton("保存") { d, _ ->
-                    try {
-                        val newEnabled = stateHolder[0]
-                        if (masterEnabled != newEnabled) {
-                            masterEnabled = newEnabled
-                            if (newEnabled) onEnable() else onDisable()
+                AlertDialogContent(
+                    title = { Text("微信主页侧边栏") },
+                    text = {
+                        DefaultColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            ListItem(
+                                modifier = Modifier.clickable { localEnable = !localEnable },
+                                trailingContent = { androidx.compose.material3.Switch(localEnable, null) },
+                                headlineContent = { Text("启用侧边栏") }
+                            )
+                            Text(
+                                "打开方式",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                            )
+                            ListItem(
+                                modifier = Modifier.clickable { localFull = !localFull },
+                                trailingContent = { androidx.compose.material3.Switch(localFull, null) },
+                                headlineContent = { Text("全屏右滑跟手") }
+                            )
+                            ListItem(
+                                modifier = Modifier.clickable { localEdge = !localEdge },
+                                trailingContent = { androidx.compose.material3.Switch(localEdge, null) },
+                                headlineContent = { Text("左边缘右滑") }
+                            )
+                            ListItem(
+                                modifier = Modifier.clickable { localButton = !localButton },
+                                trailingContent = { androidx.compose.material3.Switch(localButton, null) },
+                                headlineContent = { Text("左上角按钮") }
+                            )
+                            if (localEdge) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "左边缘触摸条宽度 ${localEdgeWidth.toInt()}dp",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Slider(
+                                        value = localEdgeWidth,
+                                        onValueChange = {
+                                            localEdgeWidth = it
+                                            edgeZoneWidthDp = it.toInt().coerceIn(10, 80)
+                                        },
+                                        valueRange = 10f..80f,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            Text(
+                                "侧边栏实现",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                            )
+                            ListItem(
+                                modifier = Modifier.clickable { localSideMode = if (localSideMode == 1) 2 else 1 },
+                                trailingContent = { Text(if (localSideMode == 1) "方式一 · 原版侧边栏" else "方式二 · WeKit 侧边栏", fontSize = 12.sp) },
+                                headlineContent = { Text("侧边栏实现方式") }
+                            )
+                            Text(
+                                "方式一：本模块原有侧边栏（头像/签名/天气/每日一言/快捷功能槽）。\n方式二：WeKit 侧边栏全家桶（拖拽编辑/卡片/农历/一言/天气/钱包等，功能更完整）。\n切换后需重启微信生效；本开关已合并原「主页侧滑面板」，将按所选方式启用对应实现。",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                            Text(
+                                "说明",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                            )
+                            Text(
+                                "开启后通过所选方式打开侧滑面板（三种方式可自由组合）。\n全屏右滑跟手：在主界面任意位置按住向右拖动，面板即跟随手指呼出。\n左边缘右滑：在主界面最左边缘按住向右滑动呼出（状态栏下方整条左缘），触摸条宽度可调。\n面板内可配置：头像/签名/天气/每日一言/快捷功能 4 槽。\n长按对应卡片可触发配置弹窗。",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
                         }
-                    } catch (e: Throwable) { WeLogger.e(TAG, "保存开关异常", e) }
-                    d.dismiss()
-                }
-                .setNegativeButton("取消", null)
-                .show()
+                    },
+                    dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                    confirmButton = {
+                        Button(onClick = {
+                            if (!localFull && !localEdge && !localButton) {
+                                showToast("请至少选择一种打开方式")
+                                return@Button
+                            }
+                            val newMode = (if (localFull) MODE_FULL_SWIPE else 0) or
+                                (if (localEdge) MODE_EDGE_STRIP else 0) or
+                                (if (localButton) MODE_TRIGGER_BUTTON else 0)
+                            try {
+                                if (sidePanelMode != localSideMode) {
+                                    sidePanelMode = localSideMode
+                                }
+                                if (masterEnabled != localEnable) {
+                                    masterEnabled = localEnable
+                                    if (localEnable) onEnable() else onDisable()
+                                }
+                                if (migratedTriggerMode() != newMode) {
+                                    triggerMode = newMode
+                                    if (masterEnabled) {
+                                        // 重新按新打开方式挂载触发视图
+                                        removeAllViews()
+                                        attachedActivity?.let { updateVisibility() }
+                                    }
+                                }
+                                if (localEnable && (newMode and MODE_FULL_SWIPE) != 0 && !gestureHookInstalled) {
+                                    attachedActivity?.let { attachEdgeZone(it) }
+                                }
+                                if (localEnable && (newMode and MODE_EDGE_STRIP) != 0 && edgeZoneStripView == null) {
+                                    attachedActivity?.let { attachEdgeZoneStrip(it) }
+                                }
+                                if (localEnable && (newMode and MODE_TRIGGER_BUTTON) != 0 && triggerButtonView == null) {
+                                    attachedActivity?.let { attachTriggerButton(it) }
+                                }
+                            } catch (e: Throwable) { WeLogger.e(TAG, "保存开关异常", e) }
+                            onDismiss()
+                        }) { Text("保存") }
+                    }
+                )
+            }
         } catch (e: Throwable) { WeLogger.e(TAG, "onClick 异常", e) }
     }
 
@@ -1690,4 +2674,8 @@ private fun isHomeTabClass(className: String): Boolean {
     private const val TAG = "HomeSidePanel"
     private const val PREFS_PREFIX = "hsp_"
     private const val AVATAR_CACHE_DIR = "home_side_panel"
+    private const val MAX_AVATAR_SIZE = 192  // 头像仅显示 56dp，按 3x 密度解码，避免原图解码/缓存慢
+    private const val DEAD_API_DOMAIN = "03c3.cn"
+    private const val DEFAULT_WEATHER_API_URL = "https://wttr.in/{city}?format=j1&lang=zh"
+    private const val DEFAULT_QUOTE_API_URL = "https://v1.hitokoto.cn/"
 }

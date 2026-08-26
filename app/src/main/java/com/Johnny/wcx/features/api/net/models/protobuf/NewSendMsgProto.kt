@@ -8,6 +8,10 @@ import kotlinx.serialization.protobuf.ProtoNumber
 
 /**
  * Request body for `/cgi-bin/micromsg-bin/newsendmsg` (cgi 522).
+ *
+ * The native client's signer stamps [NewSendMsgItemProto.createTime] and
+ * [NewSendMsgItemProto.clientMsgId]; callers building this proto directly must fill both
+ * (see [com.Johnny.wcx.features.api.net.MsgIdPreviewer.generateClientMsgId]).
  */
 @Serializable
 data class NewSendMsgReqProto(

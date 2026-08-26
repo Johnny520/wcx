@@ -41,6 +41,8 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.collections.emptyHashSet
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.fs.asPath
+import com.Johnny.wcx.utils.reflection.BBool
+import com.Johnny.wcx.utils.reflection.BInt
 import com.Johnny.wcx.utils.reflection.BString
 import com.Johnny.wcx.utils.reflection.bool
 import com.Johnny.wcx.utils.reflection.int
@@ -222,7 +224,9 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             usingEqStrings("MicroMsg.ChattingContext", "[notifyDataSetChange]")
         }
     }
-    val classChattingDataAdapter by dexClass {
+    val classChattingDataAdapter by dexClass(allowFailure = true) {
+        // 8.0.77 已移除 ChattingDataAdapterV3 → allowFailure 降级为 placeholder，
+        // 使用方需用 isPlaceholder 守卫（RemoveMessageSelectionLimit 内已处理）
         matcher {
             usingEqStrings(
                 "MicroMsg.ChattingDataAdapterV3",
@@ -361,7 +365,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
     private val classVoiceServiceInterface by dexClass()
 
-    private val classVoiceServiceImpl by dexClass {
+    private val classVoiceServiceImpl by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.VoiceMsgAsyncSendFSC",
@@ -382,14 +386,18 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     // -------------------------------------------------------------------------------------
 
     // 基础 & 文本
-    private val getSelfAliasMethod: Method by lazy {
-        classConfigLogic.reflekt()
-            .firstMethod {
-                name { it.length <= 2 }
-                modifiers(Modifiers.STATIC)
-                parameterCount = 0
-                returnType = String::class
-            }.self
+    private val getSelfAliasMethod: Method? by lazy {
+        try {
+            classConfigLogic.reflekt()
+                .firstMethod {
+                    modifiers(Modifiers.STATIC)
+                    parameterCount = 0
+                    returnType = String::class
+                }.self
+        } catch (e: Exception) {
+            WeLogger.w(TAG, "getSelfAliasMethod: failed to resolve via signature matching, selfCustomWxId will be empty", e)
+            null
+        }
     }
 
     // 图片
@@ -529,10 +537,16 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }
         }
 
-        val targetInterface = classVoiceServiceImpl.clazz.interfaces.first {
-            !it.isBuiltin && !it.name.startsWith("ki0.")
+        try {
+            val targetInterface = classVoiceServiceImpl.clazz.interfaces.first {
+                !it.isBuiltin && !it.name.startsWith("ki0.")
+            }
+            classVoiceServiceInterface.setDescriptor(targetInterface.name)
+            WeLogger.i(TAG, "VoiceServiceInterface resolved: ${targetInterface.name}")
+        } catch (e: Exception) {
+            WeLogger.w(TAG, "VoiceMsgAsyncSendFSC interface resolution failed (R8 obfuscation changed), voice sending will use SceneVoiceService fallback", e)
+            classVoiceServiceInterface.setPlaceholderDescriptor()
         }
-        classVoiceServiceInterface.setDescriptor(targetInterface.name)
     }
 
     fun convertMsgInfoInstanceFromContentValues(contentValues: ContentValues): Any {
@@ -1307,9 +1321,9 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             val target = classVoiceLogic.clazz.reflekt()
                 .firstMethod {
                     parameters {
-                        it[0] == BString && it[1] == int && it[2] == int
+                        it[0] == BString && it[1] == BInt && it[2] == BInt
                     }
-                    returnType = bool
+                    returnType = BBool
                 }.self
             if (target.parameterCount == 4) {
                 target.invoke(null, partialPath, actualDuration, 0, null)
@@ -1652,7 +1666,12 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
     val selfCustomWxId: String
         get() {
-            return getSelfAliasMethod.invoke(null) as? String ?: ""
+            return runCatching {
+                getSelfAliasMethod?.invoke(null) as? String ?: ""
+            }.getOrElse {
+                WeLogger.w(TAG, "selfCustomWxId resolution failed", it)
+                ""
+            }
         }
 
     fun getMsgInfoFromTag(tag: Any): Any {
@@ -1799,7 +1818,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
     /**
      * 缓存图片: 让微信把大图从 CDN 下载到它自己的 image2/ 存储 (相当于在聊天里点击图片下载)。
-     * 缓存与下载分离 —— 此方法只负责把图片缓存到微信内部, 不解码也不拷贝到 Download/WeKit/。
+     * 缓存与下载分离 —— 此方法只负责把图片缓存到微信内部, 不解码也不拷贝到 Download/WCX/。
      * @return 缓存后大图在微信内部的绝对路径, 失败返回 null
      */
     fun cacheImage(msgSvrId: Long): String? {
@@ -1812,8 +1831,8 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
 
     /**
-     * 下载图片: 先确保图片已缓存到微信内部, 再进行 WXGF 解码并保存到 Download/WeKit/。
-     * @return 保存到 Download/WeKit/ 后的绝对路径, 失败返回 null
+     * 下载图片: 先确保图片已缓存到微信内部, 再进行 WXGF 解码并保存到 Download/WCX/。
+     * @return 保存到 Download/WCX/ 后的绝对路径, 失败返回 null
      */
     fun downloadImage(msgSvrId: Long): String? {
         return try {
@@ -1838,7 +1857,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
                 when (method.name) {
                     "hashCode" -> System.identityHashCode(proxy)
                     "equals" -> proxy === args?.get(0)
-                    "toString" -> "WeKitDownloadCallback"
+                    "toString" -> "WcxDownloadCallback"
                     else -> null
                 }
             }
@@ -1897,7 +1916,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
 
     /**
-     * 根据 md5 解密贴纸, 转为 GIF 并保存到 Download/WeKit/。
+     * 根据 md5 解密贴纸, 转为 GIF 并保存到 Download/WCX/。
      * @return 保存后的文件路径, 失败返回 null
      */
     fun saveStickerByMd5(md5: String, fileName: String? = null): String? {
@@ -1929,7 +1948,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
 
     /**
-     * 根据 msgSvrId 解密贴纸, 转为 GIF 并保存到 Download/WeKit/。
+     * 根据 msgSvrId 解密贴纸, 转为 GIF 并保存到 Download/WCX/。
      * @return 保存后的文件路径, 失败返回 null
      */
     fun cacheAndSaveSticker(msgSvrId: Long): String? {
@@ -1941,7 +1960,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
 
     /**
-     * 根据加密路径解码语音 (silk → mp3) 并保存到 Download/WeKit/。
+     * 根据加密路径解码语音 (silk → mp3) 并保存到 Download/WCX/。
      * @return 保存后的 mp3 文件路径, 失败返回 null
      */
     fun saveVoiceByEncPath(encPath: String): String? {
@@ -1965,7 +1984,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
 
     /**
-     * 根据 msgSvrId 解码语音 (silk → mp3) 并保存到 Download/WeKit/。
+     * 根据 msgSvrId 解码语音 (silk → mp3) 并保存到 Download/WCX/。
      * @return 保存后的 mp3 文件路径, 失败返回 null
      */
     fun cacheAndSaveVoice(msgSvrId: Long): String? {
@@ -2029,7 +2048,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
      * 直接复用即可, 无需按 msgSvrId 重新查库重建 —— 重建出的实例可能字段缺失或压根查不到行,
      * 导致微信内部 [op0.q.u]/parse msg 返回 null 后被解引用而抛 NPE。
      *
-     * 缓存与下载分离 —— 此方法只负责把文件缓存到微信内部, 不拷贝到 Download/WeKit/。
+     * 缓存与下载分离 —— 此方法只负责把文件缓存到微信内部, 不拷贝到 Download/WCX/。
      * @return 缓存后文件在微信内部的绝对路径, 失败返回 null
      */
     fun cacheFile(msgInfoInstance: Any): String? {
@@ -2076,8 +2095,8 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
 
     /**
-     * 下载文件 (直接使用已有的 msgInfo 实例): 先确保文件已缓存到微信内部, 再拷贝到 Download/WeKit/。
-     * @return 拷贝到 Download/WeKit/ 后的绝对路径, 失败返回 null
+     * 下载文件 (直接使用已有的 msgInfo 实例): 先确保文件已缓存到微信内部, 再拷贝到 Download/WCX/。
+     * @return 拷贝到 Download/WCX/ 后的绝对路径, 失败返回 null
      */
     fun downloadFile(msgInfoInstance: Any): String? {
         return try {
@@ -2101,7 +2120,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
      * 下载文件 (按 msgSvrId 重新查库重建 msgInfo 实例)。
      * 能拿到实例时请改用 [downloadFile] 的实例重载。
      * @param talker 会话 username; 传 null 时自动从 message 表反查 (仅覆盖 C2C/群聊)。
-     * @return 拷贝到 Download/WeKit/ 后的绝对路径, 失败返回 null
+     * @return 拷贝到 Download/WCX/ 后的绝对路径, 失败返回 null
      */
     fun downloadFile(msgSvrId: Long, talker: String? = null): String? {
         return try {

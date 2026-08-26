@@ -4,7 +4,6 @@ import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
-import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.enumValueOfClass
 import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.query.matchers.base.AccessFlagsMatcher
@@ -15,20 +14,27 @@ object RemoveMenuLimits : SwitchFeature(), IResolveDex {
 
     private lateinit var showAndClickableEnumValue: Any
 
-    // com.tencent.mm.plugin.appbrand.menu.* only runs in the appbrand process.
-    override val shouldLoadInCurrentProcess get() = TargetProcesses.isInMain || TargetProcesses.currentType == TargetProcesses.PROC_APPBRAND
-
     override fun onEnable() {
         listOf(
             methodGetMenuItemVisibility1,
             methodGetMenuItemVisibility2
         ).forEach {
             it.hookBefore {
-                if (!::showAndClickableEnumValue.isInitialized) {
-                    val returnType = methodGetMenuItemVisibility1.method.returnType
-                    showAndClickableEnumValue = enumValueOfClass(returnType, "SHOW_CLICKABLE")
+                try {
+                    if (!::showAndClickableEnumValue.isInitialized) {
+                        val returnType = methodGetMenuItemVisibility1.method.returnType
+                        showAndClickableEnumValue = enumValueOfClass(returnType, "SHOW_CLICKABLE")
+                    }
+                    // 仅当返回值类型匹配时才设置 result，避免类型不匹配造成 ClassCastException
+                    if (method is java.lang.reflect.Method) {
+                        val returnType = (method as java.lang.reflect.Method).returnType
+                        if (returnType.isInstance(showAndClickableEnumValue)) {
+                            result = showAndClickableEnumValue
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                 }
-                result = showAndClickableEnumValue
             }
         }
     }

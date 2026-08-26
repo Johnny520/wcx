@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat.panel.sticker
 
+import com.Johnny.wcx.features.items.chat.panel.PANEL_BULK_CONVERSION_CONCURRENCY
+import com.Johnny.wcx.features.items.chat.panel.PANEL_BULK_DOWNLOAD_CONCURRENCY
 import com.Johnny.wcx.features.items.chat.panel.PanelPaths
 import com.Johnny.wcx.features.items.chat.panel.PanelSettings
 import com.Johnny.wcx.features.items.chat.panel.parallelForEachWithProgress
@@ -62,22 +64,6 @@ object TelegramStickerPackRepository {
         return input.takeIf(stickerSetNameRegex::matches)
     }
 
-    fun importedStickerSetNames(): Set<String> = runCatching {
-        val localPackIds = StickerPanelRepository.loadPacks().mapTo(hashSetOf()) { it.id }
-        PanelPaths.telegramStickerImportDir.listDirectoryEntries()
-            .mapNotNull { directory ->
-                val manifest = readManifest(directory / "manifest.json") ?: return@mapNotNull null
-                manifest.setName.lowercase().takeIf {
-                    manifest.localPackName.isNotBlank() &&
-                            manifest.localPackName in localPackIds
-                }
-            }
-            .toSet()
-    }.getOrElse {
-        WeLogger.w(TAG, "failed to read imported sticker sets", it)
-        emptySet()
-    }
-
     suspend fun importStickerSet(
         value: String,
         onProgress: suspend (TelegramStickerImportProgress) -> Unit,
@@ -86,12 +72,6 @@ object TelegramStickerPackRepository {
             val token = PanelSettings.telegramBotToken.trim()
             require(PanelSettings.isValidTelegramBotToken(token)) { "请先在设置中填写有效的 Telegram Bot Token" }
             val removeRoundedVideoMask = PanelSettings.stickerRemoveRoundedVideoMask
-            val tgsGifFrameRate = PanelSettings.stickerTgsGifFrameRate.coerceIn(
-                PanelSettings.MIN_TGS_GIF_FRAME_RATE,
-                PanelSettings.MAX_TGS_GIF_FRAME_RATE,
-            )
-            val downloadConcurrency = PanelSettings.effectivePanelDownloadConcurrency
-            val conversionConcurrency = PanelSettings.effectivePanelConversionConcurrency
             val requestedName = extractStickerSetName(value)
                 ?: throw IllegalArgumentException("请输入有效的 Telegram 表情包名称或链接")
             val stickerSet = TelegramStickerApiClient.getStickerSet(token, requestedName)
@@ -139,14 +119,14 @@ object TelegramStickerPackRepository {
 
             WeLogger.i(
                 TAG,
-                        "starting set=${stickerSet.name} total=${stickers.size} " +
-                        "downloadConcurrency=$downloadConcurrency " +
-                        "conversionConcurrency=$conversionConcurrency",
+                "starting set=${stickerSet.name} total=${stickers.size} " +
+                        "downloadConcurrency=$PANEL_BULK_DOWNLOAD_CONCURRENCY " +
+                        "conversionConcurrency=$PANEL_BULK_CONVERSION_CONCURRENCY",
             )
             onProgress(TelegramStickerImportProgress(TelegramStickerImportPhase.DOWNLOAD, 0, stickers.size))
 
             stickers.withIndex().parallelForEachWithProgress(
-                maxConcurrency = downloadConcurrency,
+                maxConcurrency = PANEL_BULK_DOWNLOAD_CONCURRENCY,
                 transform = { (index, sticker) ->
                     currentCoroutineContext().ensureActive()
                     val sourceFormat = sticker.sourceFormat()
@@ -207,7 +187,7 @@ object TelegramStickerPackRepository {
 
             onProgress(TelegramStickerImportProgress(TelegramStickerImportPhase.CONVERSION, 0, stickers.size))
             stickers.withIndex().parallelForEachWithProgress(
-                maxConcurrency = conversionConcurrency,
+                maxConcurrency = PANEL_BULK_CONVERSION_CONCURRENCY,
                 transform = { (index, sticker) ->
                     currentCoroutineContext().ensureActive()
                     if (!StickerPanelRepository.hasTelegramSticker(packName, sticker.fileUniqueId)) {
@@ -226,15 +206,8 @@ object TelegramStickerPackRepository {
                                         -> convertSticker(
                                             sourceFormat,
                                             rawPath,
-                                            convertedDir / when (sourceFormat) {
-                                                TelegramStickerSourceFormat.TGS ->
-                                                    "$identity.uwasm-fps$tgsGifFrameRate.gif"
-                                                TelegramStickerSourceFormat.WEBM ->
-                                                    "$identity.${if (removeRoundedVideoMask) "maskless" else "original"}.gif"
-                                                TelegramStickerSourceFormat.WEBP -> error("静态 WebP 不需要转换")
-                                            },
+                                            convertedDir / "$identity.${if (removeRoundedVideoMask) "maskless" else "original"}.gif",
                                             removeRoundedVideoMask,
-                                            tgsGifFrameRate,
                                         )
                                 }
                                 Files.newInputStream(importPath).use { input ->
@@ -333,7 +306,6 @@ object TelegramStickerPackRepository {
         source: Path,
         destination: Path,
         removeRoundedVideoMask: Boolean,
-        tgsGifFrameRate: Int,
     ): Path {
         if (destination.isRegularFile() && withContext(Dispatchers.IO) {
                 destination.fileSize()
@@ -341,11 +313,7 @@ object TelegramStickerPackRepository {
         val partial = destination.resolveSibling("${destination.fileName}.part")
         partial.deleteIfExists()
         val result = when (format) {
-            TelegramStickerSourceFormat.TGS -> TelegramStickerConverter.tgsToGif(
-                source,
-                partial,
-                tgsGifFrameRate,
-            )
+            TelegramStickerSourceFormat.TGS -> TelegramStickerConverter.tgsToGif(source, partial)
             TelegramStickerSourceFormat.WEBM -> TelegramStickerConverter.webmToGif(
                 source,
                 partial,

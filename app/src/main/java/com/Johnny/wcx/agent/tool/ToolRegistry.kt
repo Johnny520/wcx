@@ -21,36 +21,6 @@ fun interface ToolPermissionSource {
 enum class ToolLoadingMode { STATIC, DYNAMIC }
 
 /**
- * Per-turn gating of the conditionally-advertised builtin tools (§3.4).
- *
- * This is carried on [com.Johnny.wcx.agent.engine.TurnConfig] and threaded into every tool-list
- * build rather than living in a process-global flag: sessions run concurrently (a foreground chat
- * plus one or more trigger-fired background turns), and the tool list is rebuilt on every request.
- * With a global, whichever session resolved its config last decided the vision gate for ALL of them
- * — a non-vision background turn could strip `ui-screenshot` out from under a running vision turn,
- * or hand it to a non-vision model whose provider then rejects the injected images with HTTP 400.
- */
-data class ToolVisibility(
-    /** The turn's model declares vision support, so `ui-screenshot` may be advertised. */
-    val visionTools: Boolean,
-    /** A workspace or memory is enabled, so the fs file tools may be advertised. */
-    val fsTools: Boolean,
-) {
-    companion object {
-        /**
-         * Visibility outside a resolved turn (settings previews, defaults). Vision is off — nothing
-         * has declared a vision model — and fs follows [BuiltinToolProvider.fsToolsVisible].
-         *
-         * fs stays a global because workspace/memory enablement genuinely IS global: every writer
-         * (WeAgentService, the memory settings screen) derives the same value from the same setting,
-         * so unlike per-model vision support it cannot be clobbered by a concurrent session.
-         */
-        fun fromGlobals(): ToolVisibility =
-            ToolVisibility(visionTools = false, fsTools = BuiltinToolProvider.fsToolsVisible)
-    }
-}
-
-/**
  * A tool as it will be sent to the model, after permission resolution and name qualification.
  * [exposedName] is what the model calls; it maps back to a concrete [provider] + [bareName].
  */
@@ -86,16 +56,11 @@ class ToolRegistry(
     private fun exposedName(provider: ToolProvider, bare: String): String =
         if (provider.kind == ProviderKind.BUILTIN) bare else "mcp__${provider.id}__$bare"
 
-    /**
-     * Every non-disabled, available tool across providers, with resolved modes. [visibility] gates
-     * the conditionally-advertised builtin tools for this turn (see [ToolVisibility]); providers
-     * themselves list everything they own, so gating lives in exactly one place.
-     */
-    fun resolveVisibleTools(visibility: ToolVisibility = ToolVisibility.fromGlobals()): List<WireTool> = buildList {
+    /** Every non-disabled, available tool across providers, with resolved modes. */
+    fun resolveVisibleTools(): List<WireTool> = buildList {
         for (provider in providers) {
             if (!provider.isAvailable) continue
             for (tool in provider.listTools()) {
-                if (!isAdvertised(provider, tool.name, visibility)) continue
                 val mode = permissions.modeFor(provider.id, tool.name, tool.factoryDefaultMode)
                 if (mode == ToolMode.DISABLED) continue
                 add(
@@ -113,40 +78,22 @@ class ToolRegistry(
     }
 
     /**
-     * Whether a builtin tool is advertised at all under [visibility]. Non-builtin (MCP) providers are
-     * never gated this way. Kept name-based so gating never touches permission seeding — the rows are
-     * still seeded, the tools are simply not offered to the model this turn.
-     */
-    private fun isAdvertised(provider: ToolProvider, bareName: String, visibility: ToolVisibility): Boolean {
-        if (provider.kind != ProviderKind.BUILTIN) return true
-        if (!visibility.fsTools && bareName in BuiltinToolProvider.FS_TOOL_NAMES) return false
-        if (!visibility.visionTools && bareName in BuiltinToolProvider.VISION_TOOL_NAMES) return false
-        return true
-    }
-
-    /**
      * The tools to inject into a request. In [ToolLoadingMode.STATIC], all visible tools. In
      * [ToolLoadingMode.DYNAMIC], only the `discover_tools` meta-tool plus whatever the model has
      * discovered so far this turn ([discoveredThisTurn], holding exposed names).
      */
-    fun requestTools(
-        mode: ToolLoadingMode,
-        discoveredThisTurn: Set<String>,
-        visibility: ToolVisibility = ToolVisibility.fromGlobals(),
-    ): List<WireTool> =
+    fun requestTools(mode: ToolLoadingMode, discoveredThisTurn: Set<String>): List<WireTool> =
         when (mode) {
-            ToolLoadingMode.STATIC -> resolveVisibleTools(visibility)
+            ToolLoadingMode.STATIC -> resolveVisibleTools()
             ToolLoadingMode.DYNAMIC -> buildList {
                 add(discoverToolsMeta())
-                resolveVisibleTools(visibility).filterTo(this) { it.exposedName in discoveredThisTurn }
+                resolveVisibleTools().filterTo(this) { it.exposedName in discoveredThisTurn }
             }
         }
 
     /** Look up a resolved tool by the name the model called. */
-    fun findByExposedName(
-        exposedName: String,
-        visibility: ToolVisibility = ToolVisibility.fromGlobals(),
-    ): WireTool? = resolveVisibleTools(visibility).firstOrNull { it.exposedName == exposedName }
+    fun findByExposedName(exposedName: String): WireTool? =
+        resolveVisibleTools().firstOrNull { it.exposedName == exposedName }
 
     /**
      * Execute a resolved tool. Permission gating is the engine's responsibility; this performs the

@@ -1,12 +1,12 @@
 package com.Johnny.wcx.features.items.home_screen_menu
 
+import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.ui.WeHomeScreenPopupMenuApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.ui.utils.VisibilityIcon
 import com.Johnny.wcx.ui.utils.VisibilityOffIcon
-import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "显隐全部对话", categories = ["首页右上角菜单"], description = "在首页右上角菜单添加菜单项, 可显示或隐藏全部对话")
 object ToggleAllConversationsVisibility : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuItemsProvider {
@@ -19,7 +19,7 @@ object ToggleAllConversationsVisibility : SwitchFeature(), WeHomeScreenPopupMenu
         WeHomeScreenPopupMenuApi.removeProvider(this)
     }
 
-    override fun getMenuItems(param: HookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
+    override fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<WeHomeScreenPopupMenuApi.MenuItem> {
         return listOf(
             WeHomeScreenPopupMenuApi.MenuItem(
                 777010, "显示对话", VisibilityIcon

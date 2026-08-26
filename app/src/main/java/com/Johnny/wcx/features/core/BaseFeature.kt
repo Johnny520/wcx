@@ -3,6 +3,8 @@
 package com.Johnny.wcx.features.core
 
 import androidx.compose.runtime.Composable
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import dev.ujhhgtg.reflekt.reflected.BaseReflectedMethod
 import dev.ujhhgtg.reflekt.reflected.ReflectedConstructor
 import dev.ujhhgtg.reflekt.reflekt
@@ -10,11 +12,7 @@ import com.Johnny.wcx.dexkit.dsl.BaseDexDelegate
 import com.Johnny.wcx.dexkit.dsl.DexConstructorDelegate
 import com.Johnny.wcx.dexkit.dsl.DexMethodDelegate
 import com.Johnny.wcx.utils.HookAction
-import com.Johnny.wcx.utils.HookHandle
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
-import com.Johnny.wcx.utils.hookAfterDirectly
-import com.Johnny.wcx.utils.hookBeforeDirectly
 import org.luckypray.dexkit.DexKitBridge
 import java.lang.reflect.Executable
 import kotlin.reflect.KClass
@@ -28,6 +26,9 @@ abstract class BaseFeature {
         get() = "${categories.joinToString(",")}/$name"
 
     var description: String = ""
+
+    /** WeKit 兼容: 功能稳定标识 (FeaturesLoader 注入, 本模块保留以兼容连带代码)。 */
+    var technicalId: String = ""
 
     open fun startup() {
         error("You shouldn't inherit BaseFeature")
@@ -82,8 +83,8 @@ abstract class BaseFeature {
         dexDelegates.forEach { it.findInline(dexKit) }
     }
 
-    internal val unhooks = mutableListOf<HookHandle>()
-    internal fun registerUnhook(u: HookHandle) {
+    internal val unhooks = mutableListOf<XC_MethodHook.Unhook>()
+    internal fun registerUnhook(u: XC_MethodHook.Unhook) {
         unhooks += u
     }
 
@@ -98,10 +99,15 @@ abstract class BaseFeature {
         priority: Int = 50,
         action: HookAction
     ) = registerUnhook(
-        hookBeforeDirectly(priority) {
-            executeHookAction(this, action)
-        }
-    )
+        XposedBridge.hookMethod(
+            this,
+            object :
+                XC_MethodHook(priority) {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    executeHookAction(param, action)
+                }
+            }
+        ))
 
     @JvmName("hookBefore2")
     internal fun BaseReflectedMethod.hookBefore(
@@ -139,10 +145,15 @@ abstract class BaseFeature {
         priority: Int = 50,
         action: HookAction
     ) = registerUnhook(
-        hookAfterDirectly(priority) {
-            executeHookAction(this, action)
-        }
-    )
+        XposedBridge.hookMethod(
+            this,
+            object :
+                XC_MethodHook(priority) {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    executeHookAction(param, action)
+                }
+            }
+        ))
 
     @JvmName("hookAfter2")
     internal fun BaseReflectedMethod.hookAfter(
@@ -182,7 +193,7 @@ abstract class BaseFeature {
 
     // --- end dex delegate ---
 
-    internal fun executeHookAction(param: HookParam, action: HookAction) {
+    internal fun executeHookAction(param: XC_MethodHook.MethodHookParam, action: HookAction) {
         runCatching {
             action(param)
         }.onFailure { e -> WeLogger.e("executeHookAction", "failed to execute hook of $name", e) }

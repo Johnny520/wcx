@@ -42,8 +42,8 @@ object ModelProviderManager {
 
     /**
      * Returns an [LlmClient] for [provider], building one if absent or if the provider's config
-     * (type/baseUrl/apiKey) changed since last cached. [provider] must carry a usable apiKey (use
-     * [WeAgentRepository.getModelProvider]); keys are stored as-is, so nothing needs decrypting.
+     * (type/baseUrl/apiKey) changed since last cached. [provider] must already have its apiKey
+     * decrypted (use [WeAgentRepository.getDecryptedModelProvider]).
      */
     @Synchronized
     fun clientFor(provider: ModelProviderEntity): LlmClient {

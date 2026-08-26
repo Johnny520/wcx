@@ -10,4 +10,12 @@ public class LauncherUI extends Activity {
     public static LauncherUI getInstance() {
         throw new RuntimeException("Stub!");
     }
+
+    public Object getCurrentFragmet() {
+        throw new RuntimeException("Stub!");
+    }
+
+    public void startChatting(String userName) {
+        throw new RuntimeException("Stub!");
+    }
 }

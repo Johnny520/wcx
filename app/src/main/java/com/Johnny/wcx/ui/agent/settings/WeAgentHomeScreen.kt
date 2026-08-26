@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -15,10 +14,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.Johnny.wcx.activity.agent.AgentSettingsScreen
-import com.Johnny.wcx.agent.data.OverlayMode
 import com.Johnny.wcx.agent.data.WeAgentRepository
 import com.Johnny.wcx.agent.data.WeAgentSettings
 import com.Johnny.wcx.agent.data.entity.ModelEntity
+import com.Johnny.wcx.agent.data.entity.SystemPromptEntity
+import com.Johnny.wcx.agent.data.entity.WorkspaceEntity
 import com.Johnny.wcx.features.api.agent.WeAgentService
 import com.Johnny.wcx.features.items.system.agent.WeAgentOverlayController
 import com.Johnny.wcx.ui.content.MiuixSmallTitle
@@ -39,7 +39,7 @@ fun WeAgentHomeScreen(onOpen: (AgentSettingsScreen) -> Unit) {
 
     var loaded by remember { mutableStateOf(false) }
     var dynamicTools by remember { mutableStateOf(false) }
-    var overlayMode by remember { mutableStateOf(OverlayMode.ALWAYS) }
+    var overlayForegroundOnly by remember { mutableStateOf(false) }
     var sendWhileRunning by remember { mutableStateOf("QUEUE_AFTER_TURN") }
     var maxRequests by remember { mutableStateOf(WeAgentSettings.DEFAULT_MAX_MODEL_REQUESTS.toString()) }
     var smallModelId by remember { mutableStateOf<String?>(null) }
@@ -47,23 +47,22 @@ fun WeAgentHomeScreen(onOpen: (AgentSettingsScreen) -> Unit) {
     var defaultSystemPromptId by remember { mutableStateOf<String?>(null) }
     var defaultWorkspaceId by remember { mutableStateOf<String?>(null) }
 
-    // These must come from the live DB flows, not a one-shot read: MiuixStackNavigator keeps the whole
-    // stack composed, so this screen never leaves composition and a LaunchedEffect(Unit) would never
-    // re-run. A model/prompt/workspace added on a child screen has to show up in these dropdowns as
-    // soon as the user comes back.
-    val models by remember { WeAgentRepository.observeModels() }.collectAsState(initial = emptyList())
-    val systemPrompts by remember { WeAgentRepository.observeSystemPrompts() }.collectAsState(initial = emptyList())
-    val workspaces by remember { WeAgentRepository.observeWorkspaces() }.collectAsState(initial = emptyList())
+    var models by remember { mutableStateOf<List<ModelEntity>>(emptyList()) }
+    var systemPrompts by remember { mutableStateOf<List<SystemPromptEntity>>(emptyList()) }
+    var workspaces by remember { mutableStateOf<List<WorkspaceEntity>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         dynamicTools = WeAgentSettings.toolLoadingMode() == com.Johnny.wcx.agent.tool.ToolLoadingMode.DYNAMIC
-        overlayMode = WeAgentSettings.overlayMode()
+        overlayForegroundOnly = WeAgentSettings.overlayForegroundOnly()
         sendWhileRunning = WeAgentSettings.sendWhileRunningMode().name
         maxRequests = WeAgentSettings.maxModelRequests().toString()
         smallModelId = WeAgentSettings.smallModelId()
         defaultModelId = WeAgentSettings.defaultModelId()
         defaultSystemPromptId = WeAgentSettings.defaultSystemPromptId()
         defaultWorkspaceId = WeAgentSettings.defaultWorkspaceId()
+        models = WeAgentRepository.getAllModelsOnce()
+        systemPrompts = WeAgentRepository.getAllSystemPromptsOnce()
+        workspaces = WeAgentRepository.observeWorkspacesOnce()
         loaded = true
     }
 
@@ -73,16 +72,14 @@ fun WeAgentHomeScreen(onOpen: (AgentSettingsScreen) -> Unit) {
         item {
             Card(Modifier.padding(bottom = 6.dp)) {
                 if (loaded) {
-                    WindowDropdownPreference(
-                        title = "悬浮窗模式",
-                        summary = "悬浮球何时显示（禁用后仍可从聊天工具栏唤起）",
-                        items = OverlayMode.entries.map { it.label },
-                        selectedIndex = OverlayMode.entries.indexOf(overlayMode),
-                        onSelectedIndexChange = {
-                            val mode = OverlayMode.entries[it]
-                            overlayMode = mode
-                            WeAgentOverlayController.setMode(mode)
-                            scope.launch { WeAgentSettings.set(WeAgentSettings.KEY_OVERLAY_MODE, mode.name) }
+                    SwitchPreference(
+                        title = "仅前台显示悬浮窗",
+                        summary = "微信切到后台时自动隐藏悬浮窗，回到前台再显示",
+                        checked = overlayForegroundOnly,
+                        onCheckedChange = {
+                            overlayForegroundOnly = it
+                            WeAgentOverlayController.setForegroundOnly(it)
+                            scope.launch { WeAgentSettings.set(WeAgentSettings.KEY_OVERLAY_FOREGROUND_ONLY, it.toString()) }
                         },
                     )
                 }
@@ -245,13 +242,9 @@ fun WeAgentHomeScreen(onOpen: (AgentSettingsScreen) -> Unit) {
     // setting never appears to persist across screen opens.
     LaunchedEffect(maxRequests, loaded) {
         if (!loaded) return@LaunchedEffect
-        // Blank means "still typing" — don't store anything yet.
-        val typed = maxRequests.toIntOrNull() ?: return@LaunchedEffect
-        val clamped = typed.coerceIn(1, 100)
-        // Write the clamp back into the field as well, otherwise the UI would keep showing the raw
-        // input (e.g. "500" or "0") while a different value is actually stored.
-        if (clamped != typed) maxRequests = clamped.toString()
-        WeAgentSettings.set(WeAgentSettings.KEY_MAX_MODEL_REQUESTS, clamped.toString())
+        maxRequests.toIntOrNull()?.let {
+            WeAgentSettings.set(WeAgentSettings.KEY_MAX_MODEL_REQUESTS, it.coerceIn(1, 100).toString())
+        }
     }
 }
 

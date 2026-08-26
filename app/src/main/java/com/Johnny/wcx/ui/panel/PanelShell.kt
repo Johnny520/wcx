@@ -15,17 +15,10 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -72,14 +65,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,9 +95,7 @@ import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.composables.icons.materialsymbols.MaterialSymbols
-import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Close
-import com.composables.icons.materialsymbols.outlined.Refresh
 import com.composables.icons.materialsymbols.outlined.Search
 import com.Johnny.wcx.features.items.chat.panel.PanelUiState
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
@@ -125,7 +114,6 @@ data class PanelAction(
     val label: String,
     val enabled: Boolean = true,
     val showLabel: Boolean = false,
-    val headerStart: Boolean = false,
     val onLongClick: (() -> Unit)? = null,
     val onClick: () -> Unit,
 )
@@ -139,51 +127,6 @@ data class PanelActionSearch(
     val onExpandedChange: (Boolean) -> Unit,
 )
 
-@Composable
-private fun PanelHeaderAction(
-    action: PanelAction?,
-    edge: Alignment.Horizontal,
-    animationLabel: String,
-) {
-    val isBackAction = edge == Alignment.Start
-    val direction = if (isBackAction) -1 else 1
-    val enterDuration = if (isBackAction) 205 else 240
-    val exitDuration = if (isBackAction) 185 else 220
-    val sizeDuration = if (isBackAction) 225 else 260
-    AnimatedContent(
-        targetState = action,
-        contentKey = { it?.icon },
-        contentAlignment = if (edge == Alignment.Start) Alignment.CenterStart else Alignment.CenterEnd,
-        transitionSpec = {
-            val enter = fadeIn(tween(if (isBackAction) 155 else 180, delayMillis = 30)) +
-                    scaleIn(tween(enterDuration, easing = FastOutSlowInEasing), initialScale = 0.78f) +
-                    slideInHorizontally(tween(enterDuration, easing = FastOutSlowInEasing)) {
-                        direction * it / 3
-                    }
-            val exit = fadeOut(tween(if (isBackAction) 130 else 150)) +
-                    scaleOut(tween(exitDuration, easing = FastOutSlowInEasing), targetScale = 0.78f) +
-                    slideOutHorizontally(tween(exitDuration, easing = FastOutSlowInEasing)) {
-                        direction * it / 3
-                    }
-            (enter togetherWith exit).using(
-                SizeTransform(
-                    clip = false,
-                    sizeAnimationSpec = { _, _ -> tween(sizeDuration, easing = FastOutSlowInEasing) },
-                ),
-            )
-        },
-        label = animationLabel,
-    ) { currentAction ->
-        if (currentAction == null) {
-            Box(Modifier)
-        } else {
-            IconButton(onClick = currentAction.onClick, enabled = currentAction.enabled) {
-                Icon(currentAction.icon, currentAction.label)
-            }
-        }
-    }
-}
-
 internal data class PanelImportOption<T>(
     val mode: T,
     val title: String,
@@ -192,23 +135,8 @@ internal data class PanelImportOption<T>(
 )
 
 class PanelDialogScope internal constructor(private val dialog: Dialog) {
-    private var implicitDismissBlockCount = 0
-
-    internal val canDismissImplicitly: Boolean
-        get() = implicitDismissBlockCount == 0
-
-    internal fun blockImplicitDismiss() {
-        implicitDismissBlockCount++
-    }
-
-    internal fun unblockImplicitDismiss() {
-        implicitDismissBlockCount = (implicitDismissBlockCount - 1).coerceAtLeast(0)
-    }
-
     fun dismiss() = dialog.dismiss()
 }
-
-private val LocalPanelDialogScope = staticCompositionLocalOf<PanelDialogScope?> { null }
 
 @Suppress("DEPRECATION")
 fun showPanelDialog(
@@ -255,10 +183,7 @@ fun showPanelDialog(
     dialog.setContentView(
         ComposeView(wrapped).apply {
             setContent {
-                CompositionLocalProvider(
-                    LocalContext provides wrapped,
-                    LocalPanelDialogScope provides scope,
-                ) {
+                CompositionLocalProvider(LocalContext provides wrapped) {
                     InjectedUiTheme {
                         Box(
                             modifier = Modifier
@@ -267,9 +192,7 @@ fun showPanelDialog(
                                 .clickable(
                                     indication = null,
                                     interactionSource = null,
-                                    onClick = {
-                                        if (scope.canDismissImplicitly) scope.dismiss()
-                                    },
+                                    onClick = scope::dismiss,
                                 ),
                             contentAlignment = Alignment.BottomCenter,
                         ) {
@@ -335,28 +258,6 @@ fun <T> PanelShell(
     titleContent: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    fun PanelAction.isHeaderAction(): Boolean =
-        headerStart || icon == MaterialSymbols.Outlined.Arrow_back || icon == MaterialSymbols.Outlined.Refresh
-
-    val backAction = actions.firstOrNull {
-        it.headerStart || it.icon == MaterialSymbols.Outlined.Arrow_back
-    }
-    val refreshAction = actions.firstOrNull { it.icon == MaterialSymbols.Outlined.Refresh }
-    val stripActions = actions.filterNot { it.isHeaderAction() }
-    val stripActionSearch = actionSearch?.let { search ->
-        if (search.actionIndex == Int.MAX_VALUE) search
-        else {
-            val originalIndex = search.actionIndex.coerceIn(0, actions.size)
-            val removedBeforeSearch = actions.take(originalIndex).count { it.isHeaderAction() }
-            search.copy(actionIndex = (originalIndex - removedBeforeSearch).coerceAtLeast(0))
-        }
-    }
-    val titleStartPadding by animateDpAsState(
-        targetValue = if (backAction == null) 12.dp else 48.dp,
-        animationSpec = tween(225, easing = FastOutSlowInEasing),
-        label = "panel-title-start-padding",
-    )
-
     fun closeActionSearch() {
         actionSearch?.onValueChange?.invoke("")
         actionSearch?.onExpandedChange?.invoke(false)
@@ -442,82 +343,32 @@ fun <T> PanelShell(
             }
 
             Column(Modifier.fillMaxSize()) {
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .height(48.dp)
+                        .padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(start = titleStartPadding, end = 100.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (titleContent == null) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                                contentAlignment = Alignment.CenterStart,
-                            ) {
-                                AnimatedContent(
-                                    targetState = title,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = Alignment.CenterStart,
-                                    transitionSpec = {
-                                        val enter = fadeIn(tween(180, delayMillis = 50)) +
-                                                slideInVertically(
-                                                    tween(220, easing = FastOutSlowInEasing),
-                                                ) { it / 4 }
-                                        val exit = fadeOut(tween(130)) +
-                                                slideOutVertically(
-                                                    tween(180, easing = FastOutSlowInEasing),
-                                                ) { -it / 4 }
-                                        (enter togetherWith exit).using(SizeTransform(clip = false))
-                                    },
-                                    label = "panel-title",
-                                ) { animatedTitle ->
-                                    Text(
-                                        text = animatedTitle,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        } else {
-                            titleContent()
-                            Box(Modifier.weight(1f))
-                        }
+                    if (titleContent == null) {
+                        Text(
+                            text = title,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        titleContent()
+                        Box(Modifier.weight(1f))
                     }
-
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .align(Alignment.CenterStart),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        PanelHeaderAction(backAction, Alignment.Start, "panel-header-back")
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.size(48.dp), contentAlignment = Alignment.CenterEnd) {
-                            PanelHeaderAction(refreshAction, Alignment.End, "panel-header-refresh")
-                        }
-                        IconButton(onClick = onDismiss) {
-                            Icon(MaterialSymbols.Outlined.Close, "关闭")
-                        }
+                    IconButton(onClick = onDismiss) {
+                        Icon(MaterialSymbols.Outlined.Close, "关闭")
                     }
                 }
                 HorizontalDivider()
-                if (stripActions.isNotEmpty() || stripActionSearch != null) {
-                    PanelActionStrip(stripActions, wrapActions, stripActionSearch)
+                if (actions.isNotEmpty() || actionSearch != null) {
+                    PanelActionStrip(actions, wrapActions, actionSearch)
                     HorizontalDivider()
                 }
                 Box(Modifier.fillMaxSize()) { content() }
@@ -938,7 +789,7 @@ fun PanelConfirmation(
 
 @Composable
 fun PanelProgressOverlay(message: String, progress: Float? = null) {
-    PanelFullOverlay(onDismiss = {}, allowImplicitDismiss = false) {
+    PanelOverlay(onDismiss = {}) {
         Text(message, style = MaterialTheme.typography.titleMedium)
         if (progress == null) {
             CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
@@ -959,28 +810,14 @@ fun PanelProgressOverlay(message: String, progress: Float? = null) {
 @Composable
 fun PanelFullOverlay(
     onDismiss: () -> Unit,
-    allowImplicitDismiss: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val dialogScope = LocalPanelDialogScope.current
-    if (!allowImplicitDismiss) {
-        DisposableEffect(dialogScope) {
-            dialogScope?.blockImplicitDismiss()
-            onDispose { dialogScope?.unblockImplicitDismiss() }
-        }
-    }
-    BackHandler {
-        if (allowImplicitDismiss) onDismiss()
-    }
+    BackHandler(onBack = onDismiss)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f))
-            .clickable(
-                indication = null,
-                interactionSource = null,
-                onClick = { if (allowImplicitDismiss) onDismiss() },
-            ),
+            .clickable(indication = null, interactionSource = null, onClick = onDismiss),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
@@ -1034,4 +871,4 @@ fun PanelPageOverlay(
 private fun PanelOverlay(
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
-) = PanelFullOverlay(onDismiss, content = content)
+) = PanelFullOverlay(onDismiss, content)

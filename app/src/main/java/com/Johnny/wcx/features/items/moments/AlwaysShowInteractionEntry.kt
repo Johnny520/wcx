@@ -4,10 +4,12 @@ import android.view.View
 import android.widget.TextView
 import androidx.core.view.isVisible
 import dev.ujhhgtg.reflekt.reflekt
+
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
+
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.android.Intent
 import com.Johnny.wcx.utils.android.baseActivity
@@ -26,9 +28,6 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
 
     private const val HEADER_UIC =
         "com.tencent.mm.plugin.sns.ui.improve.component.header.ImproveHeaderUIC"
-
-    /** 没有任何互动消息时的文案, 与微信自身的「朋友的互动消息」保持一致 */
-    private const val IDLE_TEXT = "朋友的互动消息"
 
     private const val MSG_UI_WITH_ALL = "${PackageNames.WECHAT}.plugin.sns.ui.SnsMsgUIWithAll"
 
@@ -89,7 +88,7 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
             noInteractionMessages = true
             val headerUic = extractHeaderUic(thisObject ?: return@hookAfter) ?: return@hookAfter
             notifyLayout(headerUic).isVisible = true
-            notifyContent(headerUic).text = IDLE_TEXT
+            notifyContent(headerUic).text = ("朋友的互动消息")
             // 一条互动消息都没有, 没有可展示的头像
             notifyImg(headerUic).isVisible = false
         }

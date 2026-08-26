@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.dexkit.cache.DexCacheManager
+import com.Johnny.wcx.dexkit.resolution.resolveAllDex
 import com.Johnny.wcx.features.core.FeaturesLoader
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.utils.HostInfo
@@ -298,7 +299,10 @@ object LocalAdaptationEngine {
                 if (feature is com.Johnny.wcx.dexkit.abc.IResolveDex) {
                     // 检查缓存是否有效
                     if (!DexCacheManager.isItemCacheValid(feature)) {
-                        feature.resolveDex(dexKit)
+                        // resolveAllDex = withResolutionContext + resolveInlineDex + resolveDex:
+                        // 保证 .data 扩展读取在同一线程的 DexKit 会话内完成, 否则抛
+                        // "Dex resolution context is not active"。
+                        feature.resolveAllDex(dexKit)
                         DexCacheManager.saveItemCache(feature)
                         WeLogger.d(TAG, "resolved: ${feature.displayName}")
                     } else {

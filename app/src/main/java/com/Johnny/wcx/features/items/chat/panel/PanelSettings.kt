@@ -4,14 +4,6 @@ import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 
 object PanelSettings {
     const val DEFAULT_FUNBOX_API_CLIENT_WXID = "wxid_1234567890abcd"
-    const val MIN_TGS_GIF_FRAME_RATE = 1
-    const val MAX_TGS_GIF_FRAME_RATE = 60
-    const val DEFAULT_TGS_GIF_FRAME_RATE = 60
-    const val MIN_PANEL_CONCURRENCY = 1
-    const val MAX_PANEL_DOWNLOAD_CONCURRENCY = 32
-    const val MAX_PANEL_CONVERSION_CONCURRENCY = 8
-    const val DEFAULT_PANEL_DOWNLOAD_CONCURRENCY = 4
-    const val DEFAULT_PANEL_CONVERSION_CONCURRENCY = 2
 
     var stickerLastDestination by prefOption("sticker_panel_last_destination", "RECENT")
     var voiceLastDestination by prefOption("voice_panel_last_destination", "RECENT")
@@ -32,15 +24,6 @@ object PanelSettings {
     var voiceItemCustomSortHintShown by prefOption("voice_panel_item_custom_sort_hint_shown", false)
     var panelAutoClose by prefOption("panel_auto_close", true)
     var wrapPanelActions by prefOption("panel_actions_wrap", false)
-    var rememberPanelNavigation by prefOption("panel_remember_navigation", true)
-    var panelDownloadConcurrency by prefOption(
-        "panel_download_concurrency",
-        DEFAULT_PANEL_DOWNLOAD_CONCURRENCY,
-    )
-    var panelConversionConcurrency by prefOption(
-        "panel_conversion_concurrency",
-        DEFAULT_PANEL_CONVERSION_CONCURRENCY,
-    )
     private var legacyOnlineStickerPacksUseList by prefOption("sticker_panel_online_packs_use_list", false)
     private var localStickerPackLayoutValue by prefOption("sticker_panel_local_pack_layout", "TABS")
     private var onlineStickerPackLayoutValue by prefOption("sticker_panel_online_pack_layout", "")
@@ -53,18 +36,6 @@ object PanelSettings {
         DEFAULT_FUNBOX_API_CLIENT_WXID,
     )
     var telegramBotToken by prefOption("sticker_panel_telegram_bot_token", "")
-    var stickerTgsGifFrameRate by prefOption(
-        "sticker_panel_tgs_gif_frame_rate",
-        DEFAULT_TGS_GIF_FRAME_RATE,
-    )
-    var stickerClosePreviewAfterScrub by prefOption(
-        "sticker_panel_close_preview_after_scrub",
-        true,
-    )
-    var stickerOnlinePreviewUseOriginal by prefOption(
-        "sticker_panel_online_preview_use_original",
-        true,
-    )
     var stickerRemoveRoundedVideoMask by prefOption(
         "sticker_panel_remove_rounded_video_mask",
         false,
@@ -121,18 +92,6 @@ object PanelSettings {
     val effectiveFunBoxApiClientWxId: String
         get() = funBoxApiClientWxId.takeIf(::isValidFunBoxApiClientWxId)
             ?: DEFAULT_FUNBOX_API_CLIENT_WXID
-
-    val effectivePanelDownloadConcurrency: Int
-        get() = panelDownloadConcurrency.coerceIn(
-            MIN_PANEL_CONCURRENCY,
-            MAX_PANEL_DOWNLOAD_CONCURRENCY,
-        )
-
-    val effectivePanelConversionConcurrency: Int
-        get() = panelConversionConcurrency.coerceIn(
-            MIN_PANEL_CONCURRENCY,
-            MAX_PANEL_CONVERSION_CONCURRENCY,
-        )
 
     fun isValidFunBoxApiClientWxId(value: String): Boolean =
         FUNBOX_WXID_REGEX.matches(value.trim())

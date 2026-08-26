@@ -128,7 +128,7 @@ object WeUiAutomationToolBindings {
                 "null = whole window. " +
                 "`maxDimension` (optional): max width or height in pixels after downscaling (default 1024). " +
                 "Returns a short acknowledgement; the actual image is delivered as a separate message.",
-        sideEffect = false,   // read-only from WeChat's perspective; gated separately by ToolVisibility.visionTools
+        sideEffect = false,   // read-only from WeChat's perspective; gated separately by visionToolsVisible
         group = BUILTIN_UI,
     )
     suspend fun uiScreenshot(

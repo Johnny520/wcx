@@ -2,6 +2,7 @@ package com.Johnny.wcx.features.items.chat
 
 import android.content.Context
 import android.widget.ListView
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -24,20 +25,29 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,14 +75,16 @@ import com.composables.icons.materialsymbols.outlined.Add
 import com.composables.icons.materialsymbols.outlined.Check
 import com.composables.icons.materialsymbols.outlined.Delete
 import com.composables.icons.materialsymbols.outlined.Edit
+import com.composables.icons.materialsymbols.outlined.Settings
 import com.composables.icons.materialsymbols.outlined.Swap_vert
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
+import com.Johnny.wcx.features.api.core.models.IWeContact
+import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -86,9 +98,12 @@ import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.android.runOnUiThread
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.serialization.DefaultJson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.div
@@ -98,7 +113,7 @@ import kotlin.io.path.writeText
 import java.lang.reflect.Modifier as JavaModifier
 
 @Feature(name = "对话分组", categories = ["聊天"], description = "向主页顶部添加 Tab 栏, 将对话分组\n建议同时启用「界面美化/隐藏主页下滑「最近」页」")
-object ConversationGrouping : SwitchFeature(), IResolveDex {
+object ConversationGrouping : ClickableFeature(), IResolveDex {
 
     const val GROUP_PREFIX = "wekit_group_"
 
@@ -127,17 +142,22 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
 
     private val groupMembersCache = ConcurrentHashMap<String, List<String>>()
 
+    // Reference to the tab bar ComposeView added as a header to the conversation ListView.
+    // Used by onDisable() to remove the header when the master switch is toggled off.
+    private var headerComposeView: ComposeView? = null
+
     override fun onEnable() {
         hookConversationListQuery()
 
         methodOnTabCreate.hookAfter {
-            val convListView = thisObject!!.reflekt()
+            val convListView = thisObject.reflekt()
                 .firstField {
                     type = "com.tencent.mm.ui.conversation.ConversationListView"
                 }
                 .get()!! as ListView
 
             val composeView = ComposeView(convListView.context).apply {
+                headerComposeView = this
                 val lifecycleOwner = LifecycleOwnerProvider.lifecycleOwner
                 setLifecycleOwner(lifecycleOwner)
 
@@ -157,7 +177,7 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
                             selectedGroupId = selectedGroupId,
                             onTabSelected = { groupId ->
                                 selectedGroupId = groupId
-                                selectTab(groupId)
+                                selectTab(groups.find { it.id == groupId })
                             },
                             onCreateGroup = {
                                 showCreateGroupDialog(context) {
@@ -171,13 +191,13 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
                                     onGroupUpdated = {
                                         groups = loadGroups()
                                         // Recompute the filter if the edited group is the active one.
-                                        if (selectedGroupId == group.id) selectTab(group.id)
+                                        if (selectedGroupId == group.id) selectTab(groups.find { it.id == group.id })
                                     },
                                     onGroupDeleted = {
                                         groups = loadGroups()
                                         if (selectedGroupId == group.id) {
                                             selectedGroupId = ALL_TAB_ID
-                                            selectTab(ALL_TAB_ID)
+                                            selectTab(null)
                                         }
                                     }
                                 )
@@ -187,8 +207,10 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
                                 groups = loadGroups()
                                 if (selectedGroupId == group.id) {
                                     selectedGroupId = ALL_TAB_ID
-                                    selectTab(ALL_TAB_ID)
+                                    selectTab(null)
                                 }
+                                // Force a UI refresh so the tab bar re-renders without the deleted group.
+                                WeConversationApi.reloadConversations()
                                 showToast("已删除「${group.name}」")
                             },
                             onReorder = { orderedIds ->
@@ -208,15 +230,137 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
         }
     }
 
-    private fun selectTab(groupId: String?) {
+    override fun onDisable() {
+        // Clear the active predicate so the conversation list shows all conversations.
+        activePredicate = null
+        // Remove the tab bar header view from the ListView to clean up the UI.
+        // Must run on the UI thread since it manipulates the View hierarchy.
+        runOnUiThread {
+            headerComposeView?.let { view ->
+                (view.parent as? ListView)?.removeHeaderView(view)
+            }
+            headerComposeView = null
+        }
+        // Invalidate the cache so loadGroups re-reads from disk next time.
+        groupsCache = null
+        groupMembersCache.clear()
+        // Reload the conversation list to reflect the removed filter.
+        WeConversationApi.reloadConversations()
+    }
+
+    // =========================================================================
+    // 设置页面 — 总开关 + 新增分组 + 分组列表(⚙)
+    // =========================================================================
+    override fun onClick(context: ComponentActivity) {
+        showComposeDialog(context) {
+            var masterEnabled by remember { mutableStateOf(isEnabled) }
+            var groups by remember { mutableStateOf(loadGroups().filter { !isAllTab(it.id) }) }
+
+            AlertDialogContent(
+                title = { Text("对话分组") },
+                text = {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
+                        // 总开关
+                        ListItem(
+                            modifier = Modifier.clickable { masterEnabled = !masterEnabled },
+                            trailingContent = {
+                                Switch(checked = masterEnabled, onCheckedChange = null)
+                            },
+                            headlineContent = { Text("总开关", fontWeight = FontWeight.SemiBold) },
+                            supportingContent = {
+                                Text("向主页顶部添加 Tab 栏，将对话分组\n建议同时启用「界面美化/隐藏主页下滑「最近」页」")
+                            }
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        // 新增自定义分组
+                        Button(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            onClick = {
+                                showCreateGroupDialog(context) {
+                                    groups = loadGroups().filter { !isAllTab(it.id) }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = MaterialSymbols.Outlined.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("新增自定义分组")
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // 已创建分组列表
+                        if (groups.isEmpty()) {
+                            Text(
+                                "暂无自定义分组",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        } else {
+                            groups.forEach { group ->
+                                ListItem(
+                                    modifier = Modifier.clickable {
+                                        showEditGroupDialog(
+                                            context = context,
+                                            group = group,
+                                            onGroupUpdated = {
+                                                groups = loadGroups().filter { !isAllTab(it.id) }
+                                            },
+                                            onGroupDeleted = {
+                                                groups = loadGroups().filter { !isAllTab(it.id) }
+                                            }
+                                        )
+                                    },
+                                    headlineContent = { Text(group.name) },
+                                    trailingContent = {
+                                        Icon(
+                                            imageVector = MaterialSymbols.Outlined.Settings,
+                                            contentDescription = "配置分组",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
+                dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                confirmButton = {
+                    Button(onClick = {
+                        val wasEnabled = isEnabled
+                        isEnabled = masterEnabled
+                        // When disabling the master switch, reload the conversation list so the
+                        // tab bar and filter are removed in real-time without requiring a restart.
+                        if (wasEnabled && !masterEnabled) {
+                            WeConversationApi.reloadConversations()
+                        }
+                        showToast("设置已保存")
+                        onDismiss()
+                    }) { Text("保存") }
+                }
+            )
+        }
+    }
+
+    private fun selectTab(group: ChatGroup?) {
         // Resolve the predicate here, on the main thread, NOT inside the query hook: preset/SQL
         // groups need a DB read to materialize their member list, and doing that while WeChat is
         // already running the list query would nest reads on the same path.
-        // The "全部" tab (or a null id) applies no filter.
-        activePredicate = if (groupId == null || isAllTab(groupId)) {
+        // The "全部" tab (or a null group) applies no filter.
+        activePredicate = if (group == null || isAllTab(group.id)) {
             null
         } else {
-            buildGroupPredicate(groupById(groupId))
+            buildGroupPredicate(group)
         }
         // No DB writes: reloadConversations re-runs the list query on the main thread, and our
         // query hook injects the new filter, so the visible rows change without touching any row.
@@ -827,10 +971,7 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
                 selectFields = selectFields,
                 whereClause = whereClause
             )
-            // Resolve directly instead of going through getGroupMembers: that cache is keyed by
-            // group id, and this preview group reuses the id of the group being edited, so the
-            // cached (stale) member list would freeze the count at the first result.
-            resolveGroupMembers(temp).size
+            getGroupMembers(temp).size
         }
 
         AlertDialogContent(
@@ -918,16 +1059,46 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     showComposeDialog(context) {
-                                        ContactsSelector(
-                                            title = "选择对话",
-                                            contacts = remember { WeDatabaseApi.getContacts() },
-                                            initialSelectedWxIds = members,
-                                            onDismiss = this.onDismiss,
-                                            onConfirm = {
-                                                members = it
-                                                this.onDismiss()
+                                        // Load contacts asynchronously to avoid blocking the main
+                                        // thread and causing scrolling lag in the selection list.
+                                        var contacts by remember { mutableStateOf<List<IWeContact>?>(null) }
+
+                                        LaunchedEffect(Unit) {
+                                            withContext(Dispatchers.IO) {
+                                                contacts = WeDatabaseApi.getContacts()
                                             }
-                                        )
+                                        }
+
+                                        val loadedContacts = contacts
+                                        if (loadedContacts != null) {
+                                            ContactsSelector(
+                                                title = "选择对话",
+                                                contacts = loadedContacts,
+                                                initialSelectedWxIds = members,
+                                                onDismiss = this.onDismiss,
+                                                onConfirm = {
+                                                    members = it
+                                                    this.onDismiss()
+                                                }
+                                            )
+                                        } else {
+                                            AlertDialogContent(
+                                                title = { Text("选择对话") },
+                                                text = {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(200.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        CircularProgressIndicator()
+                                                    }
+                                                },
+                                                dismissButton = {
+                                                    TextButton(this.onDismiss) { Text("取消") }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             ) {
@@ -1082,6 +1253,9 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
         return resolved
     }
 
+    /** WeKit 连带 ContactSelectors 需要: 群聊筛选选项。 */
+    fun groupFilterOptions(localizedContext: Context?): List<ChatGroup> = loadGroups()
+
     private fun loadGroups(): List<ChatGroup> {
         groupsCache?.let { return it }
         val file = groupsFile
@@ -1151,7 +1325,7 @@ object ConversationGrouping : SwitchFeature(), IResolveDex {
     }
 
     @Serializable
-    private data class ChatGroup(
+    data class ChatGroup(
         val id: String = "",
         val name: String = "",
         val members: List<String> = emptyList(),

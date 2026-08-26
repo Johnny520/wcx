@@ -147,3 +147,26 @@ fun String.stripWxId(): String {
     val match = regex.find(this)
     return match?.groupValues?.get(1) ?: this
 }
+
+// =========================================================================
+// 安全文本截取工具函数 — 杜绝越界崩溃
+// =========================================================================
+
+/**
+ * 安全截取字符串子串，自动进行边界校验。
+ * 若 [start] 或 [end] 超出字符串长度，自动修正为合法范围，不会抛出异常。
+ * @return 截取后的子串，若 start >= length 则返回空字符串
+ */
+fun String.safeSubstring(start: Int, end: Int = length): String {
+    if (start >= length) return ""
+    val safeEnd = end.coerceAtMost(length)
+    if (safeEnd <= start) return ""
+    return substring(start, safeEnd)
+}
+
+/**
+ * 安全截取字符串子串，若 [start] 超出范围则返回空字符串。
+ */
+fun String.safeSubstring(range: IntRange): String {
+    return safeSubstring(range.first, range.last + 1)
+}

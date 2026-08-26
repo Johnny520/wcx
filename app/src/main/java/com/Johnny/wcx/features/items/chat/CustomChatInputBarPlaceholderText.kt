@@ -88,7 +88,7 @@ object CustomChatInputBarPlaceholderText : ClickableFeature(), IResolveDex, WeDa
             val canSend = args[0] as Boolean
             if (canSend) return@hookAfter
 
-            thisObject!!.reflekt().invokeMethod(
+            thisObject.reflekt().invokeMethod(
                 "setHint", text
                     .replace($$"$totalCount", totC.toString())
                     .replace($$"$textCount", textC.toString())
@@ -116,7 +116,7 @@ object CustomChatInputBarPlaceholderText : ClickableFeature(), IResolveDex, WeDa
 
         if (type == MessageType.TEXT.code) {
             textC += 1
-            charC += msgInfo.actualContent.length
+            charC += msgInfo.content.length
             totC += 1
         }
 
@@ -146,6 +146,17 @@ object CustomChatInputBarPlaceholderText : ClickableFeature(), IResolveDex, WeDa
 
         if (type == MessageType.FILE.code) {
             fileC += 1
+            totC += 1
+        }
+
+        // IMAGE / VOICE / VIDEO — 只有总计数，没有独立占位符
+        if (type == MessageType.IMAGE.code) {
+            totC += 1
+        }
+        if (type == MessageType.VOICE.code) {
+            totC += 1
+        }
+        if (type in setOf(MessageType.VIDEO.code, MessageType.MICRO_VIDEO.code)) {
             totC += 1
         }
     }

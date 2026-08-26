@@ -14,7 +14,6 @@ import com.Johnny.wcx.utils.reflection.int
 import com.Johnny.wcx.utils.reflection.long
 import com.Johnny.wcx.utils.reflection.short
 import com.Johnny.wcx.utils.reflection.void
-import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -30,105 +29,41 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * The registry is process-global (the tool-invoker layer has no session id); the model manages its
  * lifetime with the `jvm-clear-handles` tool.
- *
- * **Values are held weakly.** `ui-dump-tree` mints a handle for *every* visible view, and it is a
- * factory-ENABLED tool the model calls freely — with strong references, a handful of dumps across a
- * few chat screens pinned every one of those Activities (and their bitmaps) for the lifetime of the
- * WeChat process, since the only way to release them was the MANUAL_APPROVAL `jvm-clear-handles`
- * tool. Weak values let the host reclaim a screen the moment it is genuinely gone; a handle that
- * outlives its object resolves to null and the caller reports it as *expired* (see
- * [missingHandleMessage]) instead of NPE-ing. The map is additionally bounded ([MAX_ENTRIES]) so the
- * leftover empty shells can't grow without limit either.
  */
 @Keep
 object JvmObjectRegistry {
 
-    /** Upper bound on retained entries; oldest (lowest-id) entries are evicted past it. */
-    private const val MAX_ENTRIES = 4096
-
-    /**
-     * How many of the most recently stored objects are additionally held **strongly**. Weak-only
-     * would break `jvm-new` / `jvm-invoke`: a freshly constructed object nothing else references
-     * would be collectable the moment its handle was minted. A short strong tail keeps such values
-     * usable for the following calls, while a bulk `ui-dump-tree` (hundreds of views) rotates
-     * straight through it, so no Activity is pinned.
-     */
-    private const val STRONG_TAIL = 64
-
     private val counter = AtomicInteger(0)
-    private val objects = ConcurrentHashMap<Int, WeakReference<Any>>()
-    private val strongTail = ArrayDeque<Any>()
+    private val objects = ConcurrentHashMap<Int, Any>()
 
     /** Stores [obj], returning its handle string (e.g. `#12`). */
     fun store(obj: Any): String {
         val id = counter.incrementAndGet()
-        objects[id] = WeakReference(obj)
-        synchronized(strongTail) {
-            strongTail.addLast(obj)
-            while (strongTail.size > STRONG_TAIL) strongTail.removeFirst()
-        }
-        if (objects.size > MAX_ENTRIES) evict()
+        objects[id] = obj
         return "#$id"
     }
 
     /** Resolves a handle id (with or without the leading `#`) to its object, or null. */
     fun resolve(handle: String): Any? {
         val id = handle.removePrefix("#").trim().toIntOrNull() ?: return null
-        return objects[id]?.get()
+        return objects[id]
     }
 
     /** For eval convenience: resolve by raw int id. */
-    fun ref(id: Int): Any? = objects[id]?.get()
+    fun ref(id: Int): Any? = objects[id]
 
-    /**
-     * A model-readable explanation for a handle that failed to resolve, distinguishing an expired
-     * (garbage-collected) handle from one that never existed. Callers surface this as the tool result.
-     */
-    fun missingHandleMessage(handle: String): String {
-        val id = handle.removePrefix("#").trim().toIntOrNull()
-            ?: return "Malformed handle '$handle' (expected #N)."
-        return if (objects.containsKey(id))
-            "Handle '#$id' has expired — the object it pointed at was garbage-collected (handles are " +
-                    "weak so they never keep whole screens alive). Re-run the tool that produced it " +
-                    "(e.g. ui-dump-tree / ui-find-views) to obtain fresh handles."
-        else
-            "No live handle '#$id' (it was never created, or the handle registry has been cleared)."
-    }
-
-    /** Number of handles whose object is still alive. */
-    fun size(): Int = objects.values.count { it.get() != null }
+    fun size(): Int = objects.size
 
     fun clear(): Int {
-        val n = size()
+        val n = objects.size
         objects.clear()
-        synchronized(strongTail) { strongTail.clear() }
         return n
-    }
-
-    /**
-     * Drops entries whose referent has been collected. Called at turn teardown: a full [clear] is
-     * deliberately NOT done there, because the registry is process-global while turns are per-session
-     * and several sessions can run at once — clearing would yank handles out from under a concurrent
-     * turn. Weak values already make the memory release automatic; this only reaps the empty shells.
-     */
-    fun purgeDead(): Int {
-        val before = objects.size
-        objects.entries.removeAll { it.value.get() == null }
-        return before - objects.size
-    }
-
-    /** Evicts dead entries, then the oldest live ones (ids are monotonic) to stay under the cap. */
-    private fun evict() {
-        purgeDead()
-        val excess = objects.size - MAX_ENTRIES
-        if (excess > 0) objects.keys.sorted().take(excess).forEach { objects.remove(it) }
     }
 
     /** A short, model-readable summary of every live handle. */
     fun describeAll(): String {
-        val live = objects.entries.mapNotNull { (id, ref) -> ref.get()?.let { id to it } }.sortedBy { it.first }
-        if (live.isEmpty()) return "No live handles."
-        return live.joinToString("\n") { (id, obj) ->
+        if (objects.isEmpty()) return "No live handles."
+        return objects.entries.sortedBy { it.key }.joinToString("\n") { (id, obj) ->
             "#$id : ${obj.javaClass.name} = ${JvmValueBridge.previewOf(obj)}"
         }
     }
@@ -220,7 +155,7 @@ object JvmValueBridge {
 
     private fun resolveRef(handle: String): Any =
         JvmObjectRegistry.resolve(handle)
-            ?: throw JvmBridgeException(JvmObjectRegistry.missingHandleMessage(handle))
+            ?: throw JvmBridgeException("No live handle '$handle' (it may have been cleared)")
 
     @Suppress("UNCHECKED_CAST")
     private fun parseEnum(payload: String): Any {

@@ -2,6 +2,7 @@ package com.Johnny.wcx.features.items.moments
 
 import android.content.ContentValues
 import android.database.Cursor
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
 import dev.ujhhgtg.reflekt.utils.isBuiltin
@@ -12,7 +13,6 @@ import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.features.items.moments.AntiMomentCommentsDelete.INTERCEPTED_FLAG
 import com.Johnny.wcx.features.items.moments.AntiMomentCommentsDelete.INTERCEPT_MARKER
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.BString
 import com.Johnny.wcx.utils.reflection.StrArr
@@ -81,8 +81,8 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
      * Retrieves the l75.k0 DB handle from a SnsCommentStorage instance.
      * w1 (SnsCommentStorage) holds it as the sole non-builtin final instance field.
      */
-    private fun getSnsSqliteDb(param: HookParam): Any {
-        return param.thisObject!!.reflekt().firstField {
+    private fun getSnsSqliteDb(param: XC_MethodHook.MethodHookParam): Any {
+        return param.thisObject.reflekt().firstField {
             type { !it.isBuiltin }
             modifiers(Modifiers.FINAL)
         }.get()!!
@@ -95,7 +95,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
      * in older builds, and handles BLOB columns (curActionBuf) natively.
      */
     private fun updateRow(
-        param: HookParam,
+        param: XC_MethodHook.MethodHookParam,
         table: String,
         values: ContentValues,
         whereClause: String,
@@ -109,7 +109,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
 
     /** k0.B / y55.i0.j — raw query returning a Cursor */
     private fun rawQuery(
-        param: HookParam,
+        param: XC_MethodHook.MethodHookParam,
         sql: String,
         args: Array<String>,
     ): Cursor {
@@ -132,21 +132,41 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
                 val table = args.getOrNull(0) as? String ?: return@hookBefore
                 val sql = args.getOrNull(1) as? String ?: return@hookBefore
                 if (table == SNS_COMMENT && sql.lowercase().contains("delete from")) {
-                    result = false
+                    try {
+                        // 仅当原方法返回 boolean 时才设置 result = false，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+                        if (method is java.lang.reflect.Method) {
+                            val returnType = (method as java.lang.reflect.Method).returnType
+                            if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                                result = false
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                    }
                 }
             }
         }
 
         // Block WeChat's own in-memory soft-delete bit so the object stays "live".
         methodSnsCommentSetCommentDelFlag.hookBefore {
-            result = null
+            try {
+                // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
         }
 
         // Rescue comments that were soft-deleted before the module was active.
         // These rows are still in the DB but carry WeChat's delete bit (bit 0) in commentflag.
         // hookAfter ensures all fields are populated from the cursor before we inspect them.
         methodSnsCommentConvertFromCursor.hookAfter {
-            val flagField = thisObject!!.reflekt().firstField {
+            val flagField = thisObject.reflekt().firstField {
                 name = "field_commentflag"
                 superclass()
             }
@@ -161,7 +181,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
             flagField.set(flag and 1.inv() or INTERCEPTED_FLAG)
 
             // Inject the visual marker into the comment text in memory.
-            val bufField = thisObject!!.reflekt().firstField {
+            val bufField = thisObject.reflekt().firstField {
                 name = "field_curActionBuf"
                 superclass()
             }
@@ -202,7 +222,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
      * independently (important for deleteBySnsId which may match many rows).
      */
     private fun markAndBlockDelete(
-        param: HookParam,
+        param: XC_MethodHook.MethodHookParam,
         whereClause: String,
         whereArgs: Array<String>,
     ) {
@@ -236,7 +256,17 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
             WeLogger.e(TAG, "markAndBlockDelete failed", e)
         }
         // Cancel the deletion regardless of whether the marker injection succeeded.
-        param.result = true
+        try {
+            // 仅当原方法返回 boolean 时才设置 result = true，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+            if (param.method is java.lang.reflect.Method) {
+                val returnType = (param.method as java.lang.reflect.Method).returnType
+                if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                    param.result = true
+                }
+            }
+        } catch (e: Throwable) {
+            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+        }
     }
 
     /**

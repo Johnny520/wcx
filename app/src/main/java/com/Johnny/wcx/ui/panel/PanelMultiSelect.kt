@@ -17,12 +17,7 @@ internal fun <T> panelMultiSelectActions(
     onSelectionChange: (Set<String>) -> Unit,
     onTerminalAction: (List<T>) -> Unit,
 ): List<PanelAction> = listOf(
-    PanelAction(
-        MaterialSymbols.Outlined.Close,
-        "关闭",
-        headerStart = true,
-        onClick = onClose,
-    ),
+    PanelAction(MaterialSymbols.Outlined.Close, "关闭", showLabel = true, onClick = onClose),
     PanelAction(
         MaterialSymbols.Outlined.Select_all,
         "全选",
@@ -57,7 +52,7 @@ internal fun <T> panelMultiSelectActions(
     },
 )
 
-internal fun <T> invertPanelSelection(
+private fun <T> invertPanelSelection(
     current: Set<String>,
     items: List<T>,
     key: (T) -> String,
@@ -66,7 +61,7 @@ internal fun <T> invertPanelSelection(
     return candidates.filterNotTo(linkedSetOf()) { it in current }
 }
 
-internal fun <T> closePanelSelectionRange(
+private fun <T> closePanelSelectionRange(
     current: Set<String>,
     items: List<T>,
     key: (T) -> String,

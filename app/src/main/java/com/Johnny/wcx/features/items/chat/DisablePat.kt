@@ -16,7 +16,17 @@ object DisablePat : SwitchFeature(), IResolveDex {
 
     override fun onEnable() {
         methodAvatarDoubleClick.hookBefore {
-            result = true
+            try {
+                // 仅当原方法返回 boolean 时才设置 result = true，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = true
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
         }
     }
 }

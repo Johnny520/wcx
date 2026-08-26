@@ -145,6 +145,11 @@ private fun rejectVoipMpCall(wxId: String) {
  * "not open multitalk receiver or black user" and returns without showing any UI).
  */
 private fun HideContacts.installMultiTalkHooks() {
+    if (methodMultiTalkOnInvite.isPlaceholder) {
+        WeLogger.w(TAG, "onInviteMultiTalk wasn't resolved; multitalk invite hiding unavailable")
+        return
+    }
+
     methodMultiTalkOnInvite.hookBefore {
         val group = args[0] ?: return@hookBefore
         val (chatroom, inviter) = readMultiTalkInvite(group) ?: return@hookBefore
@@ -316,5 +321,5 @@ private fun HideContacts.installLegacyVoipHooks() {
  * Reads the caller wxid out of an `a65.b57` RoomInfo, which declares exactly one String field
  * (`f3634i` = callerUserName).
  */
-private fun HookParam.legacyCallerWxId(): String? =
+private fun de.robv.android.xposed.XC_MethodHook.MethodHookParam.legacyCallerWxId(): String? =
     runCatching { args[0]!!.reflekt().firstField { type = BString }.get() as? String }.getOrNull()

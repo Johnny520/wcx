@@ -34,35 +34,49 @@ object ForceTabletMode : SwitchFeature(), IResolveDex {
             usingEqStrings("loginAsOtherDeviceBtn")
         }
     }
-    private val methodCgiCheckLoginAsPad by dexMethod {
-        matcher {
-            usingEqStrings("MicroMsg.CgiCheckLoginAsPad", "/cgi-bin/micromsg-bin/checkloginaspad")
-        }
-    }
 
     override fun onEnable() {
         methodIsTablet.hookBefore {
-            result = true
+            try {
+                // 仅当原方法返回 boolean 时才设置 result = true，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
+                if (method is java.lang.reflect.Method) {
+                val returnType = (method as java.lang.reflect.Method).returnType
+                if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                    result = true
+                }
+            }
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
         }
 
         methodIsTablet2.hookBefore {
-            result = true
+            try {
+                if (method is java.lang.reflect.Method) {
+                val returnType = (method as java.lang.reflect.Method).returnType
+                if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                    result = true
+                }
+            }
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
         }
 
         methodOtherDeviceLoginButtonIsVisible.hookBefore {
-            val view = args[0] as? Button? ?: return@hookBefore
-            if (view.isGone) view.isVisible = true
+            try {
+                val view = args[0] as? Button? ?: return@hookBefore
+                if (view.isGone) view.isVisible = true
+            } catch (e: Throwable) {
+                // 兜底异常捕获
+            }
         }
 
         "com.tencent.mm.plugin.account.ui.LoginHistoryUI".toClass().reflekt().firstMethod("initView").hookAfter {
-            val btn = thisObject!!.reflekt().firstField {
+            val btn = thisObject.reflekt().firstField {
                 type = Button::class
             }.get()!! as Button
             btn.isVisible = true
-        }
-
-        methodCgiCheckLoginAsPad.hookBefore {
-            result = true
         }
     }
 

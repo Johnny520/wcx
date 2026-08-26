@@ -4,17 +4,16 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.os.postDelayed
 
-@Suppress("ObjectPropertyName")
-val _mainHandler by lazy { Handler(Looper.getMainLooper()) }
+private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
-inline fun runOnUiThread(crossinline action: () -> Unit) {
-    _mainHandler.post {
+fun runOnUiThread(action: () -> Unit) {
+    mainHandler.post {
         action()
     }
 }
 
-inline fun runOnUiThread(delayInMillis: Long, crossinline action: () -> Unit) {
-    _mainHandler.postDelayed(delayInMillis) {
+fun runOnUiThread(delayInMillis: Long, action: () -> Unit) {
+    mainHandler.postDelayed(delayInMillis) {
         action()
     }
 }

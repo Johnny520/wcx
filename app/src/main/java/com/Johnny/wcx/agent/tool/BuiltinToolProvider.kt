@@ -3,6 +3,7 @@ package com.Johnny.wcx.agent.tool
 import com.Johnny.wcx.agent.tool.BuiltinToolProvider.Companion.AVAILABILITY_CHECKS
 import com.Johnny.wcx.agent.tool.BuiltinToolProvider.Companion.FS_TOOL_NAMES
 import com.Johnny.wcx.agent.tool.BuiltinToolProvider.Companion.exaKeyPresent
+import com.Johnny.wcx.agent.tool.BuiltinToolProvider.Companion.fsToolsVisible
 import com.Johnny.wcx.features.core.AgentTool
 import kotlinx.serialization.json.JsonObject
 
@@ -15,10 +16,8 @@ import kotlinx.serialization.json.JsonObject
  *  - `builtin-fs`          — workspace/memory file tools + `load_skill`
  *
  * All are always available and pinned/undeletable in settings. Within `builtin-fs`, the file tools
- * ([FS_TOOL_NAMES]) are hidden from the model unless a workspace or memory is enabled;
- * `load_skill` stays visible regardless (skills are their own dynamic-discovery mechanism). That
- * gating — and the vision gating of [VISION_TOOL_NAMES] — is applied per turn by [ToolRegistry] from
- * the turn's [ToolVisibility], not here, so concurrent sessions can't clobber each other.
+ * ([FS_TOOL_NAMES]) are hidden from the model unless a workspace or memory is enabled ([fsToolsVisible]);
+ * `load_skill` stays visible regardless (skills are their own dynamic-discovery mechanism).
  */
 class BuiltinToolProvider(
     override val id: String,
@@ -35,15 +34,10 @@ class BuiltinToolProvider(
     fun seedInfos(): List<BuiltinToolInfo> =
         descriptors.map { BuiltinToolInfo(it.name, ToolMode.defaultFor(it.sideEffect)) }
 
-    /**
-     * Every tool this provider owns. Conditional gating ([FS_TOOL_NAMES] / [VISION_TOOL_NAMES]) is
-     * NOT applied here — it is per-turn state and is applied by
-     * [com.Johnny.wcx.agent.tool.ToolRegistry.resolveVisibleTools] from the turn's
-     * [ToolVisibility]. Doing it here would mean reading process-global flags that concurrent
-     * sessions overwrite mid-turn.
-     */
     override fun listTools(): List<ProviderTool> =
         descriptors
+            .filter { fsToolsVisible || it.name !in FS_TOOL_NAMES }
+            .filter { visionToolsVisible || it.name !in VISION_TOOL_NAMES }
             .map { d ->
                 // If an availability check fires, append its notice to the description so the
                 // model can see the constraint before it decides to call the tool.
@@ -106,21 +100,19 @@ class BuiltinToolProvider(
             "write_file", "append_file", "delete_file", "move_file",
         )
 
-        /**
-         * Set by WeAgentService (and the memory settings screen) from settings: true when workspace
-         * OR memory is enabled. Genuinely global — every writer derives the same value from the same
-         * setting — so it only supplies the default in [ToolVisibility.fromGlobals]; a running turn
-         * uses the value snapshotted into its own [ToolVisibility].
-         */
+        /** Set by WeAgentService from settings: true when workspace OR memory is enabled. */
         @Volatile
         var fsToolsVisible: Boolean = false
 
         /**
-         * Screenshot tool name — advertised only when the turn's model supports vision. Gated
-         * per-turn via [ToolVisibility.visionTools]; there is deliberately no global flag for it,
-         * because vision support is a property of the model a single turn resolved, and concurrent
-         * sessions may resolve different models.
+         * Set by WeAgentService per-turn from the session model's `supportsVision` flag.
+         * `ui-screenshot` is only advertised to the model when true — sending images to a
+         * non-vision model would error at the provider.
          */
+        @Volatile
+        var visionToolsVisible: Boolean = false
+
+        /** Screenshot tool name — hidden unless the session model supports vision. */
         val VISION_TOOL_NAMES = setOf("ui-screenshot")
 
         /**

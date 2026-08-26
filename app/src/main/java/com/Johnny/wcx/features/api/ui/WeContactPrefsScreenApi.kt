@@ -93,7 +93,13 @@ object WeContactPrefsScreenApi : ApiFeature() {
                     for (provider in providers) {
                         try {
                             if (provider.onItemClick(thisObject as Activity, key)) {
-                                result = true
+                                // 仅当原方法返回 boolean 时才设置 result = true
+                                if (method is java.lang.reflect.Method) {
+                                    val returnType = (method as java.lang.reflect.Method).returnType
+                                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                                        result = true
+                                    }
+                                }
                                 return@hookBefore
                             }
                         } catch (ex: Exception) {

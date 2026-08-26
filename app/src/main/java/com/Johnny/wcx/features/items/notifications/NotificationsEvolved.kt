@@ -24,6 +24,7 @@ import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.getSystemService
@@ -70,7 +71,10 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
 
     private val lastGroupChatSender = LruCache<String, String>()
 
-    private data class HistoryEntry(val senderName: String, val text: String, val timestamp: Long)
+    // sender 头像缓存：senderKey(会话|发送者) -> Icon，异步预取，下一条通知构建时生效
+    private val senderAvatarCache = LruCache<String, Icon>(maxLimit = 64)
+
+    private data class HistoryEntry(val senderName: String, val text: String, val timestamp: Long, val senderKey: String)
 
     // Per-conversation message history rebuilt into MessagingStyle on each notification update.
     // Cleared when the user replies or marks as read; bounded to avoid unbounded growth.
@@ -207,7 +211,6 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
                     WeLogger.w(TAG, "no talker captured for $notifTitle, skipping enhancements")
                     return@hookBefore
                 }
-                currentTalker.remove()
 
                 val match = MESSAGE_REGEX.find(notifText)
 
@@ -260,12 +263,13 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
                 // Append the new message to this conversation's history, then replay
                 // the whole history into the style so previous messages are not lost.
                 val history = messageHistory.getOrPut(convWxId) { ArrayDeque() }
-                history.addLast(HistoryEntry(senderName, text, System.currentTimeMillis()))
+                history.addLast(HistoryEntry(senderName, text, System.currentTimeMillis(), senderCacheKey(convWxId, senderName)))
                 while (history.size > MAX_HISTORY) history.removeFirst()
 
                 for (entry in history) {
-                    val person = Person.Builder().setName(entry.senderName).build()
-                    messagingStyle.addMessage(entry.text, entry.timestamp, person)
+                    val personBuilder = Person.Builder().setName(entry.senderName)
+                    senderAvatarCache[entry.senderKey]?.let { personBuilder.setIcon(it) }
+                    messagingStyle.addMessage(entry.text, entry.timestamp, personBuilder.build())
                 }
 
                 builder.style = messagingStyle
@@ -334,6 +338,140 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
                 // Apply actions directly to the builder
                 builder.addAction(replyAction)
                 builder.addAction(readAction)
+
+                // 异步预取发送者头像，供下一条通知的 MessagingStyle 使用
+                prefetchSenderAvatar(convWxId, senderName)
             }
+
+        // 合并同一会话的多条通知（通知栏同一会话只保留最新一条）
+        hookNotifyIdMerge()
+    }
+
+    // ==================== 通知合并：同一会话的通知 id 统一为会话哈希 ====================
+    // 微信原始 notify id -> convWxId 映射：微信已读消息时用原始 id 调 NotificationManager.cancel()，
+    // 需经该映射转换成合并后的 id 才能真正取消，并同步清空该会话的 MessagingStyle history，
+    // 否则已读消息会在下一条通知里被「带出」。
+    private val notifyIdMap = HashMap<Int, String>()
+
+    private fun hookNotifyIdMerge() {
+        val notifCls = Notification::class.java
+        val nmCls = android.app.NotificationManager::class.java
+        runCatching {
+            nmCls.getMethod("notify", Int::class.javaPrimitiveType, notifCls)
+                .hookBeforeDirectly {
+                    val convWxId = currentTalker.get()
+                    if (convWxId != null) {
+                        val n = args[1] as? Notification
+                        if (n != null && n.channelId == "message_channel_new_id") {
+                            val origId = args[0] as Int
+                            args[0] = convWxId.hashCode()
+                            recordNotifyId(origId, convWxId)
+                        }
+                        currentTalker.remove()
+                    }
+                }
+            WeLogger.i(TAG, "notify(int,Notification) hook registered")
+        }.onFailure { WeLogger.w(TAG, "hook notify(int) failed", it) }
+        runCatching {
+            nmCls.getMethod("notify", String::class.java, Int::class.javaPrimitiveType, notifCls)
+                .hookBeforeDirectly {
+                    val convWxId = currentTalker.get()
+                    if (convWxId != null) {
+                        val n = args[2] as? Notification
+                        if (n != null && n.channelId == "message_channel_new_id") {
+                            val origId = args[1] as Int
+                            args[1] = convWxId.hashCode()
+                            recordNotifyId(origId, convWxId)
+                        }
+                        currentTalker.remove()
+                    }
+                }
+            WeLogger.i(TAG, "notify(tag,int,Notification) hook registered")
+        }.onFailure { WeLogger.w(TAG, "hook notify(tag,int) failed", it) }
+
+        // 微信已读/清理通知：把原始 id 转换回合并后的 id 才能真正取消，
+        // 并清空该会话 history，避免已读消息在下一条通知里被带出。
+        runCatching {
+            nmCls.getMethod("cancel", Int::class.javaPrimitiveType)
+                .hookBeforeDirectly {
+                    val origId = args[0] as Int
+                    synchronized(notifyIdMap) {
+                        val convWxId = notifyIdMap.remove(origId)
+                        if (convWxId != null) {
+                            messageHistory.remove(convWxId)
+                            pendingContentIntents.remove(convWxId)
+                            args[0] = convWxId.hashCode()
+                            WeLogger.i(TAG, "wechat cancelled notif for $convWxId (merged id)")
+                        }
+                    }
+                }
+            WeLogger.i(TAG, "cancel(int) hook registered")
+        }.onFailure { WeLogger.w(TAG, "hook cancel(int) failed", it) }
+        runCatching {
+            nmCls.getMethod("cancel", String::class.java, Int::class.javaPrimitiveType)
+                .hookBeforeDirectly {
+                    val origId = args[1] as Int
+                    synchronized(notifyIdMap) {
+                        val convWxId = notifyIdMap.remove(origId)
+                        if (convWxId != null) {
+                            messageHistory.remove(convWxId)
+                            pendingContentIntents.remove(convWxId)
+                            args[1] = convWxId.hashCode()
+                            WeLogger.i(TAG, "wechat cancelled notif(tag) for $convWxId (merged id)")
+                        }
+                    }
+                }
+            WeLogger.i(TAG, "cancel(tag,int) hook registered")
+        }.onFailure { WeLogger.w(TAG, "hook cancel(tag,int) failed", it) }
+    }
+
+    private fun recordNotifyId(origId: Int, convWxId: String) {
+        synchronized(notifyIdMap) {
+            if (notifyIdMap.size >= 128) notifyIdMap.clear()
+            notifyIdMap[origId] = convWxId
+        }
+    }
+
+    // ==================== 发送者头像：异步预取 + 缓存 ====================
+    private fun senderCacheKey(convWxId: String, senderName: String): String =
+        if (convWxId.isGroupChatWxId) "$convWxId|$senderName" else convWxId
+
+    private fun resolveSenderWxid(convWxId: String, senderName: String): String? {
+        if (senderName.isBlank()) return null
+        if (!convWxId.isGroupChatWxId) return convWxId
+        // 群聊：按昵称/备注在联系人表里最佳匹配（同名时取第一个）
+        return runCatching {
+            val esc = senderName.replace("'", "''")
+            WeDatabaseApi.executeQuery(
+                "SELECT username FROM rcontact WHERE nickname = '$esc' OR conRemark = '$esc' LIMIT 1"
+            ).firstOrNull()?.get("username")?.toString()
+        }.getOrNull()
+    }
+
+    private fun prefetchSenderAvatar(convWxId: String, senderName: String) {
+        val key = senderCacheKey(convWxId, senderName)
+        if (senderAvatarCache[key] != null) return
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                val wxid = resolveSenderWxid(convWxId, senderName) ?: return@runCatching
+                val url = WeDatabaseApi.getAvatarUrl(wxid)
+                if (url.isBlank()) return@runCatching
+                val connection = URL(url).openConnection() as HttpURLConnection
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.doInput = true
+                val bytes = connection.inputStream.use { it.readBytes() }
+                if (bytes.isEmpty()) return@runCatching
+                var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@runCatching
+                val maxSize = 192
+                if (bmp.width > maxSize || bmp.height > maxSize) {
+                    val scale = maxSize.toFloat() / maxOf(bmp.width, bmp.height)
+                    bmp = Bitmap.createScaledBitmap(
+                        bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true
+                    )
+                }
+                senderAvatarCache[key] = Icon.createWithBitmap(bmp)
+            }.onFailure { /* 头像失败静默，不影响通知本身 */ }
+        }
     }
 }

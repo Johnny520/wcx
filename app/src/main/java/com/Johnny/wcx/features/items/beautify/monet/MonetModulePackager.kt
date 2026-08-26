@@ -64,7 +64,7 @@
 //            appendLine("name=微信莫奈引擎 (WeKit)")
 //            appendLine("version=$vn ($vc)")
 //            appendLine("versionCode=$vc")
-//            appendLine("author=Ujhhgtg")
+//            appendLine("author=Johnny520")
 //            append("description=为微信 $vn 启用动态壁纸取色, 由 WeKit 在运行时生成")
 //        }
 //    }

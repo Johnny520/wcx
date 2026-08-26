@@ -2,6 +2,7 @@ package com.Johnny.wcx.features.items.chat
 
 import android.util.SparseBooleanArray
 import android.view.View
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.models.MessageInfo
@@ -9,7 +10,6 @@ import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
-import com.Johnny.wcx.utils.HookParam
 import java.lang.reflect.Field
 
 @Feature(name = "合并消息显示", categories = ["聊天"], description = "将同一发送者的连续多条消息合并为一组消息显示 (Telegram 风格)")
@@ -59,7 +59,7 @@ object MergeMessagesIntoGroups : SwitchFeature(), WeChatMessageViewApi.ICreateVi
 
     // ── ICreateViewListener ──────────────────────────────────────────────────
 
-    override fun onCreateView(param: HookParam, view: View) {
+    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
         val tag = view.tag ?: return
 
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
@@ -70,7 +70,7 @@ object MergeMessagesIntoGroups : SwitchFeature(), WeChatMessageViewApi.ICreateVi
         val currentSender = msgInfo.sender
         val position = param.args[2] as Int
 
-        val adapter = param.thisObject!!.reflekt()
+        val adapter = param.thisObject.reflekt()
             .firstField { type = WeMessageApi.classChattingDataAdapter.clazz }
             .get() ?: return
 

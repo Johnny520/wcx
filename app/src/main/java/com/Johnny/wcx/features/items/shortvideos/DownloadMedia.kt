@@ -53,7 +53,7 @@ object DownloadMedia : SwitchFeature(),
             ) { _, mediaType, mediaList ->
                 if (mediaType == 2) {
                     val imageUrls = mediaList.map { json ->
-                        json.getString("url") + json.getString("url_token")
+                        "url" + "url_token"
                     }
 
                     copyToClipboard(imageUrls.joinToString("\n"))
@@ -78,13 +78,13 @@ object DownloadMedia : SwitchFeature(),
 
                     val cdnInfo = json.optJSONObject("media_cdn_info")
                     if (cdnInfo == null || !cdnInfo.has("pcdn_url")) {
-                        val url = json.getString("url")
-                        val urlToken = json.getString("url_token")
-                        val decodeKey = json.getString("decodeKey")
+                        val url = "url"
+                        val urlToken = "url_token"
+                        val decodeKey = "decodeKey"
                         clipItems += "密链" to url + urlToken
                         clipItems += "密钥" to decodeKey
                     } else {
-                        clipItems += "链接" to json.getString("pcdn_url")
+                        clipItems += "链接" to "pcdn_url"
                     }
 
                     copyToClipboard(clipItems.joinToString("\n") { pair -> "${pair.first}: ${pair.second}" })
@@ -102,7 +102,7 @@ object DownloadMedia : SwitchFeature(),
             ) { _, mediaType, mediaList ->
                 if (mediaType == 2) {
                     val imageUrls = mediaList.map { json ->
-                        json.getString("url") + json.getString("url_token")
+                        "url" + "url_token"
                     }
 
                     CoroutineScope(Dispatchers.IO).launch {
@@ -118,15 +118,15 @@ object DownloadMedia : SwitchFeature(),
                     val cdnInfo = json.optJSONObject("media_cdn_info")
 
                     if (cdnInfo == null || !cdnInfo.has("pcdn_url")) {
-                        val url = json.getString("url")
-                        val urlToken = json.getString("url_token")
-                        val decodeKey = json.getString("decodeKey")
+                        val url = "url"
+                        val urlToken = "url_token"
+                        val decodeKey = "decodeKey"
 
                         CoroutineScope(Dispatchers.IO).launch {
                             downloadAndDecryptVideo(decodeKey, url, urlToken)
                         }
                     } else {
-                        val pcdnUrl = cdnInfo.getString("pcdn_url")
+                        val pcdnUrl = "pcdn_url"
 
                         CoroutineScope(Dispatchers.IO).launch {
                             downloadPcdnVideo(pcdnUrl)
@@ -153,7 +153,7 @@ object DownloadMedia : SwitchFeature(),
                 WeLogger.e(TAG, "failed to download ${index + 1}th image", it)
                 showToastSuspend("第 ${index + 1} 张图片下载成功")
             }.onSuccess {
-                showToastSuspend("已将图片下载到 /sdcard/Download/WeKit/$fileName")
+                showToastSuspend("已将图片下载到 /sdcard/Download/WCX/$fileName")
             }
         }
     }
@@ -184,7 +184,7 @@ object DownloadMedia : SwitchFeature(),
             WeLogger.e(TAG, "failed to download video", it)
             showToastSuspend("视频下载失败!")
         }.onSuccess {
-            showToastSuspend("已将视频下载到 /sdcard/Download/WeKit/$fileName")
+            showToastSuspend("已将视频下载到 /sdcard/Download/WCX/$fileName")
         }
     }
 
@@ -200,7 +200,7 @@ object DownloadMedia : SwitchFeature(),
             WeLogger.e(TAG, "failed to download video", it)
             showToastSuspend("视频下载失败")
         }.onSuccess {
-            showToastSuspend("已将视频下载到 /sdcard/Download/WeKit/$fileName")
+            showToastSuspend("已将视频下载到 /sdcard/Download/WCX/$fileName")
         }
     }
 

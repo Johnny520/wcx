@@ -10,7 +10,6 @@ import android.view.View
 import android.view.animation.LinearInterpolator
 import android.widget.ImageView
 import android.widget.TextView
-import com.tencent.mm.ui.base.NoMeasuredTextView
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.makeAccessible
 import dev.ujhhgtg.reflekt.utils.toClass
@@ -59,31 +58,35 @@ object AprilFools : BaseFeature() {
                 applyRotation(thisObject as View)
             }
 
-        "com.tencent.mm.ui.widget.QImageView".toClass().reflekt()
-            .firstConstructor().hookAfter {
-                applyRotation(thisObject as View)
-            }
+        runCatching {
+            "com.tencent.mm.ui.widget.QImageView".toClass().reflekt()
+                .firstConstructor().hookAfter {
+                    applyRotation(thisObject as View)
+                }
+        }
 
         TextView::class.reflekt().firstMethod { name = "onDraw" }.hookBefore {
             val tv = thisObject as TextView
             applyRainbowEffect(tv, tv.text, tv.paint)
         }
 
-        NoMeasuredTextView::class.reflekt()
-            .firstMethod { name = "onDraw" }.hookBefore {
-                val view = thisObject as View
+        runCatching {
+            "com.tencent.mm.ui.base.NoMeasuredTextView".toClass().reflekt()
+                .firstMethod { name = "onDraw" }.hookBefore {
+                    val view = thisObject as View
 
-                if (!::noMeasuredTvTextProp.isInitialized) {
-                    noMeasuredTvTextProp = view.reflekt().firstField { name = "mText" }.self.makeAccessible()
-                    noMeasuredTvPaintProp = view.reflekt().firstField { type = TextPaint::class }.self.makeAccessible()
+                    if (!::noMeasuredTvTextProp.isInitialized) {
+                        noMeasuredTvTextProp = view.reflekt().firstField { name = "mText" }.self.makeAccessible()
+                        noMeasuredTvPaintProp = view.reflekt().firstField { type = TextPaint::class }.self.makeAccessible()
+                    }
+
+                    applyRainbowEffect(
+                        view,
+                        noMeasuredTvTextProp.get(view) as CharSequence,
+                        noMeasuredTvPaintProp.get(view) as TextPaint
+                    )
                 }
-
-                applyRainbowEffect(
-                    view,
-                    noMeasuredTvTextProp.get(view) as CharSequence,
-                    noMeasuredTvPaintProp.get(view) as TextPaint
-                )
-            }
+        }
     }
 
     private fun applyRotation(view: View) {

@@ -6,6 +6,7 @@ import android.widget.BaseAdapter
 import android.widget.ImageView
 import androidx.collection.mutableIntObjectMapOf
 import androidx.core.util.size
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.createInstance
 import dev.ujhhgtg.reflekt.utils.isSubclassOf
@@ -14,23 +15,19 @@ import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.utils.HookHandle
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.runOnUiThread
 import com.Johnny.wcx.utils.hookBeforeDirectly
+import com.Johnny.wcx.utils.reflection.BBool
+import com.Johnny.wcx.utils.reflection.BInt
 import com.Johnny.wcx.utils.reflection.BString
-import com.Johnny.wcx.utils.reflection.bool
-import com.Johnny.wcx.utils.reflection.int
-import java.lang.reflect.Method
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 @Feature(name = "首页菜单服务", categories = ["API"], description = "提供向首页右上角菜单添加菜单项的能力")
 object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
 
     interface IMenuItemsProvider {
-        fun getMenuItems(param: HookParam): List<MenuItem>
+        fun getMenuItems(param: XC_MethodHook.MethodHookParam): List<MenuItem>
     }
 
     data class MenuItem(
@@ -74,9 +71,9 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
         searchPackages("com.tencent.mm.ui")
         matcher {
             addFieldForType(BString)
-            addFieldForType(int)
-            addFieldForType(int)
-            addFieldForType(int)
+            addFieldForType(BInt)
+            addFieldForType(BInt)
+            addFieldForType(BInt)
             addFieldForType(BString)
             fieldCount(5)
             methods {
@@ -89,45 +86,15 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
     private val classMenuItemWrapper by dexClass {
         searchPackages("com.tencent.mm.ui")
         matcher {
-            addFieldForType(bool)
+            addFieldForType(BBool)
             addFieldForType(classMenuItemData.clazz)
-        }
-    }
-
-    // adapter 只有在菜单构建时才能拿到，所以 getView 的 Hook 没法在 onEnable 里注册；
-    // 这里按 Method 去重，避免每打开一次菜单就往 getView 上再叠一层 Hook
-    // (那会让每次 getView 都反复安装/卸载 N 个全局的 ImageView.setImageResource Hook)
-    private val hookedGetViewMethods = ConcurrentHashMap.newKeySet<Method>()
-
-    private fun hookAdapterGetViewOnce(baseAdapter: BaseAdapter) {
-        val getView = baseAdapter.reflekt().firstMethod {
-            name = "getView"
-        }
-        if (!hookedGetViewMethods.add(getView.self)) return
-
-        var unhook: HookHandle? = null
-
-        getView.hookBefore {
-            unhook = ImageView::class.reflekt().firstMethod {
-                name = "setImageResource"
-            }.hookBeforeDirectly {
-                val fakeResId = args[0] as Int
-                val imageView = thisObject as ImageView
-                imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
-                result = null
-            }
-        }
-
-        getView.hookAfter {
-            unhook?.unhook()
-            unhook = null
         }
     }
 
     override fun onEnable() {
         // WeChat 8.0.70 moved this to com.tencent.mm.ui.HomeUI
         methodAddItem.hookAfter {
-            var thisObj = thisObject!!
+            var thisObj = thisObject
 
             if (thisObj.javaClass.simpleName == "HomeUI") {
                 thisObj = thisObj.reflekt()
@@ -147,7 +114,36 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                 }
                 .get()!! as BaseAdapter
 
-            hookAdapterGetViewOnce(baseAdapter)
+            baseAdapter.reflekt().firstMethod {
+                name = "getView"
+            }.apply {
+                var unhook: XC_MethodHook.Unhook? = null
+
+                hookBefore {
+                    unhook = ImageView::class.reflekt().firstMethod {
+                        name = "setImageResource"
+                    }.hookBeforeDirectly {
+                        try {
+                            val fakeResId = args[0] as? Int ?: return@hookBeforeDirectly
+                            val imageView = thisObject as? ImageView ?: return@hookBeforeDirectly
+                            imageView.setImageDrawable(fakeResIdToResMap[fakeResId] ?: return@hookBeforeDirectly)
+                            // setImageResource 返回 void，设置 result = null 阻断原方法
+                            if (method is java.lang.reflect.Method) {
+                                val returnType = (method as java.lang.reflect.Method).returnType
+                                if (returnType == Void.TYPE) {
+                                    result = null
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                        }
+                    }
+                }
+
+                hookAfter {
+                    unhook!!.unhook()
+                }
+            }
 
             for (provider in providers) {
                 try {
@@ -184,7 +180,7 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
         }
 
         methodHandleItemClick.hookBefore {
-            val thisObj = thisObject!!
+            val thisObj = thisObject
 
             @Suppress("UNCHECKED_CAST")
             val items = thisObj.reflekt()
@@ -216,10 +212,5 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                 }
             }
         }
-    }
-
-    override fun onDisable() {
-        // getView 的 Hook 已被 unhookAll 撤销，重新启用时需要允许再次注册
-        hookedGetViewMethods.clear()
     }
 }

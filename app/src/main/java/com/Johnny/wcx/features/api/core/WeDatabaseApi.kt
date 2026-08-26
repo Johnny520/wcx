@@ -391,17 +391,6 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
     @Suppress("NOTHING_TO_INLINE")
     inline fun execStatement(statement: String, args: Array<Any>? = null) = db.execSQL(statement, args)
 
-    inline fun <T> transaction(block: () -> T): T {
-        db.beginTransaction()
-        return try {
-            val result = block()
-            db.setTransactionSuccessful()
-            result
-        } finally {
-            db.endTransaction()
-        }
-    }
-
     /**
      * 获取【全部联系人】
      * 返回所有账号
@@ -735,6 +724,31 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
             is Int -> v
             is Long -> v.toInt()
             else -> 0
+        }
+    }
+
+    /**
+     * 读取群聊成员同步状态（chatroom 表），供 AutoDndAfterJoinGroup 使用。
+     * WeKit 同签名；本模块用 executeQuery 实现。
+     */
+    fun getChatroomSyncState(roomId: String): com.Johnny.wcx.features.api.core.models.ChatroomSyncStateReadResult {
+        if (roomId.isEmpty()) return com.Johnny.wcx.features.api.core.models.ChatroomSyncStateReadResult.Unavailable
+        return try {
+            val rows = executeQuery(
+                "SELECT memberlist, chatroomVersion FROM chatroom WHERE chatroomname = ?",
+                arrayOf(roomId as Any),
+            )
+            if (rows.isEmpty()) com.Johnny.wcx.features.api.core.models.ChatroomSyncStateReadResult.MissingRow
+            else com.Johnny.wcx.features.api.core.models.ChatroomSyncStateReadResult.Available(
+                com.Johnny.wcx.features.api.core.models.WeChatroomSyncState(
+                    roomId = roomId,
+                    memberIds = rows[0].str("memberlist").split(";").filter { it.isNotEmpty() }.toSet(),
+                    memberVersion = rows[0]["chatroomVersion"] as? Int,
+                ),
+            )
+        } catch (e: Exception) {
+            WeLogger.w(TAG, "getChatroomSyncState failed; roomId=$roomId", e)
+            com.Johnny.wcx.features.api.core.models.ChatroomSyncStateReadResult.Unavailable
         }
     }
 }

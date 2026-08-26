@@ -32,14 +32,14 @@ object RemoveEmbeddedAds : SwitchFeature(), IResolveDex {
     override fun onEnable() {
         ctorNetSceneJSOperateWxData.hookBefore {
             val json = runCatching { JSONObject(args[1] as String) }.getOrElse { return@hookBefore }
-            if (json.getString("api_name") == "webapi_getadvert") {
+            if ("api_name" == "webapi_getadvert") {
                 json.put("data", json.getJSONObject("data").put("ad_unit_id", ""))
                 args[1] = json.toString()
             }
         }
 
         methodBaseTransferRequestOnLoad.hookBefore {
-            val transferResultInfo = args[0]!!
+            val transferResultInfo = args[0]
             if (!::protoField.isInitialized) {
                 protoField = transferResultInfo.reflekt()
                     .firstField {

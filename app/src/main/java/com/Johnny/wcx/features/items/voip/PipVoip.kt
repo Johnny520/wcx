@@ -6,14 +6,12 @@ import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ResultReceiver
 import android.view.View
-import android.widget.FrameLayout
-import androidx.compose.material3.Text
-import androidx.core.os.BundleCompat
 import com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI
 import com.tencent.mm.plugin.voip.ui.VideoActivity
 import dev.ujhhgtg.reflekt.reflekt
@@ -25,195 +23,97 @@ import com.Johnny.wcx.dexkit.dsl.dexField
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
-import com.Johnny.wcx.loader.entry.zygisk.ZygiskLoaderService
-import com.Johnny.wcx.loader.startup.StartupInfo
-import com.Johnny.wcx.ui.content.AlertDialogContent
-import com.Johnny.wcx.ui.content.TextButton
-import com.Johnny.wcx.ui.utils.showComposeDialog
-import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.Intent
 import java.lang.reflect.Modifier
-import java.lang.reflect.Proxy
-import java.nio.ByteBuffer
 import java.util.WeakHashMap
 
-/**
- * 用系统画中画代替微信通话最小化时的悬浮窗。
- *
- * 微信有三套通话实现，本功能都要照顾到：
- *  - 新版 VoIPMP（8.0.69 起的单人语音/视频通话，UI 是 Flutter，逻辑在 native core 里，
- *    通过 ZIDL 调用；最小化时把 Flutter `small_window` 页塞进「悬浮球」框架）；
- *  - 旧版 FlutterVoip（`FlutterVoipMgr`，仅在没有走 VoIPMP 时使用）；
- *  - 多人通话 [MultiTalkMainUI]。
- *
- * 统一的拦截点是微信自己的悬浮球：`VoipFloatBallHelper.addVoipView(...)`。
- * 它只在微信准备显示最小化悬浮窗时被调用，屏蔽它就等于屏蔽了微信的悬浮窗，
- * 与具体是哪套通话实现无关。多人通话有自己的悬浮球 helper，因此额外拦截
- * `onMiniMultiTalk`。
- *
- * **只能在 LSPosed 模式下使用。** [PipVoipActivity] 必须跑在模块自己的进程里：
- * system_server 校验的是被启动组件在清单里的 `supportsPictureInPicture`
- * （`ActivityRecord.supportsPictureInPicture()`），微信没有任何 Activity 声明过它，
- * 所以借宿主 stub 的话画中画一定被拒。Zygisk 模式下模块应用根本没有安装，
- * 因此本功能在该模式下直接停用。
- */
 @Feature(
     name = "音视频通话使用画中画",
     categories = ["聊天", "音视频通话"],
-    description = "让微信的音视频通话使用原生的画中画模式而非悬浮窗"
+    description = "让微信的音视频通话使用原生的画中画模式而非悬浮窗 (没写完)"
 )
 object PipVoip : SwitchFeature(), IResolveDex {
 
     private const val TAG = "PipVoip"
     private const val HANGUP_SCENE = 4103
+    private const val FLAG_SUPPORTS_PICTURE_IN_PICTURE = 0x400000
+    private const val RESIZE_MODE_RESIZEABLE = 2
 
-    /** VoIPMP core 的 SetAppCmd 命令号：静音 / 取消静音麦克风 */
-    private const val CMD_MUTE_MIC = 412
-    private const val CMD_UNMUTE_MIC = 413
-
-    /**
-     * Zygisk 模式下模块应用没有安装，[PipVoipActivity] 无处可跑，本功能不可用。
-     *
-     * 在模块应用自己的进程里 [StartupInfo.loaderService] 没有初始化，那种情况下
-     * 一定是 LSPosed 模式（否则模块应用不存在）。
-     */
-    private val isZygiskMode: Boolean by lazy {
-        runCatching { StartupInfo.loaderService is ZygiskLoaderService }.getOrDefault(false)
-    }
-
-    override val shouldEnableOnStartup: Boolean
-        get() = super.shouldEnableOnStartup && !isZygiskMode
-
-    // ---------------------------------------------------------------- sessions
-
-    /** 一次进行中的通话，屏蔽掉三套实现之间的差异。 */
-    private abstract class Session {
-
+    private sealed class Session(val activity: Activity) {
         var pipActive = false
 
-        /** 画中画进程回传的命令通道（[PipVoipActivity.RESULT_READY]） */
-        private var commands: ResultReceiver? = null
-
-        /** 日志用的名字；release 构建里类名已经被混淆了 */
-        abstract val label: String
-
-        open val groupCall = false
-        open val videoEnabled = true
-        open val alive = true
-
         abstract val micMuted: Boolean
-
-        abstract fun hangUp()
-        abstract fun toggleMic()
-        open fun toggleVideo() = Unit
-        abstract fun restore()
-
-        /** 画中画已经起来了；通话界面还活着的实现可以借此把微信退到后台。 */
-        open fun onEnteredPip() = Unit
+        open val videoEnabled: Boolean = true
 
         val receiver = object : ResultReceiver(Handler(Looper.getMainLooper())) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                // 8.0.77 加固: 这些回调跑在 Binder/主线程上, 行为全部 runCatching 兜底,
+                // 异常只进模块日志, 不进微信执行栈。
                 when (resultCode) {
-                    PipVoipActivity.RESULT_READY -> {
-                        commands = resultData?.let {
-                            // ResultReceiver is an anonymous PipVoipActivity class. This Bundle is
-                            // unmarshalled in WeChat, whose default class loader cannot see it.
-                            it.classLoader = PipVoipActivity::class.java.classLoader
-                            BundleCompat.getParcelable(
-                                it,
-                                PipVoipActivity.EXTRA_COMMAND_RECEIVER,
-                                ResultReceiver::class.java,
-                            )
-                        }
-                    }
-
                     PipVoipActivity.RESULT_HANG_UP -> {
-                        markPipClosed()
-                        act("hangUp") { hangUp() }
+                        runCatching { hangUp() }
+                            .onFailure { WeLogger.e(TAG, "hangUp failed", it) }
+                        pipActive = false
                     }
 
-                    PipVoipActivity.RESULT_TOGGLE_MIC -> act("toggleMic") { toggleMic() }
-                    PipVoipActivity.RESULT_TOGGLE_VIDEO -> act("toggleVideo") { toggleVideo() }
+                    PipVoipActivity.RESULT_TOGGLE_MIC ->
+                        runCatching { toggleMic() }
+                            .onFailure { WeLogger.e(TAG, "toggleMic failed", it) }
 
-                    PipVoipActivity.RESULT_RESTORE -> {
-                        markPipClosed()
-                        act("restore") { restore() }
-                    }
+                    PipVoipActivity.RESULT_TOGGLE_VIDEO ->
+                        runCatching { toggleVideo() }
+                            .onFailure { WeLogger.e(TAG, "toggleVideo failed", it) }
 
-                    PipVoipActivity.RESULT_CLOSED -> {
-                        markPipClosed()
-                        commands = null
-                    }
+                    PipVoipActivity.RESULT_RESTORE ->
+                        runCatching { restoreCallActivity() }
+                            .onFailure { WeLogger.e(TAG, "restore failed", it) }
+
+                    PipVoipActivity.RESULT_CLOSED -> pipActive = false
                 }
             }
         }
 
+        abstract fun hangUp()
+        abstract fun toggleMic()
+        open fun toggleVideo() = Unit
+
         fun enterPip() {
             if (pipActive) return
-            val muted = act("micMuted") { micMuted } ?: false
+            // 8.0.77 加固: 取值(micMuted) 与启动画中画都 runCatching 兜底, 失败回滚 pipActive,
+            // 异常只进模块日志, 不进微信执行栈。
             pipActive = true
-            pipSession = this
-            WeLogger.i(TAG, "entering pip via $label, micMuted=$muted")
             runCatching {
-                // 必须跑在模块自己的进程里：只有模块清单里的 PipVoipActivity 声明了
-                // supportsPictureInPicture，宿主的 stub 借不到这个 flag
-                HostInfo.application.startActivity(
-                    Intent {
-                        component = ComponentName(
-                            PackageNames.MODULE,
-                            PipVoipActivity::class.java.name,
-                        )
+                val muted = micMuted
+                activity.startActivity(
+                    Intent().apply {
+                        component = ComponentName(PackageNames.MODULE, PipVoipActivity::class.java.name)
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        putExtra(PipVoipActivity.EXTRA_GROUP_CALL, groupCall)
+                        putExtra(PipVoipActivity.EXTRA_GROUP_CALL, this@Session is GroupSession)
                         putExtra(PipVoipActivity.EXTRA_MIC_MUTED, muted)
                         putExtra(PipVoipActivity.EXTRA_VIDEO_ENABLED, videoEnabled)
                         putExtra(PipVoipActivity.EXTRA_RESULT_RECEIVER, receiver)
                     }
                 )
+                activity.moveTaskToBack(true)
             }.onFailure {
                 pipActive = false
-                if (pipSession === this) pipSession = null
-                WeLogger.e(TAG, "failed to start pip activity", it)
-            }
-            if (pipActive) act("onEnteredPip") { onEnteredPip() }
-        }
-
-        fun closePip() {
-            if (!pipActive) return
-            pipActive = false
-            if (pipSession === this) pipSession = null
-            val commands = commands
-            this.commands = null
-            if (commands != null) {
-                runCatching { commands.send(PipVoipActivity.COMMAND_CLOSE, null) }
-                    .onFailure { WeLogger.w(TAG, "failed to close pip via command channel", it) }
-            } else {
-                closePipActivityByIntent()
+                WeLogger.e(TAG, "failed to enter pip", it)
             }
         }
 
-        private fun markPipClosed() {
+        @SuppressLint("MissingPermission")
+        private fun restoreCallActivity() {
             pipActive = false
-            if (pipSession === this) pipSession = null
+            val activityManager = activity.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            activityManager.moveTaskToFront(activity.taskId, 0)
         }
-
-        /** 这些回调跑在 Binder 线程上，抛出去只会变成一个不透明的 DeadObjectException。 */
-        private fun <T> act(what: String, block: () -> T): T? =
-            runCatching(block)
-                .onFailure { WeLogger.e(TAG, "$what failed on $label session", it) }
-                .getOrNull()
     }
 
-    /** 旧版 FlutterVoip 单人通话 */
-    private class LegacySession(
-        val activity: Activity,
+    private class SingleSession(
+        activity: VideoActivity,
         val manager: Any,
-    ) : Session() {
-
-        override val label = "legacy"
-        override val alive get() = !activity.isDestroyed
-
+    ) : Session(activity) {
         override val micMuted: Boolean
             get() {
                 val audioManager = fieldVoipAudioManager.field.get(manager)
@@ -227,23 +127,11 @@ object PipVoip : SwitchFeature(), IResolveDex {
         override fun toggleMic() {
             methodSetVoipMuted.method.invoke(manager, !micMuted)
         }
-
-        override fun restore() = moveTaskToFront(activity)
-
-        override fun onEnteredPip() {
-            activity.moveTaskToBack(true)
-        }
     }
 
-    /** 多人通话 */
     private class GroupSession(
-        val activity: Activity,
-    ) : Session() {
-
-        override val label = "multitalk"
-        override val groupCall = true
-        override val alive get() = !activity.isDestroyed
-
+        val groupActivity: MultiTalkMainUI,
+    ) : Session(groupActivity) {
         override val micMuted: Boolean
             get() {
                 val state = fieldMultiTalkMicState.field.get(viewModel)
@@ -257,7 +145,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
             }
 
         override fun hangUp() {
-            methodMultiTalkExit.method.invoke(activity)
+            methodMultiTalkExit.method.invoke(groupActivity)
         }
 
         override fun toggleMic() {
@@ -268,273 +156,39 @@ object PipVoip : SwitchFeature(), IResolveDex {
             methodMultiTalkCamera.method.invoke(viewModel, null)
         }
 
-        override fun restore() = moveTaskToFront(activity)
-
-        override fun onEnteredPip() {
-            activity.moveTaskToBack(true)
-        }
-
         private val viewModel: Any
-            get() = fieldMultiTalkViewModel.field.get(activity)!!
+            get() = fieldMultiTalkViewModel.field.get(groupActivity)!!
     }
 
-    /**
-     * 新版 VoIPMP 单人通话。
-     *
-     * 这套实现的通话界面在最小化时会被 finish 掉，所以 session 不能挂在 Activity 上；
-     * 挂断走 core 的 `CallHangupAsync`，麦克风走 Java 侧的录音器（core 只是被告知状态），
-     * 摄像头开关只有 Dart 侧能调用，因此画中画里不提供。
-     */
-    private object VoipMpSession : Session() {
-
-        override val label = "voipmp"
-
-        override val micMuted: Boolean
-            get() = audioController?.let { fieldVoipMpMicMuted.field.getBoolean(it) } ?: false
-
-        override fun hangUp() {
-            if (methodVoipMpHangUp.isPlaceholder) {
-                WeLogger.w(TAG, "voipmp CallHangup wasn't resolved, cannot hang up")
-                return
-            }
-            val core = voipMpCore ?: error("voipmp core sdk is unavailable")
-            methodVoipMpHangUp.method.invoke(core, false, hangUpCallback)
-        }
-
-        override fun toggleMic() {
-            val controller = audioController ?: error("voipmp audio controller is unavailable")
-            val muted = !micMuted
-            val recorder = methodVoipMpAudioCapturer.method.invoke(controller)
-                ?.let { fieldVoipMpRecorder.field.get(it) }
-            if (recorder == null) {
-                WeLogger.w(TAG, "no active voipmp recorder, mic state left untouched")
-                return
-            }
-            methodVoipMpSwitchMute.method.invoke(recorder, muted)
-            fieldVoipMpMicMuted.field.setBoolean(controller, muted)
-            sendAppCmd(
-                if (muted) CMD_MUTE_MIC else CMD_UNMUTE_MIC,
-                if (muted) 0 else 1,
-            )
-        }
-
-        override fun restore() {
-            val service = voipMpService ?: error("voipmp service is unavailable")
-            methodVoipMpLaunchPage.method.invoke(service, HostInfo.application, false)
-        }
-
-        private fun sendAppCmd(cmd: Int, value: Int) {
-            val core = voipMpCore ?: return
-            val buffer = ByteBuffer.allocateDirect(1).apply {
-                put(value.toByte())
-                position(0)
-            }
-            methodVoipMpSetAppCmd.method.invoke(core, cmd, buffer, 1)
-        }
-    }
-
-    /** 只有旧版通话和多人通话的 session 与 Activity 绑定 */
     private val sessions = WeakHashMap<Activity, Session>()
 
-    /**
-     * 正在画中画里的通话。
-     *
-     * 微信最小化时会把通话界面 finish 掉，所以这里单独留一份引用：Activity 没了以后
-     * 挂断 / 麦克风还得靠 session 里的 manager 对象。
-     */
-    private var pipSession: Session? = null
-
-    /** 新版实现的音频控制器实例，构造时抓下来 */
-    private var audioController: Any? = null
-
-    /** ZIDL 的完成回调，只有一个 `complete()`；native 会持有它，所以要留强引用 */
-    private val hangUpCallback: Any by lazy {
-        val iface = methodVoipMpHangUp.method.parameterTypes[1]
-        Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { proxy, method, args ->
-            when (method.name) {
-                "hashCode" -> System.identityHashCode(proxy)
-                "equals" -> proxy === args?.firstOrNull()
-                "toString" -> $$"WeKitPipVoip$ZidlCallback"
-                else -> null
-            }
+    private val classVoipActivityProxy by dexClass(allowFailure = true) {
+        matcher {
+            usingEqStrings("MicroMsg.ILinkVoipVideoActivityProxy-")
         }
     }
 
-    private val voipMpCore: Any? get() = fieldVoipMpCoreInstance.field.get(null)
-    private val voipMpService: Any? get() = fieldVoipMpServiceInstance.field.get(null)
-
-    // ------------------------------------------------------------ 微信悬浮球（悬浮窗）
-
-    private val methodBallAddVoipView by dexMethod {
+    private val methodVoipActivityProxyDealContentView by dexMethod(allowFailure = true) {
         matcher {
-            paramTypes("int", "boolean", View::class.java.name, "long", "boolean")
-            returnType = "void"
-            usingEqStrings(
-                "MicroMsg.VoipFloatBallHelper",
-                "addVoipView, no ball, add delayed:%s",
-            )
-        }
-    }
-
-    private val methodBallRemoveVoipView by dexMethod {
-        matcher {
-            declaredClass(methodBallAddVoipView.method.declaringClass)
-            paramTypes(FrameLayout::class.java.name)
-            returnType = "void"
-            usingEqStrings("removeVoipView, no ball, view:%s")
-        }
-    }
-
-    // --------------------------------------------------------------- 新版 VoIPMP
-
-    private val classVoipMpService by dexClass {
-        matcher {
-            usingEqStrings("MicroMsg.VoIPMP.Launcher", "dismissSmallWindow: ")
-        }
-    }
-
-    private val fieldVoipMpServiceInstance by dexField {
-        matcher {
-            declaredClass(classVoipMpService.clazz)
-            type(classVoipMpService.clazz)
-            modifiers(Modifier.STATIC)
-        }
-    }
-
-    /** `launchPage(context, needAnimation)`：把通话界面重新拉起来 */
-    private val methodVoipMpLaunchPage by dexMethod {
-        matcher {
-            declaredClass(classVoipMpService.clazz)
-            paramTypes(Context::class.java.name, "boolean")
+            declaredClass(classVoipActivityProxy.clazz)
+            paramTypes(View::class.java)
             returnType = "void"
         }
     }
 
-    /** `dismissSmallWindow()`：微信认为最小化界面该消失了 */
-    private val methodVoipMpDismissSmallWindow by dexMethod {
-        matcher {
-            declaredClass(classVoipMpService.clazz)
-            paramCount = 0
-            returnType = "void"
-            usingEqStrings("MicroMsg.VoIPMP.Launcher", "dismissSmallWindow: ")
-        }
-    }
-
-    /** `voipmp.VoipmpCoreSdkService` 的 ZIDL 调用方 */
-    private val classVoipMpCore by dexClass {
-        matcher {
-            usingEqStrings("voipmp.VoipmpCoreSdkService@Get")
-        }
-    }
-
-    private val fieldVoipMpCoreInstance by dexField {
-        matcher {
-            declaredClass(classVoipMpCore.clazz)
-            type(classVoipMpCore.clazz)
-            modifiers(Modifier.STATIC)
-        }
-    }
-
-    /** `SetAppCmd(cmd, payload, length)` */
-    private val methodVoipMpSetAppCmd by dexMethod {
-        matcher {
-            declaredClass(classVoipMpCore.clazz)
-            paramTypes("int", ByteBuffer::class.java.name, "int")
-            returnType = "int"
-        }
-    }
-
-    /**
-     * `CallHangupAsync(isSubCall, callback)`。
-     *
-     * 同签名的 ZIDL 包装方法有好几个，靠调用链区分：只有挂断会被
-     * `rejectByShortCut` 起的那个协程调用。这条链最脆，找不到就只是画中画里
-     * 挂不了电话，不该拖垮整个功能。
-     */
-    private val methodVoipMpHangUp by dexMethod(allowFailure = true) {
-        matcher {
-            declaredClass(classVoipMpCore.clazz)
-            paramTypes("boolean", null)
-            returnType = "void"
-            addCaller {
-                declaredClass {
-                    methods {
-                        add {
-                            name = "<init>"
-                            addCaller {
-                                usingEqStrings("MicroMsg.VoIPMP.CoreV2", "rejectByShortCut")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /** `VoIPMPAudioController.muteMicrophone()`，同时用来定位音频控制器类 */
-    private val methodVoipMpMuteMic by dexMethod {
-        matcher {
-            paramCount = 0
-            returnType = "boolean"
-            usingEqStrings("MicroMsg.VoIPMPAudioCapturer", "muteMicrophone")
-        }
-    }
-
-    private val fieldVoipMpMicMuted by dexField {
-        matcher {
-            declaredClass(methodVoipMpMuteMic.method.declaringClass)
-            type = "boolean"
-            addWriteMethod {
-                usingEqStrings("MicroMsg.VoIPMPAudioCapturer", "muteMicrophone")
-            }
-        }
-    }
-
-    private val classVoipMpAudioCapturer by dexClass {
-        matcher {
-            usingEqStrings("MicroMsg.VoIPMPAudioCapturer", "release")
-        }
-    }
-
-    private val methodVoipMpAudioCapturer by dexMethod {
-        matcher {
-            declaredClass(methodVoipMpMuteMic.method.declaringClass)
-            paramCount = 0
-            returnType(classVoipMpAudioCapturer.clazz.interfaces.single())
-        }
-    }
-
-    /** `MMPcmRecorder.switchMute(mute)` */
-    private val methodVoipMpSwitchMute by dexMethod {
-        matcher {
-            paramTypes("boolean")
-            returnType = "void"
-            usingEqStrings("MicroMsg.MMPcmRecorder", "switchMute mute:")
-        }
-    }
-
-    private val fieldVoipMpRecorder by dexField {
-        matcher {
-            declaredClass(classVoipMpAudioCapturer.clazz)
-            type(methodVoipMpSwitchMute.method.declaringClass)
-        }
-    }
-
-    // ---------------------------------------------------------- 旧版 FlutterVoip
-
-    private val classBaseVoipManager by dexClass {
+    private val classBaseVoipManager by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.Voip.NewVoipMgr", "hangupTalkingOrCancelInvite")
         }
     }
 
-    private val classFlutterVoipManager by dexClass {
+    private val classFlutterVoipManager by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.FlutterVoipMgr", "qipeng, enableMute.")
         }
     }
 
-    private val classVoipAudioManager by dexClass {
+    private val classVoipAudioManager by dexClass(allowFailure = true) {
         matcher {
             modifiers(Modifier.FINAL)
             usingEqStrings(
@@ -545,7 +199,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val classFlutterVoipPlugin by dexClass {
+    private val classFlutterVoipPlugin by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.FlutterVoipPlugin",
@@ -556,14 +210,23 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val fieldVoipAudioManager by dexField {
+    private val fieldVoipAudioManager by dexField(allowFailure = true) {
         matcher {
             declaredClass(classBaseVoipManager.clazz)
             type(classVoipAudioManager.clazz.interfaces.single())
         }
     }
 
-    private val methodSetVoipMuted by dexMethod {
+    private val methodVoipMinimize by dexMethod(allowFailure = true) {
+        matcher {
+            declaredClass(classBaseVoipManager.clazz)
+            paramTypes("boolean")
+            returnType = "boolean"
+            usingEqStrings("onMinimizeVoip, async to minimize")
+        }
+    }
+
+    private val methodSetVoipMuted by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classFlutterVoipManager.clazz)
             paramTypes("boolean")
@@ -572,7 +235,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodVoipHangUp by dexMethod {
+    private val methodVoipHangUp by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classBaseVoipManager.clazz)
             paramTypes("int")
@@ -581,7 +244,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val fieldVoipMuted by dexField {
+    private val fieldVoipMuted by dexField(allowFailure = true) {
         matcher {
             declaredClass(classVoipAudioManager.clazz)
             type = "boolean"
@@ -593,21 +256,35 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val fieldFlutterVoipActivity by dexField {
+    private val methodFlutterVoipMinimize by dexMethod(allowFailure = true) {
+        matcher {
+            declaredClass(classFlutterVoipPlugin.clazz)
+            paramCount = 4
+            returnType = "void"
+            usingEqStrings(
+                "MicroMsg.FlutterVoipPlugin",
+                "minimize: activity=",
+                "voip is already minimized, ignore!",
+                "minimize, permission denied",
+            )
+        }
+    }
+
+    private val fieldFlutterVoipActivity by dexField(allowFailure = true) {
         matcher {
             declaredClass(classFlutterVoipPlugin.clazz)
             type(Activity::class.java)
         }
     }
 
-    private val fieldFlutterVoipManager by dexField {
+    private val fieldFlutterVoipManager by dexField(allowFailure = true) {
         matcher {
             declaredClass(classFlutterVoipPlugin.clazz)
             type(classFlutterVoipManager.clazz)
         }
     }
 
-    private val methodFlutterVoipAttachedToActivity by dexMethod {
+    private val methodFlutterVoipAttachedToActivity by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classFlutterVoipPlugin.clazz)
             paramCount = 1
@@ -616,7 +293,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodFlutterVoipReattachedToActivity by dexMethod {
+    private val methodFlutterVoipReattachedToActivity by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classFlutterVoipPlugin.clazz)
             paramCount = 1
@@ -625,9 +302,15 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    // -------------------------------------------------------------------- 多人通话
+    private val methodFlutterCallbackInvoke by dexMethod(allowFailure = true) {
+        matcher {
+            declaredClass(methodFlutterVoipMinimize.method.parameterTypes.last())
+            paramTypes(Any::class.java)
+            returnType(Any::class.java)
+        }
+    }
 
-    private val classMultiTalkViewModel by dexClass {
+    private val classMultiTalkViewModel by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "MicroMsg.MT.MultiTalkUIViewModel",
@@ -637,14 +320,14 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val fieldMultiTalkViewModel by dexField {
+    private val fieldMultiTalkViewModel by dexField(allowFailure = true) {
         matcher {
             declaredClass(MultiTalkMainUI::class.java)
             type(classMultiTalkViewModel.clazz)
         }
     }
 
-    private val classObservableState by dexClass {
+    private val classObservableState by dexClass(allowFailure = true) {
         searchPackages("androidx.lifecycle")
         matcher {
             modifiers(Modifier.PUBLIC or Modifier.ABSTRACT)
@@ -663,7 +346,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkMinimize by dexMethod {
+    private val methodMultiTalkMinimize by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(MultiTalkMainUI::class.java)
             paramCount = 0
@@ -672,7 +355,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkExit by dexMethod {
+    private val methodMultiTalkExit by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(MultiTalkMainUI::class.java)
             paramCount = 0
@@ -681,7 +364,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkMic by dexMethod {
+    private val methodMultiTalkMic by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classMultiTalkViewModel.clazz)
             paramTypes("boolean")
@@ -690,13 +373,13 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodMultiTalkCamera by dexMethod {
+    private val methodMultiTalkCamera by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onCameraClick, cur state: ")
         }
     }
 
-    private val fieldMultiTalkMicState by dexField {
+    private val fieldMultiTalkMicState by dexField(allowFailure = true) {
         matcher {
             declaredClass(classMultiTalkViewModel.clazz)
             type(classObservableState.clazz)
@@ -706,7 +389,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val fieldMultiTalkCameraState by dexField {
+    private val fieldMultiTalkCameraState by dexField(allowFailure = true) {
         matcher {
             declaredClass(classMultiTalkViewModel.clazz)
             type(classObservableState.clazz)
@@ -716,7 +399,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodObservableValue by dexMethod {
+    private val methodObservableValue by dexMethod(allowFailure = true) {
         matcher {
             declaredClass(classObservableState.clazz)
             paramCount = 0
@@ -724,125 +407,142 @@ object PipVoip : SwitchFeature(), IResolveDex {
         }
     }
 
-    // ------------------------------------------------------------------- 钩子
-
     override fun onEnable() {
-        if (isZygiskMode) {
-            WeLogger.w(TAG, "zygisk mode: module app isn't installed, feature unavailable")
-            return
+        methodVoipActivityProxyDealContentView.hookBefore {
+            // 8.0.77 加固: args 取值做空安全
+            WeLogger.d(TAG, "dealContentView: ${args?.getOrNull(0)?.javaClass}")
         }
 
-        // 新版实现的音频控制器是进程内单例，构造时抓一份，用来读/切麦克风状态。
-        // 抓不到也只是画中画里控不了麦克风，不该影响别的
-        runCatching {
-            methodVoipMpMuteMic.method.declaringClass.reflekt().firstConstructor().hookAfter {
-                audioController = thisObject
-                WeLogger.d(TAG, "captured voipmp audio controller")
-            }
-        }.onFailure { WeLogger.e(TAG, "failed to hook voipmp audio controller", it) }
-
-        methodFlutterVoipAttachedToActivity.hookAfter { registerLegacySession(thisObject!!) }
-        methodFlutterVoipReattachedToActivity.hookAfter { registerLegacySession(thisObject!!) }
-
-        MultiTalkMainUI::class.reflekt()
-            .firstMethod {
-                name = "onCreate"
-                parameterCount = 1
-            }
+        ActivityInfo::class.reflekt()
+            .firstConstructor()
             .hookAfter {
-                val activity = thisObject as Activity
-                sessions[activity] = GroupSession(activity)
+                // 8.0.77 加固: as? + 空返
+                val info = thisObject as? ActivityInfo ?: return@hookAfter
+                if (info.name == VideoActivity::class.java.name) applyPipFlags(info)
             }
 
-        listOf(MultiTalkMainUI::class.java, VideoActivity::class.java).forEach { clazz ->
-            clazz.reflekt()
-                .firstMethod {
-                    name = "onDestroy"
-                    parameterCount = 0
-                }
-                .hookBefore { removeSession(thisObject as Activity) }
-        }
-
-        // 用户按 home / 切走时提前进入画中画：此时微信还在前台，启动 Activity 不会被拦
         Activity::class.reflekt()
             .firstMethod {
-                name = "onUserLeaveHint"
-                parameterCount = 0
+                name = "onPictureInPictureModeChanged"
+                parameterCount = 2
             }
             .hookBefore {
-                when (val activity = thisObject) {
-                    is VideoActivity -> currentSession().enterPip()
-
-                    is MultiTalkMainUI -> activitySession()?.enterPip()
-                        ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
+                if (thisObject is VideoActivity) {
+                    WeLogger.i(TAG, "VideoActivity picture-in-picture mode: ${args?.getOrNull(0)}")
                 }
             }
 
-        // 微信要显示自己的悬浮窗了 —— 屏蔽掉，改成画中画。
-        // 这个 helper 只服务单人通话，多人通话有自己的一份
-        methodBallAddVoipView.hookBefore {
-            WeLogger.i(TAG, "suppressing voip float ball (state=${args[0]})")
-            currentSession().enterPip()
-            result = null
+        methodFlutterVoipAttachedToActivity.hookAfter {
+            registerSingleSession(thisObject)
         }
 
-        // 微信自己撤掉最小化界面（通话结束 / 已恢复）时，把画中画也收掉
-        methodBallRemoveVoipView.hookBefore { closeActivePip() }
-        methodVoipMpDismissSmallWindow.hookBefore { closeActivePip() }
-
-        // 多人通话有自己的悬浮球 helper，直接拦最小化本身
-        methodMultiTalkMinimize.hookBefore {
-            val session = activitySession() ?: return@hookBefore
-            session.enterPip()
-            result = null
+        methodFlutterVoipReattachedToActivity.hookAfter {
+            registerSingleSession(thisObject)
         }
-    }
 
-    override fun onBeforeToggle(newState: Boolean, context: Context): Boolean {
-        if (newState && isZygiskMode) {
-            showComposeDialog(context) {
-                AlertDialogContent(
-                    title = { Text("音视频通话使用画中画") },
-                    text = {
-                        Text(
-                            "画中画窗口必须由模块应用自己的 Activity 承载（清单里要声明 " +
-                                "supportsPictureInPicture，微信没有这样的 Activity）, " +
-                                "而 Zygisk 模式下模块应用并未安装, 因此本功能仅在 LSPosed 模式下可用!"
-                        )
-                    },
-                    confirmButton = { TextButton(onDismiss) { Text("取消") } })
+        methodFlutterVoipMinimize.hookBefore {
+            // 8.0.77 加固: as? + 空返; 取值与 Dart 回调 invoke 用 runCatching 兜底
+            val activity = fieldFlutterVoipActivity.field.get(thisObject) as? VideoActivity
+                ?: return@hookBefore
+            sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
+            runCatching {
+                val callbackArg = args?.getOrNull(3) ?: return@runCatching
+                methodFlutterCallbackInvoke.method.invoke(callbackArg, true)
+            }.onFailure { WeLogger.e(TAG, "flutter minimize callback invoke failed", it) }
+            try {
+                // 仅当原方法返回 void 时才设置 result = null
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
             }
-            return false
         }
 
-        return true
+        methodVoipMinimize.hookBefore {
+            // 8.0.77 加固: firstOrNull + 空返, 找不到匹配 session 时静默放行
+            val session = sessions.values.filterIsInstance<SingleSession>()
+                .firstOrNull { it.manager === thisObject } ?: return@hookBefore
+            session.enterPip()
+            try {
+                // 仅当原方法返回 boolean 时才设置 result = true
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
+                        result = true
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
+        }
+
+        VideoActivity::class.reflekt().firstMethod {
+            name = "onUserLeaveHint"
+            parameterCount = 0
+        }.hookBefore {
+            // 8.0.77 加固: as? + 空返, 找不到 session 只记日志
+            val activity = thisObject as? VideoActivity ?: return@hookBefore
+            sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
+        }
+        VideoActivity::class.reflekt().firstMethod {
+            name = "onDestroy"
+            parameterCount = 0
+        }.hookBefore {
+            removeSession(thisObject as? VideoActivity ?: return@hookBefore)
+        }
+
+        MultiTalkMainUI::class.reflekt().firstMethod {
+            name = "onCreate"
+            parameterCount = 1
+        }.hookAfter {
+            // 8.0.77 加固: as? + 空返
+            val activity = thisObject as? MultiTalkMainUI ?: return@hookAfter
+            sessions[activity] = GroupSession(activity)
+        }
+        MultiTalkMainUI::class.reflekt().firstMethod {
+            name = "onDestroy"
+            parameterCount = 0
+        }.hookBefore {
+            removeSession(thisObject as? MultiTalkMainUI ?: return@hookBefore)
+        }
+
+        methodMultiTalkMinimize.hookBefore {
+            // 8.0.77 加固: as? + 空返
+            val activity = thisObject as? MultiTalkMainUI ?: return@hookBefore
+            sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
+            try {
+                // 仅当原方法返回 void 时才设置 result = null
+                if (method is java.lang.reflect.Method) {
+                    val returnType = (method as java.lang.reflect.Method).returnType
+                    if (returnType == Void.TYPE) {
+                        result = null
+                    }
+                }
+            } catch (e: Throwable) {
+                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+            }
+        }
+
+        Activity::class.reflekt().firstMethod { name = "onUserLeaveHint" }.hookBefore {
+            val activity = thisObject
+            if (activity is MultiTalkMainUI) {
+                sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
+            }
+        }
     }
 
     override fun onDisable() {
-        closeActivePip()
+        sessions.values.filter { it.pipActive }.forEach { closePipActivity(it.activity) }
         sessions.clear()
-        // audioController 是宿主进程内的单例，留着它，功能中途重新开启时还用得上
     }
 
-    /** 与通话界面绑定的 session：旧版单人通话和多人通话，已经在画中画里的优先 */
-    private fun activitySession(): Session? {
-        pipSession?.takeIf { it.pipActive }?.let { return it }
-        sessions.values.removeAll { !it.alive }
-        return sessions.values.firstOrNull()
-    }
-
-    /**
-     * 当前通话属于哪套实现。没有 Activity 绑定的 session 就说明是新版 VoIPMP：
-     * 旧版通话和多人通话都会在界面创建时注册自己的 session。
-     */
-    private fun currentSession(): Session = activitySession() ?: VoipMpSession
-
-    private fun closeActivePip() {
-        pipSession?.closePip()
-    }
-
-    private fun registerLegacySession(plugin: Any) {
-        val activity = fieldFlutterVoipActivity.field.get(plugin) as? Activity ?: run {
+    private fun registerSingleSession(plugin: Any) {
+        // 8.0.77 加固: 字段可能已混淆/移除, as? + 空返, 异常不再抛进微信执行栈
+        val activity = fieldFlutterVoipActivity.field.get(plugin) as? VideoActivity ?: run {
             WeLogger.w(TAG, "flutter voip plugin has no activity attached")
             return
         }
@@ -850,41 +550,30 @@ object PipVoip : SwitchFeature(), IResolveDex {
             WeLogger.w(TAG, "flutter voip plugin has no manager attached")
             return
         }
-        WeLogger.d(TAG, "registering legacy voip session for $activity")
-        sessions[activity] = LegacySession(activity, manager)
+        WeLogger.d(TAG, "placing $activity into map")
+        sessions[activity] = SingleSession(activity, manager)
     }
 
-    /**
-     * 通话界面被销毁。注意不能顺手把画中画关掉：微信最小化时就会销毁通话界面，
-     * 那时候画中画才刚起来。真正该收掉画中画的时机由微信撤销悬浮窗时的钩子决定。
-     */
-    private fun removeSession(activity: Activity) {
-        val session = sessions.remove(activity) ?: return
-        if (session.pipActive)
-            WeLogger.d(TAG, "${activity.javaClass.simpleName} destroyed while in pip, keeping session")
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun moveTaskToFront(activity: Activity) {
-        val activityManager =
-            activity.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        activityManager.moveTaskToFront(activity.taskId, 0)
-    }
-
-    /** 命令通道还没建立时的兜底关闭方式 */
-    private fun closePipActivityByIntent() {
+    private fun applyPipFlags(info: ActivityInfo) {
+        // 8.0.77 加固: resizeMode 字段可能已混淆/改名, runCatching 兜底
         runCatching {
-            HostInfo.application.startActivity(
+            info.flags = info.flags or FLAG_SUPPORTS_PICTURE_IN_PICTURE
+            info.reflekt().firstField { name = "resizeMode" }.set(RESIZE_MODE_RESIZEABLE)
+        }.onFailure { WeLogger.e(TAG, "failed to apply pip flags", it) }
+    }
+
+    private fun removeSession(activity: Activity) {
+        if (sessions.remove(activity)?.pipActive == true) closePipActivity(activity)
+    }
+
+    private fun closePipActivity(context: Context) {
+        // 8.0.77 加固: 启动/关闭行为 runCatching 兜底, 失败只记日志
+        runCatching {
+            context.startActivity(
                 Intent {
-                    component = ComponentName(
-                        PackageNames.MODULE,
-                        PipVoipActivity::class.java.name,
-                    )
+                    component = ComponentName(PackageNames.WECHAT, PipVoipActivity::class.java.name)
                     action = PipVoipActivity.ACTION_CLOSE
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    )
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 }
             )
         }.onFailure { WeLogger.e(TAG, "failed to close pip activity", it) }

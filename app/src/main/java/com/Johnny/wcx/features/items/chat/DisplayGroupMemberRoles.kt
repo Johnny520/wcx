@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.graphics.toColorInt
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -34,9 +35,7 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
-import com.Johnny.wcx.ui.content.WeColorField
 import com.Johnny.wcx.ui.utils.showComposeDialog
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.collections.LruCache
 import com.Johnny.wcx.utils.unreachable
 import kotlin.math.roundToInt
@@ -106,28 +105,28 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
                             trailingContent = { Switch(showMem, null) },
                             headlineContent = { Text("显示「成员」标签") },
                         )
-                        WeColorField(
-                            label = "群主 | 背景色",
+                        TextField(
+                            label = { Text("群主 | 背景色") },
                             value = ob,
                             onValueChange = { ob = it })
-                        WeColorField(
-                            label = "群主 | 前景色",
+                        TextField(
+                            label = { Text("群主 | 前景色") },
                             value = of,
                             onValueChange = { of = it })
-                        WeColorField(
-                            label = "管理员 | 背景色",
+                        TextField(
+                            label = { Text("管理员 | 背景色") },
                             value = ab,
                             onValueChange = { ab = it })
-                        WeColorField(
-                            label = "管理员 | 前景色",
+                        TextField(
+                            label = { Text("管理员 | 前景色") },
                             value = af,
                             onValueChange = { af = it })
-                        WeColorField(
-                            label = "成员 | 背景色",
+                        TextField(
+                            label = { Text("成员 | 背景色") },
                             value = mb,
                             onValueChange = { mb = it })
-                        WeColorField(
-                            label = "成员 | 前景色",
+                        TextField(
+                            label = { Text("成员 | 前景色") },
                             value = mf,
                             onValueChange = { mf = it })
                         TextField(
@@ -164,7 +163,7 @@ object DisplayGroupMemberRoles : ClickableFeature(), IResolveDex,
     }
 
     override fun onCreateView(
-        param: HookParam,
+        param: XC_MethodHook.MethodHookParam,
         view: View
     ) {
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)

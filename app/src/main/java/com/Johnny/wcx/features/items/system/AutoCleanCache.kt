@@ -31,31 +31,35 @@ object AutoCleanCache : ClickableFeature() {
     private var cleanJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val cleanPaths = run {
-        val paths = mutableListOf<Path>()
+    private val cleanPaths: List<Path>
+        get() {
+            val paths = mutableListOf<Path>()
 
-        val dataDir = HostInfo.application.filesDir.parentFile!!.toPath()
-        val storageDataDir = HostInfo.application.externalCacheDir!!.toPath().parent!!
+            val dataDir = HostInfo.application.filesDir.parentFile?.toPath() ?: return paths
+            paths.add(dataDir / "cache")
+            paths.add(dataDir / "MicroMsg" / "crash")
+            paths.add(dataDir / "appbrand")
+            paths.add(dataDir / "cache" / "appbrand")
+            paths.add(dataDir / "MicroMsg" / "appbrand")
+            paths.add(dataDir / "cache" / "liteapp")
+            paths.add(dataDir / "files" / "liteapp")
+            paths.add(dataDir / "tinker")
+            paths.add(dataDir / "tinker_server")
+            paths.add(dataDir / "tinker_temp")
 
-        paths.add(dataDir / "cache")
-        paths.add(dataDir / "MicroMsg" / "crash")
-        paths.add(dataDir / "appbrand")
-        paths.add(dataDir / "cache" / "appbrand")
-        paths.add(dataDir / "MicroMsg" / "appbrand")
-        paths.add(dataDir / "cache" / "liteapp")
-        paths.add(dataDir / "files" / "liteapp")
-        paths.add(dataDir / "tinker")
-        paths.add(dataDir / "tinker_server")
-        paths.add(dataDir / "tinker_temp")
-        paths.add(storageDataDir / "cache")
-        paths.add(storageDataDir / "files" / "xlog")
-        paths.add(storageDataDir / "files" / "onelog")
-        paths.add(storageDataDir / "files" / "tbslog")
-        paths.add(storageDataDir / "files" / "Tencent" / "tbs_common_log")
-        paths.add(storageDataDir / "files" / "Tencent" / "tbs_live_log")
+            val externalCacheDir = HostInfo.application.externalCacheDir
+            if (externalCacheDir != null) {
+                val storageDataDir = externalCacheDir.toPath().parent ?: return paths
+                paths.add(storageDataDir / "cache")
+                paths.add(storageDataDir / "files" / "xlog")
+                paths.add(storageDataDir / "files" / "onelog")
+                paths.add(storageDataDir / "files" / "tbslog")
+                paths.add(storageDataDir / "files" / "Tencent" / "tbs_common_log")
+                paths.add(storageDataDir / "files" / "Tencent" / "tbs_live_log")
+            }
 
-        return@run paths
-    }
+            return paths
+        }
 
     override fun onEnable() {
         startCleaningJob()
@@ -78,8 +82,30 @@ object AutoCleanCache : ClickableFeature() {
             try {
                 WeLogger.d(TAG, "deleting $path")
                 if (path.exists()) {
-                    totalDeletedBytes += calculateSize(path)
-                    path.deleteRecursively()
+                    // 保留 WCX/upload 子目录，避免 REST API 上传临时文件被误删
+                    val wcxUploadDir = path / "WCX" / "upload"
+                    if (wcxUploadDir.exists()) {
+                        // 遍历删除除 WCX/upload 之外的所有内容
+                        path.toFile().listFiles()?.forEach { file ->
+                            if (file.name == "WCX") {
+                                // 对 WCX 目录，保留 upload 子目录
+                                file.listFiles()?.forEach { wcxChild ->
+                                    if (wcxChild.name != "upload") {
+                                        val childPath = wcxChild.toPath()
+                                        totalDeletedBytes += calculateSize(childPath)
+                                        childPath.deleteRecursively()
+                                    }
+                                }
+                            } else {
+                                val childPath = file.toPath()
+                                totalDeletedBytes += calculateSize(childPath)
+                                childPath.deleteRecursively()
+                            }
+                        }
+                    } else {
+                        totalDeletedBytes += calculateSize(path)
+                        path.deleteRecursively()
+                    }
                 }
             } catch (e: Exception) {
                 WeLogger.w(TAG, "exception during cleaning: ${path.fileName}, ${e.message}")

@@ -408,28 +408,12 @@ object WeChatService {
         if (WeMomentsApi.postTextAndImages2(content, picPaths, sdkId, sdkAppName)) Result.Success(Unit)
         else Result.Error("Failed to post moment pictures")
 
-    /**
-     * Accepts an incoming transfer. All three ids come from the transfer message's `wcpayinfo`
-     * (see `MessageInfo.TransferMessage`) and are distinct values — do not mix them up:
-     *
-     * @param transactionId `wcpayinfo.transcationid` (WeChat's typo), sent as `transaction_id`
-     * @param transferId `wcpayinfo.transferid`, sent as `trans_id`
-     * @param payerUsername `wcpayinfo.payer_username`, the wxid of whoever sent the money
-     * @param invalidTime `wcpayinfo.invalidtime`, the transfer's validity window
-     */
-    fun confirmTransfer(transactionId: String, transferId: String, payerUsername: String, invalidTime: Int): Result<Unit> =
-        if (WePaymentApi.confirmTransfer(transactionId, transferId, payerUsername, invalidTime)) Result.Success(Unit)
+    fun confirmTransfer(convId: String, transId: String, transSpanId: String, invalidTime: Int): Result<Unit> =
+        if (WePaymentApi.confirmTransfer(convId, transId, transSpanId, invalidTime)) Result.Success(Unit)
         else Result.Error("Failed to confirm transfer")
 
-    /**
-     * Rejects an incoming transfer. Ids are the same `wcpayinfo` values as [confirmTransfer].
-     *
-     * `invalidTime` is intentionally sent as `0`: WeChat's own refuse path
-     * (`RemittanceRefuseEvent` → `NetSceneTransferOperation`) hardcodes it too, so the validity
-     * window is irrelevant for refusals and callers need not collect it.
-     */
-    fun refuseTransfer(transactionId: String, transferId: String, payerUsername: String): Result<Unit> =
-        if (WePaymentApi.refuseTransfer(transactionId, transferId, payerUsername, 0)) Result.Success(Unit)
+    fun refuseTransfer(convId: String, transId: String, transSpanId: String): Result<Unit> =
+        if (WePaymentApi.refuseTransfer(convId, transId, transSpanId, 0)) Result.Success(Unit)
         else Result.Error("Failed to refuse transfer")
 
     fun verifyFriend(userId: String, ticket: String, scene: Int, privacy: Int?): Result<Unit> {

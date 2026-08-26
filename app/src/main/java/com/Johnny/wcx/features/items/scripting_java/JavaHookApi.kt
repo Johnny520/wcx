@@ -1,8 +1,8 @@
 package com.Johnny.wcx.features.items.scripting_java
 
+import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.hookAfterDirectly
 import com.Johnny.wcx.utils.hookBeforeDirectly
@@ -19,7 +19,7 @@ object JavaHookApi : ApiFeature() {
 
     private val hooks = mutableListOf<HookHandle>()
 
-    fun hookBefore(member: Member, consumer: Consumer<HookParam>): HookHandle {
+    fun hookBefore(member: Member, consumer: Consumer<XC_MethodHook.MethodHookParam>): HookHandle {
         val unhook = (member as Executable).hookBeforeDirectly {
             runCatching {
                 result = consumer.accept(this)
@@ -30,7 +30,7 @@ object JavaHookApi : ApiFeature() {
         return handle
     }
 
-    fun hookAfter(member: Member, consumer: Consumer<HookParam>): HookHandle {
+    fun hookAfter(member: Member, consumer: Consumer<XC_MethodHook.MethodHookParam>): HookHandle {
         val unhook = (member as Executable).hookAfterDirectly {
             runCatching {
                 consumer.accept(this)
@@ -41,7 +41,7 @@ object JavaHookApi : ApiFeature() {
         return handle
     }
 
-    fun hookReplace(member: Member, function: Function<HookParam, Any?>): HookHandle {
+    fun hookReplace(member: Member, function: Function<XC_MethodHook.MethodHookParam, Any?>): HookHandle {
         val unhook = (member as Executable).hookBeforeDirectly {
             runCatching {
                 result = function.apply(this)

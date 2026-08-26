@@ -13,7 +13,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -23,8 +22,6 @@ import com.Johnny.wcx.agent.data.WeAgentRepository
 import com.Johnny.wcx.agent.data.entity.McpTransport
 import com.Johnny.wcx.agent.data.entity.ProviderEntity
 import com.Johnny.wcx.agent.mcp.McpClientManager
-import com.Johnny.wcx.agent.mcp.McpProviderStatus
-import com.Johnny.wcx.agent.mcp.McpToolProvider
 import com.Johnny.wcx.agent.tool.ProviderKind
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Button
@@ -38,31 +35,11 @@ import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.window.WindowDialog
 import java.util.UUID
 
-/**
- * Observes one live provider's connection state / last error / tool list.
- *
- * [McpToolProvider] publishes these as a [kotlinx.coroutines.flow.StateFlow] because it mutates them
- * from its connect/refresh coroutines; collecting here is what makes both the list row and the
- * detail page update the moment a refresh or reconnect lands instead of only on re-entry. [provider]
- * is null while the server has no live client yet, which reads as DISCONNECTED.
- */
-@Composable
-private fun rememberMcpStatus(provider: McpToolProvider?): McpProviderStatus =
-    produceState(McpProviderStatus(), provider) {
-        val p = provider
-        if (p == null) {
-            value = McpProviderStatus()
-            return@produceState
-        }
-        p.status.collect { value = it }
-    }.value
-
 /** Lists MCP servers (row → detail; no inline delete) and adds new ones (§4). */
 @Composable
 fun McpServersScreen(onBack: () -> Unit, onOpenServer: (serverId: String) -> Unit) {
     val allProviders by WeAgentRepository.observeProviders().collectAsState(initial = emptyList())
     val servers = allProviders.filter { it.kind == ProviderKind.MCP }
-    val liveProviders by McpClientManager.providers.collectAsState()
     val scope = rememberCoroutineScope()
     val showAdd = remember { mutableStateOf(false) }
 
@@ -70,12 +47,12 @@ fun McpServersScreen(onBack: () -> Unit, onOpenServer: (serverId: String) -> Uni
         if (servers.isEmpty()) item { EmptyHint("还没有 MCP 服务器。") }
         items(servers.size, key = { servers[it].id }) { i ->
             val s = servers[i]
-            val status = rememberMcpStatus(liveProviders.firstOrNull { it.id == s.id })
+            val live = McpClientManager.connectedProviders().firstOrNull { it.id == s.id }
+            val status = live?.state?.name ?: "DISCONNECTED"
             Card(Modifier.padding(bottom = 6.dp)) {
                 ArrowPreference(
                     title = s.name.ifBlank { s.endpointUrl ?: s.id },
-                    summary = "${s.transport?.name ?: "?"} · ${status.state.name}" +
-                            (status.lastError?.let { " · $it" } ?: ""),
+                    summary = "${s.transport?.name ?: "?"} · $status" + (live?.lastError?.let { " · $it" } ?: ""),
                     onClick = { onOpenServer(s.id) },
                 )
             }
@@ -119,16 +96,15 @@ fun McpServerDetailScreen(serverId: String, onBack: () -> Unit) {
     val perms by WeAgentRepository.observeToolPermissions().collectAsState(initial = emptyList())
     val permMap = perms.associate { it.providerId to it.toolName to it.mode }
 
-    val liveProviders by McpClientManager.providers.collectAsState()
-    val status = rememberMcpStatus(liveProviders.firstOrNull { it.id == serverId })
-    val tools = status.tools
+    val live = McpClientManager.connectedProviders().firstOrNull { it.id == serverId }
+    val tools = live?.listTools().orEmpty()
 
     AgentSettingsScaffold(title = server?.name ?: "MCP 服务器", onBack = onBack) {
         item {
             Card(Modifier.padding(bottom = 6.dp)) {
                 ArrowPreference(
                     title = "连接状态",
-                    summary = status.state.name + (status.lastError?.let { " · $it" } ?: "") + " · 点击刷新工具",
+                    summary = (live?.state?.name ?: "DISCONNECTED") + (live?.lastError?.let { " · $it" } ?: "") + " · 点击刷新工具",
                     onClick = { scope.launch { McpClientManager.refreshTools(serverId) } },
                 )
                 server?.let {

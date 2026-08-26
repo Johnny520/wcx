@@ -38,9 +38,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
+
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import kotlin.math.ceil
 import kotlin.math.min
@@ -214,7 +216,11 @@ fun WeColorPickerDialog(
             }
         },
         dismissButton = { TextButton(onDismiss) { Text("取消") } },
-        confirmButton = { Button(onClick = { onConfirm(current) }) { Text("确定") } },
+        confirmButton = {
+            Button(onClick = { onConfirm(current) }) {
+                Text("确定")
+            }
+        },
     )
 }
 

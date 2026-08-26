@@ -25,7 +25,7 @@ object CopyWeChatDebugInfo : ClickableFeature(), IResolveDex {
                 name = "setText"
                 parameters(CharSequence::class)
             }.hookBeforeDirectly {
-                val debugText = (args[0] as StringBuilder).toString()
+                val debugText = (args[0] as? StringBuilder)?.toString() ?: return@hookBeforeDirectly
                 copyToClipboard(context, debugText)
                 showToast(context, "已复制")
                 throwable = RuntimeException("halt method")

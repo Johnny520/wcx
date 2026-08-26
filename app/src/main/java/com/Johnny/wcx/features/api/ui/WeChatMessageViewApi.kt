@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.api.ui
 
 import android.view.View
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -8,7 +9,6 @@ import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -17,7 +17,7 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
 
     fun interface ICreateViewListener {
         fun onCreateView(
-            param: HookParam, view: View
+            param: XC_MethodHook.MethodHookParam, view: View
         )
     }
 
@@ -50,7 +50,7 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
 
     override fun onEnable() {
         methodChatItemOnBindView.hookAfter {
-            val holder = args[0]!!
+            val holder = args[0]
             val view = holder.reflekt()
                 .firstField {
                     type = View::class
@@ -68,14 +68,14 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
         }
     }
 
-    fun getChattingContextFromParam(param: HookParam): Any {
-        return param.thisObject!!.reflekt()
+    fun getChattingContextFromParam(param: XC_MethodHook.MethodHookParam): Any {
+        return param.thisObject.reflekt()
             .firstField { type = WeMessageApi.classChattingContext.clazz }
             .get()!!
     }
 
-    fun getMsgInfoFromParam(param: HookParam): MessageInfo {
-        val chattingDataAdapter = param.thisObject!!.reflekt()
+    fun getMsgInfoFromParam(param: XC_MethodHook.MethodHookParam): MessageInfo {
+        val chattingDataAdapter = param.thisObject.reflekt()
             .firstField { type = WeMessageApi.classChattingDataAdapter.clazz }
             .get()!!
         val msgId = param.args[2] as Int

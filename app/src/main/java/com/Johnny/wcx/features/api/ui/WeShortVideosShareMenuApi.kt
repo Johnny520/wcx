@@ -2,12 +2,12 @@ package com.Johnny.wcx.features.api.ui
 
 import android.graphics.drawable.Drawable
 import android.view.ContextMenu
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.utils.HookParam
 import org.json.JSONObject
 import java.util.LinkedList
 
@@ -21,7 +21,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
     data class MenuItem(
         val id: Int,
         val text: String, val drawable: Drawable,
-        val onClick: (HookParam, Int, List<JSONObject>) -> Unit
+        val onClick: (XC_MethodHook.MethodHookParam, Int, List<JSONObject>) -> Unit
     )
 
     private val menuItems = mutableMapOf<String, List<MenuItem>>()
@@ -87,7 +87,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
 
         methodOnSelectMenuItem1.hookBefore {
             val menuItem = args[0] as android.view.MenuItem
-            val baseFinderFeed = thisObject!!.reflekt()
+            val baseFinderFeed = thisObject.reflekt()
                 .firstField {
                     type = "com.tencent.mm.plugin.finder.model.BaseFinderFeed"
                 }
@@ -102,7 +102,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
 
         methodOnSelectMenuItem2.hookBefore {
             val menuItem = args[1] as android.view.MenuItem
-            val baseFinderFeed = args[0]!!
+            val baseFinderFeed = args[0]
             handleOnSelectMenuItem(this, menuItem, baseFinderFeed)
         }
 
@@ -113,7 +113,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
 
         methodOnSelectMenuItem3.hookBefore {
             val menuItem = args[0] as android.view.MenuItem
-            val baseFinderFeed = thisObject!!.reflekt()
+            val baseFinderFeed = thisObject.reflekt()
                 .firstField {
                     type = "com.tencent.mm.plugin.finder.model.BaseFinderFeed"
                 }
@@ -135,7 +135,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
     }
 
     private fun handleOnSelectMenuItem(
-        param: HookParam,
+        param: XC_MethodHook.MethodHookParam,
         menuItem: android.view.MenuItem,
         baseFinderFeed: Any
     ) {
@@ -167,7 +167,17 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
         for (item in menuItems.values.flatten()) {
             if (item.id == itemId) {
                 item.onClick(param, mediaType, mediaJsonList)
-                param.result = null
+                try {
+                    // 仅当原方法返回 void 时才设置 result = null
+                    if (param.method is java.lang.reflect.Method) {
+                        val returnType = (param.method as java.lang.reflect.Method).returnType
+                        if (returnType == Void.TYPE) {
+                            param.result = null
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
+                }
                 return
             }
         }

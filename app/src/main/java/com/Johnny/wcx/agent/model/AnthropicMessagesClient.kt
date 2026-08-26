@@ -3,7 +3,7 @@ package com.Johnny.wcx.agent.model
 import com.Johnny.wcx.utils.WeLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
-import io.ktor.client.request.preparePost
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
@@ -55,123 +55,119 @@ class AnthropicMessagesClient(
 
     override fun stream(request: LlmRequest): Flow<LlmStreamEvent> = flow {
         val body = LlmJson.shallowMerge(buildBody(request), request.customJsonOverride)
-        // The response is scoped to `execute { … }`: every early exit below (HTTP error, stream
-        // error, break on message_stop) previously abandoned an open SSE body channel, leaking the
-        // connection until GC. `execute` releases it on every path, including exceptions.
-        http.preparePost(endpoint) {
+        val resp = http.post(endpoint) {
             header("x-api-key", apiKey)
             header("anthropic-version", ANTHROPIC_VERSION)
             contentType(ContentType.Application.Json)
             setBody(LlmJson.json.encodeToString(JsonObject.serializer(), body))
-        }.execute { resp ->
-            if (!resp.status.isSuccess()) {
-                emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
-                return@execute
-            }
+        }
+        if (!resp.status.isSuccess()) {
+            emit(LlmStreamEvent.Failed(LlmException("HTTP ${resp.status.value}: ${readBodyText(resp)}")))
+            return@flow
+        }
 
-            val textBuf = StringBuilder()
-            val reasoningBuf = StringBuilder()
-            val signatureBuf = StringBuilder()
-            val blocks = sortedMapOf<Int, ToolUseBlock>()
-            var stopReason: String? = null
-            var inputTokens: Int? = null
-            var outputTokens: Int? = null
+        val textBuf = StringBuilder()
+        val reasoningBuf = StringBuilder()
+        val signatureBuf = StringBuilder()
+        val blocks = sortedMapOf<Int, ToolUseBlock>()
+        var stopReason: String? = null
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
 
-            val channel = resp.bodyAsChannel()
-            while (true) {
-                @Suppress("DEPRECATION")
-                val line = channel.readUTF8Line() ?: break
-                val data = SseParser.dataOrNull(line) ?: continue
-                val event = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
+        val channel = resp.bodyAsChannel()
+        while (true) {
+            @Suppress("DEPRECATION")
+            val line = channel.readUTF8Line() ?: break
+            val data = SseParser.dataOrNull(line) ?: continue
+            val event = runCatching { LlmJson.json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
 
-                when (event["type"]?.jsonPrimitive?.contentOrNullSafe()) {
-                    "message_start" ->
-                        event["message"]?.jsonObject?.get("usage")?.jsonObject?.let { u ->
-                            u["input_tokens"]?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
-                            u["output_tokens"]?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
-                        }
-
-                    "content_block_start" -> {
-                        val index = event["index"]?.jsonPrimitive?.int ?: continue
-                        val block = event["content_block"]?.jsonObject ?: continue
-                        when (block["type"]?.jsonPrimitive?.contentOrNullSafe()) {
-                            "tool_use" -> blocks[index] = ToolUseBlock(
-                                id = block["id"]?.jsonPrimitive?.contentOrNullSafe() ?: "call_$index",
-                                name = block["name"]?.jsonPrimitive?.contentOrNullSafe() ?: "",
-                            )
-                            // Signal the UI that a thinking block has started so the "思考中..." card
-                            // appears immediately — before any thinking_delta text arrives.
-                            "thinking" -> emit(LlmStreamEvent.ReasoningDelta(""))
-                        }
+            when (event["type"]?.jsonPrimitive?.contentOrNullSafe()) {
+                "message_start" ->
+                    event["message"]?.jsonObject?.get("usage")?.jsonObject?.let { u ->
+                        u["input_tokens"]?.jsonPrimitive?.intOrNull?.let { inputTokens = it }
+                        u["output_tokens"]?.jsonPrimitive?.intOrNull?.let { outputTokens = it }
                     }
 
-                    "content_block_delta" -> {
-                        val index = event["index"]?.jsonPrimitive?.int ?: continue
-                        val delta = event["delta"]?.jsonObject ?: continue
-                        when (delta["type"]?.jsonPrimitive?.contentOrNullSafe()) {
-                            "text_delta" -> delta["text"]?.jsonPrimitive?.contentOrNullSafe()?.let {
-                                textBuf.append(it); emit(LlmStreamEvent.TextDelta(it))
-                            }
-
-                            "thinking_delta" -> delta["thinking"]?.jsonPrimitive?.contentOrNullSafe()?.let {
-                                reasoningBuf.append(it); emit(LlmStreamEvent.ReasoningDelta(it))
-                            }
-                            // signature_delta carries the encrypted thinking-block signature that Anthropic
-                            // requires to be replayed verbatim when this turn appears in later history.
-                            "signature_delta" -> delta["signature"]?.jsonPrimitive?.contentOrNullSafe()?.let {
-                                signatureBuf.append(it)
-                            }
-
-                            "input_json_delta" -> delta["partial_json"]?.jsonPrimitive?.contentOrNullSafe()?.let {
-                                blocks[index]?.args?.append(it)
-                            }
-                        }
-                    }
-
-                    "message_delta" -> {
-                        event["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.contentOrNullSafe()
-                            ?.let { stopReason = it }
-                        // Anthropic reports the running output token count on the top-level usage here.
-                        event["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull
-                            ?.let { outputTokens = it }
-                    }
-
-                    "message_stop" -> break
-
-                    "error" -> {
-                        emit(LlmStreamEvent.Failed(LlmException("Anthropic stream error: $data")))
-                        return@execute
+                "content_block_start" -> {
+                    val index = event["index"]?.jsonPrimitive?.int ?: continue
+                    val block = event["content_block"]?.jsonObject ?: continue
+                    when (block["type"]?.jsonPrimitive?.contentOrNullSafe()) {
+                        "tool_use" -> blocks[index] = ToolUseBlock(
+                            id = block["id"]?.jsonPrimitive?.contentOrNullSafe() ?: "call_$index",
+                            name = block["name"]?.jsonPrimitive?.contentOrNullSafe() ?: "",
+                        )
+                        // Signal the UI that a thinking block has started so the "思考中..." card
+                        // appears immediately — before any thinking_delta text arrives.
+                        "thinking" -> emit(LlmStreamEvent.ReasoningDelta(""))
                     }
                 }
+
+                "content_block_delta" -> {
+                    val index = event["index"]?.jsonPrimitive?.int ?: continue
+                    val delta = event["delta"]?.jsonObject ?: continue
+                    when (delta["type"]?.jsonPrimitive?.contentOrNullSafe()) {
+                        "text_delta" -> delta["text"]?.jsonPrimitive?.contentOrNullSafe()?.let {
+                            textBuf.append(it); emit(LlmStreamEvent.TextDelta(it))
+                        }
+
+                        "thinking_delta" -> delta["thinking"]?.jsonPrimitive?.contentOrNullSafe()?.let {
+                            reasoningBuf.append(it); emit(LlmStreamEvent.ReasoningDelta(it))
+                        }
+                        // signature_delta carries the encrypted thinking-block signature that Anthropic
+                        // requires to be replayed verbatim when this turn appears in later history.
+                        "signature_delta" -> delta["signature"]?.jsonPrimitive?.contentOrNullSafe()?.let {
+                            signatureBuf.append(it)
+                        }
+
+                        "input_json_delta" -> delta["partial_json"]?.jsonPrimitive?.contentOrNullSafe()?.let {
+                            blocks[index]?.args?.append(it)
+                        }
+                    }
+                }
+
+                "message_delta" -> {
+                    event["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.contentOrNullSafe()
+                        ?.let { stopReason = it }
+                    // Anthropic reports the running output token count on the top-level usage here.
+                    event["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull
+                        ?.let { outputTokens = it }
+                }
+
+                "message_stop" -> break
+
+                "error" -> {
+                    emit(LlmStreamEvent.Failed(LlmException("Anthropic stream error: $data")))
+                    return@flow
+                }
             }
-
-            val toolCalls = blocks.values
-                .filter { it.name.isNotEmpty() }
-                .map { LlmToolCall(it.id, it.name, it.args.toString().ifEmpty { "{}" }) }
-
-            val usage = if (inputTokens != null || outputTokens != null) {
-                LlmUsage(
-                    promptTokens = inputTokens,
-                    completionTokens = outputTokens,
-                    totalTokens = (inputTokens ?: 0).let { i -> (outputTokens ?: 0).let { o -> i + o } }
-                        .takeIf { inputTokens != null && outputTokens != null },
-                )
-            } else null
-
-            emit(
-                LlmStreamEvent.Completed(
-                    LlmMessage(
-                        role = LlmRole.ASSISTANT,
-                        content = textBuf.toString().ifEmpty { null },
-                        reasoning = reasoningBuf.toString().ifEmpty { null },
-                        reasoningSignature = signatureBuf.toString().ifEmpty { null },
-                        toolCalls = toolCalls,
-                    ),
-                    stopReason ?: if (toolCalls.isNotEmpty()) "tool_use" else null,
-                    usage,
-                )
-            )
         }
+
+        val toolCalls = blocks.values
+            .filter { it.name.isNotEmpty() }
+            .map { LlmToolCall(it.id, it.name, it.args.toString().ifEmpty { "{}" }) }
+
+        val usage = if (inputTokens != null || outputTokens != null) {
+            LlmUsage(
+                promptTokens = inputTokens,
+                completionTokens = outputTokens,
+                totalTokens = (inputTokens ?: 0).let { i -> (outputTokens ?: 0).let { o -> i + o } }
+                    .takeIf { inputTokens != null && outputTokens != null },
+            )
+        } else null
+
+        emit(
+            LlmStreamEvent.Completed(
+                LlmMessage(
+                    role = LlmRole.ASSISTANT,
+                    content = textBuf.toString().ifEmpty { null },
+                    reasoning = reasoningBuf.toString().ifEmpty { null },
+                    reasoningSignature = signatureBuf.toString().ifEmpty { null },
+                    toolCalls = toolCalls,
+                ),
+                stopReason ?: if (toolCalls.isNotEmpty()) "tool_use" else null,
+                usage,
+            )
+        )
     }
 
     // -- request body ---------------------------------------------------------

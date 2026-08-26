@@ -4,13 +4,13 @@ import android.app.Activity
 import android.graphics.drawable.Drawable
 import android.view.ContextMenu
 import android.widget.AdapterView
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.BString
 
@@ -85,12 +85,12 @@ object WeConversationContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    private fun handleCreateMenu(param: HookParam) {
+    private fun handleCreateMenu(param: XC_MethodHook.MethodHookParam) {
         val menu = param.args.getOrNull(0) as? ContextMenu ?: return
         val info = param.args.getOrNull(2) as? AdapterView.AdapterContextMenuInfo
         val groupId = info?.position ?: 0
 
-        val context = resolveContext(param.thisObject!!) ?: return
+        val context = resolveContext(param.thisObject) ?: return
 
         for (item in menuItems.values.flatten()) {
             try {
@@ -102,13 +102,13 @@ object WeConversationContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
-    private fun handleSelectMenu(param: HookParam) {
+    private fun handleSelectMenu(param: XC_MethodHook.MethodHookParam) {
         val menuItem = param.args.getOrNull(0) as? android.view.MenuItem ?: return
         val clickedId = menuItem.itemId
 
         // thisObject is ConversationLongClickListener$1, which holds the outer
         // ConversationLongClickListener instance in its only field of that type.
-        val listener = param.thisObject!!.reflekt()
+        val listener = param.thisObject.reflekt()
             .firstFieldOrNull { type = methodOnCreateMenu.method.declaringClass }
             ?.get() ?: return
 

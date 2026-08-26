@@ -2,11 +2,11 @@ package com.Johnny.wcx.features.items.official_accounts
 
 import android.content.ComponentName
 import android.content.Intent
+import de.robv.android.xposed.XC_MethodHook
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.features.api.ui.WeStartActivityApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 
@@ -21,16 +21,32 @@ object UseLegacyOfficialAccountsView : SwitchFeature(), WeStartActivityApi.IStar
         WeStartActivityApi.removeListener(this)
     }
 
-    override fun onStartActivity(param: HookParam, intent: Intent) {
+    override fun onStartActivity(param: XC_MethodHook.MethodHookParam, intent: Intent) {
         val className = intent.component?.className
         if (className == "${PackageNames.WECHAT}.plugin.brandservice.ui.flutter.BizFlutterTLFlutterViewActivity" ||
             className == "${PackageNames.WECHAT}.plugin.brandservice.ui.timeline.BizTimeLineUI"
         ) {
-            WeLogger.d("UseLegacyOfficialAccountsView", "redirected $className")
-            intent.component = ComponentName(
-                HostInfo.packageName,
-                "${PackageNames.WECHAT}.ui.conversation.NewBizConversationUI"
-            )
+            try {
+                val ctx = param.thisObject as? android.content.Context
+                val pm = ctx?.packageManager ?: run {
+                    WeLogger.w("UseLegacyOfficialAccountsView", "no context/packageManager available")
+                    return
+                }
+                val checkIntent = Intent().apply {
+                    component = ComponentName(
+                        HostInfo.packageName,
+                        "${PackageNames.WECHAT}.ui.conversation.NewBizConversationUI"
+                    )
+                }
+                if (pm.resolveActivity(checkIntent, 0) != null) {
+                    intent.component = checkIntent.component
+                    WeLogger.d("UseLegacyOfficialAccountsView", "redirected $className")
+                } else {
+                    WeLogger.d("UseLegacyOfficialAccountsView", "NewBizConversationUI not found, skip redirect")
+                }
+            } catch (e: Throwable) {
+                WeLogger.w("UseLegacyOfficialAccountsView", "redirect check failed: ${e.message}")
+            }
         }
     }
 }

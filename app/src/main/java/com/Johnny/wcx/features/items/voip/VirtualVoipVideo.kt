@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.toClass
@@ -45,11 +46,10 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.utils.showComposeDialog
-import com.Johnny.wcx.utils.HookParam
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.fs.KnownPaths
-import com.Johnny.wcx.utils.reflection.int
+import com.Johnny.wcx.utils.reflection.BInt
 import kotlin.io.path.div
 
 @Feature(
@@ -98,13 +98,13 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
 
     private val camera2HookBypass = ThreadLocal.withInitial { false }
 
-    private val methodLaunchVoipPage by dexMethod {
+    private val methodLaunchVoipPage by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.VoIPMP.Launcher", "launch page ")
         }
     }
 
-    private val methodStartCamera by dexMethod {
+    private val methodStartCamera by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.ILinkVoIPCameraHelper", "old startCamera abandon")
         }
@@ -165,7 +165,8 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
             "com.tencent.mm.plugin.voip.ui.VideoActivity",
             "com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI"
         ).forEach { className ->
-            className.toClass().apply {
+            // 8.0.77: 通话 Activity 可能已移除/改包; runCatching 兜底, 找不到就跳过该 UI 生命周期 hook
+            runCatching { className.toClass() }.getOrNull()?.apply {
                 firstMethod { name = "onCreate" }.hookBefore {
                     isVoipUiActive = true
                     WeLogger.d(TAG, "entered voip ui: $className")
@@ -198,7 +199,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
 
             firstMethod {
                 name = "getCameraInfo"
-                parameters(int, Camera.CameraInfo::class)
+                parameters(BInt, Camera.CameraInfo::class)
             }.hookAfter {
                 if (!shouldInterceptCamera) return@hookAfter
                 val info = args[1] as? Camera.CameraInfo ?: return@hookAfter
@@ -417,7 +418,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
         }
     }
 
-    private fun hijackCamera2Session(param: HookParam) {
+    private fun hijackCamera2Session(param: XC_MethodHook.MethodHookParam) {
         param.args.forEachIndexed { index, arg ->
             if (arg == null) return@forEachIndexed
             val hijackedArg = when (arg) {
@@ -430,7 +431,7 @@ object VirtualVoipVideo : ClickableFeature(), IResolveDex {
                 surface = hijackedArg.playbackSurface,
                 ownsSurface = false
             )
-            WeLogger.d(TAG, "Camera2 session argument replaced: ${param.member.name}")
+            WeLogger.d(TAG, "Camera2 session argument replaced: ${param.method.name}")
             return
         }
     }

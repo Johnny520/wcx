@@ -23,7 +23,7 @@ fun PanelSaveProgressOverlay(
     progress: PanelSaveProgress,
     onCancel: () -> Unit,
 ) {
-    PanelFullOverlay(onDismiss = onCancel, allowImplicitDismiss = false) {
+    PanelFullOverlay(onDismiss = onCancel) {
         Text(progress.title, style = MaterialTheme.typography.titleMedium)
         val processed = progress.completed + progress.failed
         LinearProgressIndicator(

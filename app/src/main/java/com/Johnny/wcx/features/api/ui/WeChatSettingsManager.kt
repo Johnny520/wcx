@@ -4,11 +4,11 @@ import android.app.Activity
 import android.content.Context
 import androidx.annotation.Keep
 import com.android.dx.stock.ProxyBuilder
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.createInstance
 import dev.ujhhgtg.reflekt.utils.toClass
 import com.Johnny.wcx.loader.utils.ParcelableFixer
-import com.Johnny.wcx.utils.HookHandle
 import com.Johnny.wcx.utils.hookAfterDirectly
 import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.Johnny.wcx.utils.reflection.buildClass
@@ -16,8 +16,6 @@ import com.Johnny.wcx.utils.reflection.createProxyBuilder
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
-import java.util.Collections
-import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -45,17 +43,8 @@ class WeChatSettingsManager(
     private var dynamicResIdCounter = -2000
     private var itemIndexCounter = 0
 
-    private var contextGetStringUnhook: HookHandle? = null
-    private var resourcesGetStringUnhook: HookHandle? = null
-
-    // 设置页可以嵌套(设置 → 通用)，superImportUIComponents 会被触发多次。
-    // 这里用弱引用集合记录当前存活的设置页，只在第一个进入时挂钩、最后一个销毁时解钩，
-    // 避免后进入的页面把前一个的 HookHandle 覆盖掉、把全局 getString Hook 永久留在微信进程里。
-    // 用弱引用而不是计数器，是为了让重复进入/未配对的销毁都不会把状态弄坏：
-    // 重复添加同一实例是空操作，移除未记录的实例也是空操作，被泄漏的页面会随 GC 自动出集合。
-    private val activeSettingsUis: MutableSet<Any> =
-        Collections.newSetFromMap(WeakHashMap<Any, Boolean>())
-    private val settingsUiLock = Any()
+    private var contextGetStringUnhook: XC_MethodHook.Unhook? = null
+    private var resourcesGetStringUnhook: XC_MethodHook.Unhook? = null
 
     // 依靠 Marker 接口隔离 Proxy 类缓存
     interface M0; interface M1; interface M2; interface M3; interface M4; interface M5; interface M6; interface M7; interface M8; interface M9; interface M10
@@ -158,7 +147,7 @@ class WeChatSettingsManager(
 
     private fun createSwitchHandlerProxy(switchHandlerClass: Class<*>, spec: SettingItemSpec): Any {
         val switchClassHandler = InvocationHandler { _, _, args ->
-            spec.onSwitchChanged?.invoke(args[0] as Boolean)
+            spec.onSwitchChanged?.invoke(args[0] as? Boolean ?: false)
         }
 
         return Proxy.newProxyInstance(switchHandlerClass.classLoader, arrayOf(switchHandlerClass), switchClassHandler)
@@ -190,8 +179,8 @@ class WeChatSettingsManager(
         classBaseSettingPrefUI.reflekt()
             .firstMethod { name = "superImportUIComponents" }
             .hookAfterDirectly {
-                val currentUi = thisObject!!
-                if (!isSupportedSettingsUi(currentUi)) return@hookAfterDirectly
+                val currentUiName = thisObject.javaClass.name
+                if (!currentUiName.endsWith("MainSettingsUI") && !currentUiName.endsWith("CommonSettingsUI")) return@hookAfterDirectly
 
                 @Suppress("UNCHECKED_CAST")
                 val layoutComponentSet = args[0] as? HashSet<Class<*>> ?: return@hookAfterDirectly
@@ -200,52 +189,25 @@ class WeChatSettingsManager(
                     layoutComponentSet.add(item.proxyClass)
                 }
 
-                onSettingsUiEntered(currentUi)
+                contextGetStringUnhook = Context::class.reflekt()
+                    .firstMethod { name = "getString"; parameters(Int::class) }
+                    .hookBeforeDirectly {
+                        stringPool[args[0] as? Int ?: 0]?.let { result = it }
+                    }
+
+                resourcesGetStringUnhook = methodResourceHelperGetStringById.hookBeforeDirectly {
+                    stringPool[args[1] as? Int ?: 0]?.let { result = it }
+                }
             }
 
         classBaseSettingUI.reflekt()
             .firstMethod { name = "onDestroy" }
             .hookAfterDirectly {
-                val currentUi = thisObject!!
-                if (!isSupportedSettingsUi(currentUi)) return@hookAfterDirectly
+                val currentUiName = thisObject.javaClass.name
+                if (!currentUiName.endsWith("MainSettingsUI") && !currentUiName.endsWith("CommonSettingsUI")) return@hookAfterDirectly
 
-                onSettingsUiDestroyed(currentUi)
+                contextGetStringUnhook?.unhook(); contextGetStringUnhook = null
+                resourcesGetStringUnhook?.unhook(); resourcesGetStringUnhook = null
             }
-    }
-
-    private fun isSupportedSettingsUi(ui: Any): Boolean {
-        val name = ui.javaClass.name
-        return name.endsWith("MainSettingsUI") || name.endsWith("CommonSettingsUI")
-    }
-
-    // 第一个设置页进入时安装全局 getString Hook
-    private fun onSettingsUiEntered(ui: Any) {
-        synchronized(settingsUiLock) {
-            // 同一个页面重复触发，或者已经有别的设置页存活时，不重复挂钩
-            if (!activeSettingsUis.add(ui)) return
-            if (activeSettingsUis.size != 1) return
-            if (contextGetStringUnhook != null || resourcesGetStringUnhook != null) return
-
-            contextGetStringUnhook = Context::class.reflekt()
-                .firstMethod { name = "getString"; parameters(Int::class) }
-                .hookBeforeDirectly {
-                    stringPool[args[0] as Int]?.let { result = it }
-                }
-
-            resourcesGetStringUnhook = methodResourceHelperGetStringById.hookBeforeDirectly {
-                stringPool[args[1] as Int]?.let { result = it }
-            }
-        }
-    }
-
-    // 最后一个设置页销毁时才解钩
-    private fun onSettingsUiDestroyed(ui: Any) {
-        synchronized(settingsUiLock) {
-            activeSettingsUis.remove(ui)
-            if (activeSettingsUis.isNotEmpty()) return
-
-            contextGetStringUnhook?.unhook(); contextGetStringUnhook = null
-            resourcesGetStringUnhook?.unhook(); resourcesGetStringUnhook = null
-        }
     }
 }

@@ -7,10 +7,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -53,6 +55,7 @@ import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.fs.KnownPaths
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -63,6 +66,7 @@ import java.nio.file.StandardCopyOption
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CancellationException
 import kotlin.io.path.absolutePathString
 
 @Feature(
@@ -115,6 +119,7 @@ object ScheduledMessage : ClickableFeature() {
 
     private var schedules by prefOption("scheduled_messages", emptyList<ScheduleConfig>())
     private val activeAlarms = ConcurrentHashMap<String, PendingIntent>()
+    private val timerJobs = ConcurrentHashMap<String, Job>()
     private lateinit var alarmReceiver: BroadcastReceiver
 
     override fun onEnable() {
@@ -129,7 +134,13 @@ object ScheduledMessage : ClickableFeature() {
 
         runCatching {
             val filter = IntentFilter(ALARM_ACTION)
-            HostInfo.application.registerReceiver(alarmReceiver, filter)
+            // Android 13+ 必须声明接收器导出标志，否则注册抛 SecurityException
+            ContextCompat.registerReceiver(
+                HostInfo.application,
+                alarmReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
         }.onFailure {
             WeLogger.e(TAG, "failed to register alarm receiver", it)
         }
@@ -146,6 +157,8 @@ object ScheduledMessage : ClickableFeature() {
     override fun onDisable() {
         activeAlarms.values.forEach { it.cancel() }
         activeAlarms.clear()
+        timerJobs.values.forEach { it.cancel() }
+        timerJobs.clear()
         runCatching {
             HostInfo.application.unregisterReceiver(alarmReceiver)
         }.onFailure {
@@ -169,21 +182,67 @@ object ScheduledMessage : ClickableFeature() {
 
         val triggerTime = calculateNextTriggerTime(schedule)
         if (triggerTime <= 0) return
+        schedule.nextSendTime = triggerTime
+        updateSchedule(schedule)
+
+        // 进程内定时器：只要微信进程存活就保证准点触发，不受系统闹钟权限/省电策略影响
+        scheduleInProcess(schedule)
 
         runCatching {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                triggerTime,
-                pendingIntent
-            )
+            val exactAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                    alarmManager.canScheduleExactAlarms()
+            if (exactAllowed) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                // 未授予精确闹钟权限：退化为不精确闹钟，系统会尽量在相近时间触发
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
 
             activeAlarms[schedule.id] = pendingIntent
-
-            schedule.nextSendTime = triggerTime
-            updateSchedule(schedule)
         }.onFailure {
-            WeLogger.e(TAG, "failed to set alarm for schedule ${schedule.id}", it)
+            WeLogger.e(TAG, "failed to set exact alarm for schedule ${schedule.id}", it)
+            // 最后兜底：精确闹钟被拒绝时再尝试一次不精确闹钟
+            runCatching {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+                activeAlarms[schedule.id] = pendingIntent
+            }.onFailure { e2 ->
+                WeLogger.e(TAG, "fallback alarm also failed for ${schedule.id}", e2)
+            }
         }
+    }
+
+    /**
+     * 进程内准点定时器：微信进程存活时按 nextSendTime 用 delay 触发，
+     * 与 AlarmManager 互为冗余（配合 handleScheduleTrigger 的时间守卫去重，不会重复发送）。
+     */
+    private fun scheduleInProcess(schedule: ScheduleConfig) {
+        timerJobs.remove(schedule.id)?.cancel()
+        val next = schedule.nextSendTime
+        val delayMs = next - System.currentTimeMillis()
+        if (delayMs <= 0) return
+        val job = CoroutineScope(Dispatchers.IO).launch {
+            try {
+                delay(delayMs)
+                handleScheduleTrigger(schedule.id)
+            } catch (e: CancellationException) {
+                // 任务被取消（停用/删除/重设闹钟）
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "in-process timer failed for ${schedule.id}", e)
+            }
+        }
+        timerJobs[schedule.id] = job
     }
 
     private fun calculateNextTriggerTime(schedule: ScheduleConfig): Long {
@@ -194,7 +253,12 @@ object ScheduledMessage : ClickableFeature() {
         return if (todayTarget > now) {
             todayTarget
         } else if (schedule.repeatDaily) {
-            todayTarget + 24 * 60 * 60 * 1000L
+            // Bug Fix: 如果今天的目标时间刚过不久（15分钟内），立即触发而不等到明天
+            if (now - todayTarget < 15 * 60 * 1000L) {
+                now + 2000L
+            } else {
+                todayTarget + 24 * 60 * 60 * 1000L
+            }
         } else {
             -1L
         }
@@ -204,6 +268,14 @@ object ScheduledMessage : ClickableFeature() {
         val schedule = schedules.find { it.id == scheduleId } ?: return
 
         if (!schedule.enabled) return
+
+        // 时间守卫：进程内定时器与闹钟可能先后触发，只允许到点后执行，避免重复发送
+        val nowMs = System.currentTimeMillis()
+        if (schedule.nextSendTime > 0 && nowMs < schedule.nextSendTime - 2000) {
+            WeLogger.i(TAG, "trigger for ${schedule.id} fired too early, skipping (next=${schedule.nextSendTime}, now=$nowMs)")
+            return
+        }
+        WeLogger.i(TAG, "scheduled trigger fired for ${schedule.id} (next=${schedule.nextSendTime}, now=$nowMs)")
 
         runCatching {
             if (schedule.segments.isNotEmpty()) {
@@ -300,7 +372,13 @@ object ScheduledMessage : ClickableFeature() {
     }
 
     private fun cancelAlarm(schedule: ScheduleConfig) {
-        activeAlarms.remove(schedule.id)?.cancel()
+        timerJobs.remove(schedule.id)?.cancel()
+        val pi = activeAlarms.remove(schedule.id) ?: return
+        pi.cancel()
+        runCatching {
+            val am = HostInfo.application.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.cancel(pi)
+        }.onFailure { WeLogger.w(TAG, "cancel alarm failed for ${schedule.id}", it) }
     }
 
     private fun addSchedule(schedule: ScheduleConfig) {
@@ -426,6 +504,8 @@ object ScheduledMessage : ClickableFeature() {
                     onDismiss = { showEditDialog = false },
                     onSave = { schedule ->
                         updateSchedule(schedule)
+                        // 编辑后重新计算并设置闹钟（时间可能已变更）
+                        if (schedule.enabled) scheduleAlarm(schedule)
                         showToast("定时任务已更新")
                         showEditDialog = false
                     },

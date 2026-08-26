@@ -11,6 +11,8 @@ class DexMethodDescriptor {
     val name: String
     val signature: String
 
+    private var _hashCode: Int = 0
+
     constructor(desc: String) {
         val a = desc.indexOf("->")
         val b = desc.indexOf('(', a)
@@ -29,12 +31,6 @@ class DexMethodDescriptor {
         signature = s
     }
 
-//    constructor(clz: Class<*>, n: String, s: String) {
-//        declaringClass = getTypeSig(clz)
-//        name = n
-//        signature = s
-//    }
-
     override fun toString() = "$declaringClass->$name$signature"
 
     val descriptor: String
@@ -43,10 +39,21 @@ class DexMethodDescriptor {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other == null || javaClass != other.javaClass) return false
-        return toString() == other.toString()
+        other as DexMethodDescriptor
+        return declaringClass == other.declaringClass &&
+                name == other.name &&
+                signature == other.signature
     }
 
-    override fun hashCode() = toString().hashCode()
+    override fun hashCode(): Int {
+        if (_hashCode == 0) {
+            var result = declaringClass.hashCode()
+            result = 31 * result + name.hashCode()
+            result = 31 * result + signature.hashCode()
+            _hashCode = result
+        }
+        return _hashCode
+    }
 
     fun getMethodInstance(classLoader: ClassLoader): Method {
         try {

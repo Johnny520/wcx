@@ -12,6 +12,10 @@ public class BaseConversationUI extends Activity {
         throw new RuntimeException("Stub!");
     }
 
+    public void startChatting(String userName) {
+        throw new RuntimeException("Stub!");
+    }
+
     public static class BaseConversationFmUI extends MMFragment {
 
     }

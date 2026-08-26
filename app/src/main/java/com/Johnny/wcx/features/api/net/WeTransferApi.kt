@@ -81,7 +81,7 @@ object WeTransferApi : ApiFeature(), IResolveDex {
     suspend fun fetchBeforeTransfer(memberId: String, groupId: String?): BeforeTransferRespProto? =
         suspendCancellableCoroutine { cont ->
             val reqBytes = BeforeTransferReqProto(userName = memberId, groupId = groupId).encode()
-            WePacketHelper.sendCgi("/cgi-bin/mmpay-bin/beforetransfer", 2783, 0, 0, reqBytes) {
+            WePacketHelper.sendCgiRaw("/cgi-bin/mmpay-bin/beforetransfer", 2783, 0, 0, reqBytes) {
                 onSuccess { bytes ->
                     val proto = bytes?.let { runCatching { BeforeTransferRespProto.decode(it) }.getOrNull() }
                     if (cont.isActive) cont.resume(proto)

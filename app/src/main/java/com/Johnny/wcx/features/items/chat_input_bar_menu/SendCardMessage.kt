@@ -2,10 +2,12 @@ package com.Johnny.wcx.features.items.chat_input_bar_menu
 
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Send_time_extension
+
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.ui.WeChatInputBarMenuApi
 import com.Johnny.wcx.features.api.ui.WeCurrentConversationApi
 import com.Johnny.wcx.features.core.Feature
+
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.android.showToast
 
@@ -21,19 +23,25 @@ object SendCardMessage : SwitchFeature() {
             WeChatInputBarMenuApi.ActionItem(
                 id = "send_card_message",
                 icon = MaterialSymbols.Outlined.Send_time_extension,
-                label = "发送卡片消息",
-                onClick = { _, chatFooter ->
+                label = ("发送卡片消息"),
+                onClick = { context, chatFooter ->
                     val currentConv = WeCurrentConversationApi.value
                     val content = chatFooter.lastText
 
                     if (content.isEmpty()) {
-                        showToast("输入内容为空!")
+                        showToast(
+                            context,
+                            ("输入内容为空！"),
+                        )
                         return@ActionItem
                     }
 
                     val isSuccess = WeMessageApi.sendXmlAppMsg(currentConv, content)
                     if (!isSuccess) {
-                        showToast("发送卡片消息失败, 请检查格式")
+                        showToast(
+                            context,
+                            ("发送卡片消息失败，请检查格式"),
+                        )
                         return@ActionItem
                     }
 

@@ -43,7 +43,7 @@ object SetProfileNickname : ClickableFeature() {
                             OpLog.CMD_SET_NICKNAME, SetNicknameProto(nickname = nickname)
                         )
 
-                        WePacketHelper.sendCgi(
+                        WePacketHelper.sendCgiRaw(
                             "/cgi-bin/micromsg-bin/oplog",
                             681, 0, 0,
                             reqBytes = reqBytes

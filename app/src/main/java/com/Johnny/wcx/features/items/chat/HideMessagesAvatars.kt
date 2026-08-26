@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -22,7 +23,6 @@ import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
-import com.Johnny.wcx.utils.HookParam
 
 @Feature(name = "隐藏消息头像", categories = ["聊天"], description = "隐藏消息的用户头像 (Telegram 风格)")
 object HideMessagesAvatars : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
@@ -44,7 +44,7 @@ object HideMessagesAvatars : ClickableFeature(), WeChatMessageViewApi.ICreateVie
         WeChatMessageViewApi.removeListener(this)
     }
 
-    override fun onCreateView(param: HookParam, view: View) {
+    override fun onCreateView(param: XC_MethodHook.MethodHookParam, view: View) {
         val tag = view.tag
         val msgInfo = WeChatMessageViewApi.getMsgInfoFromParam(param)
 

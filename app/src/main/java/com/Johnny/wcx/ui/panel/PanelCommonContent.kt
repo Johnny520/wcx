@@ -142,24 +142,6 @@ fun PanelActionWrapSetting(
 }
 
 @Composable
-fun PanelNavigationMemorySetting(
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    ListItem(
-        colors = panelListItemColors(),
-        headlineContent = { Text("记忆面板导航位置") },
-        supportingContent = { Text("关闭面板后，在本次微信运行期间恢复原页面") },
-        trailingContent = {
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-            )
-        },
-    )
-}
-
-@Composable
 fun PanelHistorySetting(
     value: Long,
     onValueChange: (Long) -> Unit,
@@ -178,20 +160,6 @@ fun PanelHistorySetting(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
-    )
-}
-
-@Composable
-fun PanelConcurrencySetting(
-    title: String,
-    value: Int,
-    onClick: () -> Unit,
-) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        colors = panelListItemColors(),
-        headlineContent = { Text(title) },
-        supportingContent = { Text("同时运行 $value 个任务 · 点击修改") },
     )
 }
 
@@ -341,36 +309,16 @@ fun LazyListScope.panelCollectionSettings(
     maxHistory: Long,
     onMaxHistoryChange: (Long) -> Unit,
     onCustomHistory: () -> Unit,
-    downloadConcurrency: Int,
-    onCustomDownloadConcurrency: () -> Unit,
-    conversionConcurrency: Int,
-    onCustomConversionConcurrency: () -> Unit,
     autoClose: Boolean,
     onAutoCloseChange: (Boolean) -> Unit,
     wrapActions: Boolean,
     onWrapActionsChange: (Boolean) -> Unit,
-    rememberNavigation: Boolean,
-    onRememberNavigationChange: (Boolean) -> Unit,
 ) {
     item {
         PanelHistorySetting(
             value = maxHistory,
             onValueChange = onMaxHistoryChange,
             onCustomValue = onCustomHistory,
-        )
-    }
-    item {
-        PanelConcurrencySetting(
-            title = "下载并发",
-            value = downloadConcurrency,
-            onClick = onCustomDownloadConcurrency,
-        )
-    }
-    item {
-        PanelConcurrencySetting(
-            title = "转换并发",
-            value = conversionConcurrency,
-            onClick = onCustomConversionConcurrency,
         )
     }
     item {
@@ -383,12 +331,6 @@ fun LazyListScope.panelCollectionSettings(
         PanelActionWrapSetting(
             checked = wrapActions,
             onCheckedChange = onWrapActionsChange,
-        )
-    }
-    item {
-        PanelNavigationMemorySetting(
-            checked = rememberNavigation,
-            onCheckedChange = onRememberNavigationChange,
         )
     }
 }

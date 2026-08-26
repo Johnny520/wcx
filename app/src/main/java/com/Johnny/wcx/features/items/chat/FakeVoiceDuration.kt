@@ -29,40 +29,64 @@ object FakeVoiceDuration : ClickableFeature(), IResolveDex {
             returnType = "long"
         }
     }
-    private const val KEY_DURATION = "fake_voice_duration"
+    private const val KEY_DURATION = "fake_voice_duration_seconds"
+
+    private const val DEFAULT_DURATION_SEC = 1
+    private const val MAX_DURATION_SEC = 60
 
     override fun onEnable() {
         methodVoiceRecorderGetLength.hookBefore {
-            result = WePrefs.getLongOrDef(KEY_DURATION, 0L)
+            result = getFakeDurationMs()
         }
+    }
+
+    /**
+     * Returns the faked voice duration in milliseconds.
+     * Public so other features (e.g. ForwardFavoriteVoices) that send voice via
+     * WeMessageApi.sendVoice — which bypasses the recorder hook — can apply the
+     * same fake duration for consistency.
+     */
+    fun getFakeDurationMs(): Long {
+        val durationSec = WePrefs.getIntOrDef(KEY_DURATION, DEFAULT_DURATION_SEC)
+            .coerceIn(0, MAX_DURATION_SEC)
+        return durationSec * 1000L
     }
 
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
-            var durationInput by remember { mutableStateOf(WePrefs.getLongOrDef(KEY_DURATION, 0).toString()) }
+            var durationInput by remember {
+                mutableStateOf(WePrefs.getIntOrDef(KEY_DURATION, DEFAULT_DURATION_SEC).toString())
+            }
             AlertDialogContent(
                 title = { Text("伪装语音时长") },
                 text = {
                     TextField(
                         value = durationInput,
-                        onValueChange = { durationInput = it.filter { c -> c.isDigit() } },
-                        label = { Text("语音时长 (毫秒)") })
+                        onValueChange = {
+                            durationInput = it.filter(Char::isDigit).take(2)
+                        },
+                        label = { Text("语音时长 (秒，最大${MAX_DURATION_SEC}秒)") }
+                    )
                 },
                 dismissButton = {
                     TextButton(onDismiss) { Text("取消") }
                 },
                 confirmButton = {
                     Button(onClick = {
-                        val durationMs = durationInput.toLongOrNull()
-                        if (durationMs == null) {
+                        val durationSec = durationInput.toIntOrNull()
+                        if (durationSec == null) {
                             showToast("时长格式不正确!")
                             return@Button
                         }
-
-                        WePrefs.putLong(KEY_DURATION, durationMs)
+                        if (durationSec < 0 || durationSec > MAX_DURATION_SEC) {
+                            showToast("时长范围: 0-${MAX_DURATION_SEC}秒")
+                            return@Button
+                        }
+                        WePrefs.putInt(KEY_DURATION, durationSec)
                         onDismiss()
                     }) { Text("确定") }
-                })
+                }
+            )
         }
     }
 }

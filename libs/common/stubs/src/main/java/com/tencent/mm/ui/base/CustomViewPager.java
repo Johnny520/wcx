@@ -1,10 +1,9 @@
 package com.tencent.mm.ui.base;
 
 import android.content.Context;
+import android.view.ViewGroup;
 
-import com.tencent.mm.ui.mogic.WxViewPager;
-
-public class CustomViewPager extends WxViewPager {
+public class CustomViewPager extends ViewGroup {
 
     public CustomViewPager(Context context) {
         super(context);

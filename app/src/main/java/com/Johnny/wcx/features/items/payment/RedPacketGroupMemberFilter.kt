@@ -31,6 +31,7 @@ import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.serialization.DefaultJson
 import com.Johnny.wcx.utils.strings.isGroupChatWxId
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.Serializable
 import kotlin.io.path.div
 import kotlin.io.path.exists
@@ -63,7 +64,7 @@ object RedPacketGroupMemberFilter {
         val rules = runCatching {
             val file = configFile
             if (!file.exists()) return emptyList()
-            DefaultJson.decodeFromString<List<GroupMemberRule>>(file.readText())
+            DefaultJson.decodeFromString(ListSerializer(GroupMemberRule.serializer()), file.readText())
                 .map { it.copy(members = it.members.filter { m -> m.isNotBlank() }) }
                 .filter { it.groupId.isGroupChatWxId }
         }.onFailure {

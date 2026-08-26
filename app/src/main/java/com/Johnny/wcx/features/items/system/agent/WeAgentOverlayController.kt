@@ -6,7 +6,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.ui.platform.ComposeView
-import com.Johnny.wcx.agent.data.OverlayMode
 import com.Johnny.wcx.features.api.agent.WeAgentService
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.agent.WeAgentBall
@@ -55,20 +54,19 @@ object WeAgentOverlayController {
     @Volatile
     private var desiredVisible = false
 
-    /** Which visibility rule the ball follows (§ 界面 setting). */
+    /** When true, the ball is only attached while WeChat is in the foreground (§ 界面 setting). */
     @Volatile
-    private var mode = OverlayMode.ALWAYS
+    private var foregroundOnly = false
 
     fun canDrawOverlays(): Boolean = Settings.canDrawOverlays(HostInfo.application)
 
     /**
-     * Marks the overlay as desired (feature enabled) and reconciles visibility. Under
-     * [OverlayMode.FOREGROUND_ONLY] the ball is only attached while WeChat is foreground; the
-     * tracker drives later attach/detach. Idempotent.
+     * Marks the overlay as desired (feature enabled) and reconciles visibility. With
+     * [foregroundOnly] on, the ball is only attached while WeChat is foreground; the tracker drives
+     * later attach/detach. Idempotent.
      */
     fun show() {
         desiredVisible = true
-        if (mode == OverlayMode.DISABLED) return
         if (!canDrawOverlays()) {
             showToast("请在系统设置中为微信开启「显示在其他应用上层」")
             WeLogger.w(TAG, "no SYSTEM_ALERT_WINDOW permission for host process")
@@ -85,13 +83,13 @@ object WeAgentOverlayController {
     }
 
     /**
-     * Sets the ball's visibility rule. Registers the foreground tracker for
-     * [OverlayMode.FOREGROUND_ONLY] so background transitions detach the ball, and reconciles
-     * immediately (e.g. re-attaches if WeChat is already foreground, or detaches now if it isn't).
+     * Sets whether the overlay is foreground-only. Registers the foreground tracker when enabling so
+     * background transitions detach the ball, and reconciles immediately (e.g. re-attaches if WeChat
+     * is already foreground, or detaches now if it's background).
      */
-    fun setMode(newMode: OverlayMode) {
-        mode = newMode
-        if (newMode == OverlayMode.FOREGROUND_ONLY) wireForegroundTracker()
+    fun setForegroundOnly(enabled: Boolean) {
+        foregroundOnly = enabled
+        if (enabled) wireForegroundTracker()
         reconcile()
     }
 
@@ -100,13 +98,10 @@ object WeAgentOverlayController {
         WeChatForegroundTracker.ensureRegistered()
     }
 
-    /** True when the ball should currently be attached given desire, mode, permission, and foreground. */
-    private fun shouldBeVisible(): Boolean = when (mode) {
-        OverlayMode.DISABLED -> false
-        OverlayMode.ALWAYS -> desiredVisible && canDrawOverlays()
-        OverlayMode.FOREGROUND_ONLY ->
-            desiredVisible && canDrawOverlays() && WeChatForegroundTracker.isForeground
-    }
+    /** True when the ball should currently be attached given desire, permission, and foreground. */
+    private fun shouldBeVisible(): Boolean =
+        desiredVisible && canDrawOverlays() &&
+                (!foregroundOnly || WeChatForegroundTracker.isForeground)
 
     /** Attaches or detaches the ball window to match [shouldBeVisible]. Must run on the main thread. */
     private fun reconcile() {
@@ -188,21 +183,6 @@ object WeAgentOverlayController {
 
     fun togglePanel() {
         if (panelView != null) removePanel() else addPanel()
-    }
-
-    /**
-     * Opens the panel independently of the ball — used by entry points that don't go through the
-     * overlay ball (e.g. the chat toolbar item), so the panel stays reachable with
-     * [OverlayMode.DISABLED]. No-op when the panel is already up. Must run on the main thread.
-     */
-    fun openPanel() {
-        if (panelView != null) return
-        if (!canDrawOverlays()) {
-            showToast("请在系统设置中为微信开启「显示在其他应用上层」")
-            WeLogger.w(TAG, "no SYSTEM_ALERT_WINDOW permission for host process")
-            return
-        }
-        addPanel()
     }
 
     private fun addPanel() {

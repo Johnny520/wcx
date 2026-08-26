@@ -134,7 +134,7 @@ object WePacketHelper : ApiFeature(), IResolveDex {
             }
         }
     }
-    val classNetScenePat by dexClass {
+    private val classNetScenePat by dexClass {
         matcher {
             classNetSceneBase.clazz.let { superClass = it.name }
 
@@ -209,7 +209,12 @@ object WePacketHelper : ApiFeature(), IResolveDex {
 
     private val cgiReqClassMap = mutableMapOf<Int, Class<*>>()
 
-    private val signers get() = WePacketSigner.signers
+    private val signers = listOf(
+        NewSendMsgSigner,
+        EmojiSigner,
+        AppMsgSigner,
+        SendPatSigner { classNetScenePat.clazz }
+    )
 
     private const val TAG = "WePacketHelper"
 
@@ -342,11 +347,11 @@ object WePacketHelper : ApiFeature(), IResolveDex {
         cgiId: Int,
         funcId: Int,
         routeId: Int,
-        reqJson: String,
+        jsonPayload: String,
         dslBlock: WeRequestDsl.() -> Unit
     ) {
         val dsl = WeRequestDsl().apply(dslBlock)
-        sendCgi(uri, cgiId, funcId, routeId, reqJson, dsl)
+        sendCgi(uri, cgiId, funcId, routeId, jsonPayload, dsl)
     }
 
     /**
@@ -357,7 +362,7 @@ object WePacketHelper : ApiFeature(), IResolveDex {
      * as the oplog operations). The bytes are dispatched through the generic request path;
      * signer-based CGIs are not supported here.
      */
-    fun sendCgi(
+    fun sendCgiRaw(
         uri: String,
         cgiId: Int,
         funcId: Int,
@@ -366,10 +371,10 @@ object WePacketHelper : ApiFeature(), IResolveDex {
         dslBlock: WeRequestDsl.() -> Unit
     ) {
         val dsl = WeRequestDsl().apply(dslBlock)
-        sendCgi(uri, cgiId, funcId, routeId, reqBytes, dsl)
+        sendCgiRaw(uri, cgiId, funcId, routeId, reqBytes, dsl)
     }
 
-    fun sendCgi(
+    fun sendCgiRaw(
         uri: String,
         cgiId: Int,
         funcId: Int,
@@ -403,10 +408,10 @@ object WePacketHelper : ApiFeature(), IResolveDex {
                 var successAction: (() -> Unit)? = null
 
                 // 签名分发
-                val signer = signers.firstOrNull { it.matchesJson(cgiId) }
+                val signer = signers.firstOrNull { it.match(cgiId) }
                 if (signer != null) {
-                    val result = signer.preprocessJson(cl, jsonObj)
-                    result.json?.let { jsonObj = it }
+                    val result = signer.sign(cl, jsonObj)
+                    jsonObj = result.json
                     nativeNetScene = result.nativeNetScene
                     successAction = result.onSendSuccess
                 }

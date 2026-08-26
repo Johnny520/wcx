@@ -5,8 +5,6 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -51,7 +49,7 @@ object UiAutomator {
                 ?: throw JvmBridgeException("Top activity has no decorView")
         }
         return when (val obj = JvmObjectRegistry.resolve(windowRef)
-            ?: throw JvmBridgeException(JvmObjectRegistry.missingHandleMessage(windowRef))) {
+            ?: throw JvmBridgeException("No live handle '$windowRef'")) {
             is View -> obj.rootView
             is Activity -> obj.window?.decorView
                 ?: throw JvmBridgeException("Activity handle has no decorView")
@@ -63,7 +61,7 @@ object UiAutomator {
 
     fun resolveView(ref: String): View {
         val obj = JvmObjectRegistry.resolve(ref)
-            ?: throw JvmBridgeException(JvmObjectRegistry.missingHandleMessage(ref))
+            ?: throw JvmBridgeException("No live handle '$ref'")
         return obj as? View ?: throw JvmBridgeException("'$ref' is not a View (${obj.javaClass.name})")
     }
 
@@ -299,17 +297,10 @@ object UiAutomator {
     // Held-gesture primitives (DOWN / MOVE / UP as separate tool calls)
     // -----------------------------------------------------------------------------------------
 
-    /**
-     * Mutable state kept for the current held gesture. A live gesture can be auto-cancelled.
-     *
-     * [decor] is held **weakly**: this is a static slot that only [touchUp] used to clear, so an
-     * errored/cancelled turn between `ui-touch-down` and `ui-touch-up` pinned the Activity's entire
-     * view hierarchy for the rest of the process's life. If the decor is gone the gesture is simply
-     * dead and gets dropped.
-     */
+    /** Mutable state kept for the current held gesture. A live gesture can be auto-cancelled. */
     data class GestureState(
         val downTime: Long,
-        val decor: java.lang.ref.WeakReference<View>,
+        val decor: View,
         val lastX: Float,
         val lastY: Float,
     )
@@ -321,25 +312,26 @@ object UiAutomator {
     /** Start a held touch gesture (ACTION_DOWN). Auto-cancels any previous active gesture. */
     fun touchDown(decor: View, screenX: Float, screenY: Float) {
         // Cancel stale gesture to avoid leaking a stuck DOWN event.
-        cancelActiveGesture()
+        activeGesture?.let { old ->
+            val (lx, ly) = toDecorLocal(old.decor, old.lastX, old.lastY)
+            val t = SystemClock.uptimeMillis()
+            val cancel = MotionEvent.obtain(old.downTime, t, MotionEvent.ACTION_CANCEL, lx, ly, 0)
+            old.decor.dispatchTouchEvent(cancel); cancel.recycle()
+        }
         val (lx, ly) = toDecorLocal(decor, screenX, screenY)
         val now = SystemClock.uptimeMillis()
         val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, lx, ly, 0)
         decor.dispatchTouchEvent(down); down.recycle()
-        activeGesture = GestureState(now, java.lang.ref.WeakReference(decor), screenX, screenY)
+        activeGesture = GestureState(now, decor, screenX, screenY)
     }
 
     /** Continue a held gesture with ACTION_MOVE. Requires a prior [touchDown]. */
     fun touchMove(screenX: Float, screenY: Float): String {
         val gs = activeGesture ?: return "No active gesture (call ui-touch-down first)."
-        val decor = gs.decor.get() ?: run {
-            activeGesture = null
-            return "The gesture's window is gone (the activity was destroyed); call ui-touch-down again."
-        }
-        val (lx, ly) = toDecorLocal(decor, screenX, screenY)
+        val (lx, ly) = toDecorLocal(gs.decor, screenX, screenY)
         val t = SystemClock.uptimeMillis()
         val mv = MotionEvent.obtain(gs.downTime, t, MotionEvent.ACTION_MOVE, lx, ly, 0)
-        decor.dispatchTouchEvent(mv); mv.recycle()
+        gs.decor.dispatchTouchEvent(mv); mv.recycle()
         activeGesture = gs.copy(lastX = screenX, lastY = screenY)
         return "Moved to ($screenX, $screenY)."
     }
@@ -347,37 +339,13 @@ object UiAutomator {
     /** Release a held gesture with ACTION_UP. */
     fun touchUp(screenX: Float, screenY: Float): String {
         val gs = activeGesture ?: return "No active gesture to release."
-        activeGesture = null
-        val decor = gs.decor.get()
-            ?: return "The gesture's window is gone (the activity was destroyed); nothing to release."
-        val (lx, ly) = toDecorLocal(decor, screenX, screenY)
+        val (lx, ly) = toDecorLocal(gs.decor, screenX, screenY)
         val t = SystemClock.uptimeMillis()
         val up = MotionEvent.obtain(gs.downTime, t, MotionEvent.ACTION_UP, lx, ly, 0)
-        decor.dispatchTouchEvent(up); up.recycle()
+        gs.decor.dispatchTouchEvent(up); up.recycle()
+        activeGesture = null
         return "Released at ($screenX, $screenY)."
     }
-
-    /**
-     * Dispatch ACTION_CANCEL for a still-held gesture and drop the reference. Called both by
-     * [touchDown] (superseding gesture) and from the engine's turn teardown — without the latter, a
-     * turn that fails or is cancelled between `ui-touch-down` and `ui-touch-up` leaves WeChat with a
-     * stuck ACTION_DOWN in its input state (subsequent real touches misbehave). Safe to call from any
-     * thread and when no gesture is active; dispatch is posted to the main thread without blocking.
-     */
-    fun cancelActiveGesture() {
-        val gs = activeGesture ?: return
-        activeGesture = null
-        val decor = gs.decor.get() ?: return
-        val dispatch = {
-            val (lx, ly) = toDecorLocal(decor, gs.lastX, gs.lastY)
-            val t = SystemClock.uptimeMillis()
-            val cancel = MotionEvent.obtain(gs.downTime, t, MotionEvent.ACTION_CANCEL, lx, ly, 0)
-            decor.dispatchTouchEvent(cancel); cancel.recycle()
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) dispatch() else mainHandler.post(dispatch)
-    }
-
-    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     // -----------------------------------------------------------------------------------------
     // View-level actions
