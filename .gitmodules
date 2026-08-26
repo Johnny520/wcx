@@ -1,6 +1,0 @@
-[submodule "libs/common/bsh"]
-	path = libs/common/bsh
-	url = https://github.com/Johnny520/bsh.git
-[submodule "libs/common/reflekt"]
-	path = libs/common/reflekt
-	url = https://github.com/Ujhhgtg/reflekt
