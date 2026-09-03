@@ -381,20 +381,41 @@ object ScheduledMessage : ClickableFeature() {
         }.onFailure { WeLogger.w(TAG, "cancel alarm failed for ${schedule.id}", it) }
     }
 
-    private fun addSchedule(schedule: ScheduleConfig) {
+    internal fun addSchedule(schedule: ScheduleConfig) {
         schedules = schedules + schedule
         if (schedule.enabled) {
             scheduleAlarm(schedule)
         }
     }
 
-    private fun updateSchedule(schedule: ScheduleConfig) {
+    internal fun updateSchedule(schedule: ScheduleConfig) {
         schedules = schedules.map { if (it.id == schedule.id) schedule else it }
     }
 
-    private fun deleteSchedule(schedule: ScheduleConfig) {
+    internal fun deleteSchedule(schedule: ScheduleConfig) {
         cancelAlarm(schedule)
         schedules = schedules.filter { it.id != schedule.id }
+    }
+
+    /**
+     * 公开 API: 通过 activity 拷贝 uri 到 moduleCache
+     */
+    internal fun copyUriToCache(activity: FragmentActivity, uri: Uri, type: MessageType): String? {
+        return activity.copyUriToCache(uri, type)
+    }
+
+    /**
+     * 公开 API: 获取指定会话的定时任务
+     */
+    internal fun getSchedulesForTalker(talker: String): List<ScheduleConfig> {
+        return schedules.filter { it.talker == talker }
+    }
+
+    /**
+     * 公开 API: 获取所有定时任务
+     */
+    internal fun getSchedules(): List<ScheduleConfig> {
+        return schedules
     }
 
     private fun segmentsSummary(segments: List<MessageSegment>): String {
