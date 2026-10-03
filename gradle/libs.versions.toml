@@ -1,7 +1,7 @@
 [versions]
 agp = "9.3.0"
 coil = "3.5.0"
-compose-bom = "2026.06.01"
+compose-bom = "2026.09.00"
 dexkit = "2.2.0"
 appcompat = "1.7.1"
 composablehorizons-symbols = "2.2.1"
