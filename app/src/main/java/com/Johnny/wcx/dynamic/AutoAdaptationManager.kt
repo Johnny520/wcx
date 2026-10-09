@@ -14,6 +14,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.withContext
 import org.luckypray.dexkit.DexKitBridge
 import kotlin.time.Duration.Companion.milliseconds
@@ -48,24 +51,23 @@ object AutoAdaptationManager {
         FAILED          // 适配失败
     }
 
-    private var state = AdaptationState.IDLE
-    private var lastAdaptedVersion = ""
-    private val featureClassFeatures = mutableMapOf<String, ClassFeature>()
-    private val scanResults = mutableMapOf<String, ScanResult>()
-
     @Volatile
-    private var isInitialized = false
+    private var state = AdaptationState.IDLE
+    @Volatile
+    private var lastAdaptedVersion = ""
+    private val featureClassFeatures = ConcurrentHashMap<String, ClassFeature>()
+    private val scanResults = ConcurrentHashMap<String, ScanResult>()
+    private val initialized = AtomicBoolean(false)
 
-    // 适配完成回调
-    private val onAdaptationCompleteCallbacks = mutableListOf<() -> Unit>()
+    // 回调可能由 UI 线程注册、由后台适配线程触发；使用线程安全容器避免并发修改异常。
+    private val onAdaptationCompleteCallbacks = CopyOnWriteArrayList<() -> Unit>()
 
     /**
      * 初始化适配管理器。
      * 在模块启动时调用一次。
      */
     fun init() {
-        if (isInitialized) return
-        isInitialized = true
+        if (!initialized.compareAndSet(false, true)) return
 
         WeLogger.i(TAG, "initializing auto adaptation manager")
         WeLogger.i(TAG, "wechat version: ${HostInfo.versionName}")
@@ -86,7 +88,9 @@ object AutoAdaptationManager {
     fun onAdaptationComplete(callback: () -> Unit) {
         onAdaptationCompleteCallbacks.add(callback)
         if (state == AdaptationState.COMPLETED || state == AdaptationState.PARTIAL) {
-            callback()
+            // A UI callback must not make registration fail or affect the adaptation worker.
+            runCatching { callback() }
+                .onFailure { WeLogger.e(TAG, "adaptation-complete callback failed", it) }
         }
     }
 
@@ -133,6 +137,18 @@ object AutoAdaptationManager {
 
         val feature = FeaturesProvider.ALL_HOOK_ITEMS.find { it.name == featureName }
         val classFeature = featureClassFeatures[featureName]
+            ?: feature?.technicalId?.takeIf { it.isNotBlank() }?.let(featureClassFeatures::get)
+
+        if (feature == null || classFeature == null) {
+            // The current generic ClassFeature registry is not keyed to most real feature names.
+            // Never silently pretend a retry occurred, and never inject a similarly named result.
+            WeLogger.w(
+                TAG,
+                "retry unavailable for '$featureName': no explicit BaseFeature <-> ClassFeature mapping is registered"
+            )
+            if (feature != null) DynamicFallbackChain.handleFailure(feature)
+            return
+        }
 
         if (feature != null && classFeature != null) {
             scope.launch {
@@ -140,15 +156,26 @@ object AutoAdaptationManager {
                     val dexKit = withContext(Dispatchers.IO) {
                         acquireDexKitBridge()
                     }
-                    if (dexKit != null) {
-                        val result = DynamicClassScanner.scan(dexKit, classFeature)
-                        if (result != null) {
-                            scanResults[featureName] = result
-                            DynamicHookInjector.inject(feature, result)
+                    if (dexKit == null) {
+                        WeLogger.w(TAG, "retry aborted for $featureName: DexKitBridge unavailable")
+                        DynamicFallbackChain.handleFailure(feature)
+                        return@launch
+                    }
+                    val result = DynamicClassScanner.scan(dexKit, classFeature)
+                    if (result != null) {
+                        // Keep the shared scan cache keyed by the ClassFeature registry ID,
+                        // exactly like scanBatch(). The requested BaseFeature name can differ
+                        // from that ID; mixing key spaces breaks lifecycle lookup and later retries.
+                        scanResults[classFeature.id] = result
+                        val injected = DynamicHookInjector.inject(feature, result)
+                        if (injected) {
                             WeLogger.i(TAG, "retry successful for $featureName")
                         } else {
+                            WeLogger.w(TAG, "retry scan matched but hook injection failed for $featureName")
                             DynamicFallbackChain.handleFailure(feature)
                         }
+                    } else {
+                        DynamicFallbackChain.handleFailure(feature)
                     }
                 } catch (e: Exception) {
                     WeLogger.e(TAG, "retry failed for $featureName", e)
@@ -227,6 +254,10 @@ object AutoAdaptationManager {
             DynamicClassScanner.scanBatch(dexKit, featureClassFeatures.values.toList())
         }
 
+        // A version re-adaptation must not retain targets discovered in the previous APK.
+        // Otherwise a failed scan can accidentally leave stale descriptors available to later
+        // lifecycle helpers or retry code.
+        scanResults.clear()
         scanResults.putAll(batchResult.success)
         WeLogger.i(TAG, "scan complete: ${batchResult.success.size} success, ${batchResult.failed.size} failed")
 
@@ -239,14 +270,41 @@ object AutoAdaptationManager {
 
         val injectSuccess = injectResults.count { it.value }
         val injectFailed = injectResults.count { !it.value }
-        WeLogger.i(TAG, "injection complete: $injectSuccess success, $injectFailed failed")
+        val unmappedDynamicFeatures = allFeatures.count { feature ->
+            feature.dexDelegates.isNotEmpty() && feature.displayName !in injectResults.keys
+        }
+        WeLogger.i(
+            TAG,
+            "injection complete: $injectSuccess success, $injectFailed failed, " +
+                "$unmappedDynamicFeatures feature(s) had no matching scan-result mapping"
+        )
+        if (unmappedDynamicFeatures > 0) {
+            WeLogger.w(TAG, "dynamic scan result IDs do not map to all feature delegate keys; those features were not dynamically injected")
+        }
 
-        // 步骤 4: 处理失败的功能
+        // 注入器以 displayName 作为结果键；扫描成功但注入失败的功能也必须进入降级链。
+        val injectionFailedNames = injectResults.filterValues { !it }.keys
+        for (feature in allFeatures) {
+            if (feature.displayName in injectionFailedNames) {
+                DynamicFallbackChain.handleFailure(feature)
+            }
+        }
+
+        // 步骤 4: 处理扫描失败的功能
         val failedFeatures = batchResult.failed
         for (failedFeature in failedFeatures) {
-            val feature = allFeatures.find { it.name == failedFeature.id }
+            val feature = allFeatures.find {
+                it.name == failedFeature.id ||
+                    (it.technicalId.isNotBlank() && it.technicalId == failedFeature.id)
+            }
             if (feature != null) {
                 DynamicFallbackChain.handleFailure(feature)
+            } else {
+                WeLogger.d(
+                    TAG,
+                    "scan feature '${failedFeature.id}' has no exact BaseFeature name/technicalId mapping; " +
+                        "not assigning its failure to an unrelated feature"
+                )
             }
         }
 
@@ -261,16 +319,24 @@ object AutoAdaptationManager {
 
         // 更新状态
         lastAdaptedVersion = HostInfo.versionName
-        state = if (batchResult.failed.isEmpty()) {
+        // 扫描成功不代表 Hook 注入成功；两阶段都必须无失败才能报告 COMPLETED。
+        state = if (
+            batchResult.failed.isEmpty() && injectFailed == 0 &&
+            injectResults.isNotEmpty() && unmappedDynamicFeatures == 0
+        ) {
             AdaptationState.COMPLETED
         } else {
+            // Do not report success when scanning succeeded but no feature received a mapping.
             AdaptationState.PARTIAL
         }
 
         WeLogger.i(TAG, "adaptation finished: state=$state, version=${HostInfo.versionName}")
 
         // 通知适配完成
-        onAdaptationCompleteCallbacks.forEach { it() }
+        onAdaptationCompleteCallbacks.forEach { callback ->
+            runCatching { callback() }
+                .onFailure { WeLogger.e(TAG, "adaptation-complete callback failed", it) }
+        }
     }
 
     /**
@@ -290,7 +356,10 @@ object AutoAdaptationManager {
      */
     private fun saveScanCache() {
         for ((featureId, result) in scanResults) {
-            val feature = FeaturesProvider.ALL_HOOK_ITEMS.find { it.name == featureId }
+            val feature = FeaturesProvider.ALL_HOOK_ITEMS.find {
+                it.name == featureId ||
+                    (it.technicalId.isNotBlank() && it.technicalId == featureId)
+            }
             if (feature is IResolveDex) {
                 try {
                     DexCacheManager.saveItemCache(feature)
@@ -326,7 +395,12 @@ object AutoAdaptationManager {
         val failedIds = batchResult.failed.map { it.id }.toSet()
 
         for (feature in allFeatures) {
-            val isScanFailed = feature is IResolveDex && feature.name in failedIds
+            // Scanner IDs are usually technical IDs, not localized feature names. Compare only
+            // exact stable identifiers; never use substring/fuzzy matching to attribute failure.
+            val isScanFailed = feature is IResolveDex && failedIds.any { failedId ->
+                failedId == feature.name ||
+                    (feature.technicalId.isNotBlank() && failedId == feature.technicalId)
+            }
             val isFallbackFailed = DynamicFallbackChain.isFailed(feature.name)
 
             if (isScanFailed && isFallbackFailed) {
@@ -355,11 +429,8 @@ object AutoAdaptationManager {
         // LauncherUI — 微信主界面
         featureClassFeatures["LauncherUI"] = ClassFeature(
             id = "LauncherUI",
-            superClass = "android.app.Activity",
-            interfaces = listOf(
-                "com.tencent.mm.ui.MMFragmentActivity",
-                "com.tencent.mm.ui.base.ActivityAttribute"
-            ),
+            superClass = "com.tencent.mm.plugin.secdata.ui.MMSecDataFragmentActivity",
+            classNameHint = "com.tencent.mm.ui.LauncherUI",
             stringConstants = listOf("ChattingUI", "LauncherUI", "main"),
             methodFeatures = listOf(
                 MethodFeature(
@@ -370,7 +441,7 @@ object AutoAdaptationManager {
                 )
             ),
             fallbackKeywords = listOf("LauncherUI", "MainUI", "HomeUI"),
-            description = "微信主界面 LauncherUI"
+            description = "微信主界面 LauncherUI（8.0.79 DEX 已核对类名和直接父类）"
         )
 
         // ===================================================================
@@ -406,17 +477,17 @@ object AutoAdaptationManager {
         featureClassFeatures["ConversationList"] = ClassFeature(
             id = "ConversationList",
             superClass = "android.widget.ListView",
-            interfaces = listOf("android.widget.AbsListView"),
-            stringConstants = listOf("conversation", "chat", "message"),
+            classNameHint = "com.tencent.mm.ui.conversation.ConversationListView",
             methodFeatures = listOf(
                 MethodFeature(
-                    id = "getAdapter",
-                    returnType = "Landroid/widget/ListAdapter;",
-                    paramCount = 0
+                    id = "getRealCount",
+                    returnType = "I",
+                    paramCount = 0,
+                    nameKeywords = listOf("getRealCount")
                 )
             ),
-            fallbackKeywords = listOf("Conversation", "ChatList", "MessageList"),
-            description = "微信会话列表"
+            fallbackKeywords = listOf("ConversationListView", "Conversation", "ChatList", "MessageList"),
+            description = "微信会话列表（8.0.79 DEX 已核对 ConversationListView）"
         )
 
         // ===================================================================
@@ -444,8 +515,8 @@ object AutoAdaptationManager {
 
         featureClassFeatures["TimelineUI"] = ClassFeature(
             id = "TimelineUI",
-            superClass = "android.app.Activity",
-            stringConstants = listOf("timeline", "sns", "moment"),
+            superClass = "com.tencent.mm.plugin.sns.ui.improve.ImproveSnsJankUI",
+            classNameHint = "com.tencent.mm.plugin.sns.ui.improve.ImproveSnsTimelineUI",
             methodFeatures = listOf(
                 MethodFeature(
                     id = "onCreate",
@@ -455,15 +526,15 @@ object AutoAdaptationManager {
                 )
             ),
             fallbackKeywords = listOf("Timeline", "Sns", "Moment"),
-            description = "微信朋友圈界面"
+            description = "微信朋友圈界面（8.0.79 ImproveSnsTimelineUI）"
         )
 
         featureClassFeatures["SnsTimeLineUI"] = ClassFeature(
             id = "SnsTimeLineUI",
-            superClass = "android.app.Activity",
-            stringConstants = listOf("SnsTimeLineUI", "SnsTimeLine"),
+            superClass = "com.tencent.mm.hellhoundlib.activities.HellActivity",
+            classNameHint = "com.tencent.mm.plugin.sns.ui.SnsTimeLineUI",
             fallbackKeywords = listOf("SnsTimeLine", "SnsUserUI"),
-            description = "朋友圈时间线"
+            description = "朋友圈旧版时间线类（8.0.79 DEX 已核对；生命周期方法由父类提供）"
         )
 
         // ===================================================================
@@ -522,8 +593,8 @@ object AutoAdaptationManager {
 
         featureClassFeatures["ChattingUI"] = ClassFeature(
             id = "ChattingUI",
-            superClass = "android.app.Activity",
-            stringConstants = listOf("ChattingUI", "chatting", "message"),
+            superClass = "com.tencent.mm.plugin.secdata.ui.MMSecDataFragmentActivity",
+            classNameHint = "com.tencent.mm.ui.chatting.ChattingUI",
             methodFeatures = listOf(
                 MethodFeature(
                     id = "onCreate",
@@ -538,7 +609,7 @@ object AutoAdaptationManager {
                 )
             ),
             fallbackKeywords = listOf("Chatting", "ChatUI", "MessageUI"),
-            description = "微信聊天界面"
+            description = "微信聊天界面（8.0.79 DEX 已核对类名和直接父类）"
         )
 
         // ===================================================================
@@ -547,18 +618,14 @@ object AutoAdaptationManager {
 
         featureClassFeatures["WebViewUI"] = ClassFeature(
             id = "WebViewUI",
-            superClass = "android.app.Activity",
-            stringConstants = listOf("WebView", "webview", "url"),
+            superClass = "com.tencent.mm.plugin.secdata.ui.MMSecDataActivity",
+            classNameHint = "com.tencent.mm.plugin.webview.ui.tools.WebViewUI",
             methodFeatures = listOf(
-                MethodFeature(
-                    id = "getWebView",
-                    returnType = "Landroid/webkit/WebView;",
-                    paramCount = 0,
-                    nameKeywords = listOf("getWebView", "webView")
-                )
+                MethodFeature(id = "onCreate", returnType = "V", paramTypes = listOf("Landroid/os/Bundle;"), paramCount = 1),
+                MethodFeature(id = "onResume", returnType = "V", paramCount = 0)
             ),
             fallbackKeywords = listOf("WebView", "Browser"),
-            description = "微信 WebView 界面"
+            description = "微信 WebView 界面（8.0.79 DEX 已核对类名和直接父类）"
         )
 
         // ===================================================================
@@ -587,24 +654,18 @@ object AutoAdaptationManager {
 
         featureClassFeatures["ChatFooter"] = ClassFeature(
             id = "ChatFooter",
-            superClass = "android.widget.LinearLayout",
-            stringConstants = listOf("chat", "footer", "input", "send"),
+            superClass = "android.widget.FrameLayout",
+            classNameHint = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
             methodFeatures = listOf(
                 MethodFeature(
-                    id = "getInputText",
+                    id = "getLastText",
                     returnType = "Ljava/lang/String;",
                     paramCount = 0,
-                    nameKeywords = listOf("getText", "getInput", "text")
-                ),
-                MethodFeature(
-                    id = "sendMessage",
-                    returnType = "V",
-                    paramCount = 1,
-                    nameKeywords = listOf("send", "dispatch")
+                    nameKeywords = listOf("getLastText")
                 )
             ),
             fallbackKeywords = listOf("ChatFooter", "InputBar", "SendPanel"),
-            description = "微信聊天输入栏"
+            description = "微信聊天输入栏（8.0.79 DEX 已核对 ChatFooter）"
         )
 
         WeLogger.i(TAG, "registered ${featureClassFeatures.size} class features")
