@@ -46,6 +46,7 @@ object DynamicFallbackChain {
     /**
      * 为功能注册备用实现。
      */
+    @Synchronized
     fun register(featureId: String, fallback: FallbackEntry) {
         fallbackRegistry.getOrPut(featureId) { mutableListOf() }.add(fallback)
         fallbackRegistry[featureId]?.sortBy { it.priority }
@@ -55,6 +56,7 @@ object DynamicFallbackChain {
     /**
      * 为功能注册多个备用实现。
      */
+    @Synchronized
     fun registerAll(featureId: String, fallbacks: List<FallbackEntry>) {
         fallbacks.forEach { register(featureId, it) }
     }
@@ -66,6 +68,7 @@ object DynamicFallbackChain {
      * @param error 失败原因
      * @return 是否通过备用链路成功启动
      */
+    @Synchronized
     fun handleFailure(feature: BaseFeature, error: Throwable? = null): Boolean {
         val featureId = feature.name
         if (featureId in failedFeatures) {
@@ -112,21 +115,25 @@ object DynamicFallbackChain {
     /**
      * 检查功能是否处于故障状态。
      */
+    @Synchronized
     fun isFailed(featureId: String): Boolean = featureId in failedFeatures
 
     /**
      * 检查功能是否通过备用链路运行。
      */
+    @Synchronized
     fun isFallbackActive(featureId: String): Boolean = featureId in activeFallbacks
 
     /**
      * 获取当前激活的备用实现 ID。
      */
+    @Synchronized
     fun getActiveFallback(featureId: String): String? = activeFallbacks[featureId]
 
     /**
      * 重置功能的故障状态（用于重新适配后重试）。
      */
+    @Synchronized
     fun reset(featureId: String) {
         failedFeatures.remove(featureId)
         val fallbackId = activeFallbacks.remove(featureId)
@@ -140,6 +147,7 @@ object DynamicFallbackChain {
     /**
      * 重置所有功能的故障状态。
      */
+    @Synchronized
     fun resetAll() {
         activeFallbacks.forEach { (featureId, fallbackId) ->
             fallbackRegistry[featureId]?.find { it.id == fallbackId }?.shutdown?.invoke()
@@ -152,6 +160,7 @@ object DynamicFallbackChain {
     /**
      * 获取故障统计信息。
      */
+    @Synchronized
     fun getStats(): Map<String, Any> {
         return mapOf(
             "totalFeatures" to fallbackRegistry.size,
