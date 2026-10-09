@@ -382,7 +382,10 @@ fn task_configure() -> Result<()> {
     for spec in ABI_TABLE {
         let cc = format!("{ndk_bin_dir}/{}{MIN_SDK}-clang{ext}", spec.clang_prefix);
         let cxx = format!("{ndk_bin_dir}/{}{MIN_SDK}-clang++{ext}", spec.clang_prefix);
-        let bindgen_args = format!("--sysroot={}", ndk_sysroot.display());
+        // NDK r30 起 sysroot 头文件（cdefs.h）要求显式 __ANDROID_API__，
+        // 否则 bindgen 用无版本 target（如 aarch64-linux-android）解析时
+        // 报 "Unversioned target triples are not supported!"，导致 Rust 原生库构建失败。
+        let bindgen_args = format!("--sysroot={} -D__ANDROID_API__={MIN_SDK}", ndk_sysroot.display());
         out.push_str(&format!("CC_{k} = \"{cc}\"\n", k = spec.env_key));
         out.push_str(&format!("CXX_{k} = \"{cxx}\"\n", k = spec.env_key));
         out.push_str(&format!("AR_{k} = \"{ar}\"\n", k = spec.env_key));
