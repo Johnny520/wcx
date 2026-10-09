@@ -279,6 +279,8 @@ object JavaEngine {
 
             // ===== Plugin Info =====
 
+            // scriptDir：脚本根目录（兼容 Hchat 脚本约定，WA 风格变量之一）
+            setVariable("scriptDir", KnownPaths.moduleData.resolve("scripts_java").absolutePathString())
             setVariable("pluginPath", plugin.dir.absolutePathString())
             setVariable("pluginDir", plugin.dir.toFile())
             setVariable("pluginId", plugin.name)

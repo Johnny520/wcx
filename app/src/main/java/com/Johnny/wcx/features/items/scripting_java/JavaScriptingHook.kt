@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.scripting_java
 
 import android.content.ContentValues
+import android.os.Environment
 import android.content.Context
 import android.net.Uri
 import androidx.activity.ComponentActivity
@@ -537,9 +538,37 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
         }
     }
 
-    // ── 安全列出脚本子目录（带异常处理） ──────────────────────────────────
+    /**
+     * 兼容脚本目录：Hchat 的脚本插件目录。
+     *
+     * WCX 与 Hchat 的脚本引擎同源（BeanShell + WA 风格变量表 + main.java/info.prop 约定），
+     * 这里额外扫描 Hchat 的脚本目录，使其脚本无需改动即可直接加载。
+     *
+     * 该目录位于公共外部存储，能否读取取决于宿主进程（微信）的存储权限：
+     * 无权限时安全跳过，不影响 WCX 自身脚本目录（scripts_java）的加载。
+     */
+    private val COMPAT_SCRIPT_DIRS: List<Path> by lazy {
+        runCatching {
+            val ext = Environment.getExternalStorageDirectory()?.toPath()
+            if (ext == null) emptyList() else listOf(ext / "Hchat" / "脚本插件")
+        }.onFailure {
+            WeLogger.w(TAG, "failed to resolve Hchat compat script dir", it)
+        }.getOrDefault(emptyList())
+    }
+
+    // ── 安全列出脚本子目录（带异常处理；兼容目录不可读不影响主目录） ──────────
     private fun safeListScriptDirs(): List<Path> = runCatching {
-        SCRIPTS_DIR.listDirectoryEntries().filter { it.isDirectory() }
+        val dirs = buildList {
+            addAll(SCRIPTS_DIR.listDirectoryEntries().filter { it.isDirectory() })
+            COMPAT_SCRIPT_DIRS.forEach { compat ->
+                if (runCatching { compat.isDirectory() }.getOrDefault(false)) {
+                    WeLogger.d(TAG, "发现兼容脚本目录: ${compat.toAbsolutePath()}")
+                    addAll(compat.listDirectoryEntries().filter { it.isDirectory() })
+                }
+            }
+        }
+        // 同名插件只保留一个，避免外部目录覆盖本地目录
+        dirs.distinctBy { it.name }
     }.getOrElse { e ->
         WeLogger.e(TAG, "列出脚本目录失败: ${SCRIPTS_DIR.toAbsolutePath().toString()}", e)
         lastScanError = "无法读取脚本目录: ${e.message}"
