@@ -366,8 +366,7 @@ fun LogsPager() {
                                         scope.launch {
                                             withContext(Dispatchers.IO) {
                                                 when (kind) {
-                                                    LogKind.RUN -> WeLogger.allLogFiles
-                                                        .forEach { runCatching { it.toFile().delete() } }
+                                                    LogKind.RUN -> WeLogger.clearRunLogs()
 
                                                     LogKind.CRASH -> CrashLogsManager.deleteAllCrashLogs()
                                                 }
