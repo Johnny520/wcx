@@ -31,6 +31,7 @@ import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.net.WeNetSceneApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.features.items.payment.stats.RedPacketStatsManager
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
@@ -216,6 +217,18 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
             if (amount <= 0) return@hookAfter
 
             val displayAmount = amount / 100.0
+
+            // 抢红包金额统计：开关开启才写入（关闭时不执行任何读写）；
+            // 金额<=0/解析异常已在上方短路；任一异常仅记日志，绝不影响抢红包核心流程。
+            if (RedPacketStatsManager.isEnabled()) {
+                RedPacketStatsManager.addSuccessRecord(
+                    senderName = info.nickName,
+                    chatName = runCatching { WeDatabaseApi.getDisplayName(info.talker) }.getOrDefault(""),
+                    money = displayAmount,
+                    msgType = redPacketTypeLabel(info.msgType),
+                    timestamp = System.currentTimeMillis(),
+                )
+            }
 
             val reply = packetAutoReply
             if (reply.isNotBlank()) {
@@ -409,6 +422,17 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
         val patternSimple = "<$tag>(.*?)</$tag>".toRegex()
         val matchSimple = patternSimple.find(xml)
         return matchSimple?.groupValues?.get(1) ?: ""
+    }
+
+    /**
+     * 红包类型展示文本。
+     * 【未验证】微信红包 nativeurl 的 msgtype 参数约定：1=普通红包、2=拼手气红包。
+     * 该映射基于公开惯例；若实际含义不同仅影响展示文本，不影响金额统计正确性。
+     */
+    private fun redPacketTypeLabel(msgType: Int): String = when (msgType) {
+        1 -> "普通红包"
+        2 -> "拼手气红包"
+        else -> "红包(type=$msgType)"
     }
 
     override fun onDisable() {
