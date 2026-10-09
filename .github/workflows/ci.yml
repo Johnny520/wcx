@@ -94,12 +94,19 @@ jobs:
         run: |
           cargo xtask configure
           # NDK r30 的 cdefs.h 要求显式 __ANDROID_API__；bindgen（含依赖 crate
-          # 如 silk-v3-sys）用无版本 target 解析 sysroot 头文件时，会报
-          # "Unversioned target triples are not supported!"。
-          # 直接改写 configure 生成的 .cargo/config.toml，向每个
-          # BINDGEN_EXTRA_CLANG_ARGS_* 注入 -D__ANDROID_API__=28（与 MIN_SDK 对齐）。
+          # 如 silk-v3-sys）默认传入无版本 target 会重置 __ANDROID_API__，解析
+          # sysroot 头文件时报 "Unversioned target triples are not supported!"。
+          # 兜底改写 configure 生成的 .cargo/config.toml：追加 -D__ANDROID_API__
+          # 与带 API 版本的 --target（覆盖 bindgen 默认无版本 target）。
+          # 注：xtask configure 已生成同款参数，此处仅作旧 xtask 缓存时的兜底。
           CFG_FILE="app/src/main/rust/wekit-native/.cargo/config.toml"
-          sed -i 's|BINDGEN_EXTRA_CLANG_ARGS_\([A-Za-z0-9_]*\) = "--sysroot=\([^"]*\)"|BINDGEN_EXTRA_CLANG_ARGS_\1 = "--sysroot=\2 -D__ANDROID_API__=28"|' "$CFG_FILE"
+          sed -i \
+            -e 's|BINDGEN_EXTRA_CLANG_ARGS_\([A-Za-z0-9_-]*\) = "--sysroot=\([^"]*\)"|BINDGEN_EXTRA_CLANG_ARGS_\1 = "--sysroot=\2 -D__ANDROID_API__=28"|' \
+            -e 's|BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android = "\("[^"]*\)"|BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android = "\1 --target=aarch64-linux-android28"|' \
+            -e 's|BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android = "\("[^"]*\)"|BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android = "\1 --target=x86_64-linux-android28"|' \
+            -e 's|BINDGEN_EXTRA_CLANG_ARGS_armv7-linux-androideabi = "\("[^"]*\)"|BINDGEN_EXTRA_CLANG_ARGS_armv7-linux-androideabi = "\1 --target=armv7a-linux-androideabi28"|' \
+            -e 's|BINDGEN_EXTRA_CLANG_ARGS_i686-linux-android = "\("[^"]*\)"|BINDGEN_EXTRA_CLANG_ARGS_i686-linux-android = "\1 --target=i686-linux-android28"|' \
+            "$CFG_FILE"
           grep 'BINDGEN_EXTRA' "$CFG_FILE"
           cargo xtask build --native-only
 
