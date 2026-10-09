@@ -62,6 +62,7 @@ import kotlinx.serialization.json.Json
 )
 object MessageFilterShield : ClickableFeature(),
     WeDatabaseListenerApi.IInsertListener,
+    WeDatabaseListenerApi.IInsertFilter,
     WeChatMessageViewApi.ICreateViewListener {
 
     private const val TAG = "MessageFilterShield"
@@ -82,9 +83,6 @@ object MessageFilterShield : ClickableFeature(),
 
     // 拦截日志（仅内存，不持久化，重启后清空）
     private val shieldLog = mutableListOf<ShieldLogEntry>()
-
-    // 需要被丢弃的消息 msgSvrId 集合
-    private val discardMsgIds = mutableSetOf<Long>()
 
     // ==================== 数据模型 ====================
 
@@ -175,10 +173,37 @@ object MessageFilterShield : ClickableFeature(),
     override fun onDisable() {
         WeDatabaseListenerApi.removeListener(this)
         WeChatMessageViewApi.removeListener(this)
-        discardMsgIds.clear()
     }
 
     // ==================== 消息插入监听（丢弃策略） ====================
+
+    // ==================== 消息插入拦截（丢弃策略） ====================
+    //
+    // 挂在 insertWithOnConflict 的 before 上；返回 false 会置 result = -1，真正阻止该消息入库。
+    // 原实现只把 msgSvrId 记进一个无人消费的集合（死代码），故「丢弃」从未生效。
+
+    override fun allowInsert(table: String, values: ContentValues): Boolean {
+        if (table != "message") return true
+        if (!masterEnabled) return true
+        if (strategy != FilterStrategy.DISCARD.value) return true
+
+        val msgInfo = runCatching { MessageInfo.fromContentValues(values) }.getOrNull() ?: return true
+        if (msgInfo.isSelfSender) return true
+
+        val (intercepted, ruleScope) = shouldInterceptWithScope(msgInfo.talker, msgInfo.typeCode)
+        if (!intercepted) {
+            logShield(msgInfo, "放过", ruleScope, false)
+            return true
+        }
+
+        logShield(msgInfo, "丢弃", ruleScope, true)
+        WeLogger.i(
+            TAG,
+            "discarded message (blocked insert): talker=${msgInfo.talker}, " +
+                "type=${msgInfo.typeCode}, scope=$ruleScope"
+        )
+        return false
+    }
 
     override fun onInsert(table: String, values: ContentValues) {
         if (table != "message") return
@@ -193,7 +218,6 @@ object MessageFilterShield : ClickableFeature(),
 
         val (intercepted, ruleScope) = shouldInterceptWithScope(talker, typeCode)
         if (intercepted) {
-            discardMsgIds.add(msgInfo.serverId)
             logShield(msgInfo, "丢弃", ruleScope, true)
             WeLogger.i(TAG, "discarded message: talker=$talker, type=$typeCode, scope=$ruleScope, msgSvrId=${msgInfo.serverId}")
         } else {

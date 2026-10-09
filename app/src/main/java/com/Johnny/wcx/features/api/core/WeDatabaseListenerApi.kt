@@ -29,11 +29,17 @@ object WeDatabaseListenerApi : ApiFeature() {
         fun onQuery(sql: String): String?
     }
 
+    /** 插入过滤器：返回 false 表示阻止本次插入（result 置为 -1）。 */
+    fun interface IInsertFilter {
+        fun allowInsert(table: String, values: ContentValues): Boolean
+    }
+
     private const val TAG = "WeDatabaseListenerApi"
 
     private val insertListeners = CopyOnWriteArrayList<IInsertListener>()
     private val updateListeners = CopyOnWriteArrayList<IUpdateListener>()
     private val queryListeners = CopyOnWriteArrayList<IQueryListener>()
+    private val insertFilters = CopyOnWriteArrayList<IInsertFilter>()
 
     /**
      * 最近一次 `insertWithOnConflict` 的数据库实例（insert hook 时捕获）。
@@ -53,6 +59,9 @@ object WeDatabaseListenerApi : ApiFeature() {
         if (listener is IQueryListener) {
             queryListeners.add(listener)
         }
+        if (listener is IInsertFilter) {
+            insertFilters.add(listener)
+        }
     }
 
     fun removeListener(listener: Any) {
@@ -65,6 +74,9 @@ object WeDatabaseListenerApi : ApiFeature() {
         if (listener is IQueryListener) {
             queryListeners.remove(listener)
         }
+        if (listener is IInsertFilter) {
+            insertFilters.remove(listener)
+        }
     }
 
     override fun onEnable() {
@@ -76,6 +88,7 @@ object WeDatabaseListenerApi : ApiFeature() {
     override fun onDisable() {
         insertListeners.clear()
         updateListeners.clear()
+        insertFilters.clear()
         queryListeners.clear()
     }
 
@@ -105,24 +118,45 @@ object WeDatabaseListenerApi : ApiFeature() {
     // ==================== Insert Hook ====================
 
     private fun hookDatabaseInsert() {
-        SQLiteDatabase::class.reflekt()
+        val insertMethod = SQLiteDatabase::class.reflekt()
             .firstMethod {
                 name = "insertWithOnConflict"
                 parameters(String::class, String::class, ContentValues::class, Int::class)
-            }.hookAfter {
-                lastInsertDb = thisObject as? SQLiteDatabase
-                try {
-                    if (insertListeners.isEmpty()) return@hookAfter
-
-                    val table = args[0] as String
-                    val values = args[2] as ContentValues
-
-                    logWithStack("Insert", table, args, result)
-                    insertListeners.forEach { it.onInsert(table, values) }
-                } catch (e: Throwable) {
-                    WeLogger.e(TAG, "Insert dispatch failed", e)
-                }
             }
+        // before：允许 IInsertFilter 阻止插入
+        insertMethod.hookBefore {
+            try {
+                if (insertFilters.isEmpty()) return@hookBefore
+
+                val table = args[0] as String
+                val values = args[2] as ContentValues
+
+                for (filter in insertFilters) {
+                    if (!filter.allowInsert(table, values)) {
+                        result = -1L
+                        WeLogger.i(TAG, "insert blocked by filter: table=$table")
+                        break
+                    }
+                }
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "Insert filter dispatch failed", e)
+            }
+        }
+        // after：原逻辑（记录 db 实例 + 通知插入监听）
+        insertMethod.hookAfter {
+            lastInsertDb = thisObject as? SQLiteDatabase
+            try {
+                if (insertListeners.isEmpty()) return@hookAfter
+
+                val table = args[0] as String
+                val values = args[2] as ContentValues
+
+                logWithStack("Insert", table, args, result)
+                insertListeners.forEach { it.onInsert(table, values) }
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "Insert dispatch failed", e)
+            }
+        }
     }
 
     // ==================== Update Hook ====================
