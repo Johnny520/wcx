@@ -54,6 +54,7 @@ import com.Johnny.wcx.utils.serialization.XmlUtils.extractXmlTag
 import org.json.JSONObject
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.matchers.base.AccessFlagsMatcher
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.lang.reflect.Constructor
@@ -1197,13 +1198,62 @@ object WeMessageApi : ApiFeature(), IResolveDex {
         }
     }
 
+    /**
+     * 由微信侧的「加密语音路径」解析出可用的语音文件完整路径。
+     *
+     * 容错（对齐 WeChatVoiceApi 一类成熟实现的做法，但按本工程框架重写）：
+     * [methodGetAmrFullPath] 在不同微信版本间参数形态发生过变化——既有
+     * `static (String, boolean)` 的 2 参形态，也有 `(Object, String, boolean)` 的 3 参形态。
+     * 早期实现无条件按 3 个实参调用，一旦宿主换成 2 参形态就会抛
+     * IllegalArgumentException: wrong number of arguments，被上层 catch 后表现为「转发语音失败」。
+     * 这里按实际 parameterCount 分派，并对返回值做非空/可读校验。
+     *
+     * 解析失败返回空串（不抛异常），调用方需自行判空。
+     */
     fun getVoiceFullPath(encPath: String): String {
-        val m = methodGetAmrFullPath.method
-        var service: Any? = null
-        if (!Modifier.isStatic(m.modifiers)) {
-            service = WeServiceApi.getServiceByClass(m.declaringClass)
+        if (encPath.isBlank()) {
+            WeLogger.w(TAG, "getVoiceFullPath: empty source path")
+            return ""
         }
-        return methodGetAmrFullPath.method.invoke(service, null, encPath, true) as String
+        val m = runCatching { methodGetAmrFullPath.method }.getOrElse {
+            WeLogger.e(TAG, "getVoiceFullPath: methodGetAmrFullPath not resolved", it)
+            return ""
+        }
+        val paramCount = m.parameterCount
+        val resolved = runCatching {
+            when (paramCount) {
+                // static (String, boolean)
+                2 -> m.invoke(null, encPath, true)
+                // (Object service, String, boolean) —— 实例方法需先取宿主服务实例
+                3 -> {
+                    val service = if (Modifier.isStatic(m.modifiers)) null
+                    else WeServiceApi.getServiceByClass(m.declaringClass)
+                    if (!Modifier.isStatic(m.modifiers) && service == null) {
+                        WeLogger.w(TAG, "getVoiceFullPath: service instance unavailable for ${m.declaringClass.name}")
+                        return ""
+                    }
+                    m.invoke(service, null, encPath, true)
+                }
+                else -> {
+                    WeLogger.w(TAG, "getVoiceFullPath: unsupported parameter count $paramCount for ${m.declaringClass.name}")
+                    return ""
+                }
+            }
+        }.onFailure {
+            WeLogger.e(TAG, "getVoiceFullPath failed (paramCount=$paramCount): $encPath", it)
+        }.getOrNull()
+
+        val result = resolved as? String
+        if (result.isNullOrBlank()) {
+            WeLogger.w(TAG, "getVoiceFullPath returned empty (paramCount=$paramCount): $encPath")
+            return ""
+        }
+        // 校验解析出的路径确实指向可读文件；不可读时仍按原样返回，
+        // 由调用方决定是否继续（避免把已失效的路径静默传给发送流程）。
+        if (!File(result).isFile) {
+            WeLogger.w(TAG, "getVoiceFullPath: resolved path is not an existing file: $result")
+        }
+        return result
     }
 
     // WeChat marks a received voice message as read (clearing the unplayed red dot) by

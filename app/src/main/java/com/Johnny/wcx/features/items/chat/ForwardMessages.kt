@@ -141,10 +141,33 @@ object ForwardMessages : SwitchFeature(),
     }
 
     private fun forwardVoice(toUser: String, msgInfo: MessageInfo): Boolean {
-        val encPath = msgInfo.imagePath ?: return false
+        // 语音消息的源路径取自微信消息对象的 field_imgPath；为空说明该消息没有可用的语音文件引用。
+        // 原来的实现直接 return false，失败现场没有任何日志，排查时无从下手。
+        val encPath = msgInfo.imagePath
+        if (encPath.isNullOrBlank()) {
+            WeLogger.w(TAG, "forwardVoice skipped: empty source path (type=${msgInfo.typeCode})")
+            return false
+        }
+
         val voicePath = WeMessageApi.getVoiceFullPath(encPath)
+        if (voicePath.isBlank()) {
+            WeLogger.w(TAG, "forwardVoice failed: cannot resolve voice file path from $encPath")
+            return false
+        }
+
+        // 时长由 native 解析（AudioUtils.getDurationMs -> lib.rs）。
+        // native 侧解析失败时不会抛异常，而是静默返回 0；这里显式记录，
+        // 便于区分「路径解析失败」与「时长解析失败」两种不同的失败原因。
         val durationMs = AudioUtils.getDurationMs(voicePath).toInt()
-        return WeMessageApi.sendVoice(toUser, voicePath, durationMs)
+        if (durationMs <= 0) {
+            WeLogger.w(TAG, "forwardVoice: duration unresolved for $voicePath (native returned $durationMs)")
+        }
+
+        val sent = WeMessageApi.sendVoice(toUser, voicePath, durationMs)
+        if (!sent) {
+            WeLogger.w(TAG, "forwardVoice: sendVoice returned false (path=$voicePath, duration=$durationMs)")
+        }
+        return sent
     }
 
     private fun forwardVideo(toUser: String, msgInfo: MessageInfo): Boolean {
