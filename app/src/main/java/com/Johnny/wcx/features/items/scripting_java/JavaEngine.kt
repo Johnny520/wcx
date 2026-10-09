@@ -28,6 +28,10 @@ import com.Johnny.wcx.features.api.core.WeServiceApi
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.net.WeNetSceneApi
 import com.Johnny.wcx.features.api.ui.WeCurrentConversationApi
+import com.Johnny.wcx.features.api.ui.WeAlertDialogApi
+import com.Johnny.wcx.features.api.ui.WeChatInputBarMenuApi
+import com.Johnny.wcx.features.api.ui.WeChatMessageContextMenuApi
+import com.Johnny.wcx.utils.android.runOnUiThread
 import com.Johnny.wcx.features.api.ui.WeMomentsApi
 import com.Johnny.wcx.utils.AudioUtils
 import com.Johnny.wcx.utils.BshSnapshotDecompiler
@@ -551,6 +555,202 @@ object JavaEngine {
             setMethod(
                 BshMethod("findClass", arrayOf(BString)) {
                     runCatching { ClassLoaders.HOST.loadClass(it[0] as String) }.getOrNull()
+                })
+
+            // ===== Menu registration（与 Hchat 脚本 API 同名，便于脚本互通）=====
+
+            setMethod(
+                BshMethod("registerPlusMenu", arrayOf(BString, Consumer::class.java)) {
+                    val title = it[0] as String
+                    @Suppress("UNCHECKED_CAST")
+                    val cb = it[1] as Consumer<Any?>
+                    val provider = WeChatInputBarMenuApi.IActionItemsProvider {
+                        listOf(
+                            WeChatInputBarMenuApi.ActionItem(
+                                id = "script_plus_$title",
+                                icon = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Block,
+                                label = title,
+                                onClick = { _, _ -> runCatching { cb.accept(null) } }
+                            )
+                        )
+                    }
+                    WeChatInputBarMenuApi.addProvider(provider)
+                    return@BshMethod provider
+                })
+            setMethod(
+                BshMethod("registerMessageMenu", arrayOf(BString, Consumer::class.java)) {
+                    val title = it[0] as String
+                    @Suppress("UNCHECKED_CAST")
+                    val cb = it[1] as Consumer<Any?>
+                    val provider = WeChatMessageContextMenuApi.IMenuItemsProvider {
+                        listOf(
+                            WeChatMessageContextMenuApi.MenuItem(
+                                id = title.hashCode(),
+                                text = title,
+                                drawable = HostInfo.application
+                                    .getDrawable(android.R.drawable.ic_menu_edit)
+                                    ?: android.graphics.drawable.ColorDrawable(0),
+                                imageVector = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Block,
+                                isSupported = { true },
+                                onClick = { _, _, _ -> runCatching { cb.accept(null) } }
+                            )
+                        )
+                    }
+                    WeChatMessageContextMenuApi.addProvider(provider)
+                    return@BshMethod provider
+                })
+            setMethod(
+                BshMethod("removeMenu", arrayOf(Any::class.java)) {
+                    when (val h = it[0]) {
+                        is WeChatInputBarMenuApi.IActionItemsProvider ->
+                            WeChatInputBarMenuApi.removeProvider(h)
+                        is WeChatMessageContextMenuApi.IMenuItemsProvider ->
+                            WeChatMessageContextMenuApi.removeProvider(h)
+                    }
+                    return@BshMethod null
+                })
+
+            // ===== Module dialogs（模块弹窗，与 Hchat 脚本 API 对应）=====
+
+            setMethod(
+                BshMethod("showModuleDialog", arrayOf(BString, BString)) {
+                    val title = it[0] as String
+                    val message = it[1] as String
+                    runOnUiThread {
+                        val act = getTopMostActivity(true)
+                        if (act == null) {
+                            showToast("$title: $message")
+                            return@runOnUiThread
+                        }
+                        runCatching {
+                            android.app.AlertDialog.Builder(act)
+                                .setTitle(title)
+                                .setMessage(message)
+                                .setPositiveButton("确定") { d, _ -> d.dismiss() }
+                                .show()
+                        }.onFailure { e -> showToast("弹窗失败：${e.message}") }
+                    }
+                    return@BshMethod true
+                })
+            setMethod(
+                BshMethod("showModuleConfirmDialog", arrayOf(BString, BString, Consumer::class.java)) {
+                    val title = it[0] as String
+                    val message = it[1] as String
+                    @Suppress("UNCHECKED_CAST")
+                    val cb = it[2] as Consumer<Any?>
+                    runOnUiThread {
+                        val act = getTopMostActivity(true)
+                        if (act == null) return@runOnUiThread
+                        runCatching {
+                            android.app.AlertDialog.Builder(act)
+                                .setTitle(title)
+                                .setMessage(message)
+                                .setPositiveButton("确定") { _, _ ->
+                                    runCatching { cb.accept(true) }
+                                }
+                                .setNegativeButton("取消") { _, _ ->
+                                    runCatching { cb.accept(false) }
+                                }
+                                .show()
+                        }.onFailure { e -> showToast("弹窗失败：${e.message}") }
+                    }
+                    return@BshMethod true
+                })
+            setMethod(
+                BshMethod(
+                    "showModuleInputDialog",
+                    arrayOf(BString, BString, BString, BString, Consumer::class.java)
+                ) {
+                    val title = it[0] as String
+                    val initial = it[2] as String
+                    val placeholder = it[3] as String
+                    @Suppress("UNCHECKED_CAST")
+                    val cb = it[4] as Consumer<Any?>
+                    runOnUiThread {
+                        val act = getTopMostActivity(true)
+                        if (act == null) return@runOnUiThread
+                        runCatching {
+                            val input = android.widget.EditText(act)
+                            input.setText(initial)
+                            input.hint = placeholder
+                            android.app.AlertDialog.Builder(act)
+                                .setTitle(title)
+                                .setView(input)
+                                .setPositiveButton("确定") { _, _ ->
+                                    runCatching { cb.accept(input.text.toString()) }
+                                }
+                                .setNegativeButton("取消", null)
+                                .show()
+                        }.onFailure { e -> showToast("弹窗失败：${e.message}") }
+                    }
+                    return@BshMethod true
+                })
+            setMethod(
+                BshMethod(
+                    "showModuleChoiceDialog",
+                    arrayOf(BString, BString, List::class.java, Consumer::class.java)
+                ) {
+                    val title = it[0] as String
+                    val choices = (it[2] as List<*>).map { c -> c?.toString() ?: "" }
+                    @Suppress("UNCHECKED_CAST")
+                    val cb = it[3] as Consumer<Any?>
+                    runOnUiThread {
+                        val act = getTopMostActivity(true)
+                        if (act == null) return@runOnUiThread
+                        runCatching {
+                            android.app.AlertDialog.Builder(act)
+                                .setTitle(title)
+                                .setSingleChoiceItems(
+                                    Array(choices.size) { i -> choices[i] as CharSequence },
+                                    -1
+                                ) { d, which ->
+                                    runCatching { cb.accept(which) }
+                                    d.dismiss()
+                                }
+                                .setNegativeButton("取消", null)
+                                .show()
+                        }.onFailure { e -> showToast("弹窗失败：${e.message}") }
+                    }
+                    return@BshMethod true
+                })
+            setMethod(
+                BshMethod(
+                    "showModuleMultiChoiceDialog",
+                    arrayOf(BString, BString, List::class.java, Consumer::class.java)
+                ) {
+                    val title = it[0] as String
+                    val choices = (it[2] as List<*>).map { c -> c?.toString() ?: "" }
+                    @Suppress("UNCHECKED_CAST")
+                    val cb = it[3] as Consumer<Any?>
+                    val checked = BooleanArray(choices.size)
+                    runOnUiThread {
+                        val act = getTopMostActivity(true)
+                        if (act == null) return@runOnUiThread
+                        runCatching {
+                            val items = Array(choices.size) { i -> choices[i] as CharSequence }
+                            android.app.AlertDialog.Builder(act)
+                                .setTitle(title)
+                                .setMultiChoiceItems(
+                                    items, checked
+                                ) { _, which, isChecked -> checked[which] = isChecked }
+                                .setPositiveButton("确定") { _, _ ->
+                                    runCatching {
+                                        cb.accept(checked.indices.filter { checked[it] })
+                                    }
+                                }
+                                .setNegativeButton("取消", null)
+                                .show()
+                        }.onFailure { e -> showToast("弹窗失败：${e.message}") }
+                    }
+                    return@BshMethod true
+                })
+
+            // ===== Contact label（与 Hchat 脚本 API 对应）=====
+
+            setMethod(
+                BshMethod("addContactLabel", arrayOf(BString)) {
+                    val name = it[0] as String
+                    WeContactLabelApi.createLabel(name)?.toString() ?: ""
                 })
 
             // getLong(key, default)
