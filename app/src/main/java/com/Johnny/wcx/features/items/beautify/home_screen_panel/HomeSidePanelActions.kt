@@ -103,12 +103,11 @@ internal class HomeSidePanelActionExecutor(
 ) {
 
     fun execute(kind: HomeSidePanelActionKind) {
-        if (kind == HomeSidePanelActionKind.MARK_ALL_READ) {
-            closePanel(null)
-            executeAfterPanelClosed(kind)
-        } else {
-            closePanel { executeAfterPanelClosed(kind) }
-        }
+        // 关闭面板后立即执行动作，不依赖关闭动画的回调：
+        // HomeSidePanel.animateTo 在动画被 cancel 时 onAnimationEnd 会直接 return，
+        // afterClosed 将永不触发，导致动作丢失（表现为“点击无反应”）。
+        closePanel(null)
+        executeAfterPanelClosed(kind)
     }
 
     fun openPaymentCode() {

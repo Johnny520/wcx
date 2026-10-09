@@ -181,8 +181,12 @@ internal fun HomeSidePanelWeatherCard(
         is WeatherCardContent.Preview -> content.snapshot
     }
     val shape = RoundedCornerShape(24.dp)
+    // 点击天气卡片直接进入该卡片的设置（改位置/定位），取代原先的“点击刷新”；
+    // 未提供 onEditCard 时回退为刷新，保持既有能力。
     val clickModifier = if (interactionEnabled && !editMode && runtime != null) {
-        Modifier.clickable { onRefresh(card.id) }
+        Modifier.clickable {
+            onEditCard?.invoke(card.id) ?: onRefresh(card.id)
+        }
     } else {
         Modifier
     }
@@ -231,7 +235,7 @@ internal fun HomeSidePanelWeatherCard(
                 )
                 snapshot?.let {
                     Text(
-                        "更新于 ".format(formatWeatherPublishedAt(it.publishedAt)),
+                        "更新于 %s".format(formatWeatherPublishedAt(it.publishedAt)),
                         modifier = Modifier
                             .padding(start = 10.dp)
                             .widthIn(max = 112.dp),
@@ -275,7 +279,7 @@ internal fun HomeSidePanelWeatherCard(
                                         maxLines = 1,
                                     )
                                     Text(
-                                        "体感 ".format(snapshot.feelsLike),
+                                        "体感 %s".format(snapshot.feelsLike),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = contentColor.copy(alpha = 0.72f),
                                     )
@@ -550,8 +554,8 @@ internal fun HomeSidePanelHitokotoCard(
                             author != null && source != null ->
                                 "—— %1\$s「%2\$s」".format(author, source)
 
-                            author != null -> "—— ".format(author)
-                            source != null -> "——「".format(source)
+                            author != null -> "—— %s".format(author)
+                            source != null -> "——「%s」".format(source)
                             else -> null
                         }
                         attribution?.let {
