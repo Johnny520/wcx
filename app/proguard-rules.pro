@@ -21,14 +21,14 @@
 -keep class kotlin.coroutines.Continuation { *; }
 -dontwarn kotlinx.coroutines.**
 
-# kotlin-reflect 经传递依赖存在于 APK：R8 不得裁剪其内建表
-# （否则 KotlinBuiltIns.getBuiltInClassByFqName 返回 null → 启用功能时 IllegalStateException）
+# kotlin-reflect 在运行时反射路径中使用；暂时保留其内建表，避免反射/脚本功能回归。
 -keep class kotlin.reflect.** { *; }
 -dontwarn kotlin.reflect.**
 
 # ─── Serialization ──────────────────────────────────────────────────
 -keepattributes *Annotation*, InnerClasses
--keep class kotlinx.serialization.** { *; }
+# 不再全量 keep kotlinx.serialization 运行库。运行时入口由普通可达性分析保留，
+# 应用内生成的 serializer 仍由下方规则保留，允许 R8 移除未使用的格式/实现代码。
 -dontnote kotlinx.serialization.AnnotationsKt
 -keepclassmembers class kotlinx.serialization.json.** {
     *** Companion;
@@ -50,7 +50,8 @@
 -dontwarn androidx.room.paging.**
 
 # ─── Compose ────────────────────────────────────────────────────────
--keep class androidx.compose.** { *; }
+# 不要全量 keep androidx.compose：Compose 依赖自带 consumer rules，
+# 全量 keep 会阻止 R8 删除未使用的 UI/运行时实现，显著增大 release APK。
 -dontwarn androidx.compose.**
 
 # ─── Third-party (dontwarn only, allow R8 optimization) ──────────────
@@ -69,7 +70,7 @@
 -dontwarn java.lang.invoke.**
 
 # ─── WeChat Stubs ───────────────────────────────────────────────────
--keep class com.tencent.mm.** { *; }
+# 微信 API stub 为 compileOnly；不应打入模块 APK，也无需对其设置 keep 规则。
 
 # ─── Obfuscation Enhancements ───────────────────────────────────────
 -repackageclasses
