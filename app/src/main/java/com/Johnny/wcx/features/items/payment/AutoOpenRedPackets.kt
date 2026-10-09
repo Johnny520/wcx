@@ -219,7 +219,13 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
 
             val reply = packetAutoReply
             if (reply.isNotBlank()) {
-                WeMessageApi.sendText(info.talker, reply.replace($$"$amount", "¥$displayAmount"))
+                try {
+                    WeMessageApi.sendText(info.talker, reply.replace("\$amount", "¥$displayAmount"))
+                    WeLogger.i(TAG, "sent red packet auto-reply to ${info.talker}")
+                } catch (e: Throwable) {
+                    // 自动回复失败不能中断抢红包成功处理或通知逻辑。
+                    WeLogger.e(TAG, "red packet auto-reply failed (talker=${info.talker})", e)
+                }
             }
 
             if (!packetNotif) return@hookAfter
@@ -386,6 +392,9 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                     WeLogger.i(TAG, "sent receive request (sendId=$sendId)")
                 } catch (e: Throwable) {
                     WeLogger.e(TAG, "failed to send receive request (sendId=$sendId)", e)
+                    currentRedPacketMap.remove(sendId)
+                    retryCountMap.remove(sendId)
+                    processedSendIds.remove(sendId)
                 }
             }
         } catch (e: Throwable) {
@@ -522,7 +531,7 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                             value = autoReplyInput,
                             onValueChange = { autoReplyInput = it.trim() },
                             label = { Text("抢到后自动回复 (留空禁用)") },
-                            supportingText = { Text($$"成功抢到红包后向来源对话发送自定义消息\n(使用占位符 $amount 表示金额)") },
+                            supportingText = { Text("成功抢到红包后向来源对话发送自定义消息\n(使用占位符 \$amount 表示金额)") },
                             singleLine = true,
                         )
                     }
