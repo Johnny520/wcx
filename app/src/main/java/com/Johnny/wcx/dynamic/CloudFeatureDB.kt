@@ -129,6 +129,19 @@ object CloudFeatureDB {
             }
 
             val json = JSONObject(cacheFile.readText())
+            val cachedVersion = json.optString("weChatVersion", "")
+            if (cachedVersion != currentWeChatVersion) {
+                // Cached class/method descriptors are version-specific. Loading a cache from
+                // another host version can silently inject stale members into the current APK.
+                features.clear()
+                lastUpdateTime = 0L
+                WeLogger.w(
+                    TAG,
+                    "discarding cloud feature cache for WeChat '$cachedVersion'; " +
+                        "current version is '$currentWeChatVersion'"
+                )
+                return
+            }
             val featuresArray = json.getJSONArray("features")
             features.clear()
             for (i in 0 until featuresArray.length()) {
@@ -175,33 +188,40 @@ object CloudFeatureDB {
     // -----------------------------------------------------------------------
 
     private fun fetchFromCloud(): Boolean {
-        try {
-            val url = URL("$CLOUD_URL?wechat_version=${HostInfo.versionName}&module_version=${HostInfo.versionName}")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 10_000
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("Accept", "application/json")
+        // This repository currently contains a placeholder domain, not a deployable service.
+        // Avoid a 10-second network timeout on every startup and make the limitation explicit.
+        if (CLOUD_URL.contains("example.com", ignoreCase = true)) {
+            WeLogger.w(TAG, "cloud feature sync disabled: CLOUD_URL is still a placeholder; local features remain available")
+            return false
+        }
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL("$CLOUD_URL?wechat_version=${java.net.URLEncoder.encode(HostInfo.versionName, Charsets.UTF_8.name())}&module_version=${java.net.URLEncoder.encode(com.Johnny.wcx.BuildConfig.VERSION_NAME, Charsets.UTF_8.name())}")
+            val activeConnection = url.openConnection() as HttpURLConnection
+            connection = activeConnection
+            activeConnection.connectTimeout = 10_000
+            activeConnection.readTimeout = 10_000
+            activeConnection.requestMethod = "GET"
+            activeConnection.setRequestProperty("Accept", "application/json")
 
-            val responseCode = connection.responseCode
+            val responseCode = activeConnection.responseCode
             if (responseCode != 200) {
                 WeLogger.w(TAG, "cloud returned HTTP $responseCode")
-                return false
+                false
+            } else {
+                val response = activeConnection.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(response)
+                parseAndMergeFeatures(json)
+
+                lastUpdateTime = System.currentTimeMillis()
+                saveLocalCache()
+
+                WeLogger.i(TAG, "cloud update successful, ${features.size} features loaded")
+                true
             }
-
-            val response = connection.inputStream.bufferedReader().readText()
-            connection.disconnect()
-
-            val json = JSONObject(response)
-            parseAndMergeFeatures(json)
-
-            lastUpdateTime = System.currentTimeMillis()
-            saveLocalCache()
-
-            WeLogger.i(TAG, "cloud update successful, ${features.size} features loaded")
-            return true
-        } catch (e: Exception) {
-            throw e
+        } finally {
+            // Always release the connection, including non-200 responses and JSON parse errors.
+            connection?.disconnect()
         }
     }
 
