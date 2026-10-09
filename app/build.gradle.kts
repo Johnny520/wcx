@@ -12,17 +12,21 @@ plugins {
     alias(libs.plugins.aboutlibraries.android)
 }
 
-fun getCommitCount(): Int {
-    return providers.exec {
-        commandLine("git", "rev-list", "--count", "HEAD")
-    }.standardOutput.asText.get().trim().toInt()
-}
+// Source ZIPs often do not include .git metadata. Do not make a clean export
+// impossible to build just because the repository history is unavailable.
+fun gitValue(vararg args: String): String? = runCatching {
+    providers.exec {
+        commandLine("git", *args)
+        isIgnoreExitValue = true
+    }.let { result ->
+        if (result.result.get().exitValue == 0) result.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
+        else null
+    }
+}.getOrNull()
 
-fun getGitHash(): String {
-    return providers.exec {
-        commandLine("git", "rev-parse", "--short", "HEAD")
-    }.standardOutput.asText.get().trim()
-}
+fun getCommitCount(): Int = gitValue("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0
+
+fun getGitHash(): String = gitValue("rev-parse", "--short", "HEAD") ?: "source-zip"
 
 android {
     namespace = libs.versions.namespace.get()
