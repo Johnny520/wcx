@@ -4,7 +4,12 @@ import android.util.Log
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.fs.createDirsSafe
-import java.io.FileWriter
+import java.io.BufferedWriter
+import java.io.OutputStreamWriter
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
+import java.nio.file.StandardCopyOption
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -20,7 +25,12 @@ object WeLogger {
     private const val TAG = BuildConfig.TAG
 
     private const val CHUNK_SIZE = 4000
-    private const val MAX_CHUNKS = 200
+    // A single verbose packet/database dump must not enqueue hundreds of thousands of chars.
+    private const val MAX_CHUNKS = 16
+    private const val MAX_LOG_FILE_BYTES = 4L * 1024 * 1024
+    private const val MAX_RECORD_CHARS = 32_000
+    private const val MAX_TOTAL_LOG_BYTES = 24L * 1024 * 1024
+    private const val MAX_LOG_AGE_DAYS = 3L
     private const val QUEUE_CAPACITY = 2048
     private const val RESERVED_IMPORTANT_CAPACITY = 128
     private const val BATCH_SIZE = 64
@@ -39,6 +49,7 @@ object WeLogger {
         ) : WriteTask
 
         class Flush(val completed: CountDownLatch) : WriteTask
+        class Clear(val completed: CountDownLatch) : WriteTask
     }
 
     /**
@@ -52,52 +63,110 @@ object WeLogger {
         start()
     }
 
-    private var writer: FileWriter? = null
+    private var writer: BufferedWriter? = null
     private var currentLogDate: LocalDate? = null
+    private var currentLogPath: java.nio.file.Path? = null
+    private var currentLogBytes: Long = 0L
 
     // ========== File Logging Internals ==========
 
-    private fun getOrRotateWriter(logDate: LocalDate): FileWriter? {
+    private fun getOrRotateWriter(logDate: LocalDate): BufferedWriter? {
         if (writer != null && currentLogDate == logDate) return writer
 
-        writer?.runCatching { close() }
-        writer = null
-        currentLogDate = null
-
+        closeWriter()
         val logsDir = runCatching {
             (KnownPaths.moduleData / "logs").createDirsSafe()
         }.getOrNull() ?: return null
 
-        // Clean up logs older than 3 days during rotation/initialization
-        deleteOldLogs(logsDir)
-
+        pruneLogs(logsDir)
         val logPath = logsDir / "wcx-${dateFmt.format(logDate)}.log"
-
         return runCatching {
-            FileWriter(logPath.toFile(), true).also {
+            BufferedWriter(
+                OutputStreamWriter(
+                    Files.newOutputStream(
+                        logPath,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.WRITE,
+                        StandardOpenOption.APPEND,
+                    ),
+                    StandardCharsets.UTF_8,
+                ),
+            ).also {
                 writer = it
                 currentLogDate = logDate
+                currentLogPath = logPath
+                currentLogBytes = Files.size(logPath)
             }
         }.getOrNull()
     }
 
-    private fun deleteOldLogs(logsDir: java.nio.file.Path) {
-        runCatching {
-            val thresholdDate = LocalDate.now().minusDays(3)
-            val logFileRegex = Regex("""wcx-(\d{4}-\d{2}-\d{2})\.log""")
+    private fun closeWriter() {
+        writer?.runCatching { flush(); close() }
+        writer = null
+        currentLogDate = null
+        currentLogPath = null
+        currentLogBytes = 0L
+    }
 
-            logsDir.toFile().listFiles()?.forEach { file ->
-                val match = logFileRegex.matchEntire(file.name)
-                if (match != null) {
-                    val dateStr = match.groupValues[1]
-                    val fileDate = runCatching { LocalDate.parse(dateStr, dateFmt) }.getOrNull()
-
-                    // If the log file date is older than 3 days ago, delete it
-                    if (fileDate != null && fileDate.isBefore(thresholdDate)) {
-                        file.delete()
+    private fun rotateCurrentLog() {
+        val oldPath = currentLogPath
+        val oldDate = currentLogDate
+        closeWriter()
+        if (oldPath != null && oldDate != null) {
+            runCatching {
+                if (Files.exists(oldPath) && Files.size(oldPath) > 0L) {
+                    val dir = oldPath.parent
+                    var rotated = dir.resolve("wcx-${dateFmt.format(oldDate)}-${System.currentTimeMillis()}.log")
+                    var suffix = 1
+                    while (Files.exists(rotated)) {
+                        rotated = dir.resolve("wcx-${dateFmt.format(oldDate)}-${System.currentTimeMillis()}-$suffix.log")
+                        suffix++
                     }
+                    Files.move(oldPath, rotated, StandardCopyOption.REPLACE_EXISTING)
+                }
+            }.onFailure { Log.w(TAG, "failed to rotate run log", it) }
+            runCatching { pruneLogs(oldPath.parent) }
+        }
+    }
+
+    private fun pruneLogs(logsDir: java.nio.file.Path) {
+        runCatching {
+            val thresholdDate = LocalDate.now().minusDays(MAX_LOG_AGE_DAYS)
+            val logFileRegex = Regex("""wcx-(\d{4}-\d{2}-\d{2})(?:-\d{13}(?:-\d+)?)?\.log""")
+            val files = logsDir.toFile().listFiles()
+                ?.filter { it.isFile && logFileRegex.matches(it.name) }
+                ?.toMutableList()
+                ?: return
+
+            files.forEach { file ->
+                val match = logFileRegex.matchEntire(file.name) ?: return@forEach
+                val fileDate = runCatching { LocalDate.parse(match.groupValues[1], dateFmt) }.getOrNull()
+                if (fileDate != null && fileDate.isBefore(thresholdDate)) {
+                    file.delete()
                 }
             }
+
+            // Enforce a global disk budget as well as age-based retention. Oldest files go first.
+            val remaining = logsDir.toFile().listFiles()
+                ?.filter { it.isFile && logFileRegex.matches(it.name) }
+                ?.sortedBy { it.lastModified() }
+                ?: return
+            var totalBytes = remaining.sumOf { it.length() }
+            for (file in remaining) {
+                if (totalBytes <= MAX_TOTAL_LOG_BYTES) break
+                val length = file.length()
+                if (file.delete()) totalBytes -= length
+            }
+        }
+    }
+
+    private fun clearRunLogsOnWriterThread() {
+        closeWriter()
+        droppedRecords.set(0L)
+        val dir = logsDir ?: return
+        val regex = Regex("""wcx-\d{4}-\d{2}-\d{2}(?:-\d{13}(?:-\d+)?)?\.log""")
+        runCatching {
+            dir.toFile().listFiles()?.filter { it.isFile && regex.matches(it.name) }?.forEach { it.delete() }
         }
     }
 
@@ -136,6 +205,15 @@ object WeLogger {
                         }
                         hasWrites = false
                     }
+
+                    is WriteTask.Clear -> {
+                        try {
+                            clearRunLogsOnWriterThread()
+                        } finally {
+                            task.completed.countDown()
+                        }
+                        hasWrites = false
+                    }
                 }
             }
 
@@ -145,9 +223,9 @@ object WeLogger {
     }
 
     private fun writeRecord(record: WriteTask.Record): Boolean {
-        val w = getOrRotateWriter(record.timestamp.toLocalDate()) ?: return false
+        var w = getOrRotateWriter(record.timestamp.toLocalDate()) ?: return false
         return runCatching {
-            w.write(buildString {
+            val text = buildString {
                 append(timestampFmt.format(record.timestamp))
                 append(' ')
                 append(record.level)
@@ -161,8 +239,20 @@ object WeLogger {
                     append('\n')
                     append(Log.getStackTraceString(record.throwable))
                 }
-            })
+            }
+            // Bound a single record too: stack traces or generated payloads can otherwise be huge.
+            val boundedText = if (text.length > MAX_RECORD_CHARS) {
+                text.take(MAX_RECORD_CHARS) + "\n[log record truncated at $MAX_RECORD_CHARS characters]"
+            } else text
+            val bytesToWrite = boundedText.toByteArray(StandardCharsets.UTF_8).size.toLong() + 1L
+
+            if (currentLogBytes > 0L && currentLogBytes + bytesToWrite > MAX_LOG_FILE_BYTES) {
+                rotateCurrentLog()
+                w = getOrRotateWriter(record.timestamp.toLocalDate()) ?: return false
+            }
+            w.write(boundedText)
             w.write('\n'.code)
+            currentLogBytes += bytesToWrite
             true
         }.getOrElse {
             Log.e(TAG, "failed to write log file", it)
@@ -190,6 +280,9 @@ object WeLogger {
     }
 
     private fun enqueue(record: WriteTask.Record) {
+        // Keep verbose diagnostics in logcat, but avoid persisting high-volume D/V traffic in
+        // release builds. INFO/WARN/ERROR remain available in the in-app log viewer.
+        if (record.level == "V" || (record.level == "D" && !BuildConfig.DEBUG)) return
         val isImportant = record.level == "E" || record.level == "W" || record.level == "A"
         val hasRoom = isImportant || writeQueue.remainingCapacity() > RESERVED_IMPORTANT_CAPACITY
         if (!hasRoom || !writeQueue.offer(record)) {
@@ -240,22 +333,48 @@ object WeLogger {
         get() = runCatching { (KnownPaths.moduleData / "logs").createDirsSafe() }.getOrNull()
 
     /**
-     * All run-log files (`wcx-yyyy-MM-dd.log`), newest first. Flushes the active writer first so
-     * the current day's file reflects the latest entries before the UI reads it.
+     * All run-log segments (current daily file plus rotated size-limited segments), newest first.
+     * Flushes the active writer first so the current file reflects recent entries before reading.
      */
     val allLogFiles: List<java.nio.file.Path>
         get() {
             flush()
             val dir = logsDir ?: return emptyList()
-            val regex = Regex("""wcx-\d{4}-\d{2}-\d{2}\.log""")
+            val regex = Regex("""wcx-\d{4}-\d{2}-\d{2}(?:-\d{13}(?:-\d+)?)?\.log""")
             return runCatching {
                 dir.toFile().listFiles()
                     ?.filter { it.isFile && regex.matches(it.name) }
-                    ?.sortedByDescending { it.name }
+                    ?.sortedByDescending { it.lastModified() }
                     ?.map { it.toPath() }
                     ?: emptyList()
             }.getOrDefault(emptyList())
         }
+
+    /** Clears run logs on the writer thread so the open file handle cannot keep writing to a deleted file. */
+    fun clearRunLogs() {
+        if (Thread.currentThread() === writerThread) {
+            clearRunLogsOnWriterThread()
+            return
+        }
+        val completed = CountDownLatch(1)
+        val enqueued = try {
+            writeQueue.offer(WriteTask.Clear(completed), FLUSH_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
+        if (!enqueued) {
+            Log.w(TAG, "timed out while enqueueing run-log clear request")
+            return
+        }
+        try {
+            if (!completed.await(FLUSH_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                Log.w(TAG, "timed out while clearing run logs")
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+    }
 
     // ========== Tag + String ==========
 
