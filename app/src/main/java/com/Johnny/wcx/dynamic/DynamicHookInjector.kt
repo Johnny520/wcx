@@ -54,8 +54,11 @@ object DynamicHookInjector {
                 }
             }
 
-            WeLogger.i(TAG, "injected $injectedCount/${feature.dexDelegates.size} delegates for ${feature.displayName}")
-            injectedCount > 0
+            val total = feature.dexDelegates.size
+            WeLogger.i(TAG, "injected $injectedCount/$total delegates for ${feature.displayName}")
+            // Partial descriptor injection is not a successful adaptation. Reporting true here
+            // caused the manager to treat a feature with unresolved delegates as healthy.
+            total > 0 && injectedCount == total
         } catch (e: Exception) {
             WeLogger.e(TAG, "inject failed for ${feature.displayName}", e)
             false
@@ -71,7 +74,22 @@ object DynamicHookInjector {
     ): Map<String, Boolean> {
         val results = mutableMapOf<String, Boolean>()
         for (feature in features) {
-            val result = scanResults[feature.name] ?: continue
+            // Only accept an exact stable-key match. ClassFeature IDs are not generally the
+            // same as localized display names; guessing by substring could inject wrong hooks.
+            val result = scanResults[feature.name]
+                ?: feature.technicalId.takeIf { it.isNotBlank() }?.let(scanResults::get)
+            if (result == null) {
+                // Keep absence distinct from an attempted injection failure. The manager uses
+                // this diagnostic to avoid claiming COMPLETED when keys do not line up.
+                if (feature.dexDelegates.isNotEmpty()) {
+                    WeLogger.d(
+                        TAG,
+                        "no exact scan result key for feature name='${feature.name}', " +
+                            "technicalId='${feature.technicalId}' (${feature.displayName}); skipping dynamic injection"
+                    )
+                }
+                continue
+            }
             results[feature.displayName] = inject(feature, result)
         }
         return results
@@ -99,6 +117,12 @@ object DynamicHookInjector {
         }?.value
 
         if (methodDesc != null) {
+            if (!isValidClassName(methodDesc.className) ||
+                !isValidMethodMapping(methodDesc.methodName, methodDesc.methodSign) ||
+                methodDesc.methodName == "<init>" || methodDesc.methodName == "<clinit>") {
+                WeLogger.w(TAG, "rejected malformed scanned method descriptor for ${delegate.key}")
+                return false
+            }
             delegate.setDescriptor(
                 com.Johnny.wcx.dexkit.DexMethodDescriptor(
                     methodDesc.className,
@@ -110,30 +134,16 @@ object DynamicHookInjector {
             return true
         }
 
-        // 尝试模糊匹配 (通过关键词)
-        val fuzzyMatch = scanResult.methods.values.firstOrNull { desc ->
-            desc.methodName.contains(propertyName, ignoreCase = true) ||
-            propertyName.contains(desc.methodName, ignoreCase = true)
-        }
-
-        if (fuzzyMatch != null) {
-            delegate.setDescriptor(
-                com.Johnny.wcx.dexkit.DexMethodDescriptor(
-                    fuzzyMatch.className,
-                    fuzzyMatch.methodName,
-                    fuzzyMatch.methodSign
-                )
-            )
-            WeLogger.d(TAG, "fuzzy injected method: ${delegate.key} -> ${fuzzyMatch.descriptor}")
-            return true
-        }
+        // Do not infer semantic equivalence from a unique substring match. In an obfuscated
+        // host, a single candidate can still be an unrelated method; only an exact feature ID
+        // or an explicitly provisioned cloud mapping is acceptable here.
 
         // 尝试云端特征库
         val cloudMapping = CloudFeatureDB.getMethodMapping(
             scanResult.className.substringAfterLast("."),
             propertyName
         )
-        if (cloudMapping != null) {
+        if (cloudMapping != null && isValidMethodMapping(cloudMapping.methodName, cloudMapping.methodSign)) {
             delegate.setDescriptor(
                 com.Johnny.wcx.dexkit.DexMethodDescriptor(
                     scanResult.className,
@@ -143,6 +153,8 @@ object DynamicHookInjector {
             )
             WeLogger.d(TAG, "cloud injected method: ${delegate.key} -> ${cloudMapping.methodName}")
             return true
+        } else if (cloudMapping != null) {
+            WeLogger.w(TAG, "rejected malformed cloud method mapping for ${delegate.key}")
         }
 
         WeLogger.w(TAG, "no method match for ${delegate.key}")
@@ -157,6 +169,12 @@ object DynamicHookInjector {
         }?.value
 
         if (ctorDesc != null) {
+            if (!isValidClassName(ctorDesc.className) ||
+                !isValidMethodMapping("<init>", ctorDesc.methodSign) ||
+                !ctorDesc.methodSign.endsWith(")V")) {
+                WeLogger.w(TAG, "rejected malformed scanned constructor descriptor for ${delegate.key}")
+                return false
+            }
             delegate.setDescriptor(
                 com.Johnny.wcx.dexkit.DexMethodDescriptor(
                     ctorDesc.className,
@@ -171,6 +189,67 @@ object DynamicHookInjector {
         return false
     }
 
+
+    /** Validate a fully-qualified Java class name supplied by a scan/cloud result. */
+    private fun isValidClassName(className: String): Boolean {
+        if (className.isBlank() || className.startsWith(".") || className.endsWith(".")) return false
+        if (className.contains('/') || className.contains(';') || className.contains('[') ||
+            className.contains(' ') || className.contains("->")) return false
+        return className.split('.').all { part ->
+            part.isNotEmpty() && part.none { it == '(' || it == ')' || it == ':' }
+        }
+    }
+
+    /** Validate DEX method descriptors before accepting cached/cloud data. */
+    private fun isValidMethodMapping(methodName: String, methodSign: String): Boolean {
+        if (methodName.isBlank() || methodName.contains('/') || methodName.contains(';') || methodName.contains("->")) {
+            return false
+        }
+        if (!methodSign.startsWith("(")) return false
+        val close = methodSign.indexOf(')')
+        if (close < 0) return false
+        var cursor = 1
+        while (cursor < close) {
+            val next = typeDescriptorEnd(methodSign, cursor, allowVoid = false) ?: return false
+            if (next > close) return false
+            cursor = next
+        }
+        if (cursor != close) return false
+        val returnEnd = typeDescriptorEnd(methodSign, close + 1, allowVoid = true) ?: return false
+        return returnEnd == methodSign.length
+    }
+
+    /** Validate a field name and exactly one DEX field type descriptor. */
+    private fun isValidFieldMapping(fieldName: String, typeName: String): Boolean {
+        if (fieldName.isBlank() || fieldName.contains('/') || fieldName.contains(';') || fieldName.contains("->")) {
+            return false
+        }
+        return typeDescriptorEnd(typeName, 0, allowVoid = false) == typeName.length
+    }
+
+    /** Returns the first index after a valid DEX type descriptor, or null when malformed. */
+    private fun typeDescriptorEnd(value: String, start: Int, allowVoid: Boolean): Int? {
+        if (start >= value.length) return null
+        var cursor = start
+        while (cursor < value.length && value[cursor] == '[') cursor++
+        if (cursor >= value.length) return null
+        return when (value[cursor]) {
+            'V' -> if (allowVoid && cursor == start) cursor + 1 else null
+            'Z', 'B', 'S', 'C', 'I', 'J', 'F', 'D' -> cursor + 1
+            'L' -> {
+                val semicolon = value.indexOf(';', cursor + 1)
+                if (semicolon <= cursor + 1) return null
+                val className = value.substring(cursor + 1, semicolon)
+                if (className.startsWith('/') || className.endsWith('/') ||
+                    className.contains('.') || className.contains(' ') ||
+                    className.contains('[') || className.contains('(') || className.contains(')')) {
+                    null
+                } else semicolon + 1
+            }
+            else -> null
+        }
+    }
+
     private fun injectField(delegate: DexFieldDelegate, scanResult: ScanResult): Boolean {
         val propertyName = delegate.key.substringAfterLast(":")
 
@@ -179,6 +258,11 @@ object DynamicHookInjector {
         }?.value
 
         if (fieldDesc != null) {
+            if (!isValidClassName(fieldDesc.className) ||
+                !isValidFieldMapping(fieldDesc.fieldName, fieldDesc.typeName)) {
+                WeLogger.w(TAG, "rejected malformed scanned field descriptor for ${delegate.key}")
+                return false
+            }
             delegate.setDescriptor("${fieldDesc.className}->${fieldDesc.fieldName}:${fieldDesc.typeName}")
             WeLogger.d(TAG, "injected field: ${delegate.key} -> ${fieldDesc.descriptor}")
             return true
@@ -189,12 +273,14 @@ object DynamicHookInjector {
             scanResult.className.substringAfterLast("."),
             propertyName
         )
-        if (cloudMapping != null) {
+        if (cloudMapping != null && isValidFieldMapping(cloudMapping.fieldName, cloudMapping.typeName)) {
             delegate.setDescriptor(
                 "${scanResult.className}->${cloudMapping.fieldName}:${cloudMapping.typeName}"
             )
             WeLogger.d(TAG, "cloud injected field: ${delegate.key} -> ${cloudMapping.fieldName}")
             return true
+        } else if (cloudMapping != null) {
+            WeLogger.w(TAG, "rejected malformed cloud field mapping for ${delegate.key}")
         }
 
         return false
