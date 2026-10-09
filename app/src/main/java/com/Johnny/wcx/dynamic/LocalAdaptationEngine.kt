@@ -260,12 +260,20 @@ object LocalAdaptationEngine {
             }
         }
 
-        // 步骤 2: 扫描所有 Hook 特征
-        withContext(Dispatchers.IO) {
+        // 步骤 2: 扫描所有 Hook 特征。Do not advance the stored version when any
+        // resolver failed; otherwise the next launch would treat a partial run as complete
+        // and never retry the broken descriptors.
+        val scanSummary = withContext(Dispatchers.IO) {
             scanAllFeatures(dexKit)
         }
+        if (scanSummary.failedItems.isNotEmpty()) {
+            val failed = scanSummary.failedItems.joinToString { it }
+            throw IllegalStateException(
+                "Dex adaptation incomplete: ${scanSummary.failedItems.size}/${scanSummary.attemptedItems} failed: $failed"
+            )
+        }
 
-        // 步骤 3: 保存版本信息
+        // 步骤 3: 保存版本信息 only after all resolvable features succeeded.
         val currentVersion = "${HostInfo.versionName}${HostInfo.versionCode}"
         val apkFile = File(HostInfo.appInfo.sourceDir)
         val apkSize = if (apkFile.exists()) apkFile.length() else 0L
@@ -286,37 +294,41 @@ object LocalAdaptationEngine {
      * 扫描所有已注册的 Feature 的 Dex 特征。
      * 触发 DexKit 解析和缓存保存。
      */
-    private fun scanAllFeatures(dexKit: DexKitBridge) {
-        val features = FeaturesProvider.ALL_HOOK_ITEMS
-        WeLogger.i(TAG, "scanning ${features.size} features...")
+    private data class ScanSummary(
+        val attemptedItems: Int,
+        val succeededItems: Int,
+        val failedItems: List<String>
+    )
+
+    private fun scanAllFeatures(dexKit: DexKitBridge): ScanSummary {
+        val features = FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<com.Johnny.wcx.dexkit.abc.IResolveDex>()
+        WeLogger.i(TAG, "scanning ${features.size} Dex-resolvable features...")
 
         var successCount = 0
-        var failCount = 0
+        val failedItems = mutableListOf<String>()
 
-        for (feature in features) {
+        for (item in features) {
+            val feature = item as? com.Johnny.wcx.features.core.BaseFeature
+            val displayName = feature?.displayName ?: item.javaClass.simpleName
             try {
-                // 触发 feature 的 Dex 解析（如果实现了 IResolveDex）
-                if (feature is com.Johnny.wcx.dexkit.abc.IResolveDex) {
-                    // 检查缓存是否有效
-                    if (!DexCacheManager.isItemCacheValid(feature)) {
-                        // resolveAllDex = withResolutionContext + resolveInlineDex + resolveDex:
-                        // 保证 .data 扩展读取在同一线程的 DexKit 会话内完成, 否则抛
-                        // "Dex resolution context is not active"。
-                        feature.resolveAllDex(dexKit)
-                        DexCacheManager.saveItemCache(feature)
-                        WeLogger.d(TAG, "resolved: ${feature.displayName}")
-                    } else {
-                        WeLogger.d(TAG, "cache hit: ${feature.displayName}")
-                    }
-                    successCount++
+                // resolveAllDex keeps inline resolution and normal resolution in one active
+                // DexKit context; splitting these calls can cause a missing-context exception.
+                if (!DexCacheManager.isItemCacheValid(item)) {
+                    item.resolveAllDex(dexKit)
+                    DexCacheManager.saveItemCache(item)
+                    WeLogger.d(TAG, "resolved: $displayName")
+                } else {
+                    WeLogger.d(TAG, "cache hit: $displayName")
                 }
+                successCount++
             } catch (e: Exception) {
-                WeLogger.w(TAG, "failed to resolve ${feature.displayName}: ${e.message}")
-                failCount++
+                failedItems += displayName
+                WeLogger.e(TAG, "failed to resolve $displayName", e)
             }
         }
 
-        WeLogger.i(TAG, "scan complete: $successCount success, $failCount failed")
+        WeLogger.i(TAG, "scan complete: $successCount success, ${failedItems.size} failed")
+        return ScanSummary(features.size, successCount, failedItems)
     }
 
     private fun notifyComplete() {
