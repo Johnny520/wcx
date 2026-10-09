@@ -100,7 +100,18 @@ object TabTheme : ClickableFeature() {
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
 
     private var tabThemeEnabled by prefOption("tab_theme_enabled", false)
-    private var opacity by prefOption("tab_theme_opacity", 0.15f)
+    private var opacity by prefOption("tab_theme_opacity", 0.15f) // 兼容旧版本全局透明度
+    private var opacityTab0 by prefOption("tab_theme_opacity_0", -1f)
+    private var opacityTab1 by prefOption("tab_theme_opacity_1", -1f)
+    private var opacityTab2 by prefOption("tab_theme_opacity_2", -1f)
+    private var opacityTab3 by prefOption("tab_theme_opacity_3", -1f)
+    private fun opacityForTab(index: Int): Float {
+        val saved = when (index) { 0 -> opacityTab0; 1 -> opacityTab1; 2 -> opacityTab2; else -> opacityTab3 }
+        return (if (saved in 0f..1f) saved else opacity).coerceIn(0.05f, 0.6f)
+    }
+    private fun saveTabOpacity(index: Int, value: Float) {
+        when (index) { 0 -> opacityTab0 = value; 1 -> opacityTab1 = value; 2 -> opacityTab2 = value; else -> opacityTab3 = value }
+    }
     private var transparentStatusBar by prefOption("tab_theme_transparent_status_bar", true)
 
     /** 聊天页隔离开关：开启后 Tab 背景只在主页/通讯录/发现/我四个 Tab 界面生效，聊天界面不生效。 */
@@ -180,6 +191,8 @@ object TabTheme : ClickableFeature() {
             val activity = thisObject.reflekt()
                 .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
                 .get()!! as Activity
+            // 主题只属于 LauncherUI 的四个主 Tab，绝不能在 ChattingUI 等子页面创建全屏图片层。
+            if (activity.javaClass.name != "com.tencent.mm.ui.LauncherUI") return@hookAfter
 
             val viewPager = thisObject.reflekt()
                 .firstField { name = "mViewPager" }
@@ -226,7 +239,13 @@ object TabTheme : ClickableFeature() {
                     isFocusable = false
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
-                decor.addView(bgContainer)
+                // 放在 decor 内容视图后面，避免新建的 ImageView 覆盖微信页面/会话内容。
+                decor.addView(bgContainer, 0)
+            } else if (decor.indexOfChild(bgContainer) > 0) {
+                // 兼容旧版本已创建且位于顶层的背景容器：重新放到内容层下面。
+                val oldLayoutParams = bgContainer.layoutParams
+                decor.removeView(bgContainer)
+                decor.addView(bgContainer, 0, oldLayoutParams)
             }
 
             val tabImageViews = mutableMapOf<Int, ImageView>()
@@ -247,7 +266,7 @@ object TabTheme : ClickableFeature() {
                             memoryCachePolicy(CachePolicy.DISABLED)
                             diskCachePolicy(CachePolicy.DISABLED)
                         }
-                        alpha = opacity
+                        alpha = opacityForTab(tabIndex)
                     }
                     bgContainer.addView(iv)
                     tabImageViews[tabIndex] = iv
@@ -369,7 +388,9 @@ object TabTheme : ClickableFeature() {
         onSaveAs: () -> Unit
     ) {
         var enabledState by remember { mutableStateOf(tabThemeEnabled) }
-        var opacityState by remember { mutableFloatStateOf(opacity) }
+        val opacityStates = remember {
+            mutableStateMapOf<Int, Float>().apply { for (i in 0..3) put(i, opacityForTab(i)) }
+        }
         var transparentStatusBarState by remember { mutableStateOf(transparentStatusBar) }
         var chatOnlyState by remember { mutableStateOf(chatOnlyEnabled) }
 
@@ -400,15 +421,18 @@ object TabTheme : ClickableFeature() {
                     )
 
                     Text(
-                        text = "透明度: ${(opacityState * 100).toInt()}%",
+                        text = "各 Tab 背景透明度",
                         style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.padding(top = 8.dp)
                     )
-                    Slider(
-                        value = opacityState,
-                        onValueChange = { opacityState = it },
-                        valueRange = 0.05f..0.6f
-                    )
+                    tabNames.forEach { (index, name) ->
+                        Text("$name：${((opacityStates[index] ?: opacity) * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                        Slider(
+                            value = opacityStates[index] ?: opacity,
+                            onValueChange = { opacityStates[index] = it },
+                            valueRange = 0.05f..0.6f
+                        )
+                    }
 
                     ListItem(
                         modifier = Modifier.clickable {
@@ -474,7 +498,9 @@ object TabTheme : ClickableFeature() {
             confirmButton = {
                 Button(onClick = {
                     tabThemeEnabled = enabledState
-                    opacity = opacityState
+                    // 继续写入旧全局值以兼容旧版本；新版本分别保存四个 Tab 的透明度。
+                    opacity = opacityStates[0] ?: opacity
+                    for (index in 0..3) saveTabOpacity(index, opacityStates[index] ?: opacity)
                     transparentStatusBar = transparentStatusBarState
                     chatOnlyEnabled = chatOnlyState
                     if (enabledState) {
