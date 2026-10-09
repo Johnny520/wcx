@@ -73,9 +73,11 @@ object ForceTabletMode : SwitchFeature(), IResolveDex {
         }
 
         "com.tencent.mm.plugin.account.ui.LoginHistoryUI".toClass().reflekt().firstMethod("initView").hookAfter {
-            val btn = thisObject.reflekt().firstField {
-                type = Button::class
-            }.get()!! as Button
+            // 不同微信版本的字段布局可能不同，firstField 可能匹配不到或返回 null。
+            // 原实现对 get() 直接 !! 强转，一旦为空即抛 NPE 并可能拖垮宿主主进程。
+            val btn = runCatching {
+                thisObject.reflekt().firstField { type = Button::class }.get() as? Button
+            }.getOrNull() ?: return@hookAfter
             btn.isVisible = true
         }
     }

@@ -29,7 +29,9 @@ object AutoViewOriginalMedia : SwitchFeature(), IResolveDex {
                 }
             }
         }
-        methodSetImageHdImgBtnVisibility.setDescriptor(results.single())
+        // 原实现用 single()：results 为空抛 NoSuchElementException、多结果抛 IllegalArgumentException，
+        // 均发生在 resolveDex 阶段且无兜底。改为空安全、多候选取首个。
+        results.firstOrNull()?.let { methodSetImageHdImgBtnVisibility.setDescriptor(it) }
 
         methodCheckNeedShowOriginVideoBtn.find(dexKit) {
             matcher {
