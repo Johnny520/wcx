@@ -42,6 +42,7 @@ object DynamicClassScanner {
 
     // 扫描策略：按优先级从高到低尝试
     private val STRATEGIES = listOf(
+        ::scanByExactClassName,
         ::scanByExactMatch,
         ::scanByInheritance,
         ::scanBySignature,
@@ -57,8 +58,27 @@ object DynamicClassScanner {
         WeLogger.i(TAG, "scanning ${feature.id}: ${feature.description}")
 
         for (strategy in STRATEGIES) {
-            val result = strategy(dexKit, feature)
+            // A malformed matcher or DexKit edge case must not abort the whole adaptation run.
+            val result = try {
+                strategy(dexKit, feature)
+            } catch (e: Exception) {
+                WeLogger.w(TAG, "${feature.id}: strategy ${strategy.javaClass.name} failed: ${e.message}")
+                null
+            } catch (e: LinkageError) {
+                // Host APK class metadata can be inconsistent across Android/WeChat versions;
+                // isolate a linkage failure to this strategy rather than aborting adaptation.
+                WeLogger.w(TAG, "${feature.id}: strategy ${strategy.javaClass.name} linkage failure: ${e.message}")
+                null
+            }
             if (result != null) {
+                // DexKit structural matches are hypotheses, not proof that the target can be
+                // resolved by the host class loader. Validate the concrete members before
+                // publishing a result to the injector; if validation fails, continue with the
+                // next strategy instead of caching a stale or malformed descriptor.
+                if (!verify(result)) {
+                    WeLogger.w(TAG, "${feature.id}: ${result.strategy} candidate ${result.className} failed runtime descriptor verification; trying next strategy")
+                    continue
+                }
                 WeLogger.i(TAG, "${feature.id} matched via ${result.strategy} -> ${result.className} (confidence=${result.confidence})")
                 return result
             }
@@ -76,7 +96,17 @@ object DynamicClassScanner {
         val failed = mutableListOf<ClassFeature>()
 
         for (feature in features.sortedBy { it.priority }) {
-            val result = scan(dexKit, feature)
+            // Isolate each feature: one unexpected scan exception must not discard all prior
+            // successes or prevent later features from being checked.
+            val result = try {
+                scan(dexKit, feature)
+            } catch (e: Exception) {
+                WeLogger.e(TAG, "${feature.id}: scan aborted unexpectedly; continuing with remaining features", e)
+                null
+            } catch (e: LinkageError) {
+                WeLogger.e(TAG, "${feature.id}: scan linkage failure; continuing with remaining features: ${e.message}")
+                null
+            }
             if (result != null) {
                 success[feature.id] = result
             } else {
@@ -88,22 +118,58 @@ object DynamicClassScanner {
     }
 
     // -----------------------------------------------------------------------
+    // Strategy 0: verified class-name hint, followed by member-signature validation.
+    // -----------------------------------------------------------------------
+
+    private fun scanByExactClassName(dexKit: DexKitBridge, feature: ClassFeature): ScanResult? {
+        val hint = feature.classNameHint?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            val classes = dexKit.findClass { matcher { className = hint } }
+            if (classes.size != 1) {
+                if (classes.isNotEmpty()) {
+                    WeLogger.w(TAG, "${feature.id}: class-name hint '$hint' resolved to ${classes.size} candidates")
+                }
+                return null
+            }
+            val target = classes.single()
+            val expectedSuper = feature.superClass
+            if (expectedSuper != null && target.superClass?.name != expectedSuper) {
+                WeLogger.w(
+                    TAG,
+                    "${feature.id}: class-name hint '$hint' has superclass '${target.superClass?.name}', " +
+                        "expected '$expectedSuper'; falling through to structural strategies"
+                )
+                return null
+            }
+            buildResult(dexKit, feature, target, MatchStrategy.EXACT, 1.0f)
+        } catch (e: Exception) {
+            WeLogger.d(TAG, "${feature.id}: exact class-name hint failed: ${e.message}")
+            null
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // 策略 1: 精确匹配 — 类特征完全匹配
     // -----------------------------------------------------------------------
 
     private fun scanByExactMatch(dexKit: DexKitBridge, feature: ClassFeature): ScanResult? {
+        // An empty DexKit matcher may match every class. Features with only soft
+        // stringConstants/method hints must go through a strategy that actually uses them.
+        val hasExactConstraint = feature.superClass != null || feature.interfaces.isNotEmpty() ||
+            feature.classModifiers != null || feature.annotations.isNotEmpty() ||
+            feature.stringConstantsAll.isNotEmpty()
+        if (!hasExactConstraint) return null
+
         return try {
             val classes = dexKit.findClass {
-                feature.superClass?.let { matcher { superClass = it } }
-                feature.interfaces.forEach { iface ->
-                    matcher { addInterface(iface) }
-                }
-                feature.classModifiers?.let { matcher { modifiers = it } }
-                feature.annotations.forEach { annotation ->
-                    matcher { addAnnotation { type = annotation } }
-                }
-                feature.stringConstantsAll.forEach { str ->
-                    matcher { addUsingString(str, StringMatchType.Equals) }
+                // Keep all mandatory constraints in one matcher; repeated matcher {} calls
+                // may replace the previous matcher and silently discard earlier constraints.
+                matcher {
+                    feature.superClass?.let { superClass = it }
+                    feature.interfaces.forEach { iface -> addInterface(iface) }
+                    feature.classModifiers?.let { modifiers = it }
+                    feature.annotations.forEach { annotation -> addAnnotation { type = annotation } }
+                    feature.stringConstantsAll.forEach { str -> addUsingString(str, StringMatchType.Equals) }
                 }
             }
 
@@ -113,7 +179,8 @@ object DynamicClassScanner {
                 classes.getOrNull(feature.multipleIndex)
             } else {
                 if (classes.size > 1) {
-                    WeLogger.w(TAG, "${feature.id}: multiple exact matches (${classes.size}), using first: ${classes[0].name}")
+                    WeLogger.w(TAG, "${feature.id}: exact match is ambiguous (${classes.size} candidates); refusing to select an arbitrary class")
+                    return null
                 }
                 classes.first()
             } ?: return null
@@ -133,34 +200,40 @@ object DynamicClassScanner {
         if (feature.superClass == null && feature.interfaces.isEmpty()) return null
 
         return try {
-            val classes = dexKit.findClass {
-                feature.superClass?.let { matcher { superClass = it } }
-                feature.interfaces.forEach { iface ->
-                    matcher { addInterface(iface) }
+            fun structuralQuery(stringConstraint: String? = null): List<ClassData> = dexKit.findClass {
+                matcher {
+                    feature.superClass?.let { superClass = it }
+                    feature.interfaces.forEach { iface -> addInterface(iface) }
+                    stringConstraint?.let { addUsingString(it, StringMatchType.Contains) }
                 }
             }
 
-            if (classes.isEmpty()) return null
-
-            // 继承链匹配优先使用字符串常量进一步过滤
-            var candidates: List<ClassData> = classes
-            if (feature.stringConstants.isNotEmpty()) {
-                candidates = classes.filter { cls ->
-                    feature.stringConstants.any { str ->
-                        cls.methods.any { m ->
-                            m.descriptor.contains(str) || m.name.contains(str, ignoreCase = true)
-                        } || cls.fields.any { f ->
-                            f.descriptor.contains(str) || f.name.contains(str, ignoreCase = true)
-                        }
+            val candidates = when {
+                feature.stringConstantsAll.isNotEmpty() -> dexKit.findClass {
+                    matcher {
+                        feature.superClass?.let { superClass = it }
+                        feature.interfaces.forEach { iface -> addInterface(iface) }
+                        feature.stringConstantsAll.forEach { addUsingString(it, StringMatchType.Equals) }
                     }
                 }
+                feature.stringConstants.isNotEmpty() -> feature.stringConstants
+                    .flatMap { structuralQuery(it) }.distinctBy { it.name }
+                else -> structuralQuery()
             }
 
-            if (candidates.isEmpty()) {
-                candidates = classes
+            if (candidates.isEmpty()) return null
+            if (!feature.allowMultiple && candidates.size != 1) {
+                WeLogger.w(TAG, "${feature.id}: inheritance match is ambiguous (${candidates.size} candidates); refusing arbitrary selection")
+                return null
             }
-
-            val targetClass = candidates.first()
+            val targetClass = (if (feature.allowMultiple) {
+                candidates.getOrNull(feature.multipleIndex)
+            } else {
+                candidates.singleOrNull()
+            }) ?: run {
+                WeLogger.w(TAG, "${feature.id}: inheritance candidate index ${feature.multipleIndex} is unavailable")
+                return null
+            }
             buildResult(dexKit, feature, targetClass, MatchStrategy.INHERITANCE, 0.7f)
         } catch (e: Exception) {
             WeLogger.d(TAG, "${feature.id}: inheritance match failed: ${e.message}")
@@ -179,23 +252,26 @@ object DynamicClassScanner {
             // 取第一个方法特征来定位类
             val primaryMethod = feature.methodFeatures.first()
             val methods = dexKit.findMethod {
-                primaryMethod.returnType?.let { matcher { returnType = it } }
-                primaryMethod.paramTypes.forEach { pt ->
-                    matcher { addParamType(pt) }
+                // Compose the signature as one matcher so every declared constraint applies.
+                matcher {
+                    primaryMethod.returnType?.let { returnType = it.toDexKitTypeName() }
+                    primaryMethod.paramTypes.forEach { pt -> addParamType(pt.toDexKitTypeName()) }
+                    if (primaryMethod.paramCount >= 0) paramCount = primaryMethod.paramCount
+                    if (primaryMethod.isConstructor) name = "<init>"
+                    primaryMethod.modifiers?.let { modifiers = it }
                 }
-                if (primaryMethod.paramCount >= 0) {
-                    matcher { paramCount = primaryMethod.paramCount }
-                }
-                if (primaryMethod.isConstructor) {
-                    matcher { name = "<init>" }
-                }
-                primaryMethod.modifiers?.let { matcher { modifiers = it } }
             }
 
             if (methods.isEmpty()) return null
 
-            // 从方法反向定位类
-            val className = methods.first().className
+            // A broad signature can match many methods/classes. Do not silently pick the first
+            // result, which could bind a feature to an unrelated class.
+            val matchingClasses = methods.map { it.className }.distinct()
+            if (matchingClasses.size != 1) {
+                WeLogger.w(TAG, "${feature.id}: signature match is ambiguous (${matchingClasses.size} classes)")
+                return null
+            }
+            val className = matchingClasses.first()
             val classData = dexKit.findClassData(className) ?: return null
 
             buildResult(dexKit, feature, classData, MatchStrategy.SIGNATURE, 0.6f)
@@ -214,27 +290,38 @@ object DynamicClassScanner {
         if (allStrings.isEmpty()) return null
 
         return try {
-            val classes = dexKit.findClass {
-                feature.stringConstantsAll.forEach { str ->
-                    matcher { addUsingString(str, StringMatchType.Equals) }
+            fun queryForString(string: String?, exact: Boolean): List<ClassData> = dexKit.findClass {
+                matcher {
+                    feature.superClass?.let { superClass = it }
+                    feature.interfaces.forEach { iface -> addInterface(iface) }
+                    if (string != null) addUsingString(string, if (exact) StringMatchType.Equals else StringMatchType.Contains)
                 }
-                if (feature.stringConstantsAll.isEmpty()) {
-                    feature.stringConstants.forEach { str ->
-                        matcher { addUsingString(str, StringMatchType.Contains) }
+            }
+            val candidates: List<ClassData> = when {
+                feature.stringConstantsAll.isNotEmpty() -> dexKit.findClass {
+                    matcher {
+                        feature.superClass?.let { superClass = it }
+                        feature.interfaces.forEach { iface -> addInterface(iface) }
+                        feature.stringConstantsAll.forEach { addUsingString(it, StringMatchType.Equals) }
                     }
                 }
+                else -> feature.stringConstants.flatMap { queryForString(it, exact = false) }
+                    .distinctBy { it.name }
             }
+            if (candidates.isEmpty()) return null
 
-            if (classes.isEmpty()) return null
-
-            // 通过父类进一步过滤
-            var candidates: List<ClassData> = classes
-            if (feature.superClass != null) {
-                candidates = classes.filter { it.superClass?.name == feature.superClass }
-                if (candidates.isEmpty()) candidates = classes
+            if (!feature.allowMultiple && candidates.size != 1) {
+                WeLogger.w(TAG, "${feature.id}: string-constant match is ambiguous (${candidates.size} candidates); refusing arbitrary selection")
+                return null
             }
-
-            val targetClass = candidates.first()
+            val targetClass = (if (feature.allowMultiple) {
+                candidates.getOrNull(feature.multipleIndex)
+            } else {
+                candidates.singleOrNull()
+            }) ?: run {
+                WeLogger.w(TAG, "${feature.id}: string-constant candidate index ${feature.multipleIndex} is unavailable")
+                return null
+            }
             buildResult(dexKit, feature, targetClass, MatchStrategy.STRING_CONSTANT, 0.5f)
         } catch (e: Exception) {
             WeLogger.d(TAG, "${feature.id}: string constant match failed: ${e.message}")
@@ -252,19 +339,28 @@ object DynamicClassScanner {
 
         return try {
             // 通过类名模糊搜索
-            val allClasses = dexKit.findClass {
-                keywords.forEach { kw ->
+            // Fallback keywords have OR semantics. Keep the per-keyword hit set so candidates
+            // found by string constants are not discarded merely because their class names are
+            // obfuscated and contain none of the human-readable keywords.
+            val hitsByKeyword = keywords.associateWith { keyword ->
+                dexKit.findClass {
                     matcher {
-                        addUsingString(kw, StringMatchType.Contains)
+                        feature.superClass?.let { superClass = it }
+                        feature.interfaces.forEach { iface -> addInterface(iface) }
+                        addUsingString(keyword, StringMatchType.Contains)
                     }
-                }
+                }.map { it.name }.toSet()
             }
+            val allClasses = keywords.flatMap { keyword ->
+                hitsByKeyword[keyword].orEmpty().mapNotNull { className -> dexKit.findClassData(className) }
+            }.distinctBy { it.name }
 
             if (allClasses.isEmpty()) return null
 
-            // 评分: 匹配越多关键词的类得分越高
+            // Score by the number of keyword constants that actually hit, with class-name and
+            // superclass matches as additional evidence rather than the only evidence.
             val scored = allClasses.map { cls ->
-                var score = 0
+                var score = hitsByKeyword.count { (_, classNames) -> cls.name in classNames } * 3
                 val name = cls.name.lowercase()
                 val superName = cls.superClass?.name?.lowercase() ?: ""
                 for (kw in keywords) {
@@ -277,9 +373,22 @@ object DynamicClassScanner {
 
             val best = scored.first()
             if (best.second == 0) return null
+            val tiedBest = scored.count { it.second == best.second }
+            if (!feature.allowMultiple && tiedBest > 1) {
+                WeLogger.w(TAG, "${feature.id}: fuzzy match has $tiedBest equally scored candidates (${best.second}); refusing arbitrary selection")
+                return null
+            }
 
-            val confidence = (best.second.toFloat() / (keywords.size * 3)).coerceIn(0.1f, 0.5f)
-            buildResult(dexKit, feature, best.first, MatchStrategy.FUZZY, confidence)
+            val selected = (if (feature.allowMultiple) {
+                scored.getOrNull(feature.multipleIndex)
+            } else {
+                best
+            }) ?: run {
+                WeLogger.w(TAG, "${feature.id}: fuzzy candidate index ${feature.multipleIndex} is unavailable")
+                return null
+            }
+            val confidence = (selected.second.toFloat() / (keywords.size * 3)).coerceIn(0.1f, 0.5f)
+            buildResult(dexKit, feature, selected.first, MatchStrategy.FUZZY, confidence)
         } catch (e: Exception) {
             WeLogger.d(TAG, "${feature.id}: fuzzy match failed: ${e.message}")
             null
@@ -293,15 +402,24 @@ object DynamicClassScanner {
     private fun scanByCloudFeature(dexKit: DexKitBridge, feature: ClassFeature): ScanResult? {
         // 从云端特征库获取当前版本的精确匹配规则
         val cloudFeature = CloudFeatureDB.getFeature(feature.id) ?: return null
+        // A cloud record without a class name would create an empty matcher, which can
+        // match the entire DEX. Never turn incomplete remote metadata into a random target.
+        val targetClassName = cloudFeature.className?.takeIf { it.isNotBlank() } ?: run {
+            WeLogger.w(TAG, "${feature.id}: cloud feature has no className; ignoring incomplete record")
+            return null
+        }
 
         return try {
             val classes = dexKit.findClass {
-                cloudFeature.className?.let { matcher { className = it } }
+                matcher { className = targetClassName }
             }
 
-            if (classes.isEmpty()) return null
+            if (classes.size != 1) {
+                WeLogger.w(TAG, "${feature.id}: cloud class '$targetClassName' resolved to ${classes.size} candidates; refusing selection")
+                return null
+            }
 
-            buildResult(dexKit, feature, classes.first(), MatchStrategy.CLOUD_FEATURE, 0.9f)
+            buildResult(dexKit, feature, classes.single(), MatchStrategy.CLOUD_FEATURE, 0.9f)
         } catch (e: Exception) {
             WeLogger.d(TAG, "${feature.id}: cloud feature match failed: ${e.message}")
             null
@@ -318,7 +436,7 @@ object DynamicClassScanner {
         classData: ClassData,
         strategy: MatchStrategy,
         baseConfidence: Float
-    ): ScanResult {
+    ): ScanResult? {
         val methods = mutableMapOf<String, DynamicMethodDesc>()
         val fields = mutableMapOf<String, DynamicFieldDesc>()
 
@@ -338,11 +456,34 @@ object DynamicClassScanner {
             }
         }
 
+        val expectedMembers = feature.methodFeatures.size + feature.fieldFeatures.size
+        val matchedMembers = methods.size + fields.size
+
+        // A class-level match alone is not evidence that the feature's actual Hook targets
+        // survived the WeChat update. Reject candidates where every declared member signature
+        // failed; otherwise the scanner reports success with an empty, unusable descriptor set.
+        if (expectedMembers > 0 && matchedMembers == 0) {
+            WeLogger.w(
+                TAG,
+                "${feature.id}: class ${classData.name} matched via $strategy, but none of " +
+                    "$expectedMembers declared method/field features matched; rejecting candidate"
+            )
+            return null
+        }
+
+        val memberCoverage = if (expectedMembers == 0) 1.0f else matchedMembers.toFloat() / expectedMembers
+        if (matchedMembers < expectedMembers) {
+            WeLogger.w(
+                TAG,
+                "${feature.id}: partial member coverage $matchedMembers/$expectedMembers in ${classData.name}"
+            )
+        }
+
         return ScanResult(
             className = classData.name,
             methods = methods,
             fields = fields,
-            confidence = baseConfidence,
+            confidence = (baseConfidence * memberCoverage).coerceIn(0.0f, 1.0f),
             strategy = strategy
         )
     }
@@ -362,8 +503,8 @@ object DynamicClassScanner {
                     if (feature.isConstructor) {
                         name = "<init>"
                     }
-                    feature.returnType?.let { returnType = it }
-                    feature.paramTypes.forEach { addParamType(it) }
+                    feature.returnType?.let { returnType = it.toDexKitTypeName() }
+                    feature.paramTypes.forEach { addParamType(it.toDexKitTypeName()) }
                     if (feature.paramCount >= 0) {
                         paramCount = feature.paramCount
                     }
@@ -377,23 +518,42 @@ object DynamicClassScanner {
                     val fuzzyResults = dexKit.findMethod {
                         matcher {
                             declaredClass = classData.name
-                            feature.returnType?.let { returnType = it }
-                            feature.paramTypes.forEach { addParamType(it) }
+                            feature.returnType?.let { returnType = it.toDexKitTypeName() }
+                            feature.paramTypes.forEach { addParamType(it.toDexKitTypeName()) }
                         }
                     }
-                    val best = fuzzyResults.firstOrNull { m ->
-                        feature.nameKeywords.any { kw ->
-                            m.name.contains(kw, ignoreCase = true)
-                        }
+                    val matches = fuzzyResults.filter { m ->
+                        (feature.isStatic == null || Modifier.isStatic(m.modifiers) == feature.isStatic) &&
+                            feature.nameKeywords.any { kw -> m.name.contains(kw, ignoreCase = true) }
                     }
-                    if (best != null) {
-                        return DynamicMethodDesc(best.className, best.methodName, best.methodSign)
+                    if (matches.size == 1) {
+                        val match = matches.single()
+                        return DynamicMethodDesc(match.className, match.methodName, match.methodSign)
+                    }
+                    if (matches.size > 1) {
+                        WeLogger.w(TAG, "${feature.id}: keyword fallback is ambiguous (${matches.size} methods) in ${classData.name}")
                     }
                 }
                 return null
             }
 
-            val m = results.first()
+            val staticFiltered = feature.isStatic?.let { expected ->
+                results.filter { Modifier.isStatic(it.modifiers) == expected }
+            } ?: results
+            if (staticFiltered.isEmpty()) return null
+            val candidates = if (feature.nameKeywords.isEmpty()) staticFiltered else {
+                val keywordMatches = staticFiltered.filter { m ->
+                    feature.nameKeywords.any { kw -> m.name.contains(kw, ignoreCase = true) }
+                }
+                // Names are commonly obfuscated in WeChat; keywords are only a tie-breaker,
+                // never a reason to discard an otherwise unique signature match.
+                if (keywordMatches.isNotEmpty()) keywordMatches else staticFiltered
+            }
+            if (candidates.size != 1) {
+                WeLogger.w(TAG, "${feature.id}: method descriptor is ambiguous (${candidates.size} candidates) in ${classData.name}")
+                return null
+            }
+            val m = candidates.single()
             DynamicMethodDesc(m.className, m.methodName, m.methodSign)
         } catch (e: Exception) {
             WeLogger.d(TAG, "findMethodByFeature ${feature.id} failed: ${e.message}")
@@ -413,7 +573,7 @@ object DynamicClassScanner {
             val results = dexKit.findField {
                 matcher {
                     declaredClass = classData.name
-                    feature.type?.let { type = it }
+                    feature.type?.let { type = it.toDexKitTypeName() }
                     feature.modifiers?.let { modifiers = it }
                 }
             }
@@ -423,23 +583,45 @@ object DynamicClassScanner {
                     val fuzzyResults = dexKit.findField {
                         matcher {
                             declaredClass = classData.name
-                            feature.type?.let { type = it }
+                            feature.type?.let { type = it.toDexKitTypeName() }
                         }
                     }
-                    val best = fuzzyResults.firstOrNull { f ->
-                        feature.nameKeywords.any { kw ->
-                            f.name.contains(kw, ignoreCase = true)
-                        }
+                    val matches = fuzzyResults.filter { f ->
+                        (feature.isStatic == null || Modifier.isStatic(f.modifiers) == feature.isStatic) &&
+                            feature.nameKeywords.any { kw -> f.name.contains(kw, ignoreCase = true) }
                     }
-                    if (best != null) {
-                        return DynamicFieldDesc(best.className, best.fieldName, best.typeName)
+                    if (matches.size == 1) {
+                        val match = matches.single()
+                        val typeDescriptor = match.typeName.toDexFieldDescriptor() ?: return null
+                        return DynamicFieldDesc(match.className, match.fieldName, typeDescriptor)
+                    }
+                    if (matches.size > 1) {
+                        WeLogger.w(TAG, "${feature.id}: field keyword fallback is ambiguous (${matches.size} fields) in ${classData.name}")
                     }
                 }
                 return null
             }
 
-            val f = results.first()
-            DynamicFieldDesc(f.className, f.fieldName, f.typeName)
+            val staticFiltered = feature.isStatic?.let { expected ->
+                results.filter { Modifier.isStatic(it.modifiers) == expected }
+            } ?: results
+            // Like method matching, field-name keywords are tie-breakers rather than hard
+            // requirements (obfuscation may remove the original name). But when a keyword
+            // does identify candidates, prefer that smaller set instead of rejecting a valid
+            // field merely because unrelated fields share the same type.
+            val keywordFiltered = if (feature.nameKeywords.isEmpty()) staticFiltered else {
+                val keywordMatches = staticFiltered.filter { field ->
+                    feature.nameKeywords.any { keyword -> field.name.contains(keyword, ignoreCase = true) }
+                }
+                if (keywordMatches.isNotEmpty()) keywordMatches else staticFiltered
+            }
+            if (keywordFiltered.size != 1) {
+                WeLogger.w(TAG, "${feature.id}: field descriptor is ambiguous (${keywordFiltered.size} candidates) in ${classData.name}")
+                return null
+            }
+            val f = keywordFiltered.single()
+            val typeDescriptor = f.typeName.toDexFieldDescriptor() ?: return null
+            DynamicFieldDesc(f.className, f.fieldName, typeDescriptor)
         } catch (e: Exception) {
             WeLogger.d(TAG, "findFieldByFeature ${feature.id} failed: ${e.message}")
             null
@@ -455,58 +637,249 @@ object DynamicClassScanner {
      */
     fun verify(result: ScanResult): Boolean {
         return try {
-            val clazz = ClassLoaders.HOST.loadClass(result.className)
+            // Validate the root target even when a feature currently has no member descriptors.
+            // Without this, an empty result could be accepted despite naming a nonexistent class.
+            ClassLoaders.HOST.loadClass(result.className)
             result.methods.forEach { (_, desc) ->
                 try {
+                    // A scan result can contain methods declared on a related class, so verify
+                    // against the descriptor's owner rather than assuming the root class owns it.
+                    val owner = ClassLoaders.HOST.loadClass(desc.className)
                     val paramTypes = parseParamTypes(desc.methodSign)
-                    clazz.getDeclaredMethod(desc.methodName, *paramTypes)
-                } catch (_: NoSuchMethodException) {
-                    WeLogger.w(TAG, "verify failed: method ${desc.methodName} not found in ${result.className}")
+                    val close = desc.methodSign.indexOf(')')
+                    require(close >= 0 && close + 1 < desc.methodSign.length) {
+                        "Malformed method descriptor: ${desc.methodSign}"
+                    }
+                    val returnType = parseTypeDescriptor(desc.methodSign.substring(close + 1), allowVoid = true)
+                    if (desc.methodName == "<init>") {
+                        require(returnType == Void.TYPE) { "Constructor descriptor must return V: ${desc.methodSign}" }
+                        owner.getDeclaredConstructor(*paramTypes)
+                    } else {
+                        val method = owner.getDeclaredMethod(desc.methodName, *paramTypes)
+                        require(method.returnType == returnType) {
+                            "Return type mismatch for ${desc.className}->${desc.methodName}: " +
+                                "descriptor=$returnType, runtime=${method.returnType}"
+                        }
+                    }
+                } catch (e: ReflectiveOperationException) {
+                    WeLogger.w(TAG, "verify failed: method ${desc.className}->${desc.methodName}${desc.methodSign}: ${e.message}")
+                    return false
+                } catch (e: IllegalArgumentException) {
+                    WeLogger.w(TAG, "verify failed: invalid method descriptor for ${desc.methodName}: ${e.message}")
+                    return false
+                } catch (e: SecurityException) {
+                    WeLogger.w(TAG, "verify failed: access to method ${desc.className}->${desc.methodName} denied: ${e.message}")
+                    return false
+                } catch (e: LinkageError) {
+                    WeLogger.w(TAG, "verify failed: method ${desc.className}->${desc.methodName} linkage error: ${e.message}")
                     return false
                 }
             }
             result.fields.forEach { (_, desc) ->
                 try {
-                    clazz.getDeclaredField(desc.fieldName)
-                } catch (_: NoSuchFieldException) {
-                    WeLogger.w(TAG, "verify failed: field ${desc.fieldName} not found in ${result.className}")
+                    val owner = ClassLoaders.HOST.loadClass(desc.className)
+                    val field = owner.getDeclaredField(desc.fieldName)
+                    val descriptorType = parseTypeDescriptor(desc.typeName, allowVoid = false)
+                    require(field.type == descriptorType) {
+                        "Field type mismatch for ${desc.className}->${desc.fieldName}: " +
+                            "descriptor=$descriptorType, runtime=${field.type}"
+                    }
+                } catch (e: ReflectiveOperationException) {
+                    WeLogger.w(TAG, "verify failed: field ${desc.className}->${desc.fieldName}: ${e.message}")
+                    return false
+                } catch (e: SecurityException) {
+                    WeLogger.w(TAG, "verify failed: access to field ${desc.className}->${desc.fieldName} denied: ${e.message}")
+                    return false
+                } catch (e: LinkageError) {
+                    WeLogger.w(TAG, "verify failed: field ${desc.className}->${desc.fieldName} linkage error: ${e.message}")
                     return false
                 }
             }
             true
         } catch (e: ClassNotFoundException) {
-            WeLogger.w(TAG, "verify failed: class ${result.className} not found")
+            WeLogger.w(TAG, "verify failed: class ${result.className} not found: ${e.message}")
+            false
+        } catch (e: IllegalArgumentException) {
+            WeLogger.w(TAG, "verify failed: malformed scan result: ${e.message}")
+            false
+        } catch (e: SecurityException) {
+            WeLogger.w(TAG, "verify failed: reflective verification denied: ${e.message}")
+            false
+        } catch (e: LinkageError) {
+            WeLogger.w(TAG, "verify failed: class/linkage error for ${result.className}: ${e.message}")
             false
         }
     }
 
-    private fun parseParamTypes(methodSign: String): Array<Class<*>> {
-        val paramsStr = methodSign.substring(
-            methodSign.indexOf('(') + 1,
-            methodSign.indexOf(')')
-        )
-        if (paramsStr.isEmpty()) return emptyArray()
-
-        return paramsStr.split(";")
-            .filter { it.isNotEmpty() }
-            .map { it.replace('/', '.') + ";" }
-            .map { typeStr ->
-                when {
-                    typeStr.startsWith("L") -> ClassLoaders.HOST.loadClass(
-                        typeStr.removePrefix("L").removeSuffix(";").replace('/', '.')
-                    )
-                    typeStr == "Z" -> Boolean::class.javaPrimitiveType!!
-                    typeStr == "B" -> Byte::class.javaPrimitiveType!!
-                    typeStr == "C" -> Char::class.javaPrimitiveType!!
-                    typeStr == "S" -> Short::class.javaPrimitiveType!!
-                    typeStr == "I" -> Int::class.javaPrimitiveType!!
-                    typeStr == "J" -> Long::class.javaPrimitiveType!!
-                    typeStr == "F" -> Float::class.javaPrimitiveType!!
-                    typeStr == "D" -> Double::class.javaPrimitiveType!!
-                    typeStr == "V" -> Void::class.javaPrimitiveType!!
-                    else -> Any::class.java
+    /** Resolve one complete JVM/Dex type descriptor using the host class loader. */
+    private fun parseTypeDescriptor(descriptor: String, allowVoid: Boolean): Class<*> {
+        require(descriptor.isNotEmpty()) { "Empty type descriptor" }
+        return when (descriptor) {
+            "V" -> {
+                require(allowVoid) { "Void is not valid for this type" }
+                Void.TYPE
+            }
+            "Z" -> Boolean::class.javaPrimitiveType!!
+            "B" -> Byte::class.javaPrimitiveType!!
+            "C" -> Char::class.javaPrimitiveType!!
+            "S" -> Short::class.javaPrimitiveType!!
+            "I" -> Int::class.javaPrimitiveType!!
+            "J" -> Long::class.javaPrimitiveType!!
+            "F" -> Float::class.javaPrimitiveType!!
+            "D" -> Double::class.javaPrimitiveType!!
+            else -> when {
+                descriptor.startsWith("[") -> {
+                    // Do not reject arrays merely because an object component contains the
+                    // letter 'V' (for example [Lcom/example/Video;). Parse the component type
+                    // according to the descriptor grammar and prohibit only the exact V type.
+                    val component = descriptor.dropWhile { it == '[' }
+                    require(component.isNotEmpty() && component != "V") {
+                        "Array descriptor cannot contain void: $descriptor"
+                    }
+                    require(isValidReferenceOrPrimitiveDescriptor(component, allowVoid = false)) {
+                        "Invalid array descriptor: $descriptor"
+                    }
+                    Class.forName(descriptor.replace('/', '.'), false, ClassLoaders.HOST)
                 }
-            }.toTypedArray()
+                descriptor.startsWith("L") && descriptor.endsWith(";") && descriptor.length > 2 -> {
+                    val internalName = descriptor.substring(1, descriptor.length - 1)
+                    require(isValidInternalClassName(internalName)) { "Invalid object descriptor: $descriptor" }
+                    ClassLoaders.HOST.loadClass(internalName.replace('/', '.'))
+                }
+                else -> throw IllegalArgumentException("Invalid type descriptor: $descriptor")
+            }
+        }
+    }
+
+    /** DexKit field type names are commonly Java names (for example `java.lang.String`),
+     * while a Dex field descriptor requires `Ljava/lang/String;`. Normalize both forms.
+     */
+    private fun String.toDexFieldDescriptor(): String? {
+        val value = trim()
+        if (value.isEmpty()) return null
+        val primitive = when (value) {
+            "boolean" -> "Z"
+            "byte" -> "B"
+            "char" -> "C"
+            "short" -> "S"
+            "int" -> "I"
+            "long" -> "J"
+            "float" -> "F"
+            "double" -> "D"
+            "void" -> return null
+            else -> null
+        }
+        if (primitive != null) return primitive
+        if (value.startsWith("[")) {
+            val dimensions = value.takeWhile { it == '[' }
+            val componentDescriptor = value.dropWhile { it == '[' }.toDexFieldDescriptor() ?: return null
+            if (componentDescriptor == "V") return null
+            return dimensions + componentDescriptor
+        }
+        if (value.endsWith("[]")) {
+            val component = value.dropLast(2).toDexFieldDescriptor() ?: return null
+            return "[$component"
+        }
+        if (value.startsWith("L") && value.endsWith(";") && isValidReferenceOrPrimitiveDescriptor(value, false)) {
+            return value
+        }
+        // Already a primitive Dex descriptor.
+        if (value in setOf("Z", "B", "C", "S", "I", "J", "F", "D")) return value
+        val internalName = value.replace('.', '/')
+        if (!isValidInternalClassName(internalName)) return null
+        return "L$internalName;"
+    }
+
+    private fun isValidInternalClassName(name: String): Boolean =
+        name.isNotBlank() && !name.startsWith('/') && !name.endsWith('/') &&
+            !name.contains("//") && name.none { it == '.' || it == ';' || it == '[' || it == '(' || it == ')' || it.isWhitespace() }
+
+    private fun isValidReferenceOrPrimitiveDescriptor(descriptor: String, allowVoid: Boolean): Boolean {
+        if (descriptor in setOf("Z", "B", "C", "S", "I", "J", "F", "D")) return true
+        if (descriptor == "V") return allowVoid
+        if (descriptor.startsWith("L") && descriptor.endsWith(";") && descriptor.length > 2) {
+            return isValidInternalClassName(descriptor.substring(1, descriptor.length - 1))
+        }
+        if (descriptor.startsWith("[")) {
+            val component = descriptor.dropWhile { it == '[' }
+            return component.isNotEmpty() && component != "V" && isValidReferenceOrPrimitiveDescriptor(component, allowVoid = false)
+        }
+        return false
+    }
+
+    /** Parse a JVM/Dex method descriptor without splitting away object-type delimiters. */
+    private fun parseParamTypes(methodSign: String): Array<Class<*>> {
+        val open = methodSign.indexOf('(')
+        val close = methodSign.indexOf(')', startIndex = open + 1)
+        require(open >= 0 && close > open) { "Malformed method descriptor: $methodSign" }
+
+        val params = methodSign.substring(open + 1, close)
+        if (params.isEmpty()) return emptyArray()
+
+        val loader = ClassLoaders.HOST
+        val result = ArrayList<Class<*>>()
+        var index = 0
+        while (index < params.length) {
+            val start = index
+            while (index < params.length && params[index] == '[') index++
+            require(index < params.length) { "Incomplete parameter descriptor: $methodSign" }
+
+            when (params[index]) {
+                'L' -> {
+                    val end = params.indexOf(';', index)
+                    require(end >= 0) { "Unterminated object descriptor: $methodSign" }
+                    index = end + 1
+                }
+                'B', 'C', 'D', 'F', 'I', 'J', 'S', 'Z' -> index++
+                else -> throw IllegalArgumentException("Invalid parameter descriptor in $methodSign at $index")
+            }
+
+            val typeDescriptor = params.substring(start, index)
+            val type = when (typeDescriptor) {
+                "Z" -> Boolean::class.javaPrimitiveType!!
+                "B" -> Byte::class.javaPrimitiveType!!
+                "C" -> Char::class.javaPrimitiveType!!
+                "S" -> Short::class.javaPrimitiveType!!
+                "I" -> Int::class.javaPrimitiveType!!
+                "J" -> Long::class.javaPrimitiveType!!
+                "F" -> Float::class.javaPrimitiveType!!
+                "D" -> Double::class.javaPrimitiveType!!
+                else -> when {
+                    typeDescriptor.startsWith("[") ->
+                        Class.forName(typeDescriptor.replace('/', '.'), false, loader)
+                    typeDescriptor.startsWith("L") && typeDescriptor.endsWith(";") ->
+                        loader.loadClass(typeDescriptor.substring(1, typeDescriptor.length - 1).replace('/', '.'))
+                    else -> throw IllegalArgumentException("Invalid parameter descriptor: $typeDescriptor")
+                }
+            }
+            result += type
+        }
+        return result.toTypedArray()
+    }
+
+    /**
+     * DexKit matcher APIs expect Java type names, while the feature registry stores JVM
+     * descriptors (for example `Ljava/lang/String;`, `I`, `[I`). Normalize both forms.
+     */
+    private fun String.toDexKitTypeName(): String {
+        val value = trim()
+        if (value.isEmpty()) return value
+        when (value) {
+            "V" -> return "void"
+            "Z" -> return "boolean"
+            "B" -> return "byte"
+            "C" -> return "char"
+            "S" -> return "short"
+            "I" -> return "int"
+            "J" -> return "long"
+            "F" -> return "float"
+            "D" -> return "double"
+        }
+        if (value.startsWith("[")) return value.drop(1).toDexKitTypeName() + "[]"
+        if (value.startsWith("L") && value.endsWith(";")) {
+            return value.substring(1, value.length - 1).replace('/', '.')
+        }
+        return value.replace('/', '.')
     }
 
     /**
