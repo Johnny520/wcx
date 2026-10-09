@@ -1,6 +1,8 @@
 package com.Johnny.wcx.constants
 
 object WeChatVersions {
+    // Read from the supplied 微信 8.0.79 APK manifest (package com.tencent.mm).
+    const val MM_8_0_79 = 3200
     const val MM_8_0_76 = 3180
     const val MM_8_0_72 = 3100
     const val MM_8_0_71 = 3080
