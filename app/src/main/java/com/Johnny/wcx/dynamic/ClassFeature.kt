@@ -66,7 +66,13 @@ data class ClassFeature(
     val multipleIndex: Int = 0,
 
     /** 是否允许匹配失败（不设置 placeholder） */
-    val allowFailure: Boolean = false
+    val allowFailure: Boolean = false,
+
+    /**
+     * 可选的已知类名提示。用于已验证的版本特征优先精确定位；若类名不存在或成员
+     * 特征验证失败，扫描器仍会继续尝试结构化策略，不把提示当作唯一适配路径。
+     */
+    val classNameHint: String? = null
 )
 
 /**
