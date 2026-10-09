@@ -118,9 +118,7 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
     }
     private const val TAG = "WeSettingsInjector"
 
-    // Namespaced keys are intentionally WCX-specific. Reusing WeKit/test keys can make
-    // two independently loaded modules intercept each other's preference clicks.
-    private const val PREFS_KEY = "wcx_settings_entry_v1"
+    private const val PREFS_KEY = "wekit_settings_entry"
     private const val PREFS_TITLE = "${BuildConfig.TAG} 设置"
     private const val PREFERENCE_CLASS_NAME = "com.tencent.mm.ui.base.preference.Preference"
 
@@ -342,17 +340,13 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
         )
 
         settingsManager.createItem {
-            // Keep the item key unique to WCX; setting keys are process-wide in the host UI.
-            key = "SettingGroup_Main_WCX_Settings_v1"
+            key = "SettingGroup_Main_WeKitTest1"
             title = "WCX 设置"
             level = 1
             groupTitle = "插件"
             pageClass = SettingGroupMain::class.java
             parentClass = SettingAdditionHeaderSearch::class.java
-            // Do not hook SettingGroupPersonalInfo's location method as an insertion anchor.
-            // Other modules often use the same built-in class; overriding its location creates
-            // last-hook-wins behavior and can make modules hide or reorder each other's entries.
-            // The WCX item is registered independently under SettingGroupMain instead.
+            childClass = SettingGroupPersonalInfo::class.java
             onClick = {
                 try {
                     openSettingsDialog(it)
