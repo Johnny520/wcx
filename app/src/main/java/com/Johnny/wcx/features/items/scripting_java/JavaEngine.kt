@@ -32,6 +32,7 @@ import com.Johnny.wcx.features.api.ui.WeAlertDialogApi
 import com.Johnny.wcx.features.api.ui.WeChatInputBarMenuApi
 import com.Johnny.wcx.features.api.ui.WeChatMessageContextMenuApi
 import com.Johnny.wcx.utils.android.runOnUiThread
+import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Block
 import com.Johnny.wcx.features.api.ui.WeMomentsApi
 import com.Johnny.wcx.utils.AudioUtils
@@ -569,7 +570,7 @@ object JavaEngine {
                         listOf(
                             WeChatInputBarMenuApi.ActionItem(
                                 id = "script_plus_$title",
-                                icon = Block,
+                                icon = MaterialSymbols.Outlined.Block,
                                 label = title,
                                 onClick = { _, _ -> runCatching { cb.accept(null) } }
                             )
@@ -591,7 +592,7 @@ object JavaEngine {
                                 drawable = HostInfo.application
                                     .getDrawable(android.R.drawable.ic_menu_edit)
                                     ?: android.graphics.drawable.ColorDrawable(0),
-                                imageVector = Block,
+                                imageVector = MaterialSymbols.Outlined.Block,
                                 isSupported = { true },
                                 onClick = { _, _, _ -> runCatching { cb.accept(null) } }
                             )
