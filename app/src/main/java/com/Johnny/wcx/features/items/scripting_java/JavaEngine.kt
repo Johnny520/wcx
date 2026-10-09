@@ -568,7 +568,7 @@ object JavaEngine {
                         listOf(
                             WeChatInputBarMenuApi.ActionItem(
                                 id = "script_plus_$title",
-                                icon = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Block,
+                                icon = com.composables.icons.materialsymbols.outlined.Block,
                                 label = title,
                                 onClick = { _, _ -> runCatching { cb.accept(null) } }
                             )
@@ -590,7 +590,7 @@ object JavaEngine {
                                 drawable = HostInfo.application
                                     .getDrawable(android.R.drawable.ic_menu_edit)
                                     ?: android.graphics.drawable.ColorDrawable(0),
-                                imageVector = com.composables.icons.materialsymbols.MaterialSymbols.Outlined.Block,
+                                imageVector = com.composables.icons.materialsymbols.outlined.Block,
                                 isSupported = { true },
                                 onClick = { _, _, _ -> runCatching { cb.accept(null) } }
                             )
