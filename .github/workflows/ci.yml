@@ -96,12 +96,11 @@ jobs:
           # NDK r30 的 cdefs.h 要求显式 __ANDROID_API__；bindgen（含依赖 crate
           # 如 silk-v3-sys）用无版本 target 解析 sysroot 头文件时，会报
           # "Unversioned target triples are not supported!"。
-          # 从 configure 生成的配置中复用 --sysroot，再注入 __ANDROID_API__ 定义。
+          # 直接改写 configure 生成的 .cargo/config.toml，向每个
+          # BINDGEN_EXTRA_CLANG_ARGS_* 注入 -D__ANDROID_API__=28（与 MIN_SDK 对齐）。
           CFG_FILE="app/src/main/rust/wekit-native/.cargo/config.toml"
-          SYSROOT_ARG=$(grep -oE -- '--sysroot=[^"]+' "$CFG_FILE" | head -n 1)
-          for T in aarch64_linux_android x86_64_linux_android armv7_linux_androideabi i686_linux_android; do
-            export "BINDGEN_EXTRA_CLANG_ARGS_${T}=${SYSROOT_ARG} -D__ANDROID_API__=28"
-          done
+          sed -i 's|BINDGEN_EXTRA_CLANG_ARGS_\([A-Za-z0-9_]*\) = "--sysroot=\([^"]*\)"|BINDGEN_EXTRA_CLANG_ARGS_\1 = "--sysroot=\2 -D__ANDROID_API__=28"|' "$CFG_FILE"
+          grep 'BINDGEN_EXTRA' "$CFG_FILE"
           cargo xtask build --native-only
 
       - name: Prepare keystore
