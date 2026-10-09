@@ -475,6 +475,84 @@ object JavaEngine {
                     saveConfig(plugin, props)
                 })
 
+            // ===== Contact / Group Info（与 Hchat 脚本 API 同名同形，便于脚本互通）=====
+
+            setMethod(
+                BshMethod("getFriendListInfo", arrayOf()) {
+                    WeDatabaseApi.getFriends().map { c ->
+                        mapOf(
+                            "wxid" to c.wxId,
+                            "nickname" to c.nickname,
+                            "remarkName" to c.remarkName,
+                            "displayName" to c.displayName,
+                            "customWxId" to c.customWxId,
+                            "avatarUrl" to c.avatarUrl,
+                            "type" to c.type,
+                        )
+                    }
+                })
+            setMethod(
+                BshMethod("getFriendInfo", arrayOf(BString)) {
+                    WeDatabaseApi.getFriend(it[0] as String)?.let { c ->
+                        mapOf(
+                            "wxid" to c.wxId,
+                            "nickname" to c.nickname,
+                            "remarkName" to c.remarkName,
+                            "displayName" to c.displayName,
+                            "customWxId" to c.customWxId,
+                            "avatarUrl" to c.avatarUrl,
+                            "type" to c.type,
+                        )
+                    }
+                })
+            setMethod(
+                BshMethod("getGroupListInfo", arrayOf()) {
+                    WeDatabaseApi.getGroups().map { g ->
+                        mapOf(
+                            "roomId" to g.wxId,
+                            "name" to g.nickname,
+                            "displayName" to g.displayName,
+                            "avatarUrl" to g.avatarUrl,
+                        )
+                    }
+                })
+            setMethod(
+                BshMethod("getGroupMemberListInfo", arrayOf(BString)) {
+                    WeDatabaseApi.getGroupMembers(it[0] as String).map { c ->
+                        mapOf(
+                            "wxid" to c.wxId,
+                            "nickname" to c.nickname,
+                            "remarkName" to c.remarkName,
+                            "displayName" to c.displayName,
+                            "avatarUrl" to c.avatarUrl,
+                        )
+                    }
+                })
+            setMethod(
+                BshMethod("getContactLabelListInfo", arrayOf()) {
+                    WeContactLabelApi.getAllLabels().map { l ->
+                        mapOf("labelId" to l.labelId, "labelName" to l.labelName)
+                    }
+                })
+            setMethod(
+                BshMethod("getGroupName", arrayOf(BString)) {
+                    WeDatabaseApi.getGroup(it[0] as String)?.displayName ?: ""
+                })
+            setMethod(
+                BshMethod("getGroupMemberDisplayName", arrayOf(BString, BString)) {
+                    WeDatabaseApi.getGroupMemberDisplayName(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("getAvatarUrl", arrayOf(BString)) {
+                    WeDatabaseApi.getAvatarUrl(it[0] as String)
+                })
+            setMethod(
+                BshMethod("getSelfWxId", arrayOf()) { WeApi.selfWxId })
+            setMethod(
+                BshMethod("findClass", arrayOf(BString)) {
+                    runCatching { ClassLoaders.HOST.loadClass(it[0] as String) }.getOrNull()
+                })
+
             // getLong(key, default)
             setMethod(
                 BshMethod(
