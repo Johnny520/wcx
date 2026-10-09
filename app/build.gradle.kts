@@ -46,8 +46,8 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         // 版本号单一数据源：CI（.github/workflows/ci.yml）直接读取此处，
         // 发版时只需在此递增 versionCode / versionName
-        versionCode = 266
-        versionName = "v266"
+        versionCode = 267
+        versionName = "v267"
 
         buildConfigField("String", "COMMIT_HASH", "\"${gitHash}\"")
         buildConfigField("String", "TAG", "\"WCX\"")
