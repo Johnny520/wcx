@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.content.SharedPreferences
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -116,227 +115,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 private const val PRESS_RELEASE_DELAY_MS = 110L
-private const val RINGTONE_SYSTEM_REQUEST_CODE = 0x48435254
-private const val RINGTONE_FILE_REQUEST_CODE = 0x48435255
-private const val REDPACKET_REPLY_FILE_REQUEST_CODE = 0x48435256
-private const val AUTO_REPLY_FILE_REQUEST_CODE = 0x48435257
-private const val CONFIG_EXPORT_REQUEST_CODE = 0x48435258
-private const val CONFIG_IMPORT_REQUEST_CODE = 0x48435259
-private const val SCHEDULED_TASK_FILE_REQUEST_CODE = 0x4843525A
-private const val AUDIO_TRANSFORM_INPUT_REQUEST_CODE = 0x4843525B
-private const val AUDIO_TRANSFORM_OUTPUT_REQUEST_CODE = 0x4843525C
-private const val FAKE_LOCATION_WECHAT_PICKER_REQUEST_CODE = 0x4843525D
-private const val SCRIPT_AGENT_ATTACHMENT_REQUEST_CODE = 0x4843525E
-private const val PLUGIN_MARKET_EXTRA_FILE_REQUEST_CODE = 0x4843525F
+
 private const val SCRIPT_PLUGIN_EXPORT_REQUEST_CODE = 0x48435260
+
 private const val SCRIPT_PLUGIN_IMPORT_REQUEST_CODE = 0x48435261
+
 private const val MARKDOWN_LINK_TAG = "md_link"
+
 private val MARKDOWN_LINK_REGEX = Regex("""\[([^\]]+)]\(([^)\s]+)\)""")
+
 private val NAVIGATION_BUTTON_MIN_INSET = 24.dp
+
 private val NAVIGATION_BUTTON_EXTRA_GAP = 8.dp
-private const val REDPACKET_AT_SENDER_VARIABLE = "{@发红包的人}"
-
-private fun isLiquidGlassSupported(): Boolean = Build.VERSION.SDK_INT >= 33
-private val REDPACKET_AT_SENDER_VARIABLES = listOf(
-    REDPACKET_AT_SENDER_VARIABLE,
-    "{@sender}",
-    "{@成员}"
-)
-
-private val redPacketTemplateVariables = listOf(
-    TemplateVariable("{amount}", "金额"),
-    TemplateVariable("{talker}", "会话"),
-    TemplateVariable("{sender}", "成员"),
-    TemplateVariable("{time}", "时间")
-)
-private val redPacketReplyTemplateVariables = redPacketTemplateVariables + TemplateVariable(
-    REDPACKET_AT_SENDER_VARIABLE,
-    "@发红包人"
-)
-private val transferTemplateVariables = listOf(
-    TemplateVariable("{amount}", "金额"),
-    TemplateVariable("{talker}", "会话"),
-    TemplateVariable("{sender}", "转账人"),
-    TemplateVariable("{@转账的人}", "@转账人"),
-    TemplateVariable("{time}", "时间")
-)
-
-private val antiRecallTemplateVariables = listOf(
-    TemplateVariable(AntiRecallSettings.VAR_RECALLER_NAME, "撤回者"),
-    TemplateVariable(AntiRecallSettings.VAR_RECALL_TEXT, "文字内容"),
-    TemplateVariable(AntiRecallSettings.VAR_SEND_TIME, "发送时间"),
-    TemplateVariable(AntiRecallSettings.VAR_RECALL_TIME, "撤回时间")
-)
-private val messageAffixTemplateVariables = listOf(
-    TemplateVariable(MessageAffixSettings.VAR_SEND_TEXT, "原消息"),
-    TemplateVariable(MessageAffixSettings.VAR_LINE, "换行"),
-    TemplateVariable(MessageAffixSettings.VAR_SEND_TIME, "发送时间"),
-    TemplateVariable(MessageAffixSettings.VAR_SEND_DURATION, "发送耗时"),
-    TemplateVariable(MessageAffixSettings.VAR_TOTAL_MESSAGES, "发送总数"),
-    TemplateVariable(MessageAffixSettings.VAR_TEXT_MESSAGES, "文字消息数"),
-    TemplateVariable(MessageAffixSettings.VAR_TEXT_CHARACTERS, "文字字数"),
-    TemplateVariable(MessageAffixSettings.VAR_EMOJI_MESSAGES, "表情消息数"),
-    TemplateVariable(MessageAffixSettings.VAR_TRANSFER_MESSAGES, "转账消息数"),
-    TemplateVariable(MessageAffixSettings.VAR_RED_PACKET_MESSAGES, "红包消息数"),
-    TemplateVariable(MessageAffixSettings.VAR_FILE_MESSAGES, "文件消息数")
-)
-private val inputHintTemplateVariables = listOf(
-    TemplateVariable(InputHintSettings.VAR_TOTAL_MESSAGES, "发送总数"),
-    TemplateVariable(InputHintSettings.VAR_TEXT_MESSAGES, "文字消息数"),
-    TemplateVariable(InputHintSettings.VAR_TEXT_CHARACTERS, "文字字数"),
-    TemplateVariable(InputHintSettings.VAR_EMOJI_MESSAGES, "表情消息数"),
-    TemplateVariable(InputHintSettings.VAR_TRANSFER_MESSAGES, "转账消息数"),
-    TemplateVariable(InputHintSettings.VAR_RED_PACKET_MESSAGES, "红包消息数"),
-    TemplateVariable(InputHintSettings.VAR_FILE_MESSAGES, "文件消息数")
-)
-private val keywordNotificationTemplateVariables = listOf(
-    TemplateVariable("%keyword%", "关键词"),
-    TemplateVariable("%sender%", "发送者"),
-    TemplateVariable("%wxid%", "发送者ID"),
-    TemplateVariable("%content%", "内容"),
-    TemplateVariable("%type%", "消息类型")
-)
-private val momentsPostNotificationTemplateVariables = listOf(
-    TemplateVariable("%sender%", "发布者"),
-    TemplateVariable("%wxid%", "发布者ID"),
-    TemplateVariable("%type%", "类型"),
-    TemplateVariable("%content%", "内容"),
-    TemplateVariable("%snsid%", "朋友圈ID")
-)
-private val momentsAutoCommentTemplateVariables = listOf(
-    TemplateVariable(MomentsAutoCommentSettings.VAR_TIME, "时间")
-)
-private val textSpeechTemplateVariables = listOf(
-    TemplateVariable(TextSpeechSettings.VAR_SENDER_NICKNAME, "发送者昵称"),
-    TemplateVariable(TextSpeechSettings.VAR_WECHAT_ID, "发送者微信号"),
-    TemplateVariable(TextSpeechSettings.VAR_REMARK_NAME, "备注"),
-    TemplateVariable(TextSpeechSettings.VAR_GROUP_NICKNAME, "群内昵称"),
-    TemplateVariable(TextSpeechSettings.VAR_GROUP_NAME, "群聊名称"),
-    TemplateVariable(TextSpeechSettings.VAR_CONVERSATION_NAME, "会话名称"),
-    TemplateVariable(TextSpeechSettings.VAR_ANNOUNCEMENT_SOURCE, "播报来源"),
-    TemplateVariable(TextSpeechSettings.VAR_MESSAGE_CONTENT, "消息正文"),
-    TemplateVariable(TextSpeechSettings.VAR_MESSAGE_TYPE, "消息类型"),
-    TemplateVariable(TextSpeechSettings.VAR_VOICE_DURATION, "语音时长"),
-    TemplateVariable(TextSpeechSettings.VAR_MESSAGE_TIME, "消息时间"),
-    TemplateVariable(TextSpeechSettings.VAR_SENDER_ID, "发送者ID"),
-    TemplateVariable(TextSpeechSettings.VAR_CONVERSATION_ID, "会话ID")
-)
-private val momentsBottomDetailTemplateVariables = listOf(
-    TemplateVariable(MomentsBottomDetailSettings.VAR_ORIGINAL_TEXT, "微信原时间"),
-    TemplateVariable(MomentsBottomDetailSettings.VAR_TIME, "自定义时间"),
-    TemplateVariable(MomentsBottomDetailSettings.VAR_TYPE, "朋友圈类型"),
-    TemplateVariable(MomentsBottomDetailSettings.VAR_SNS_ID, "朋友圈ID"),
-    TemplateVariable(MomentsBottomDetailSettings.VAR_USER_NAME, "发布者ID")
-)
-private val groupMemberTemplateVariables = listOf(
-    TemplateVariable("%userName%", "微信昵称"),
-    TemplateVariable("%groupNickname%", "群内昵称"),
-    TemplateVariable("%userWxid%", "Wxid"),
-    TemplateVariable("%realNameTail%", "实名尾字"),
-    TemplateVariable("%gender%", "性别"),
-    TemplateVariable("%region%", "地区"),
-    TemplateVariable("%groupName%", "群名"),
-    TemplateVariable("%time%", "时间"),
-    TemplateVariable("[AtWx=%userWxid%]", "@成员"),
-    TemplateVariable("[AtWx=]", "@其他人")
-)
-private val groupRenameTemplateVariables = listOf(
-    TemplateVariable("%userName%", "微信昵称"),
-    TemplateVariable("%oldGroupNickname%", "旧群内昵称"),
-    TemplateVariable("%newGroupNickname%", "新群内昵称"),
-    TemplateVariable("%userWxid%", "Wxid"),
-    TemplateVariable("%realNameTail%", "实名尾字"),
-    TemplateVariable("%gender%", "性别"),
-    TemplateVariable("%region%", "地区"),
-    TemplateVariable("%groupName%", "群名"),
-    TemplateVariable("%time%", "时间"),
-    TemplateVariable("[AtWx=%userWxid%]", "@成员"),
-    TemplateVariable("[AtWx=]", "@其他人")
-)
-private val groupRenameNoticeVariables = listOf(
-    TemplateVariable("%oldGroupNickname%", "旧群内昵称"),
-    TemplateVariable("%newGroupNickname%", "新群内昵称"),
-    TemplateVariable("%userName%", "微信昵称"),
-    TemplateVariable("%userWxid%", "可点击Wxid"),
-    TemplateVariable("%realNameTail%", "真实姓名尾巴"),
-    TemplateVariable("%gender%", "性别"),
-    TemplateVariable("%region%", "地区"),
-    TemplateVariable("%groupName%", "群名"),
-    TemplateVariable("%time%", "时间")
-)
-private val groupLeaveNoticeVariables = listOf(
-    TemplateVariable("%displayName%", "完整显示名"),
-    TemplateVariable("%groupNickname%", "群内昵称"),
-    TemplateVariable("%userName%", "微信昵称"),
-    TemplateVariable("%remarkName%", "备注"),
-    TemplateVariable("%userWxid%", "可点击Wxid"),
-    TemplateVariable("%groupName%", "群名"),
-    TemplateVariable("%time%", "时间")
-)
-private val groupInviteNoticeVariables = listOf(
-    TemplateVariable("%inviterName%", "邀请者名称"),
-    TemplateVariable("%inviterGroupNickname%", "邀请者群昵称"),
-    TemplateVariable("%inviterWxid%", "邀请者可点击Wxid"),
-    TemplateVariable("%inviteeName%", "被邀请者名称"),
-    TemplateVariable("%inviteeGroupNickname%", "被邀请者群昵称"),
-    TemplateVariable("%inviteeWxid%", "被邀请者可点击Wxid"),
-    TemplateVariable("%inviteCount%", "累计邀请次数"),
-    TemplateVariable("%groupName%", "群名"),
-    TemplateVariable("%time%", "时间")
-)
-private val autoReplyTemplateVariables = listOf(
-    TemplateVariable("%friendName%", "好友/成员名"),
-    TemplateVariable("%senderName%", "发送者"),
-    TemplateVariable("%senderWxid%", "发送者ID"),
-    TemplateVariable("%talker%", "会话ID"),
-    TemplateVariable("%groupName%", "群名"),
-    TemplateVariable("%content%", "原消息"),
-    TemplateVariable("%atSender%", "@发送者"),
-    TemplateVariable("%atAll%", "@所有人")
-)
-private val scheduledTaskTemplateVariables = listOf(
-    TemplateVariable("%friendName%", "好友/成员名")
-)
-
-private val groupRandomJoinTexts = listOf(
-    "[AtWx=%userWxid%] 欢迎 %userName% 加入 %groupName%",
-    "欢迎新朋友 %userName% 加入，大家请多关照",
-    "欢迎 %userName%，记得看群公告",
-    "新成员 %userName% 已加入群聊",
-    "欢迎 %userName%，愿在 %groupName% 玩得开心"
-)
-
-private val groupRandomLeftTexts = listOf(
-    "有缘再会，祝 %userName% 一切顺利",
-    "%userName% 已离开群聊，愿一切安好",
-    "青山不改，绿水长流，后会有期",
-    "我们会想念你的，%userName%",
-    "%userName% 已退群，感谢曾经同行"
-)
-
-private val groupRandomJoinCardTitles = listOf(
-    "欢迎：%userName%",
-    "群聊因你而精彩",
-    "新成员到来：%userName%"
-)
-
-private val groupRandomJoinCardDescs = listOf(
-    "常来聊天",
-    "群名称：%groupName%\n名片：%groupNickname%\n进群时间：%time%",
-    "快来和大家一起玩\nID：%userWxid%"
-)
-
-private val groupRandomLeftCardTitles = listOf(
-    "成员离群通知",
-    "%userName% 已离开",
-    "祝你一切顺利"
-)
-
-private val groupRandomLeftCardDescs = listOf(
-    "我们有缘再见",
-    "群名称：%groupName%\n名片：%groupNickname%\n离群时间：%time%",
-    "相逢是缘，祝君安好"
-)
 
 private object NavIcons {
     val Back: ImageVector = navIcon(
@@ -772,6 +562,7 @@ private fun SearchBarSurface(
         }
     }
 }
+
 
 private data class TemplateVariable(
     val token: String,
@@ -2426,6 +2217,76 @@ private fun MarkdownLine(
 ): MarkdownInlineState {
     val trimmed = line.trim()
     return when {
+        trimmed.isBlank() -> {
+            Box(modifier = Modifier.height(8.dp))
+            inlineState
+        }
+        trimmed.matches(Regex("""-{3,}|_{3,}|\*{3,}""")) -> {
+            Box(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .height(1.dp)
+                    .background(MiuixTheme.colorScheme.outline)
+            )
+            inlineState
+        }
+        trimmed.startsWith("#") -> {
+            val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 6)
+            val text = trimmed.drop(level).trim()
+            MarkdownTextResult(
+                context = context,
+                text = text,
+                inlineState = inlineState,
+                modifier = Modifier.padding(top = if (level <= 2) 10.dp else 8.dp, bottom = 4.dp),
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = when (level) {
+                    1 -> 22.sp
+                    2 -> 19.sp
+                    3 -> 17.sp
+                    else -> 15.sp
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        trimmed.startsWith(">") -> {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Box(
+                    modifier = Modifier.padding(end = 8.dp)
+                        .size(width = 3.dp, height = 20.dp)
+                        .background(MiuixTheme.colorScheme.primary)
+                )
+                MarkdownTextResult(
+                    context = context,
+                    text = trimmed.removePrefix(">").trim(),
+                    inlineState = inlineState,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = bodyFontSize,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            inlineState
+        }
+        trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") -> {
+            MarkdownBullet(context, trimmed.drop(2).trim(), inlineState, fontSize = bodyFontSize)
+        }
+        Regex("""^\d+[.)]\s+.*""").matches(trimmed) -> {
+            val marker = trimmed.substringBefore(' ').trim()
+            MarkdownBullet(context, trimmed.removePrefix(marker).trim(), inlineState, marker, bodyFontSize)
+        }
+        else -> {
+            MarkdownTextResult(
+                context = context,
+                text = line,
+                inlineState = inlineState,
+                fontSize = bodyFontSize,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
+    }
+}
+
 
 @Composable
 private fun MarkdownBullet(
@@ -2442,6 +2303,18 @@ private fun MarkdownBullet(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             fontSize = fontSize,
             modifier = Modifier.padding(end = 8.dp)
+        )
+        nextState = MarkdownTextResult(
+            context = context,
+            text = text,
+            inlineState = inlineState,
+            fontSize = fontSize,
+            modifier = Modifier.weight(1f)
+        )
+    }
+    return nextState
+}
+
 
 @Composable
 private fun MarkdownTextResult(
@@ -2632,6 +2505,7 @@ private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
     }
 }
 
+
 @Composable
 internal fun BottomActionBar(
     primaryText: String,
@@ -2670,6 +2544,21 @@ internal fun BottomActionBar(
         }
         if (middleText != null && onMiddleClick != null) {
             BottomBarButton(
+                text = middleText,
+                modifier = Modifier.weight(1f),
+                filled = false,
+                onClick = onMiddleClick
+            )
+        }
+        BottomBarButton(
+            text = primaryText,
+            modifier = Modifier.weight(1f),
+            filled = true,
+            onClick = onPrimaryClick
+        )
+    }
+}
+
 
 @Composable
 private fun EmptyText(text: String) {
@@ -2680,6 +2569,7 @@ private fun EmptyText(text: String) {
         textAlign = TextAlign.Center
     )
 }
+
 
 @Composable
 internal fun InsetDivider(start: Dp = 16.dp) {
