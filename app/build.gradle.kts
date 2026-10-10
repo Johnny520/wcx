@@ -306,6 +306,22 @@ dependencies {
     // Termux 终端（GPLv3）：terminal-view 依赖 terminal-emulator
     implementation(files("libs/terminal-emulator-0.118.0.aar"))
     implementation(files("libs/terminal-view-0.118.0.aar"))
+    // Hchat 脚本子系统依赖（迁移）
+    implementation("io.github.billywei01:fastkv:3.0.1")
+    implementation("com.google.flatbuffers:flatbuffers-java:23.5.26")
+    implementation("dev.rikka.ndk.thirdparty:cxx:1.2.0")
+    implementation("com.github.REAndroid:ARSCLib:V1.3.8")
+    implementation("io.github.skylot:jadx-dex-input:1.5.5") {
+        exclude(group = "com.google.guava", module = "guava")
+    }
+    implementation("com.google.guava:guava:33.5.0-android")
+    implementation("com.android.tools.smali:smali-baksmali:3.0.9")
+    implementation("com.highcapable.kavaref:kavaref-core:1.1.0")
+    implementation("com.jakewharton.android.repackaged:dalvik-dx:16.0.1")
+    implementation("com.alibaba.fastjson2:fastjson2:2.0.61.android8")
+    implementation("androidx.navigationevent:navigationevent:1.1.2")
+    implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.1")
 
     implementation(project(":libs:common:bsh"))
 
