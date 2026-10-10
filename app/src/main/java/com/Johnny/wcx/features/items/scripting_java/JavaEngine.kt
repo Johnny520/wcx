@@ -20,6 +20,7 @@ import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeAuthApi
 import com.Johnny.wcx.features.api.core.WeContactApi
 import com.Johnny.wcx.features.api.core.WeContactLabelApi
+import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeGroupApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
@@ -574,6 +575,81 @@ object JavaEngine {
             setMethod(
                 BshMethod("findClass", arrayOf(BString)) {
                     runCatching { ClassLoaders.HOST.loadClass(it[0] as String) }.getOrNull()
+                })
+
+            // ===== Conversation / Group / Message extras（对齐 Hchat 脚本 API）=====
+
+            setMethod(
+                BshMethod("getChatroomName", arrayOf(BString)) {
+                    WeDatabaseApi.getGroup(it[0] as String)?.displayName ?: ""
+                })
+            setMethod(
+                BshMethod("getGroupMemberName", arrayOf(BString, BString)) {
+                    WeDatabaseApi.getGroupMemberDisplayName(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("getGroupNickName", arrayOf(BString, BString)) {
+                    WeDatabaseApi.getGroupMemberDisplayName(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("getOfficialListInfo", arrayOf()) {
+                    WeDatabaseApi.getOfficialAccounts().map { a ->
+                        mapOf(
+                            "wxid" to a.wxId,
+                            "nickname" to a.nickname,
+                            "avatarUrl" to a.avatarUrl,
+                        )
+                    }
+                })
+            setMethod(
+                BshMethod("deleteConversation", arrayOf(BString)) {
+                    WeConversationApi.deleteConversation(it[0] as String)
+                })
+            setMethod(
+                BshMethod("hideConversation", arrayOf(BString)) {
+                    WeConversationApi.hideConversation(it[0] as String)
+                })
+            setMethod(
+                BshMethod("reloadConversations", arrayOf()) {
+                    WeConversationApi.reloadConversations()
+                })
+            setMethod(
+                BshMethod("clearUnread", arrayOf(BString)) {
+                    WeConversationApi.markAsRead(it[0] as String)
+                    true
+                })
+            setMethod(
+                BshMethod("clearAllUnread", arrayOf()) {
+                    WeConversationApi.markAllAsRead()
+                    true
+                })
+            setMethod(
+                BshMethod("isDnd", arrayOf(BString)) {
+                    WeConversationApi.isDnd(it[0] as String)
+                })
+            setMethod(
+                BshMethod("setDnd", arrayOf(BString, java.lang.Boolean.TYPE)) {
+                    WeConversationApi.setDnd(it[0] as String, it[1] as Boolean)
+                })
+            setMethod(
+                BshMethod("isPinned", arrayOf(BString)) {
+                    WeConversationApi.isPinned(it[0] as String)
+                })
+            setMethod(
+                BshMethod("setPinned", arrayOf(BString, java.lang.Boolean.TYPE)) {
+                    WeConversationApi.setPinned(it[0] as String, it[1] as Boolean)
+                })
+            setMethod(
+                BshMethod("revokeMsg", arrayOf(java.lang.Long.TYPE)) {
+                    WeMessageApi.revokeMsgByMsgId(it[0] as Long)
+                })
+            setMethod(
+                BshMethod("getMsgSvrIdByMsgId", arrayOf(java.lang.Long.TYPE)) {
+                    WeMessageApi.getMsgSvrIdByMsgId(it[0] as Long) ?: -1L
+                })
+            setMethod(
+                BshMethod("getTalkerByMsgSvrId", arrayOf(java.lang.Long.TYPE)) {
+                    WeMessageApi.getTalkerByMsgSvrId(it[0] as Long) ?: ""
                 })
 
             // ===== Menu registration（与 Hchat 脚本 API 同名，便于脚本互通）=====
