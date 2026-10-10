@@ -25,6 +25,7 @@ import h.Hchat.utils.HchatMediaDownloader
 import me.hd.wauxv.data.bean.MsgInfoBean
 import me.hd.wauxv.data.bean.info.FriendInfo
 import me.hd.wauxv.data.bean.info.GroupInfo
+import me.hd.wauxv.data.bean.info.GroupData
 import me.hd.wauxv.plugin.api.callback.PluginCallBack
 import me.yun.silk.SilkCodec
 import okhttp3.MediaType.Companion.toMediaType
@@ -112,17 +113,13 @@ class ScriptWaBridge @JvmOverloads internal constructor(
     fun getFriendList(): List<FriendInfo> {
         return rawFriendList().map { contact ->
             FriendInfo(
-                contact.wxId,
-                contact.nickname,
-                contact.remarkName,
-                contact.customWxId,
-                contact.avatarUrl,
-                contact.avatarBackupUrl,
-                contact.encryptedUsername,
-                contact.province,
-                contact.city,
-                contact.gender,
-                contact.type
+                wxid = contact.wxId,
+                alias = contact.customWxId,
+                remark = contact.remarkName,
+                nickname = contact.nickname,
+                type = contact.type,
+                sourceExtInfo = contact.encryptedUsername,
+                createTime = 0L
             )
         }
     }
@@ -163,13 +160,16 @@ class ScriptWaBridge @JvmOverloads internal constructor(
             val contact = groupContacts[chatroom.chatroomId]
             val groupName = firstNotBlank(chatroom.name, contact?.nickname, chatroom.chatroomId)
             GroupInfo(
-                chatroom.chatroomId,
-                groupName,
-                firstNotBlank(contact?.nickname, groupName),
-                contact?.remarkName.orEmpty(),
-                chatroom.owner,
-                chatroom.memberIds,
-                chatroom.rawDisplayNames
+                roomId = chatroom.chatroomId,
+                remark = contact?.remarkName.orEmpty(),
+                name = groupName,
+                groupData = GroupData(
+                    roomId = chatroom.chatroomId,
+                    memberIds = chatroom.memberIds ?: emptyList(),
+                    memberNames = chatroom.rawDisplayNames ?: emptyList(),
+                    memberCount = (chatroom.memberIds ?: emptyList()).size,
+                    owner = chatroom.owner.orEmpty()
+                )
             )
         }
     }
@@ -915,7 +915,7 @@ class ScriptWaBridge @JvmOverloads internal constructor(
         if (talker.isNullOrBlank() || content.isNullOrEmpty()) return 0L
         // TODO(migration): WCX 现有插入接口不返回新消息 id，成功时统一返回 0；需要 msgId 时应扩展 WeMessageApi。
         runCatching { WeChatService.insertSystemMessage(talker, content, createTime) }
-            .onFailure { HLog.e("ScriptWaBridge", "insertSystemMsg 失败", it) }
+            .onFailure { HLog.e("ScriptWaBridge insertSystemMsg 失败", it) }
         return 0L
     }
 

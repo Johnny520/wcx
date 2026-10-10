@@ -303,6 +303,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.serialization.protobuf)
     implementation(libs.mmkv)
+    // Termux 终端（GPLv3）：terminal-view 依赖 terminal-emulator
+    implementation(files("libs/terminal-emulator-0.118.0.aar"))
+    implementation(files("libs/terminal-view-0.118.0.aar"))
 
     implementation(project(":libs:common:bsh"))
 
