@@ -105,3 +105,6 @@
 -dontwarn dev.rikka.ndk.thirdparty.**
 -keep class com.highcapable.kavaref.** { *; }
 -keep class h.Hchat.** { *; }
+
+-dontwarn com.termux.**
+-keep class com.termux.** { *; }
