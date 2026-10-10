@@ -6,8 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.content.SharedPreferences
-import android.graphics.Bitmap
-import android.graphics.Color as AndroidColor
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -17,32 +16,25 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
@@ -55,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
@@ -63,11 +56,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.focus.FocusRequester
@@ -75,18 +66,14 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -104,13 +91,15 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.DropdownEntry
-import top.yukonga.miuix.kmp.basic.DropdownItem
-import top.yukonga.miuix.kmp.menu.WindowDropdownMenu
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.blur.Backdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 import kotlinx.coroutines.Dispatchers
@@ -125,6 +114,229 @@ import java.util.LinkedHashSet
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+
+private const val PRESS_RELEASE_DELAY_MS = 110L
+private const val RINGTONE_SYSTEM_REQUEST_CODE = 0x48435254
+private const val RINGTONE_FILE_REQUEST_CODE = 0x48435255
+private const val REDPACKET_REPLY_FILE_REQUEST_CODE = 0x48435256
+private const val AUTO_REPLY_FILE_REQUEST_CODE = 0x48435257
+private const val CONFIG_EXPORT_REQUEST_CODE = 0x48435258
+private const val CONFIG_IMPORT_REQUEST_CODE = 0x48435259
+private const val SCHEDULED_TASK_FILE_REQUEST_CODE = 0x4843525A
+private const val AUDIO_TRANSFORM_INPUT_REQUEST_CODE = 0x4843525B
+private const val AUDIO_TRANSFORM_OUTPUT_REQUEST_CODE = 0x4843525C
+private const val FAKE_LOCATION_WECHAT_PICKER_REQUEST_CODE = 0x4843525D
+private const val SCRIPT_AGENT_ATTACHMENT_REQUEST_CODE = 0x4843525E
+private const val PLUGIN_MARKET_EXTRA_FILE_REQUEST_CODE = 0x4843525F
+private const val SCRIPT_PLUGIN_EXPORT_REQUEST_CODE = 0x48435260
+private const val SCRIPT_PLUGIN_IMPORT_REQUEST_CODE = 0x48435261
+private const val MARKDOWN_LINK_TAG = "md_link"
+private val MARKDOWN_LINK_REGEX = Regex("""\[([^\]]+)]\(([^)\s]+)\)""")
+private val NAVIGATION_BUTTON_MIN_INSET = 24.dp
+private val NAVIGATION_BUTTON_EXTRA_GAP = 8.dp
+private const val REDPACKET_AT_SENDER_VARIABLE = "{@发红包的人}"
+
+private fun isLiquidGlassSupported(): Boolean = Build.VERSION.SDK_INT >= 33
+private val REDPACKET_AT_SENDER_VARIABLES = listOf(
+    REDPACKET_AT_SENDER_VARIABLE,
+    "{@sender}",
+    "{@成员}"
+)
+
+private val redPacketTemplateVariables = listOf(
+    TemplateVariable("{amount}", "金额"),
+    TemplateVariable("{talker}", "会话"),
+    TemplateVariable("{sender}", "成员"),
+    TemplateVariable("{time}", "时间")
+)
+private val redPacketReplyTemplateVariables = redPacketTemplateVariables + TemplateVariable(
+    REDPACKET_AT_SENDER_VARIABLE,
+    "@发红包人"
+)
+private val transferTemplateVariables = listOf(
+    TemplateVariable("{amount}", "金额"),
+    TemplateVariable("{talker}", "会话"),
+    TemplateVariable("{sender}", "转账人"),
+    TemplateVariable("{@转账的人}", "@转账人"),
+    TemplateVariable("{time}", "时间")
+)
+
+private val antiRecallTemplateVariables = listOf(
+    TemplateVariable(AntiRecallSettings.VAR_RECALLER_NAME, "撤回者"),
+    TemplateVariable(AntiRecallSettings.VAR_RECALL_TEXT, "文字内容"),
+    TemplateVariable(AntiRecallSettings.VAR_SEND_TIME, "发送时间"),
+    TemplateVariable(AntiRecallSettings.VAR_RECALL_TIME, "撤回时间")
+)
+private val messageAffixTemplateVariables = listOf(
+    TemplateVariable(MessageAffixSettings.VAR_SEND_TEXT, "原消息"),
+    TemplateVariable(MessageAffixSettings.VAR_LINE, "换行"),
+    TemplateVariable(MessageAffixSettings.VAR_SEND_TIME, "发送时间"),
+    TemplateVariable(MessageAffixSettings.VAR_SEND_DURATION, "发送耗时"),
+    TemplateVariable(MessageAffixSettings.VAR_TOTAL_MESSAGES, "发送总数"),
+    TemplateVariable(MessageAffixSettings.VAR_TEXT_MESSAGES, "文字消息数"),
+    TemplateVariable(MessageAffixSettings.VAR_TEXT_CHARACTERS, "文字字数"),
+    TemplateVariable(MessageAffixSettings.VAR_EMOJI_MESSAGES, "表情消息数"),
+    TemplateVariable(MessageAffixSettings.VAR_TRANSFER_MESSAGES, "转账消息数"),
+    TemplateVariable(MessageAffixSettings.VAR_RED_PACKET_MESSAGES, "红包消息数"),
+    TemplateVariable(MessageAffixSettings.VAR_FILE_MESSAGES, "文件消息数")
+)
+private val inputHintTemplateVariables = listOf(
+    TemplateVariable(InputHintSettings.VAR_TOTAL_MESSAGES, "发送总数"),
+    TemplateVariable(InputHintSettings.VAR_TEXT_MESSAGES, "文字消息数"),
+    TemplateVariable(InputHintSettings.VAR_TEXT_CHARACTERS, "文字字数"),
+    TemplateVariable(InputHintSettings.VAR_EMOJI_MESSAGES, "表情消息数"),
+    TemplateVariable(InputHintSettings.VAR_TRANSFER_MESSAGES, "转账消息数"),
+    TemplateVariable(InputHintSettings.VAR_RED_PACKET_MESSAGES, "红包消息数"),
+    TemplateVariable(InputHintSettings.VAR_FILE_MESSAGES, "文件消息数")
+)
+private val keywordNotificationTemplateVariables = listOf(
+    TemplateVariable("%keyword%", "关键词"),
+    TemplateVariable("%sender%", "发送者"),
+    TemplateVariable("%wxid%", "发送者ID"),
+    TemplateVariable("%content%", "内容"),
+    TemplateVariable("%type%", "消息类型")
+)
+private val momentsPostNotificationTemplateVariables = listOf(
+    TemplateVariable("%sender%", "发布者"),
+    TemplateVariable("%wxid%", "发布者ID"),
+    TemplateVariable("%type%", "类型"),
+    TemplateVariable("%content%", "内容"),
+    TemplateVariable("%snsid%", "朋友圈ID")
+)
+private val momentsAutoCommentTemplateVariables = listOf(
+    TemplateVariable(MomentsAutoCommentSettings.VAR_TIME, "时间")
+)
+private val textSpeechTemplateVariables = listOf(
+    TemplateVariable(TextSpeechSettings.VAR_SENDER_NICKNAME, "发送者昵称"),
+    TemplateVariable(TextSpeechSettings.VAR_WECHAT_ID, "发送者微信号"),
+    TemplateVariable(TextSpeechSettings.VAR_REMARK_NAME, "备注"),
+    TemplateVariable(TextSpeechSettings.VAR_GROUP_NICKNAME, "群内昵称"),
+    TemplateVariable(TextSpeechSettings.VAR_GROUP_NAME, "群聊名称"),
+    TemplateVariable(TextSpeechSettings.VAR_CONVERSATION_NAME, "会话名称"),
+    TemplateVariable(TextSpeechSettings.VAR_ANNOUNCEMENT_SOURCE, "播报来源"),
+    TemplateVariable(TextSpeechSettings.VAR_MESSAGE_CONTENT, "消息正文"),
+    TemplateVariable(TextSpeechSettings.VAR_MESSAGE_TYPE, "消息类型"),
+    TemplateVariable(TextSpeechSettings.VAR_VOICE_DURATION, "语音时长"),
+    TemplateVariable(TextSpeechSettings.VAR_MESSAGE_TIME, "消息时间"),
+    TemplateVariable(TextSpeechSettings.VAR_SENDER_ID, "发送者ID"),
+    TemplateVariable(TextSpeechSettings.VAR_CONVERSATION_ID, "会话ID")
+)
+private val momentsBottomDetailTemplateVariables = listOf(
+    TemplateVariable(MomentsBottomDetailSettings.VAR_ORIGINAL_TEXT, "微信原时间"),
+    TemplateVariable(MomentsBottomDetailSettings.VAR_TIME, "自定义时间"),
+    TemplateVariable(MomentsBottomDetailSettings.VAR_TYPE, "朋友圈类型"),
+    TemplateVariable(MomentsBottomDetailSettings.VAR_SNS_ID, "朋友圈ID"),
+    TemplateVariable(MomentsBottomDetailSettings.VAR_USER_NAME, "发布者ID")
+)
+private val groupMemberTemplateVariables = listOf(
+    TemplateVariable("%userName%", "微信昵称"),
+    TemplateVariable("%groupNickname%", "群内昵称"),
+    TemplateVariable("%userWxid%", "Wxid"),
+    TemplateVariable("%realNameTail%", "实名尾字"),
+    TemplateVariable("%gender%", "性别"),
+    TemplateVariable("%region%", "地区"),
+    TemplateVariable("%groupName%", "群名"),
+    TemplateVariable("%time%", "时间"),
+    TemplateVariable("[AtWx=%userWxid%]", "@成员"),
+    TemplateVariable("[AtWx=]", "@其他人")
+)
+private val groupRenameTemplateVariables = listOf(
+    TemplateVariable("%userName%", "微信昵称"),
+    TemplateVariable("%oldGroupNickname%", "旧群内昵称"),
+    TemplateVariable("%newGroupNickname%", "新群内昵称"),
+    TemplateVariable("%userWxid%", "Wxid"),
+    TemplateVariable("%realNameTail%", "实名尾字"),
+    TemplateVariable("%gender%", "性别"),
+    TemplateVariable("%region%", "地区"),
+    TemplateVariable("%groupName%", "群名"),
+    TemplateVariable("%time%", "时间"),
+    TemplateVariable("[AtWx=%userWxid%]", "@成员"),
+    TemplateVariable("[AtWx=]", "@其他人")
+)
+private val groupRenameNoticeVariables = listOf(
+    TemplateVariable("%oldGroupNickname%", "旧群内昵称"),
+    TemplateVariable("%newGroupNickname%", "新群内昵称"),
+    TemplateVariable("%userName%", "微信昵称"),
+    TemplateVariable("%userWxid%", "可点击Wxid"),
+    TemplateVariable("%realNameTail%", "真实姓名尾巴"),
+    TemplateVariable("%gender%", "性别"),
+    TemplateVariable("%region%", "地区"),
+    TemplateVariable("%groupName%", "群名"),
+    TemplateVariable("%time%", "时间")
+)
+private val groupLeaveNoticeVariables = listOf(
+    TemplateVariable("%displayName%", "完整显示名"),
+    TemplateVariable("%groupNickname%", "群内昵称"),
+    TemplateVariable("%userName%", "微信昵称"),
+    TemplateVariable("%remarkName%", "备注"),
+    TemplateVariable("%userWxid%", "可点击Wxid"),
+    TemplateVariable("%groupName%", "群名"),
+    TemplateVariable("%time%", "时间")
+)
+private val groupInviteNoticeVariables = listOf(
+    TemplateVariable("%inviterName%", "邀请者名称"),
+    TemplateVariable("%inviterGroupNickname%", "邀请者群昵称"),
+    TemplateVariable("%inviterWxid%", "邀请者可点击Wxid"),
+    TemplateVariable("%inviteeName%", "被邀请者名称"),
+    TemplateVariable("%inviteeGroupNickname%", "被邀请者群昵称"),
+    TemplateVariable("%inviteeWxid%", "被邀请者可点击Wxid"),
+    TemplateVariable("%inviteCount%", "累计邀请次数"),
+    TemplateVariable("%groupName%", "群名"),
+    TemplateVariable("%time%", "时间")
+)
+private val autoReplyTemplateVariables = listOf(
+    TemplateVariable("%friendName%", "好友/成员名"),
+    TemplateVariable("%senderName%", "发送者"),
+    TemplateVariable("%senderWxid%", "发送者ID"),
+    TemplateVariable("%talker%", "会话ID"),
+    TemplateVariable("%groupName%", "群名"),
+    TemplateVariable("%content%", "原消息"),
+    TemplateVariable("%atSender%", "@发送者"),
+    TemplateVariable("%atAll%", "@所有人")
+)
+private val scheduledTaskTemplateVariables = listOf(
+    TemplateVariable("%friendName%", "好友/成员名")
+)
+
+private val groupRandomJoinTexts = listOf(
+    "[AtWx=%userWxid%] 欢迎 %userName% 加入 %groupName%",
+    "欢迎新朋友 %userName% 加入，大家请多关照",
+    "欢迎 %userName%，记得看群公告",
+    "新成员 %userName% 已加入群聊",
+    "欢迎 %userName%，愿在 %groupName% 玩得开心"
+)
+
+private val groupRandomLeftTexts = listOf(
+    "有缘再会，祝 %userName% 一切顺利",
+    "%userName% 已离开群聊，愿一切安好",
+    "青山不改，绿水长流，后会有期",
+    "我们会想念你的，%userName%",
+    "%userName% 已退群，感谢曾经同行"
+)
+
+private val groupRandomJoinCardTitles = listOf(
+    "欢迎：%userName%",
+    "群聊因你而精彩",
+    "新成员到来：%userName%"
+)
+
+private val groupRandomJoinCardDescs = listOf(
+    "常来聊天",
+    "群名称：%groupName%\n名片：%groupNickname%\n进群时间：%time%",
+    "快来和大家一起玩\nID：%userWxid%"
+)
+
+private val groupRandomLeftCardTitles = listOf(
+    "成员离群通知",
+    "%userName% 已离开",
+    "祝你一切顺利"
+)
+
+private val groupRandomLeftCardDescs = listOf(
+    "我们有缘再见",
+    "群名称：%groupName%\n名片：%groupNickname%\n离群时间：%time%",
+    "相逢是缘，祝君安好"
+)
 
 private object NavIcons {
     val Back: ImageVector = navIcon(
@@ -286,6 +498,65 @@ private object NavIcons {
     }
 }
 
+private class SettingsBackHandlerRegistry {
+    private val handlers = LinkedHashMap<Any, () -> Unit>()
+
+    @Synchronized
+    fun register(token: Any, handler: () -> Unit) {
+        handlers.remove(token)
+        handlers[token] = handler
+    }
+
+    @Synchronized
+    fun unregister(token: Any) {
+        handlers.remove(token)
+    }
+
+    fun handle(): Boolean {
+        val handler = synchronized(this) { handlers.values.lastOrNull() } ?: return false
+        handler()
+        return true
+    }
+
+    @Synchronized
+    fun clear() {
+        handlers.clear()
+    }
+}
+
+private val LocalSettingsBackHandlerRegistry = staticCompositionLocalOf<SettingsBackHandlerRegistry?> { null }
+
+@Composable
+private fun RegisterSettingsBackHandler(onBack: (() -> Unit)?) {
+    val registry = LocalSettingsBackHandlerRegistry.current
+    val currentOnBack by rememberUpdatedState(onBack)
+    val token = remember { Any() }
+    DisposableEffect(registry, token, onBack != null) {
+        if (registry != null && onBack != null) {
+            registry.register(token) { currentOnBack?.invoke() }
+        }
+        onDispose { registry?.unregister(token) }
+    }
+}
+
+private fun Intent.preferSystemDocumentsUi(context: Context): Intent {
+    val candidates = listOf(
+        "com.google.android.documentsui",
+        "com.android.documentsui"
+    )
+    for (packageName in candidates) {
+        val copy = Intent(this).setPackage(packageName)
+        val resolved = runCatching {
+            context.packageManager.queryIntentActivities(copy, 0)
+        }.getOrDefault(emptyList())
+        if (resolved.isNotEmpty()) {
+            setPackage(packageName)
+            break
+        }
+    }
+    return this
+}
+
 private object ScriptPluginDocumentBridge {
     private val hookedClasses = HashSet<Class<*>>()
     private var exportCallback: ((Uri) -> Unit)? = null
@@ -415,21 +686,6 @@ private object ScriptPluginDocumentBridge {
 private fun Modifier.responsiveTap(
     onClick: () -> Unit,
     onPressedChange: (Boolean) -> Unit = {}
-): Modifier {
-    val currentOnClick by rememberUpdatedState(onClick)
-    val currentOnPressedChange by rememberUpdatedState(onPressedChange)
-    return pointerInput(Unit) {
-        awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            currentOnPressedChange(true)
-            val up = waitForUpOrCancellation()
-            currentOnPressedChange(false)
-            if (up != null) {
-                currentOnClick()
-            }
-        }
-    }
-}
 
 @Composable
 private fun rememberPressFeedbackColor(pressed: Boolean): Color {
@@ -2116,20 +2372,6 @@ fun ScriptPluginReadmeDialog(
                         )
                     } else {
                         MarkdownUi.Content(context, readme)
-                    }
-                }
-                TextButton(
-                    text = "关闭",
-                    onClick = onClose,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
-            }
-        }
-    )
-}
-
-}
 
 private object MarkdownUi {
 
@@ -2156,21 +2398,6 @@ fun Content(
                 } else {
                     inCodeBlock = true
                     codeLines.clear()
-                }
-                return@forEach
-            }
-            if (inCodeBlock) {
-                codeLines += rawLine
-                return@forEach
-            }
-            val nextState = MarkdownLine(context, line, inlineState, bodyFontSize)
-            inlineState = nextState
-        }
-        if (inCodeBlock && codeLines.isNotEmpty()) {
-            CodeBlock(codeLines.joinToString("\n"), onCopyCode)
-        }
-    }
-}
 
 @Composable
 private fun MarkdownLine(
@@ -2181,75 +2408,6 @@ private fun MarkdownLine(
 ): MarkdownInlineState {
     val trimmed = line.trim()
     return when {
-        trimmed.isBlank() -> {
-            Box(modifier = Modifier.height(8.dp))
-            inlineState
-        }
-        trimmed.matches(Regex("""-{3,}|_{3,}|\*{3,}""")) -> {
-            Box(
-                modifier = Modifier.fillMaxWidth()
-                    .padding(vertical = 8.dp)
-                    .height(1.dp)
-                    .background(MiuixTheme.colorScheme.outline)
-            )
-            inlineState
-        }
-        trimmed.startsWith("#") -> {
-            val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 6)
-            val text = trimmed.drop(level).trim()
-            MarkdownTextResult(
-                context = context,
-                text = text,
-                inlineState = inlineState,
-                modifier = Modifier.padding(top = if (level <= 2) 10.dp else 8.dp, bottom = 4.dp),
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = when (level) {
-                    1 -> 22.sp
-                    2 -> 19.sp
-                    3 -> 17.sp
-                    else -> 15.sp
-                },
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        trimmed.startsWith(">") -> {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
-                Box(
-                    modifier = Modifier.padding(end = 8.dp)
-                        .size(width = 3.dp, height = 20.dp)
-                        .background(MiuixTheme.colorScheme.primary)
-                )
-                MarkdownTextResult(
-                    context = context,
-                    text = trimmed.removePrefix(">").trim(),
-                    inlineState = inlineState,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = bodyFontSize,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            inlineState
-        }
-        trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") -> {
-            MarkdownBullet(context, trimmed.drop(2).trim(), inlineState, fontSize = bodyFontSize)
-        }
-        Regex("""^\d+[.)]\s+.*""").matches(trimmed) -> {
-            val marker = trimmed.substringBefore(' ').trim()
-            MarkdownBullet(context, trimmed.removePrefix(marker).trim(), inlineState, marker, bodyFontSize)
-        }
-        else -> {
-            MarkdownTextResult(
-                context = context,
-                text = line,
-                inlineState = inlineState,
-                fontSize = bodyFontSize,
-                modifier = Modifier.padding(vertical = 2.dp)
-            )
-        }
-    }
-}
 
 @Composable
 private fun MarkdownBullet(
@@ -2266,68 +2424,6 @@ private fun MarkdownBullet(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             fontSize = fontSize,
             modifier = Modifier.padding(end = 8.dp)
-        )
-        nextState = MarkdownTextResult(
-            context = context,
-            text = text,
-            inlineState = inlineState,
-            fontSize = fontSize,
-            modifier = Modifier.weight(1f)
-        )
-    }
-    return nextState
-}
-
-@Composable
-fun CodeBlock(code: String, onCopy: ((String) -> Unit)? = null) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
-    ) {
-        if (onCopy != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 4.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "代码",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 11.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                Image(
-                    imageVector = NavIcons.Copy,
-                    contentDescription = "复制代码",
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(4.dp))
-                        .clickable { onCopy(code) }
-                        .padding(6.dp)
-                )
-            }
-        }
-        Text(
-            text = code,
-            color = MiuixTheme.colorScheme.onSurface,
-            fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-        )
-    }
-}
-
-@Composable
-fun Text(
-    context: Context,
-    text: String,
-    modifier: Modifier = Modifier,
-    color: Color = MiuixTheme.colorScheme.onSurface,
-    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
-    fontWeight: FontWeight? = null
-) {
-    MarkdownTextResult(context, text, MarkdownInlineState(), modifier, color, fontSize, fontWeight)
-}
 
 @Composable
 private fun MarkdownTextResult(
@@ -2338,30 +2434,6 @@ private fun MarkdownTextResult(
     color: Color = MiuixTheme.colorScheme.onSurface,
     fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
     fontWeight: FontWeight? = null
-): MarkdownInlineState {
-    val primary = MiuixTheme.colorScheme.primary
-    val result = remember(text, primary, inlineState.bold) {
-        buildMarkdownAnnotatedString(text, primary, inlineState)
-    }
-    ClickableText(
-        text = result.text,
-        modifier = modifier,
-        style = TextStyle(color = color, fontSize = fontSize, fontWeight = fontWeight),
-        onClick = { offset ->
-            result.text.getStringAnnotations(MARKDOWN_LINK_TAG, offset, offset)
-                .firstOrNull()
-                ?.let { annotation -> openMarkdownLink(context, annotation.item) }
-        }
-    )
-    return result.state
-}
-
-private data class MarkdownInlineState(val bold: Boolean = false)
-
-private data class MarkdownInlineResult(
-    val text: AnnotatedString,
-    val state: MarkdownInlineState
-)
 
 private fun buildMarkdownAnnotatedString(
     text: String,
@@ -2392,73 +2464,6 @@ private fun AnnotatedString.Builder.appendInlineMarkdown(
         }
         val label = match.groupValues[1]
         val url = match.groupValues[2].trim()
-        if (label.isNotBlank() && url.isNotBlank()) {
-            pushStringAnnotation(MARKDOWN_LINK_TAG, url)
-            appendStyledInline(label, accent, state, link = true)
-            pop()
-        } else {
-            append(match.value)
-        }
-        segmentStart = match.range.last + 1
-    }
-    if (segmentStart < text.length) {
-        state = appendInlineMarkdownSegment(text.substring(segmentStart), accent, state)
-    }
-    return state
-}
-
-private fun AnnotatedString.Builder.appendInlineMarkdownSegment(
-    text: String,
-    accent: Color,
-    initialState: MarkdownInlineState
-): MarkdownInlineState {
-    var state = initialState
-    var index = 0
-    while (index < text.length) {
-        when {
-            text.startsWith("**", index) -> {
-                state = state.copy(bold = !state.bold)
-                index += 2
-            }
-            text[index] == '`' -> {
-                val end = text.indexOf('`', index + 1)
-                if (end > index) {
-                    withStyle(SpanStyle(color = accent, fontFamily = FontFamily.Monospace)) {
-                        append(text.substring(index + 1, end))
-                    }
-                    index = end + 1
-                } else {
-                    append(text[index])
-                    index++
-                }
-            }
-            else -> {
-                appendStyledInline(text[index].toString(), accent, state, link = false)
-                index++
-            }
-        }
-    }
-    return state
-}
-
-private fun AnnotatedString.Builder.appendStyledInline(
-    value: String,
-    accent: Color,
-    state: MarkdownInlineState,
-    link: Boolean
-) {
-    val style = SpanStyle(
-        color = if (link) accent else Color.Unspecified,
-        fontWeight = when {
-            link -> FontWeight.Medium
-            state.bold -> FontWeight.SemiBold
-            else -> null
-        }
-    )
-    withStyle(style) {
-        append(value)
-    }
-}
 
 private fun openMarkdownLink(context: Context, url: String) {
     val value = url.trim()
@@ -2501,901 +2506,65 @@ private fun WeChatTabletMiuixPage(
             )
         ) {
             item { SmallTitle(text = "平板模式") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        WeChatTabletSettings.KEY_ENABLE,
-                        "平板模式",
-                        "开启平板模式，退出微信登陆生效",
-                        WeChatTabletSettings.DEFAULT_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
-private fun AutoTransferMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
+internal fun PageScaffold(
+    title: String,
+    largeTitle: String,
+    scrollBehavior: ScrollBehavior,
+    onBack: (() -> Unit)? = null,
+    topBarActions: @Composable RowScope.() -> Unit = {},
+    bottomBar: @Composable ((Backdrop) -> Unit)? = null,
+    content: @Composable (PaddingValues) -> Unit
 ) {
-    val sp = remember { HchatStorage.preferences(context, AutoTransferSettings.PREFS_NAME) }
-    var templates by remember {
-        mutableStateOf(TransferRuleConfig.parseTemplates(sp.getString(TransferRuleConfig.KEY_TEMPLATES, "")))
-    }
-    var bindings by remember {
-        mutableStateOf(TransferRuleConfig.parseBindings(sp.getString(TransferRuleConfig.KEY_BINDINGS, "")))
-    }
-    var defaultTemplateId by remember {
-        mutableStateOf(sp.getString(TransferRuleConfig.KEY_DEFAULT_TEMPLATE_ID, "") ?: "")
-    }
-    var whitelist by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_WHITELIST, "") ?: "") }
-    var blacklist by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_BLACKLIST, "") ?: "") }
-    var listMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_MODE, 0)) }
-    var delayMs by remember { mutableStateOf(sp.getLong(AutoTransferSettings.KEY_DELAY_MS, 0L).toString()) }
-    var delayMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_DELAY_MODE, TransferRuleConfig.DELAY_CUSTOM)) }
-    var randomMinMs by remember { mutableStateOf(sp.getLong(AutoTransferSettings.KEY_DELAY_RANDOM_MIN, 500L).toString()) }
-    var randomMaxMs by remember { mutableStateOf(sp.getLong(AutoTransferSettings.KEY_DELAY_RANDOM_MAX, 3000L).toString()) }
-    var amountEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_AMOUNT_ENABLE, false)) }
-    var amountCondition by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_AMOUNT_COND, 1)) }
-    var amountAction by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_AMOUNT_ACTION, 0)) }
-    var amountValue by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_AMOUNT_VALUE, "0") ?: "0") }
-    var keywords by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_KEYWORDS, "") ?: "") }
-    var keywordMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_KEYWORD_MODE, 0)) }
-    var quietEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_QUIET_ENABLE, false)) }
-    var quietStart by remember { mutableStateOf(formatRedPacketSecond(sp.getInt(AutoTransferSettings.KEY_QUIET_START_SECOND, 0))) }
-    var quietEnd by remember { mutableStateOf(formatRedPacketSecond(sp.getInt(AutoTransferSettings.KEY_QUIET_END_SECOND, 0))) }
-    var replySteps by remember { mutableStateOf(loadGlobalTransferReplySteps(sp)) }
-    var groupReplySteps by remember { mutableStateOf(loadGlobalGroupTransferReplySteps(sp)) }
-    var notifySystemEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_SYSTEM_ENABLE, false)) }
-    var notifyToastEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_TOAST_ENABLE, false)) }
-    var notifySoundEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_SOUND_ENABLE, false)) }
-    var notifySoundMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_NOTIFY_SOUND_MODE, AutoTransferSettings.NOTIFY_SOUND_MODE_SYSTEM)) }
-    var notifyVibrateEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_VIBRATE_ENABLE, false)) }
-    var notifySoundUri by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_NOTIFY_SOUND_URI, "") ?: "") }
-    var notifyText by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_NOTIFY_TEXT, "已收款 {amount} 元") ?: "") }
-    var notifyToastText by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_NOTIFY_TOAST_TEXT, "已收款 {amount} 元") ?: "") }
-    var announceEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_ANNOUNCE_ENABLE, false)) }
-    var announceText by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_ANNOUNCE_TEXT, "收到转账 {amount} 元") ?: "") }
-    var timeFormat by remember {
-        mutableStateOf(
-            PaymentTemplateTimeFormatter.normalizePattern(
-                sp.getString(AutoTransferSettings.KEY_TIME_FORMAT, AutoTransferSettings.DEFAULT_TIME_FORMAT)
-            )
-        )
-    }
-    var receiveAccount by remember {
-        mutableStateOf(
-            sp.getString(
-                AutoTransferSettings.KEY_RECEIVE_ACCOUNT,
-                TransferReceiveAccountStore.DEFAULT_KEY
-            ) ?: TransferReceiveAccountStore.DEFAULT_KEY
-        )
-    }
-    val receiveAccountOptions = remember { transferReceiveAccountOptions(context) }
-    if (receiveAccountOptions.none { it.value == receiveAccount }) {
-        receiveAccount = TransferReceiveAccountStore.DEFAULT_KEY
-    }
-    var picker by remember { mutableStateOf<ContactPickerRequest?>(null) }
-    var templateEditor by remember { mutableStateOf<TransferTemplateEditorRequest?>(null) }
-    var bindingEditor by remember { mutableStateOf<TransferBindingEditorRequest?>(null) }
-    var showTemplates by remember { mutableStateOf(false) }
-    var showBindings by remember { mutableStateOf(false) }
-    var showBatchApply by remember { mutableStateOf(false) }
-    var showReplySteps by remember { mutableStateOf(false) }
-    var replyTarget by remember { mutableStateOf(TransferReplyTarget.PRIVATE) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    fun persistRules(
-        nextTemplates: List<TransferRuleTemplate> = templates,
-        nextBindings: List<TransferRuleBinding> = bindings,
-        nextDefault: String = defaultTemplateId
+    RegisterSettingsBackHandler(onBack)
+    val graphicsLayer = rememberGraphicsLayer()
+    val backdrop = rememberLayerBackdrop(graphicsLayer)
+    val navigationInset = navigationButtonBottomInset()
+    val navigationGap = if (navigationInset > 0.dp) NAVIGATION_BUTTON_EXTRA_GAP else 0.dp
+    val bottomAvoidance = navigationInset + navigationGap
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MiuixTheme.colorScheme.background)
     ) {
-        sp.edit()
-            .putString(TransferRuleConfig.KEY_TEMPLATES, TransferRuleConfig.encodeTemplates(nextTemplates))
-            .putString(TransferRuleConfig.KEY_BINDINGS, TransferRuleConfig.encodeBindings(nextBindings))
-            .putString(TransferRuleConfig.KEY_DEFAULT_TEMPLATE_ID, nextDefault)
-            .commit()
-    }
-
-    val route: AutoTransferRoute = when {
-        templateEditor != null -> AutoTransferRoute.TemplateEditor(templateEditor!!)
-        bindingEditor != null -> AutoTransferRoute.BindingEditor(bindingEditor!!)
-        picker != null -> AutoTransferRoute.ContactPicker(picker!!)
-        showReplySteps -> AutoTransferRoute.GlobalReplySteps(replyTarget)
-        showTemplates -> AutoTransferRoute.TemplateManager
-        showBindings -> AutoTransferRoute.BindingManager
-        showBatchApply -> AutoTransferRoute.BatchApply
-        else -> AutoTransferRoute.Main
-    }
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "AutoTransferRouteTransition",
-        depthOf = { it.depth() }
-    ) { currentRoute ->
-        when (currentRoute) {
-            is AutoTransferRoute.ContactPicker -> {
-                val request = currentRoute.request
-                ContactPickerPage(
-                    context = context,
-                    request = request,
-                    onBack = { picker = null },
-                    onConfirm = { selected ->
-                        request.onValue(formatIds(selected.map { it.id }))
-                        picker = null
-                    }
-                )
-            }
-            is AutoTransferRoute.TemplateEditor -> TransferTemplateEditorPage(
-                context = context,
-                request = currentRoute.request,
-                onBack = { templateEditor = null },
-                onSave = { updated ->
-                    val request = currentRoute.request
-                    val next = if (request.index in templates.indices) {
-                        templates.toMutableList().also { it[request.index] = updated }
-                    } else templates + updated
-                    templates = next
-                    if (defaultTemplateId.isBlank()) defaultTemplateId = updated.id
-                    persistRules(nextTemplates = next, nextDefault = defaultTemplateId)
-                    templateEditor = null
-                },
-                onDelete = {
-                    val request = currentRoute.request
-                    if (request.index in templates.indices) {
-                        val deleted = templates[request.index].id
-                        templates = templates.toMutableList().also { it.removeAt(request.index) }
-                        bindings = bindings.map { if (it.templateId == deleted) it.copy(templateId = "") else it }
-                        if (defaultTemplateId == deleted) defaultTemplateId = templates.firstOrNull()?.id.orEmpty()
-                        persistRules()
-                    }
-                    templateEditor = null
-                }
-            )
-            is AutoTransferRoute.BindingEditor -> TransferBindingEditorPage(
-                context = context,
-                request = currentRoute.request,
-                templates = templates,
-                onBack = { bindingEditor = null },
-                onSave = { updated ->
-                    val base = bindings.toMutableList()
-                    if (currentRoute.request.index in base.indices) base.removeAt(currentRoute.request.index)
-                    bindings = upsertTransferBindings(base, listOf(updated))
-                    persistRules(nextBindings = bindings)
-                    bindingEditor = null
-                },
-                onDelete = {
-                    if (currentRoute.request.index in bindings.indices) {
-                        bindings = bindings.toMutableList().also { it.removeAt(currentRoute.request.index) }
-                        persistRules(nextBindings = bindings)
-                    }
-                    bindingEditor = null
-                }
-            )
-            AutoTransferRoute.TemplateManager -> TransferTemplateListPage(
-                templates = templates,
-                onBack = { showTemplates = false },
-                onOpen = { index, value -> templateEditor = TransferTemplateEditorRequest(index, value, true) },
-                onAdd = { templateEditor = TransferTemplateEditorRequest(templates.size, newTransferTemplate(templates.size + 1, sp), false) }
-            )
-            AutoTransferRoute.BindingManager -> TransferBindingListPage(
-                bindings = bindings,
-                templates = templates,
-                onBack = { showBindings = false },
-                onOpen = { index, value -> bindingEditor = TransferBindingEditorRequest(index, value, true) },
-                onDeleteBindings = { targets ->
-                    val targetIds = targets.mapTo(HashSet()) { it.id }
-                    bindings = bindings.filterNot { it.id in targetIds }
-                    persistRules(nextBindings = bindings)
-                    Toast.makeText(context, "已删除 ${targets.size} 个适用聊天", Toast.LENGTH_SHORT).show()
-                },
-                onAdd = {
-                    picker = ContactPickerRequest(
-                        title = "选择适用聊天",
-                        mode = ContactPickerMode.BOTH,
-                        multiSelect = true,
-                        existingValue = "",
-                        enableLabels = true,
-                        onValue = { value ->
-                            val additions = parseIds(value).map { id ->
-                                bindings.firstOrNull { it.targetId == id }
-                                    ?: TransferRuleBinding(id, id, transferContactLabel(id), false, if (templates.size == 1) templates.first().id else "")
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .layerBackdrop(backdrop)
+        ) {
+            top.yukonga.miuix.kmp.basic.Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = title,
+                        largeTitle = largeTitle,
+                        scrollBehavior = scrollBehavior,
+                        navigationIcon = {
+                            onBack?.let { back ->
+                                Box(
+                                    modifier = Modifier.size(40.dp).responsiveTap(onClick = back),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        imageVector = NavIcons.Back,
+                                        contentDescription = "返回",
+                                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                             }
-                            if (additions.size == 1) {
-                                val item = additions.first()
-                                val index = bindings.indexOfFirst { it.targetId == item.targetId }
-                                bindingEditor = TransferBindingEditorRequest(index.takeIf { it >= 0 } ?: bindings.size, item, index >= 0)
-                            } else if (additions.isNotEmpty()) {
-                                bindings = upsertTransferBindings(bindings, additions)
-                                persistRules(nextBindings = bindings)
-                            }
-                        }
-                    )
-                }
-            )
-            AutoTransferRoute.BatchApply -> TransferBatchApplyPage(
-                templates = templates,
-                bindings = bindings,
-                onBack = { showBatchApply = false },
-                onPickChats = { templateId ->
-                    picker = ContactPickerRequest(
-                        title = "批量套用收款模板",
-                        mode = ContactPickerMode.BOTH,
-                        multiSelect = true,
-                        existingValue = formatIds(bindings.filter { it.templateId == templateId }.map { it.targetId }),
-                        enableLabels = true,
-                        onValue = { value ->
-                            val selected = parseIds(value)
-                            val retained = bindings.filterNot { it.templateId == templateId && it.targetId !in selected }
-                            val additions = selected.map { id ->
-                                TransferRuleBinding(id, id, transferContactLabel(id), true, templateId)
-                            }
-                            bindings = upsertTransferBindings(retained, additions)
-                            persistRules(nextBindings = bindings)
-                            Toast.makeText(context, "模板已套用到 ${selected.size} 个聊天", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                }
-            )
-            is AutoTransferRoute.GlobalReplySteps -> RedPacketReplyStepsPage(
-                context = context,
-                title = if (currentRoute.target == TransferReplyTarget.GROUP) "群聊收款回复" else "私聊收款回复",
-                initialSteps = if (currentRoute.target == TransferReplyTarget.GROUP) groupReplySteps else replySteps,
-                templateVariables = transferTemplateVariables,
-                onBack = { showReplySteps = false },
-                onSave = {
-                    if (currentRoute.target == TransferReplyTarget.GROUP) groupReplySteps = it else replySteps = it
-                    showReplySteps = false
-                }
-            )
-            AutoTransferRoute.Main -> PageScaffold(
-                title = provider.title(),
-                largeTitle = provider.title(),
-                scrollBehavior = scrollBehavior,
-                bottomBar = {
-                    BottomActionBar(
-                        primaryText = "保存设置",
-                        onPrimaryClick = save@{
-                            if (!PaymentTemplateTimeFormatter.isValidPattern(timeFormat)) {
-                                Toast.makeText(context, "时间格式无效", Toast.LENGTH_SHORT).show()
-                                return@save
-                            }
-                            val normalizedTimeFormat = PaymentTemplateTimeFormatter.normalizePattern(timeFormat)
-                            val minDelay = randomMinMs.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L
-                            val maxDelay = randomMaxMs.toLongOrNull()?.coerceIn(minDelay, 600000L) ?: minDelay
-                            val cleanSteps = cleanRedPacketReplySteps(replySteps)
-                            val cleanGroupSteps = cleanRedPacketReplySteps(groupReplySteps)
-                            sp.edit()
-                                .putString(AutoTransferSettings.KEY_WHITELIST, whitelist)
-                                .putString(AutoTransferSettings.KEY_BLACKLIST, blacklist)
-                                .putInt(AutoTransferSettings.KEY_MODE, listMode)
-                                .putLong(AutoTransferSettings.KEY_DELAY_MS, delayMs.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L)
-                                .putInt(AutoTransferSettings.KEY_DELAY_MODE, delayMode)
-                                .putLong(AutoTransferSettings.KEY_DELAY_RANDOM_MIN, minDelay)
-                                .putLong(AutoTransferSettings.KEY_DELAY_RANDOM_MAX, maxDelay)
-                                .putString(AutoTransferSettings.KEY_AMOUNT_VALUE, amountValue)
-                                .putBoolean(AutoTransferSettings.KEY_AMOUNT_ENABLE, amountEnabled)
-                                .putInt(AutoTransferSettings.KEY_AMOUNT_COND, amountCondition)
-                                .putInt(AutoTransferSettings.KEY_AMOUNT_ACTION, amountAction)
-                                .putInt(AutoTransferSettings.KEY_KEYWORD_MODE, keywordMode)
-                                .putString(AutoTransferSettings.KEY_KEYWORDS, if (keywordMode == 0) "" else keywords)
-                                .putString(AutoTransferSettings.KEY_RECEIVE_ACCOUNT, receiveAccount)
-                                .putBoolean(AutoTransferSettings.KEY_QUIET_ENABLE, quietEnabled)
-                                .putInt(AutoTransferSettings.KEY_QUIET_START_SECOND, parseRedPacketSecond(quietStart, 0))
-                                .putInt(AutoTransferSettings.KEY_QUIET_END_SECOND, parseRedPacketSecond(quietEnd, 0))
-                                .putString(AutoTransferSettings.KEY_REPLY_ITEMS, RedPacketRuleConfig.encodeReplySteps(cleanSteps))
-                                .putString(AutoTransferSettings.KEY_REPLY_GROUP_ITEMS, RedPacketRuleConfig.encodeReplySteps(cleanGroupSteps))
-                                .putBoolean(AutoTransferSettings.KEY_REPLY_ENABLE, cleanSteps.isNotEmpty())
-                                .putString(AutoTransferSettings.KEY_REPLY_TEXT, cleanSteps.firstOrNull()?.content.orEmpty())
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_SYSTEM_ENABLE, notifySystemEnabled)
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_TOAST_ENABLE, notifyToastEnabled)
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_SOUND_ENABLE, notifySoundEnabled)
-                                .putInt(AutoTransferSettings.KEY_NOTIFY_SOUND_MODE, notifySoundMode)
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_VIBRATE_ENABLE, notifyVibrateEnabled)
-                                .putString(AutoTransferSettings.KEY_NOTIFY_SOUND_URI, notifySoundUri)
-                                .putString(AutoTransferSettings.KEY_NOTIFY_TEXT, notifyText)
-                                .putString(AutoTransferSettings.KEY_NOTIFY_TOAST_TEXT, notifyToastText)
-                                .putBoolean(AutoTransferSettings.KEY_ANNOUNCE_ENABLE, announceEnabled)
-                                .putString(AutoTransferSettings.KEY_ANNOUNCE_TEXT, announceText)
-                                .putString(AutoTransferSettings.KEY_TIME_FORMAT, normalizedTimeFormat)
-                                .apply()
-                            replySteps = cleanSteps
-                            groupReplySteps = cleanGroupSteps
-                            timeFormat = normalizedTimeFormat
-                            Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
                         },
-                        secondaryText = "返回",
-                        onSecondaryClick = onBack
+                        actions = topBarActions,
+                        defaultWindowInsetsPadding = true
                     )
-                }
-            ) { padding ->
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                    state = listState,
-                    contentPadding = PaddingValues(
-                        top = padding.calculateTopPadding() + 8.dp,
-                        bottom = padding.calculateBottomPadding() + 84.dp
-                    )
-                ) {
-                    item { SmallTitle(text = "规则") }
-                    item {
-                        SettingsCard {
-                            SwitchRow(sp, AutoTransferSettings.KEY_ENABLE, "自动收款", "自动领取待收款转账", false)
-                            InsetDivider()
-                            ActionRow("收款规则模板", if (templates.isEmpty()) "暂无模板" else "${templates.size} 个模板") { showTemplates = true }
-                            InsetDivider()
-                            PopupChoiceRow(
-                                title = "默认规则",
-                                summary = describeTransferDefault(defaultTemplateId, templates),
-                                options = listOf(PopupChoice("旧版全局设置", "")) + templates.map { PopupChoice(it.name, it.id) },
-                                currentValue = defaultTemplateId,
-                                onValueChanged = {
-                                    defaultTemplateId = it
-                                    persistRules(nextDefault = it)
-                                }
-                            )
-                            InsetDivider()
-                            ActionRow("适用聊天", if (bindings.isEmpty()) "暂无单独配置" else "${bindings.size} 个聊天") { showBindings = true }
-                            InsetDivider()
-                            ActionRow("批量套用模板", "一次给多个聊天分配同一规则") { showBatchApply = true }
-                        }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "全局收款") }
-                    item {
-                        SettingsCard {
-                            PopupChoiceRow("收款位置", "使用微信当前账号提供的收款账户", receiveAccountOptions, receiveAccount, onValueChanged = { receiveAccount = it })
-                            InsetDivider()
-                            SwitchRow(sp, AutoTransferSettings.KEY_REFUND_REJECTED, "拒收时退回", "规则不通过时原路退回", false)
-                            InsetDivider()
-                            PopupOptionRow("收款延迟", transferDelayModeLabel(delayMode), redPacketDelayModeOptions(true), delayMode, onValueChanged = { delayMode = it })
-                            if (delayMode == TransferRuleConfig.DELAY_CUSTOM) {
-                                InsetDivider(); NumberInputRow("自定义延迟", "单位 ms", delayMs) { delayMs = it }
-                            } else if (delayMode == TransferRuleConfig.DELAY_RANDOM) {
-                                InsetDivider(); NumberInputRow("最小延迟", "单位 ms", randomMinMs) { randomMinMs = it }
-                                InsetDivider(); NumberInputRow("最大延迟", "单位 ms", randomMaxMs) { randomMaxMs = it }
-                            }
-                        }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "全局过滤") }
-                    item {
-                        SettingsCard {
-                            PopupOptionRow("收款范围", transferListModeLabel(listMode), optionItems("全部接收" to 0, "只接收白名单" to 1, "拒收黑名单" to 2), listMode, onValueChanged = { listMode = it; sp.edit().putInt(AutoTransferSettings.KEY_MODE, it).apply() })
-                            if (listMode == 1 || listMode == 2) {
-                                InsetDivider()
-                                ActionRow(if (listMode == 1) "白名单" else "黑名单", autoReplySelectedIdSummary(if (listMode == 1) whitelist else blacklist)) {
-                                    picker = ContactPickerRequest(if (listMode == 1) "选择白名单" else "选择黑名单", ContactPickerMode.BOTH, true, if (listMode == 1) whitelist else blacklist, {
-                                        if (listMode == 1) whitelist = it else blacklist = it
-                                    }, true)
-                                }
-                            }
-                            InsetDivider()
-                            SwitchRow(amountEnabled, "启用金额规则", "按转账金额决定接收或拒收") { amountEnabled = it; sp.edit().putBoolean(AutoTransferSettings.KEY_AMOUNT_ENABLE, it).apply() }
-                            if (amountEnabled) {
-                                InsetDivider(); PopupOptionRow("金额条件", transferAmountConditionLabel(amountCondition), optionItems("大于" to 0, "小于" to 1, "等于" to 2), amountCondition, onValueChanged = { amountCondition = it; sp.edit().putInt(AutoTransferSettings.KEY_AMOUNT_COND, it).apply() })
-                                InsetDivider(); InputRow("金额数值", "单位元，例如 10.5", amountValue) { amountValue = it.filter { ch -> ch.isDigit() || ch == '.' } }
-                                InsetDivider(); PopupOptionRow("命中后动作", transferAmountActionLabel(amountAction), optionItems("拒收/忽略" to 0, "仅接收满足条件" to 1), amountAction, onValueChanged = { amountAction = it; sp.edit().putInt(AutoTransferSettings.KEY_AMOUNT_ACTION, it).apply() })
-                            }
-                            InsetDivider()
-                            PopupOptionRow("关键词规则", transferKeywordModeLabel(keywordMode), optionItems("不启用" to 0, "必须包含关键词" to 1, "包含则拒收" to 2), keywordMode, onValueChanged = { keywordMode = it; sp.edit().putInt(AutoTransferSettings.KEY_KEYWORD_MODE, it).apply() })
-                            if (keywordMode != 0) {
-                                InsetDivider(); InputRow("关键词", "多个关键词用 |、逗号或换行分隔", keywords, minLines = 2) { keywords = it }
-                            }
-                            InsetDivider()
-                            SwitchRow(quietEnabled, "禁收时段", "指定时段内不自动收款") { quietEnabled = it }
-                            if (quietEnabled) {
-                                InsetDivider(); TimeOfDayPickerRow("开始时间", quietStart) { quietStart = it }
-                                InsetDivider(); TimeOfDayPickerRow("结束时间", quietEnd) { quietEnd = it }
-                            }
-                        }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板变量") }
-                    item {
-                        SettingsCard {
-                            InputRow(
-                                "时间变量格式",
-                                "用于 {time}，例如 yyyy-MM-dd HH:mm:ss",
-                                timeFormat
-                            ) { timeFormat = it }
-                        }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "收款后回复") }
-                    item {
-                        SettingsCard {
-                            SelectRow("私聊收款回复", describeRedPacketReplySteps(replySteps)) {
-                                replyTarget = TransferReplyTarget.PRIVATE
-                                showReplySteps = true
-                            }
-                            InsetDivider()
-                            SelectRow("群聊收款回复", describeRedPacketReplySteps(groupReplySteps)) {
-                                replyTarget = TransferReplyTarget.GROUP
-                                showReplySteps = true
-                            }
-                        }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "成功提醒") }
-                    item {
-                        TransferNotificationSettingsCard(
-                            context, notifySystemEnabled, { notifySystemEnabled = it }, notifyToastEnabled, { notifyToastEnabled = it },
-                            notifySoundEnabled, { notifySoundEnabled = it }, notifySoundMode, { notifySoundMode = it; notifySoundUri = "" },
-                            notifyVibrateEnabled, { notifyVibrateEnabled = it }, notifySoundUri, { notifySoundUri = it },
-                            notifyText, { notifyText = it }, notifyToastText, { notifyToastText = it },
-                            announceEnabled, { announceEnabled = it }, announceText, { announceText = it }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TransferTemplateListPage(
-    templates: List<TransferRuleTemplate>,
-    onBack: () -> Unit,
-    onOpen: (Int, TransferRuleTemplate) -> Unit,
-    onAdd: () -> Unit
-) {
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = "收款规则模板",
-        largeTitle = "收款规则模板",
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar("新增模板", onAdd, "返回", onBack)
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "模板") }
-            item {
-                SettingsCard {
-                    if (templates.isEmpty()) {
-                        EmptyText("暂无模板。新增后可设为默认规则或分配给指定聊天。")
-                    } else {
-                        templates.forEachIndexed { index, template ->
-                            SelectRow(
-                                template.name.ifBlank { "模板 ${index + 1}" },
-                                describeTransferTemplate(template)
-                            ) { onOpen(index, template) }
-                            if (index < templates.lastIndex) InsetDivider()
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TransferBindingListPage(
-    bindings: List<TransferRuleBinding>,
-    templates: List<TransferRuleTemplate>,
-    onBack: () -> Unit,
-    onOpen: (Int, TransferRuleBinding) -> Unit,
-    onAdd: () -> Unit,
-    onDeleteBindings: (List<TransferRuleBinding>) -> Unit
-) {
-    val context = LocalContext.current
-    var category by remember { mutableStateOf(ConversationRuleCategory.ALL) }
-    var query by remember { mutableStateOf("") }
-    var batchDeleteMode by remember { mutableStateOf(false) }
-    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    val lower = query.trim().lowercase(Locale.US)
-    val visible = bindings.mapIndexed { index, value -> index to value }.filter { (_, value) ->
-        conversationRuleCategoryMatches(value, category) && (
-            lower.isBlank() || value.label.lowercase(Locale.US).contains(lower) ||
-                value.targetId.lowercase(Locale.US).contains(lower) ||
-                templates.firstOrNull { it.id == value.templateId }?.name?.lowercase(Locale.US)?.contains(lower) == true
-            )
-    }
-    val visibleIds = visible.mapTo(LinkedHashSet()) { it.second.id }
-    val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
-    val selectedBindings = bindings.filter { it.id in selectedIds }
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = "适用聊天",
-        largeTitle = "适用聊天",
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            if (batchDeleteMode) {
-                BottomActionBar(
-                    primaryText = "删除所选（${selectedBindings.size}）",
-                    onPrimaryClick = {
-                        if (selectedBindings.isEmpty()) {
-                            Toast.makeText(context, "请先选择适用聊天", Toast.LENGTH_SHORT).show()
-                        } else {
-                            showDeleteConfirm = true
-                        }
-                    },
-                    secondaryText = "取消",
-                    onSecondaryClick = {
-                        batchDeleteMode = false
-                        selectedIds = emptySet()
-                    },
-                    middleText = if (visibleIds.isEmpty()) null else if (allVisibleSelected) "取消全选" else "全选",
-                    onMiddleClick = if (visibleIds.isEmpty()) null else {
-                        {
-                            selectedIds = if (allVisibleSelected) {
-                                selectedIds - visibleIds
-                            } else {
-                                selectedIds + visibleIds
-                            }
-                        }
-                    }
-                )
-            } else {
-                BottomActionBar(
-                    primaryText = "添加聊天",
-                    onPrimaryClick = onAdd,
-                    secondaryText = "返回",
-                    onSecondaryClick = onBack,
-                    middleText = if (bindings.isEmpty()) null else "批量删除",
-                    onMiddleClick = if (bindings.isEmpty()) null else {
-                        {
-                            batchDeleteMode = true
-                            selectedIds = emptySet()
-                        }
-                    }
-                )
-            }
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item {
-                SettingsCard {
-                    ConversationRuleCategoryTabs(
-                        selected = category,
-                        onSelected = { category = it },
-                        includeOfficial = false
-                    )
-                }
-            }
-            item { SettingsCard { InputRow("搜索聊天", "昵称 / ID / 模板名", query) { query = it } } }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "聊天 · ${visible.size}/${bindings.size} 项") }
-            item {
-                SettingsCard {
-                    if (visible.isEmpty()) {
-                        EmptyText(if (bindings.isEmpty()) "暂无适用聊天。" else "没有匹配结果。")
-                    } else {
-                        visible.forEachIndexed { row, (index, binding) ->
-                            if (batchDeleteMode) {
-                                OptionChoiceRow(
-                                    item = OptionItem(
-                                        label = binding.label.ifBlank { binding.targetId },
-                                        value = index,
-                                        summary = describeTransferBinding(binding, templates)
-                                    ),
-                                    selected = binding.id in selectedIds,
-                                    onClick = {
-                                        selectedIds = if (binding.id in selectedIds) {
-                                            selectedIds - binding.id
-                                        } else {
-                                            selectedIds + binding.id
-                                        }
-                                    }
-                                )
-                            } else {
-                                SelectRow(
-                                    binding.label.ifBlank { binding.targetId },
-                                    describeTransferBinding(binding, templates)
-                                ) { onOpen(index, binding) }
-                            }
-                            if (row < visible.lastIndex) InsetDivider()
-                        }
-                    }
-                }
-            }
-        }
-    }
-    BatchDeleteConfirmDialog(
-        show = showDeleteConfirm,
-        message = "将删除已选的 ${selectedBindings.size} 个适用聊天，此操作不可撤销。",
-        labels = selectedBindings.map { it.label.ifBlank { it.targetId } },
-        onDismiss = { showDeleteConfirm = false },
-        onConfirm = {
-            val targets = selectedBindings
-            showDeleteConfirm = false
-            batchDeleteMode = false
-            selectedIds = emptySet()
-            onDeleteBindings(targets)
-        }
-    )
-}
-
-@Composable
-private fun TransferBindingEditorPage(
-    context: Context,
-    request: TransferBindingEditorRequest,
-    templates: List<TransferRuleTemplate>,
-    onBack: () -> Unit,
-    onSave: (TransferRuleBinding) -> Unit,
-    onDelete: () -> Unit
-) {
-    var enabled by remember(request) { mutableStateOf(request.binding.enabled) }
-    var templateId by remember(request) { mutableStateOf(request.binding.templateId) }
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = request.binding.label.ifBlank { request.binding.targetId },
-        largeTitle = request.binding.label.ifBlank { request.binding.targetId },
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                "保存聊天",
-                {
-                    onSave(request.binding.copy(enabled = enabled, templateId = templateId))
-                    Toast.makeText(context, "适用聊天已保存", Toast.LENGTH_SHORT).show()
                 },
-                "返回",
-                onBack
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "聊天") }
-            item {
-                SettingsCard {
-                    InfoRow("ID", request.binding.targetId)
-                    InsetDivider()
-                    SwitchRow(enabled, "启用自动收款", "关闭后该聊天不会自动收款") { enabled = it }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板") }
-            item {
-                SettingsCard {
-                    OptionChoiceRow(
-                        OptionItem("跟随默认规则", -1, "使用默认模板或全局设置"),
-                        templateId.isBlank()
-                    ) { templateId = "" }
-                    templates.forEachIndexed { index, template ->
-                        InsetDivider()
-                        OptionChoiceRow(
-                            OptionItem(template.name.ifBlank { "模板 ${index + 1}" }, index, describeTransferTemplate(template)),
-                            templateId == template.id
-                        ) { templateId = template.id }
-                    }
-                }
-            }
-            if (request.canDelete) {
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
-                item { SettingsCard { ActionRow("移除适用聊天", "移除后恢复默认规则", onDelete) } }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TransferBatchApplyPage(
-    templates: List<TransferRuleTemplate>,
-    bindings: List<TransferRuleBinding>,
-    onBack: () -> Unit,
-    onPickChats: (String) -> Unit
-) {
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = "批量套用模板",
-        largeTitle = "批量套用模板",
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "选择模板") }
-            item {
-                SettingsCard {
-                    if (templates.isEmpty()) {
-                        EmptyText("请先新增收款规则模板。")
-                    } else {
-                        templates.forEachIndexed { index, template ->
-                            val count = bindings.count { it.templateId == template.id }
-                            SelectRow(template.name, "$count 个聊天 · ${describeTransferTemplate(template)}") {
-                                onPickChats(template.id)
-                            }
-                            if (index < templates.lastIndex) InsetDivider()
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TransferTemplateEditorPage(
-    context: Context,
-    request: TransferTemplateEditorRequest,
-    onBack: () -> Unit,
-    onSave: (TransferRuleTemplate) -> Unit,
-    onDelete: () -> Unit
-) {
-    var value by remember(request) { mutableStateOf(request.template) }
-    var showReplySteps by remember { mutableStateOf(false) }
-    var replyTarget by remember { mutableStateOf(TransferReplyTarget.PRIVATE) }
-    var groupReplySteps by remember(request) {
-        mutableStateOf(request.template.groupReplySteps ?: request.template.replySteps)
-    }
-    var picker by remember { mutableStateOf<ContactPickerRequest?>(null) }
-    val accountOptions = remember { transferReceiveAccountOptions(context) }
-    if (showReplySteps) {
-        RedPacketReplyStepsPage(
-            context = context,
-            title = if (replyTarget == TransferReplyTarget.GROUP) "模板群聊收款回复" else "模板私聊收款回复",
-            initialSteps = if (replyTarget == TransferReplyTarget.GROUP) groupReplySteps else value.replySteps,
-            templateVariables = transferTemplateVariables,
-            onBack = { showReplySteps = false },
-            onSave = {
-                if (replyTarget == TransferReplyTarget.GROUP) groupReplySteps = it else value = value.copy(replySteps = it)
-                showReplySteps = false
-            }
-        )
-        return
-    }
-    picker?.let { requestPicker ->
-        ContactPickerPage(
-            context = context,
-            request = requestPicker,
-            onBack = { picker = null },
-            onConfirm = {
-                requestPicker.onValue(formatIds(it.map { option -> option.id }))
-                picker = null
-            }
-        )
-        return
-    }
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = value.name.ifBlank { "收款模板" },
-        largeTitle = value.name.ifBlank { "收款模板" },
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                "保存模板",
-                {
-                    onSave(value.copy(
-                        name = value.name.ifBlank { "收款模板" },
-                        replySteps = cleanRedPacketReplySteps(value.replySteps),
-                        groupReplySteps = cleanRedPacketReplySteps(groupReplySteps)
-                    ))
-                    Toast.makeText(context, "收款模板已保存", Toast.LENGTH_SHORT).show()
-                },
-                "返回",
-                onBack
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "模板") }
-            item {
-                SettingsCard {
-                    InputRow("模板名称", "用于默认规则和聊天绑定", value.name) { value = value.copy(name = it) }
-                    InsetDivider()
-                    SwitchRow(value.enabled, "启用模板", "关闭后使用该模板的聊天不会自动收款") { value = value.copy(enabled = it) }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "收款") }
-            item {
-                SettingsCard {
-                    PopupChoiceRow("收款位置", "选择转账到账账户", accountOptions, value.receiveAccount, onValueChanged = { value = value.copy(receiveAccount = it) })
-                    InsetDivider()
-                    SwitchRow(value.refundRejected, "拒收时退回", "规则不通过时原路退回") { value = value.copy(refundRejected = it) }
-                    InsetDivider()
-                    PopupOptionRow("收款延迟", transferDelayModeLabel(value.delayMode), redPacketDelayModeOptions(true), value.delayMode, onValueChanged = { value = value.copy(delayMode = it) })
-                    if (value.delayMode == TransferRuleConfig.DELAY_CUSTOM) {
-                        InsetDivider(); NumberInputRow("自定义延迟", "单位 ms", value.delayMs.toString()) { value = value.copy(delayMs = it.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L) }
-                    } else if (value.delayMode == TransferRuleConfig.DELAY_RANDOM) {
-                        InsetDivider(); NumberInputRow("最小延迟", "单位 ms", value.randomMinMs.toString()) { value = value.copy(randomMinMs = it.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L) }
-                        InsetDivider(); NumberInputRow("最大延迟", "单位 ms", value.randomMaxMs.toString()) { value = value.copy(randomMaxMs = it.toLongOrNull()?.coerceIn(value.randomMinMs, 600000L) ?: value.randomMinMs) }
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "过滤") }
-            item {
-                SettingsCard {
-                    PopupOptionRow("收款范围", transferListModeLabel(value.listMode), optionItems("全部接收" to 0, "只接收白名单" to 1, "拒收黑名单" to 2), value.listMode, onValueChanged = { value = value.copy(listMode = it) })
-                    if (value.listMode == 1 || value.listMode == 2) {
-                        InsetDivider()
-                        val listValue = if (value.listMode == 1) value.whitelist else value.blacklist
-                        ActionRow(if (value.listMode == 1) "白名单" else "黑名单", autoReplySelectedIdSummary(listValue)) {
-                            picker = ContactPickerRequest(
-                                if (value.listMode == 1) "选择白名单" else "选择黑名单",
-                                ContactPickerMode.BOTH,
-                                true,
-                                listValue,
-                                { selected -> value = if (value.listMode == 1) value.copy(whitelist = selected) else value.copy(blacklist = selected) },
-                                true
-                            )
-                        }
-                    }
-                    InsetDivider()
-                    SwitchRow(value.amountEnabled, "启用金额规则", "按转账金额决定接收或拒收") { value = value.copy(amountEnabled = it) }
-                    if (value.amountEnabled) {
-                        InsetDivider(); PopupOptionRow("金额条件", transferAmountConditionLabel(value.amountCondition), optionItems("大于" to 0, "小于" to 1, "等于" to 2), value.amountCondition, onValueChanged = { value = value.copy(amountCondition = it) })
-                        InsetDivider(); InputRow("金额数值", "单位元，例如 10.5", value.amountValue) { text -> value = value.copy(amountValue = text.filter { it.isDigit() || it == '.' }) }
-                        InsetDivider(); PopupOptionRow("命中后动作", transferAmountActionLabel(value.amountAction), optionItems("拒收/忽略" to 0, "仅接收满足条件" to 1), value.amountAction, onValueChanged = { value = value.copy(amountAction = it) })
-                    }
-                    InsetDivider()
-                    PopupOptionRow("关键词规则", transferKeywordModeLabel(value.keywordMode), optionItems("不启用" to 0, "必须包含关键词" to 1, "包含则拒收" to 2), value.keywordMode, onValueChanged = { value = value.copy(keywordMode = it) })
-                    if (value.keywordMode != 0) {
-                        InsetDivider(); InputRow("关键词", "多个关键词用 |、逗号或换行分隔", value.keywords, minLines = 2) { value = value.copy(keywords = it) }
-                    }
-                    InsetDivider()
-                    SwitchRow(value.quietEnabled, "禁收时段", "指定时段内不自动收款") { value = value.copy(quietEnabled = it) }
-                    if (value.quietEnabled) {
-                        InsetDivider(); TimeOfDayPickerRow("开始时间", formatRedPacketSecond(value.quietStartSecond)) { value = value.copy(quietStartSecond = parseRedPacketSecond(it, value.quietStartSecond)) }
-                        InsetDivider(); TimeOfDayPickerRow("结束时间", formatRedPacketSecond(value.quietEndSecond)) { value = value.copy(quietEndSecond = parseRedPacketSecond(it, value.quietEndSecond)) }
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "收款后回复") }
-            item {
-                SettingsCard {
-                    SelectRow("私聊收款回复", describeRedPacketReplySteps(value.replySteps)) {
-                        replyTarget = TransferReplyTarget.PRIVATE
-                        showReplySteps = true
-                    }
-                    InsetDivider()
-                    SelectRow("群聊收款回复", describeRedPacketReplySteps(groupReplySteps)) {
-                        replyTarget = TransferReplyTarget.GROUP
-                        showReplySteps = true
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "成功提醒") }
-            item {
-                TransferNotificationSettingsCard(
-                    context,
-                    value.notifySystemEnabled, { value = value.copy(notifySystemEnabled = it) },
-                    value.notifyToastEnabled, { value = value.copy(notifyToastEnabled = it) },
-                    value.notifySoundEnabled, { value = value.copy(notifySoundEnabled = it) },
-                    value.notifySoundMode, { value = value.copy(notifySoundMode = it, notifySoundUri = "") },
-                    value.notifyVibrateEnabled, { value = value.copy(notifyVibrateEnabled = it) },
-                    value.notifySoundUri, { value = value.copy(notifySoundUri = it) },
-                    value.notifyText, { value = value.copy(notifyText = it) },
-                    value.notifyToastText, { value = value.copy(notifyToastText = it) },
-                    value.announceEnabled, { value = value.copy(announceEnabled = it) },
-                    value.announceText, { value = value.copy(announceText = it) }
-                )
-            }
-            if (request.canDelete) {
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
-                item { SettingsCard { ActionRow("删除模板", "删除后相关聊天恢复默认规则", onDelete) } }
-            }
-        }
-    }
-}
+                bottomBar = {},
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                content = { padding ->
+                    content(
+                        PaddingValues(
+                            top = padding.calculateTopPadding(),
+                            bottom = padding.calculateBottomPadding() + bottomAvoidance
 
 @Composable
 internal fun SettingsCard(
@@ -3427,489 +2596,9 @@ internal fun SwitchRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            if (summary.isNotBlank()) {
-                Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-            }
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = {
-                checked = it
-                sp.edit().putBoolean(key, it).apply()
-            }
-        )
-    }
-}
 
 @Composable
-internal fun SwitchRow(
-    checked: Boolean,
-    title: String,
-    summary: String,
-    enabled: Boolean = true,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().then(
-            if (enabled) {
-                Modifier.clickable { onCheckedChange(!checked) }
-            } else {
-                Modifier
-            }
-        ).padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = { if (enabled) onCheckedChange(it) }
-        )
-    }
-}
-
-@Composable
-private fun OptionRow(
-    sp: SharedPreferences,
-    key: String,
-    title: String,
-    options: List<OptionItem>,
-    defaultValue: Int,
-    onValueChanged: (Int) -> Unit = {}
-) {
-    var currentValue by remember {
-        mutableStateOf(sp.getInt(key, defaultValue))
-    }
-    PopupOptionRow(
-        title = title,
-        summary = options.firstOrNull { it.value == currentValue }?.label
-            ?: options.firstOrNull { it.value == defaultValue }?.label
-            ?: "",
-        options = options,
-        currentValue = currentValue,
-        onValueChanged = {
-            currentValue = it
-            onValueChanged(it)
-            sp.edit().putInt(key, it).apply()
-        }
-    )
-}
-
-@Composable
-private fun PopupOptionRow(
-    title: String,
-    summary: String,
-    options: List<OptionItem>,
-    currentValue: Int,
-    onValueChanged: (Int) -> Unit,
-    enabled: Boolean = true
-) {
-    val selectedIndex = options.indexOfFirst { it.value == currentValue }.takeIf { it >= 0 } ?: 0
-    val labels = options.map { it.label }
-    WindowDropdownMenu(
-        entry = DropdownEntry(
-            items = labels.mapIndexed { index, label ->
-                DropdownItem(
-                    text = label,
-                    selected = index == selectedIndex,
-                    onClick = { options.getOrNull(index)?.let { onValueChanged(it.value) } }
-                )
-            }
-        ),
-        title = title,
-        summary = summary,
-        enabled = enabled,
-        collapseOnSelection = true
-    )
-}
-
-@Composable
-internal fun InputRow(
-    title: String,
-    summary: String,
-    value: String,
-    minLines: Int = 1,
-    onValueChange: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-        Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = TextStyle(
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 14.sp
-            ),
-            minLines = minLines,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-        )
-    }
-}
-
-@Composable
-internal fun PopupChoiceRow(
-    title: String,
-    summary: String,
-    options: List<PopupChoice<String>>,
-    currentValue: String,
-    onValueChanged: (String) -> Unit,
-    enabled: Boolean = true
-) {
-    val selectedIndex = options.indexOfFirst { it.value == currentValue }.takeIf { it >= 0 } ?: 0
-    WindowDropdownMenu(
-        entry = DropdownEntry(
-            items = options.mapIndexed { index, option ->
-                DropdownItem(
-                    text = option.label,
-                    selected = index == selectedIndex,
-                    onClick = { onValueChanged(option.value) }
-                )
-            }
-        ),
-        title = title,
-        summary = summary,
-        enabled = enabled,
-        collapseOnSelection = true
-    )
-}
-
-@Composable
-internal fun ColorPickerRow(
-    title: String,
-    summary: String,
-    value: String,
-    allowGradient: Boolean = true,
-    onReset: (() -> Unit)? = null,
-    onValueChange: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val currentValue by rememberUpdatedState(value)
-    val colorParts = if (allowGradient) {
-        colorSpecParts(value)
-    } else {
-        MemberTitleStore.cleanColor(value) to ""
-    }
-    var editEnd by remember { mutableStateOf(colorParts.second.isNotEmpty()) }
-    val selectedColor = if (allowGradient && editEnd) colorParts.second.ifEmpty { colorParts.first } else colorParts.first
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = title,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    ClickHintTag()
-                }
-                Text(
-                    text = if (allowGradient) {
-                        "$summary，支持 #RRGGBB / #AARRGGBB / #A,#B 渐变"
-                    } else {
-                        "$summary，支持 #RRGGBB / #AARRGGBB"
-                    },
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp
-                )
-            }
-            ColorPreviewDot(if (allowGradient) value else colorParts.first)
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BasicTextField(
-                value = value,
-                onValueChange = { onValueChange(it.take(if (allowGradient) 19 else 9)) },
-                textStyle = TextStyle(
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 14.sp
-                ),
-                modifier = Modifier.weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            )
-            if (onReset != null) {
-                Text(
-                    text = "重置",
-                    color = MiuixTheme.colorScheme.primary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onReset)
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                )
-            }
-        }
-        if (expanded) {
-            if (allowGradient) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ColorSpecChip(
-                        label = "起始色",
-                        value = colorParts.first,
-                        selected = !editEnd,
-                        onClick = { editEnd = false },
-                        modifier = Modifier.weight(1f)
-                    )
-                    ColorSpecChip(
-                        label = "结束色",
-                        value = colorParts.second,
-                        selected = editEnd,
-                        onClick = { editEnd = true },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-            PsColorPicker(
-                value = selectedColor,
-                onValueChange = { picked ->
-                    val next = if (allowGradient) {
-                        val latestParts = colorSpecParts(currentValue)
-                        if (editEnd) {
-                            composeColorSpec(latestParts.first.ifEmpty { picked }, picked)
-                        } else {
-                            composeColorSpec(picked, latestParts.second)
-                        }
-                    } else {
-                        picked
-                    }
-                    onValueChange(next)
-                },
-                modifier = Modifier.padding(top = if (allowGradient) 12.dp else 8.dp)
-            )
-            Text(
-                text = if (allowGradient) {
-                    "先选起始色或结束色，再用色盘取色；清空输入框可恢复默认/跟随昵称"
-                } else {
-                    "可直接输入颜色值，也可以用色盘取色；清空输入框可恢复默认色"
-                },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ColorSpecChip(
-    label: String,
-    value: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val borderColor = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.outline.copy(alpha = 0.45f)
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        ColorPreviewDot(value, size = 24.dp)
-        Column {
-            Text(text = label, color = MiuixTheme.colorScheme.onSurface, fontSize = 12.sp)
-            Text(
-                text = value.ifEmpty { "未设置" },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 11.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun ColorPreviewDot(value: String, size: Dp = 34.dp) {
-    val colorParts = colorSpecParts(value)
-    val startColor = composeColorFromHex(colorParts.first) ?: MiuixTheme.colorScheme.secondaryVariant
-    val endColor = composeColorFromHex(colorParts.second)
-    val shape = RoundedCornerShape(size / 2)
-    val colorBackground = if (endColor != null && endColor != startColor) {
-        Modifier.background(Brush.horizontalGradient(listOf(startColor, endColor)))
-    } else {
-        Modifier.background(startColor)
-    }
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(shape)
-            .then(colorBackground)
-            .border(2.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
-        contentAlignment = Alignment.Center
-    ) {
-        if (value.isEmpty()) {
-            Text(text = "-", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 15.sp)
-        }
-    }
-}
-
-@Composable
-private fun PsColorPicker(
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val selected = colorPickerSelection(value)
-    val markerColor = MiuixTheme.colorScheme.onSurface
-    val density = LocalDensity.current
-    val paletteSize = 228.dp
-    val hueBarWidth = 40.dp
-    val paletteSizePx = remember(density) { with(density) { paletteSize.roundToPx() } }
-    val hueBarWidthPx = remember(density) { with(density) { hueBarWidth.roundToPx() } }
-    val paletteBitmap = remember(selected.hue, paletteSizePx) {
-        buildSvPaletteBitmap(selected.hue, paletteSizePx)
-    }
-    val hueBitmap = remember(paletteSizePx, hueBarWidthPx) {
-        buildHuePaletteBitmap(hueBarWidthPx, paletteSizePx)
-    }
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Canvas(
-            modifier = Modifier
-                .size(paletteSize)
-                .pointerInput(selected.hue) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        onValueChange(
-                            colorFromSvOffset(
-                                selected.hue,
-                                down.position,
-                                size.width.toFloat(),
-                                size.height.toFloat()
-                            )
-                        )
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            onValueChange(
-                                colorFromSvOffset(
-                                    selected.hue,
-                                    change.position,
-                                    size.width.toFloat(),
-                                    size.height.toFloat()
-                                )
-                            )
-                            change.consume()
-                            if (!change.pressed) break
-                        }
-                    }
-                }
-        ) {
-            drawImage(paletteBitmap)
-            val marker = Offset(
-                selected.saturation * size.width,
-                (1f - selected.value) * size.height
-            )
-            drawCircle(color = markerColor, radius = 9f, center = marker)
-            drawCircle(color = Color.White, radius = 5.5f, center = marker)
-        }
-        Canvas(
-            modifier = Modifier
-                .padding(start = 14.dp)
-                .size(width = hueBarWidth, height = paletteSize)
-                .clip(RoundedCornerShape(14.dp))
-                .pointerInput(selected.saturation, selected.value) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        onValueChange(
-                            colorFromHueOffset(
-                                selected.saturation,
-                                selected.value,
-                                down.position.y,
-                                size.height.toFloat()
-                            )
-                        )
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            onValueChange(
-                                colorFromHueOffset(
-                                    selected.saturation,
-                                    selected.value,
-                                    change.position.y,
-                                    size.height.toFloat()
-                                )
-                            )
-                            change.consume()
-                            if (!change.pressed) break
-                        }
-                    }
-                }
-        ) {
-            drawImage(hueBitmap)
-            val markerY = (selected.hue / 360f).coerceIn(0f, 1f) * size.height
-            drawCircle(color = markerColor, radius = 10f, center = Offset(size.width / 2f, markerY))
-            drawCircle(color = Color.White, radius = 6f, center = Offset(size.width / 2f, markerY))
-        }
-    }
-}
-
-private fun buildSvPaletteBitmap(hue: Float, sizePx: Int): ImageBitmap {
-    val safeSize = sizePx.coerceAtLeast(2)
-    val bitmap = Bitmap.createBitmap(safeSize, safeSize, Bitmap.Config.ARGB_8888)
-    val pixels = IntArray(safeSize * safeSize)
-    var index = 0
-    for (y in 0 until safeSize) {
-        val value = (1f - (y.toFloat() / (safeSize - 1))).coerceIn(0f, 1f)
-        for (x in 0 until safeSize) {
-            val saturation = (x.toFloat() / (safeSize - 1)).coerceIn(0f, 1f)
-            pixels[index++] = AndroidColor.HSVToColor(floatArrayOf(hue, saturation, value))
-        }
-    }
-    bitmap.setPixels(pixels, 0, safeSize, 0, 0, safeSize, safeSize)
-    return bitmap.asImageBitmap()
-}
-
-private fun buildHuePaletteBitmap(widthPx: Int, heightPx: Int): ImageBitmap {
-    val safeWidth = widthPx.coerceAtLeast(2)
-    val safeHeight = heightPx.coerceAtLeast(2)
-    val bitmap = Bitmap.createBitmap(safeWidth, safeHeight, Bitmap.Config.ARGB_8888)
-    val pixels = IntArray(safeWidth * safeHeight)
-    var index = 0
-    for (y in 0 until safeHeight) {
-        val hue = (y.toFloat() / (safeHeight - 1)).coerceIn(0f, 1f) * 360f
-        val color = AndroidColor.HSVToColor(floatArrayOf(hue, 1f, 1f))
-        repeat(safeWidth) {
-            pixels[index++] = color
-        }
-    }
-    bitmap.setPixels(pixels, 0, safeWidth, 0, 0, safeWidth, safeHeight)
-    return bitmap.asImageBitmap()
-}
-
-private fun composeColorFromHex(value: String): Color? {
-    val normalized = RealNameTailStore.cleanColor(value)
-    if (normalized.isEmpty()) return null
-    return runCatching { Color(AndroidColor.parseColor(normalized)) }.getOrNull()
-}
+internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
 
 @Composable
 private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
@@ -3963,44 +2652,23 @@ internal fun BottomActionBar(
         }
         if (middleText != null && onMiddleClick != null) {
             BottomBarButton(
-                text = middleText,
-                modifier = Modifier.weight(1f),
-                filled = false,
-                onClick = onMiddleClick
-            )
-        }
-        BottomBarButton(
-            text = primaryText,
-            modifier = Modifier.weight(1f),
-            filled = true,
-            onClick = onPrimaryClick
-        )
-    }
+
+@Composable
+private fun EmptyText(text: String) {
+    Text(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
+        text = text,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        textAlign = TextAlign.Center
+    )
 }
 
 @Composable
-private fun navigationButtonBottomInset(): Dp {
-    val context = LocalContext.current
-    val density = LocalDensity.current
-    val gestureNavigation = remember(context) { isGestureNavigationMode(context) }
-    if (gestureNavigation) return 0.dp
-    val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val resourceBottom = remember(context, density) {
-        with(density) { navigationBarHeightPx(context).toDp() }
-    }
-    val bottomInset = if (navigationBottom > resourceBottom) navigationBottom else resourceBottom
-    return if (bottomInset >= NAVIGATION_BUTTON_MIN_INSET) bottomInset else 0.dp
-}
-
-private fun navigationBarHeightPx(context: Context): Int {
-    val resources = context.resources
-    val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-    return if (id > 0) {
-        runCatching { resources.getDimensionPixelSize(id) }.getOrDefault(0)
-    } else {
-        0
-    }
-}
+internal fun InsetDivider(start: Dp = 16.dp) {
+    Box(
+        modifier = Modifier
+            .padding(start = start)
+            .fillMaxWidth()
 
 /** WCX 入口：脚本 Tab 内容（Hchat Miuix 版）。 */
 @Composable
