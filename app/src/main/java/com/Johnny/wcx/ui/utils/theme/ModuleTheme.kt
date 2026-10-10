@@ -2,6 +2,7 @@ package com.Johnny.wcx.ui.utils.theme
 
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.LocalContentColor as Material3LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
@@ -61,6 +62,11 @@ fun ModuleTheme(
         MiuixTheme(controller = controller) {
             CompositionLocalProvider(
                 LocalContentColor provides MiuixTheme.colorScheme.onBackground,
+                // material3 的 Text 默认读取的是 material3 自己的 LocalContentColor
+                // （默认 Color.Black）。miuix 组件树里无人提供它，导致深色模式下
+                // 未显式指定颜色的 material3 Text 变成「深底黑字」看不清。
+                // 这里显式提供，使两套设计系统的裸 Text 都能随主题自适应。
+                Material3LocalContentColor provides materialScheme.onBackground,
             ) {
                 content()
             }
