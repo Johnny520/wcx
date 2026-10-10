@@ -7,6 +7,9 @@ import android.os.Looper
 import android.text.TextUtils
 import h.Hchat.hooks.api.contact.WeChatContactApi
 import h.Hchat.hooks.api.core.WeChatApis
+import h.Hchat.utils.HLog
+import com.Johnny.wcx.features.api.core.WeContactApi
+import com.Johnny.wcx.features.items.system.servers.WeChatService
 import h.Hchat.hooks.api.media.WeChatFavoriteItem
 import h.Hchat.hooks.api.media.WeChatMediaApi
 import h.Hchat.hooks.api.model.ContactLabelBean
@@ -19,8 +22,8 @@ import h.Hchat.hooks.api.runtime.WeChatDatabaseApi
 import h.Hchat.hooks.items.quickread.QuickMarkReadRuntime
 import h.Hchat.hooks.items.shortvideo.FinderMediaDownloadSupport
 import h.Hchat.utils.HchatMediaDownloader
+import me.hd.wauxv.data.bean.MsgInfoBean
 import me.hd.wauxv.data.bean.info.FriendInfo
-import me.hd.wauxv.data.bean.info.GroupData
 import me.hd.wauxv.data.bean.info.GroupInfo
 import me.hd.wauxv.plugin.api.callback.PluginCallBack
 import me.yun.silk.SilkCodec
@@ -108,18 +111,18 @@ class ScriptWaBridge @JvmOverloads internal constructor(
 
     fun getFriendList(): List<FriendInfo> {
         return rawFriendList().map { contact ->
-            // TODO(migration): 路线 A —— 改用 WCX 版 FriendInfo 的成员（同名 FQN）。
-            //   Hchat 版 FriendInfo 为 11 参构造：(wxid, nickname, remark, alias, avatarUrl, avatarBackupUrl,
-            //     encryptedUsername, province, city, gender, type)
-            //   WCX 版 FriendInfo 仅有：wxid/alias/remark/nickname/type/sourceExtInfo/createTime
-            //   下列成员在 WCX 版中缺失、此处未透出，脚本若依赖需人工确认（必要时在 WCX 版补成员）：
-            //     avatarUrl / avatarBackupUrl / encryptedUsername / province / city / gender
             FriendInfo(
-                wxid = contact.wxId,
-                alias = contact.customWxId,
-                remark = contact.remarkName,
-                nickname = contact.nickname,
-                type = contact.type
+                contact.wxId,
+                contact.nickname,
+                contact.remarkName,
+                contact.customWxId,
+                contact.avatarUrl,
+                contact.avatarBackupUrl,
+                contact.encryptedUsername,
+                contact.province,
+                contact.city,
+                contact.gender,
+                contact.type
             )
         }
     }
@@ -159,22 +162,14 @@ class ScriptWaBridge @JvmOverloads internal constructor(
         return rawGroupList().map { chatroom ->
             val contact = groupContacts[chatroom.chatroomId]
             val groupName = firstNotBlank(chatroom.name, contact?.nickname, chatroom.chatroomId)
-            // TODO(migration): 路线 A —— 改用 WCX 版 GroupInfo 的成员（同名 FQN）。
-            //   Hchat 版 GroupInfo 为 7 参构造：(roomId, name, nickname, remarkName, owner, memberList, rawDisplayNames)
-            //   WCX 版 GroupInfo 为：(roomId, remark, name, groupData)
-            //   原直接透出的 owner/memberList/memberCount 改由 groupData 承载（用 Hchat 已取到的群数据填充，
-            //   避免新增 DB 查询）；原 nickname / displayName / rawDisplayNames 在 WCX 版中无对应成员、此处未透出，
-            //   脚本若依赖需人工确认。
             GroupInfo(
-                roomId = chatroom.chatroomId,
-                name = groupName,
-                remark = contact?.remarkName.orEmpty(),
-                groupData = GroupData(
-                    roomId = chatroom.chatroomId,
-                    memberIds = chatroom.memberIds,
-                    memberCount = chatroom.memberCount(),
-                    owner = chatroom.owner
-                )
+                chatroom.chatroomId,
+                groupName,
+                firstNotBlank(contact?.nickname, groupName),
+                contact?.remarkName.orEmpty(),
+                chatroom.owner,
+                chatroom.memberIds,
+                chatroom.rawDisplayNames
             )
         }
     }
@@ -291,14 +286,15 @@ class ScriptWaBridge @JvmOverloads internal constructor(
         return WeChatApis.contact().contacts()?.modifyContactLabelList(username, labelNames) == true
     }
 
-    fun verifyUser(wxid: String?, ticket: String?, scene: Int): Boolean {
-        val verifyUsername = ScriptNewFriendHook.resolveVerifyUsername(wxid, ticket, scene)
-        return WeChatApis.contact().verifyUser()?.verifyUser(verifyUsername, ticket, scene) == true
-    }
+    fun verifyUser(wxid: String?, ticket: String?, scene: Int): Boolean =
+        verifyUser(wxid, ticket, scene, 0)
 
     fun verifyUser(wxid: String?, ticket: String?, scene: Int, privacy: Int): Boolean {
-        val verifyUsername = ScriptNewFriendHook.resolveVerifyUsername(wxid, ticket, scene)
-        return WeChatApis.contact().verifyUser()?.verifyUser(verifyUsername, ticket, scene, privacy) == true
+        val verifyUsername = ScriptNewFriendHook.resolveVerifyUsername(wxid, ticket, scene) ?: return false
+        return runCatching {
+            WeContactApi.verifyUser(verifyUsername, ticket.orEmpty(), scene, privacy)
+            true
+        }.getOrDefault(false)
     }
 
     fun getGroupMemberList(groupWxid: String?): List<String> {
@@ -916,12 +912,14 @@ class ScriptWaBridge @JvmOverloads internal constructor(
     }
 
     fun insertSystemMsg(talker: String?, content: String?, createTime: Long): Long {
-        return runCatching {
-            WeChatApis.message().local()?.insertSystemMessage(talker, content, createTime) ?: 0L
-        }.getOrDefault(0L)
+        if (talker.isNullOrBlank() || content.isNullOrEmpty()) return 0L
+        // TODO(migration): WCX 现有插入接口不返回新消息 id，成功时统一返回 0；需要 msgId 时应扩展 WeMessageApi。
+        runCatching { WeChatService.insertSystemMessage(talker, content, createTime) }
+            .onFailure { HLog.e("ScriptWaBridge", "insertSystemMsg 失败", it) }
+        return 0L
     }
 
-    fun queryHistoryMsg(talker: String?, startTime: Long, count: Int): List<ScriptMessageBean> {
+    fun queryHistoryMsg(talker: String?, startTime: Long, count: Int): List<MsgInfoBean> {
         if (talker.isNullOrBlank()) return emptyList()
         return WeChatApis.message().store()
             ?.queryHistoryMsg(talker, startTime, count)

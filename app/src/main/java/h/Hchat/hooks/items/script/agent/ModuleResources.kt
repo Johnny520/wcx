@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.res.AssetManager
 import android.content.res.Resources
 import android.graphics.drawable.Drawable
-import h.Hchat.BuildConfig
-import h.Hchat.R
+import com.Johnny.wcx.BuildConfig
+import com.Johnny.wcx.R
 import h.Hchat.utils.HLog
 
 // 模块资源表兜底：用 R.string.app_name 探测哪张表能直接用编译期 id（反射取表有坑）

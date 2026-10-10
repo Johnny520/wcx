@@ -1,7 +1,7 @@
 package h.Hchat.hooks.items.script.agent
 
 import android.content.Context
-import h.Hchat.BuildConfig
+import com.Johnny.wcx.BuildConfig
 import h.Hchat.hooks.items.script.ScriptPluginRuntime
 import h.Hchat.hooks.items.script.market.PluginMarketSettings
 import h.Hchat.utils.HLog
