@@ -110,6 +110,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text as M3Text
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.window.Dialog
 
 
 private const val PRESS_RELEASE_DELAY_MS = 110L
@@ -2662,12 +2664,48 @@ fun ScriptPluginManagerTabPage(context: Context, onBack: () -> Unit) {
     ScriptPluginSettingsMiuixContent.ScriptPluginManagerPage(context = context, onBack = onBack)
 }
 
-/** WCX 入口：脚本 README 弹窗。 */
+/** WCX 入口：脚本 README 弹窗（自包含实现，不依赖页面内部的私有 composable）。 */
 @Composable
 fun ScriptPluginReadmeTabDialog(
     context: Context,
     plugin: ScriptPluginRuntime.ScriptPlugin,
     onClose: () -> Unit,
 ) {
-    ScriptPluginReadmeDialog(context = context, plugin = plugin, onClose = onClose)
+    val readme = remember(plugin.id) {
+        runCatching {
+            val file = File(plugin.dir, "README.md")
+            if (file.isFile) file.readText(Charsets.UTF_8) else ""
+        }.getOrDefault("")
+    }
+    Dialog(onDismissRequest = onClose) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MiuixTheme.colorScheme.surfaceContainer)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Text(
+                text = plugin.displayName ?: plugin.name,
+                fontSize = MiuixTheme.textStyles.headline1.fontSize,
+                fontWeight = FontWeight.Medium,
+                color = BasicComponentDefaults.titleColor().color,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = readme.ifBlank { "暂无说明" },
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                color = BasicComponentDefaults.summaryColor().color,
+            )
+            Spacer(Modifier.height(12.dp))
+            TextButton(
+                text = "关闭",
+                onClick = onClose,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
 }
