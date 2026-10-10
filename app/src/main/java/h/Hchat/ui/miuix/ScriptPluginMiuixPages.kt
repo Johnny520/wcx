@@ -27,8 +27,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,17 +55,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -75,7 +69,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -90,17 +83,12 @@ import h.Hchat.ui.FeatureSettingsProvider
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.blur.Backdrop
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +103,13 @@ import java.util.LinkedHashSet
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text as M3Text
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
 
 @Composable
 private fun ClickHintTag() {
@@ -2075,17 +2070,24 @@ private fun openMarkdownLink(context: Context, url: String) {
 
 private const val PRESS_RELEASE_DELAY_MS = 110L
 
+
 private const val SCRIPT_PLUGIN_EXPORT_REQUEST_CODE = 0x48435260
+
 
 private const val SCRIPT_PLUGIN_IMPORT_REQUEST_CODE = 0x48435261
 
+
 private const val MARKDOWN_LINK_TAG = "md_link"
+
 
 private val MARKDOWN_LINK_REGEX = Regex("""\[([^\]]+)]\(([^)\s]+)\)""")
 
+
 private val NAVIGATION_BUTTON_MIN_INSET = 24.dp
 
+
 private val NAVIGATION_BUTTON_EXTRA_GAP = 8.dp
+
 
 private object NavIcons {
     val Back: ImageVector = navIcon(
@@ -2247,6 +2249,7 @@ private object NavIcons {
     }
 }
 
+
 private class SettingsBackHandlerRegistry {
     private val handlers = LinkedHashMap<Any, () -> Unit>()
 
@@ -2273,9 +2276,11 @@ private class SettingsBackHandlerRegistry {
     }
 }
 
+
 private val LocalSettingsBackHandlerRegistry = staticCompositionLocalOf<SettingsBackHandlerRegistry?> { null }
 
 @Composable
+
 private fun RegisterSettingsBackHandler(onBack: (() -> Unit)?) {
     val registry = LocalSettingsBackHandlerRegistry.current
     val currentOnBack by rememberUpdatedState(onBack)
@@ -2287,6 +2292,7 @@ private fun RegisterSettingsBackHandler(onBack: (() -> Unit)?) {
         onDispose { registry?.unregister(token) }
     }
 }
+
 
 private fun Intent.preferSystemDocumentsUi(context: Context): Intent {
     val candidates = listOf(
@@ -2305,6 +2311,7 @@ private fun Intent.preferSystemDocumentsUi(context: Context): Intent {
     }
     return this
 }
+
 
 private object ScriptPluginDocumentBridge {
     private val hookedClasses = HashSet<Class<*>>()
@@ -2432,11 +2439,13 @@ private object ScriptPluginDocumentBridge {
 }
 
 @Composable
+
 private fun Modifier.responsiveTap(
     onClick: () -> Unit,
     onPressedChange: (Boolean) -> Unit = {}
 
 @Composable
+
 private fun rememberPressFeedbackColor(pressed: Boolean): Color {
     var feedbackVisible by remember { mutableStateOf(false) }
     LaunchedEffect(pressed) {
@@ -2460,68 +2469,6 @@ private fun rememberPressFeedbackColor(pressed: Boolean): Color {
 }
 
 @Composable
-private fun SearchBarSurface(
-    query: String,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-    readOnly: Boolean = false,
-    focusRequester: FocusRequester? = null,
-    onClick: (() -> Unit)? = null,
-    onQueryChange: (String) -> Unit
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            imageVector = NavIcons.Search,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)
-        )
-        if (readOnly) {
-            Text(
-                text = query.ifEmpty { placeholder },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 16.sp,
-                modifier = Modifier.weight(1f).padding(start = 10.dp)
-            )
-        } else {
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                singleLine = true,
-                textStyle = TextStyle(
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 16.sp
-                ),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
-                modifier = Modifier.weight(1f)
-                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-                    .padding(start = 10.dp),
-                decorationBox = { innerTextField ->
-                    Box(contentAlignment = Alignment.CenterStart) {
-                        if (query.isEmpty()) {
-                            Text(
-                                text = placeholder,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                fontSize = 16.sp
-                            )
-                        }
-                        innerTextField()
-                    }
-                }
-            )
-        }
-    }
-}
-
 
 private data class TemplateVariable(
     val token: String,
@@ -2542,183 +2489,147 @@ private sealed class DetailPage {
 }
 
 @Composable
-internal fun PageScaffold(
-    title: String,
-    largeTitle: String,
-    scrollBehavior: ScrollBehavior,
-    onBack: (() -> Unit)? = null,
-    topBarActions: @Composable RowScope.() -> Unit = {},
-    bottomBar: @Composable ((Backdrop) -> Unit)? = null,
-    content: @Composable (PaddingValues) -> Unit
-) {
-    RegisterSettingsBackHandler(onBack)
-    val graphicsLayer = rememberGraphicsLayer()
-    val backdrop = rememberLayerBackdrop(graphicsLayer)
-    val navigationInset = navigationButtonBottomInset()
-    val navigationGap = if (navigationInset > 0.dp) NAVIGATION_BUTTON_EXTRA_GAP else 0.dp
-    val bottomAvoidance = navigationInset + navigationGap
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MiuixTheme.colorScheme.background)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .layerBackdrop(backdrop)
-        ) {
-            top.yukonga.miuix.kmp.basic.Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = title,
-                        largeTitle = largeTitle,
-                        scrollBehavior = scrollBehavior,
-                        navigationIcon = {
-                            onBack?.let { back ->
-                                Box(
-                                    modifier = Modifier.size(40.dp).responsiveTap(onClick = back),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Image(
-                                        imageVector = NavIcons.Back,
-                                        contentDescription = "返回",
-                                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-                        },
-                        actions = topBarActions,
-                        defaultWindowInsetsPadding = true
-                    )
-                },
-                bottomBar = {},
-                contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                content = { padding ->
-                    content(
-                        PaddingValues(
-                            top = padding.calculateTopPadding(),
-                            bottom = padding.calculateBottomPadding() + bottomAvoidance
-                        )
-                    )
-                }
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = bottomAvoidance)
-                .align(Alignment.BottomCenter)
-        ) {
-            bottomBar?.invoke(backdrop)
-        }
-    }
-}
+
+// ---------------------------------------------------------------------------
+// WCX 侧本地组件实现（替代 Hchat 的通用组件，避免连带迁移无关模块）
+// 视觉风格沿用 WCX 设置页的 Miuix 组件。
+// ---------------------------------------------------------------------------
 
 
+/** 卡片容器。 */
 @Composable
 internal fun SettingsCard(
     modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    BasicComponent(modifier = modifier.fillMaxWidth(), onClick = null) {
+        Column { content() }
+    }
+}
 
+/** 可点击的条目行（标题 + 摘要）。 */
 @Composable
 internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
-    SelectRow(title = title, summary = summary, onClick = onClick)
-}
-
-
-@Composable
-private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
-    Box(
-        modifier = Modifier.size(30.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Checkbox(
-            modifier = Modifier.size(22.dp),
-            state = if (selected) ToggleableState.On else ToggleableState.Off,
-            onClick = null
-        )
-    }
-}
-
-
-@Composable
-internal fun BottomActionBar(
-    primaryText: String,
-    onPrimaryClick: () -> Unit,
-    secondaryText: String? = null,
-    onSecondaryClick: (() -> Unit)? = null,
-    middleText: String? = null,
-    onMiddleClick: (() -> Unit)? = null
-) {
-    val backAction = when {
-        secondaryText == "取消" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "取消" && onMiddleClick != null -> onMiddleClick
-        primaryText == "取消" -> onPrimaryClick
-        secondaryText == "返回" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "返回" && onMiddleClick != null -> onMiddleClick
-        primaryText == "返回" -> onPrimaryClick
-        secondaryText == "关闭" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "关闭" && onMiddleClick != null -> onMiddleClick
-        primaryText == "关闭" -> onPrimaryClick
-        else -> null
-    }
-    RegisterSettingsBackHandler(backAction)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background.copy(alpha = 0.92f))
-            .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        if (secondaryText != null && onSecondaryClick != null) {
-            BottomBarButton(
-                text = secondaryText,
-                modifier = Modifier.weight(1f),
-                filled = false,
-                onClick = onSecondaryClick
+    BasicComponent(onClick = onClick) {
+        Column {
+            Text(
+                text = title,
+                fontSize = MiuixTheme.textStyles.headline1.fontSize,
+                fontWeight = FontWeight.Medium,
+                color = BasicComponentDefaults.titleColor().color,
             )
+            if (summary.isNotBlank()) {
+                Text(
+                    text = summary,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color = BasicComponentDefaults.summaryColor().color,
+                )
+            }
         }
-        if (middleText != null && onMiddleClick != null) {
-            BottomBarButton(
-                text = middleText,
-                modifier = Modifier.weight(1f),
-                filled = false,
-                onClick = onMiddleClick
-            )
-        }
-        BottomBarButton(
-            text = primaryText,
-            modifier = Modifier.weight(1f),
-            filled = true,
-            onClick = onPrimaryClick
-        )
     }
 }
 
-
+/** 选择标记。 */
 @Composable
-private fun EmptyText(text: String) {
+internal fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
     Text(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
-        text = text,
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        textAlign = TextAlign.Center
+        text = if (selected) "✓" else "",
+        fontSize = MiuixTheme.textStyles.body2.fontSize,
+        fontWeight = FontWeight.Medium,
+        color = if (selected) MiuixTheme.colorScheme.primary
+        else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        modifier = Modifier.padding(end = 8.dp),
     )
 }
 
+/** 空态文案。 */
+@Composable
+internal fun EmptyText(text: String) {
+    BasicComponent(onClick = null) {
+        Text(
+            text = text,
+            fontSize = MiuixTheme.textStyles.body2.fontSize,
+            color = BasicComponentDefaults.summaryColor().color,
+            modifier = Modifier.padding(vertical = 10.dp),
+        )
+    }
+}
 
+/** 缩进分隔线。 */
 @Composable
 internal fun InsetDivider(start: Dp = 16.dp) {
     Box(
         modifier = Modifier
-            .padding(start = start)
             .fillMaxWidth()
-            .height(Dp.Hairline)
-            .background(MiuixTheme.colorScheme.dividerLine)
+            .padding(start = start)
+            .height(1.dp)
+            .background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.2f))
     )
 }
 
+/** 底部操作条。 */
+@Composable
+internal fun BottomActionBar(text: String, onClick: () -> Unit) {
+    BasicComponent(onClick = onClick) {
+        Text(
+            text = text,
+            fontSize = MiuixTheme.textStyles.headline1.fontSize,
+            color = MiuixTheme.colorScheme.primary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
 
-/** WCX 入口：脚本 Tab 内容（Hchat Miuix 版）。 */
+/** 搜索框。 */
+@Composable
+internal fun SearchBarSurface(
+    query: String,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    onQueryChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = { M3Text(placeholder) },
+        singleLine = true,
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/** 页面脚手架（顶栏 + 内容）。 */
+@Composable
+internal fun PageScaffold(
+    title: String,
+    largeTitle: String,
+    scrollBehavior: MiuixScrollBehavior,
+    onBack: (() -> Unit)? = null,
+    @Suppress("UNUSED_PARAMETER") bottomBar: (@Composable () -> Unit)? = null,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = title,
+                scrollBehavior = scrollBehavior,
+                navigationIcon = {
+                    if (onBack != null) {
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 12.dp)
+                                .clickable(onClick = onBack)
+                        ) {
+                            Icon(imageVector = NavIcons.Back, contentDescription = "返回")
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding -> content(padding) }
+}
+
+
+/** WCX 入口：脚本 Tab 内容（Hchat Miuix 版，通用组件为 WCX 本地实现）。 */
 @Composable
 fun ScriptPluginMiuixTabContent(
     context: Context,
