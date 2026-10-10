@@ -45,6 +45,8 @@ import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.nul
+import android.security.keystore.UserNotAuthenticatedException
+import java.security.InvalidKeyException
 
 
 @Feature(name = "指纹支付", categories = ["红包与支付"], description = "使用指纹快捷确认支付")
@@ -214,9 +216,17 @@ object FingerprintPay : ClickableFeature() {
         } catch (_: KeyPermanentlyInvalidatedException) {
             showToast("检测到新生物特征, 密钥已重置, 请在模块设置中重新加密支付密码!")
             return
+        } catch (_: UserNotAuthenticatedException) {
+            showToast("需要先通过系统认证：请在系统设置中录入指纹/面容并设置锁屏密码后重试")
+            return
+        } catch (e: InvalidKeyException) {
+            CryptoManager.deleteKey()
+            showToast("支付密钥已失效并已重置, 请重新输入支付密码并加密保存")
+            WeLogger.e(TAG, "invalid key, reset keystore entry", e)
+            return
         } catch (e: Exception) {
-            showToast("捕获到未处理的异常! 请向模块作者报告问题")
-            WeLogger.e(TAG, "unhandled exception", e)
+            showToast("指纹支付初始化失败: ${e.javaClass.simpleName}${e.message?.let { "（$it）" } ?: ""}")
+            WeLogger.e(TAG, "getEncryptCipher failed", e)
             return
         }
         TransparentActivity.launch(context) {
@@ -246,9 +256,17 @@ object FingerprintPay : ClickableFeature() {
         } catch (_: KeyPermanentlyInvalidatedException) {
             showToast("检测到新生物特征, 密钥已重置, 请在模块设置中重新加密支付密码!")
             return
+        } catch (_: UserNotAuthenticatedException) {
+            showToast("需要先通过系统认证：请在系统设置中录入指纹/面容并设置锁屏密码后重试")
+            return
+        } catch (e: InvalidKeyException) {
+            CryptoManager.deleteKey()
+            showToast("支付密钥已失效并已重置, 请重新输入支付密码并加密保存")
+            WeLogger.e(TAG, "invalid key, reset keystore entry", e)
+            return
         } catch (e: Exception) {
-            showToast("捕获到未处理的异常! 请向模块作者报告问题")
-            WeLogger.e(TAG, "unhandled exception", e)
+            showToast("指纹支付初始化失败: ${e.javaClass.simpleName}${e.message?.let { "（$it）" } ?: ""}")
+            WeLogger.e(TAG, "getDecryptCipher failed", e)
             return
         }
         TransparentActivity.launch(context) {

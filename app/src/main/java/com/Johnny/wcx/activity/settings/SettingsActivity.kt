@@ -112,6 +112,7 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import androidx.compose.material3.Icon as M3Icon
 import androidx.compose.material3.Text as M3Text
+import androidx.compose.ui.draw.clipToBounds
 
 val LocalComponentActivity = staticCompositionLocalOf<ComponentActivity> { error("not provided") }
 
@@ -362,6 +363,8 @@ fun MiuixListScaffold(
         LazyColumn(
             modifier = Modifier
                 .fillMaxHeight()
+                // 修复「列表页顶部出现异常灰块」：内容超出/回弹时 backdrop 采样会越界绘制。
+                .clipToBounds()
                 .layerBackdrop(barBackdrop)
                 .scrollEndHaptic()
                 .overScrollVertical()

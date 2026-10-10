@@ -1556,7 +1556,15 @@ private fun isHomeTabClass(className: String): Boolean {
                 entries.forEachIndexed { index, e ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable { e.onClick() }.padding(horizontal = 16.dp, vertical = 12.dp)
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            // 兜底：任一功能项异常都必须给用户可见反馈，避免"点击无反应"的误判
+                            try {
+                                e.onClick()
+                            } catch (t: Throwable) {
+                                WeLogger.e(TAG, "侧边栏功能项点击异常: ${e.label}", t)
+                                showToast("操作失败：${t.message ?: t.javaClass.simpleName}")
+                            }
+                        }.padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {
                         Icon(e.icon, e.label, tint = cs.primary, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(12.dp))

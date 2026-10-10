@@ -903,15 +903,20 @@ object HomeSidePanel : SwitchFeature() {
             event: MotionEvent,
             allowPanelPassthrough: Boolean,
         ): Boolean {
+            // 修复「侧边栏菜单点击无效」：面板内且接近完全展开时，把触摸事件整体放行给内容。
+            // 原实现要求 renderedProgress >= 0.98f 且仅放行 DOWN/UP/CANCEL，导致手指轻微移动
+            // 产生的 MOVE 会被拦截，子 View 随即收到 ACTION_CANCEL，clickable 不触发。
+            // 现在：面板内只要未进入拖拽（!dragging）就一律放行，保证点击可靠；
+            // 拖动关闭仍可通过面板外区域/关闭按钮完成。
             if (
                 allowPanelPassthrough &&
                 isInsidePanel(event.x) &&
-                renderedProgress >= 0.98f &&
-                homeSidePanelShouldPassFullyOpenTouchToChild(event.actionMasked)
+                renderedProgress >= 0.90f &&
+                !dragging
             ) {
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     beginGesture(event)
-                } else if (!dragging) {
+                } else {
                     gesture.onCancel()
                 }
                 return false
