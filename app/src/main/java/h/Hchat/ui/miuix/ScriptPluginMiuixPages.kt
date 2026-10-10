@@ -126,15 +126,10 @@ import java.util.concurrent.atomic.AtomicReference
 private const val PRESS_RELEASE_DELAY_MS = 110L
 
 private const val SCRIPT_PLUGIN_EXPORT_REQUEST_CODE = 0x48435260
-
 private const val SCRIPT_PLUGIN_IMPORT_REQUEST_CODE = 0x48435261
-
 private const val MARKDOWN_LINK_TAG = "md_link"
-
 private val MARKDOWN_LINK_REGEX = Regex("""\[([^\]]+)]\(([^)\s]+)\)""")
-
 private val NAVIGATION_BUTTON_MIN_INSET = 24.dp
-
 private val NAVIGATION_BUTTON_EXTRA_GAP = 8.dp
 
 private object NavIcons {
@@ -2852,7 +2847,7 @@ internal fun InsetDivider(start: Dp = 16.dp) {
     )
 }
 
-/** WCX 入口：脚本 Tab 内容（Hchat Miuix 版），供 com.Johnny.wcx 侧调用。 */
+/** WCX 入口：脚本 Tab 内容（Hchat Miuix 版）。 */
 @Composable
 fun ScriptPluginMiuixTabContent(
     context: Context,
@@ -2874,4 +2869,14 @@ fun ScriptPluginMiuixTabContent(
 @Composable
 fun ScriptPluginManagerTabPage(context: Context, onBack: () -> Unit) {
     ScriptPluginSettingsMiuixContent.ScriptPluginManagerPage(context = context, onBack = onBack)
+}
+
+/** WCX 入口：脚本 README 弹窗。 */
+@Composable
+fun ScriptPluginReadmeTabDialog(
+    context: Context,
+    plugin: ScriptPluginRuntime.ScriptPlugin,
+    onClose: () -> Unit,
+) {
+    ScriptPluginReadmeDialog(context = context, plugin = plugin, onClose = onClose)
 }

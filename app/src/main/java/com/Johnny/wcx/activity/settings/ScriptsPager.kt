@@ -14,13 +14,13 @@ import com.Johnny.wcx.utils.android.showToast
 import h.Hchat.hooks.items.script.ScriptPluginRuntime
 import h.Hchat.ui.miuix.ScriptPluginManagerTabPage
 import h.Hchat.ui.miuix.ScriptPluginMiuixTabContent
-import h.Hchat.ui.miuix.ScriptPluginReadmeDialog
+import h.Hchat.ui.miuix.ScriptPluginReadmeTabDialog
 
 /**
  * 「脚本」独立页 —— 采用 Hchat 同款 Miuix 脚本页：
- * 插件总开关 / 插件列表（启用开关 + 长按菜单）/ 插件管理页 / README 弹窗。
+ * 插件总开关 / 插件列表（启用开关 + 操作菜单）/ 插件管理页 / README 弹窗。
  *
- * 数据源与逻辑全部走已迁移的 Hchat 脚本子系统（ScriptPluginRuntime / ScriptPluginManager）。
+ * 数据与逻辑全部走已迁移的 Hchat 脚本子系统（ScriptPluginRuntime / ScriptPluginManager）。
  */
 @Composable
 fun ScriptsPager() {
@@ -50,10 +50,11 @@ fun ScriptsPager() {
         }
     }
 
-    readmePlugin?.let { plugin ->
-        ScriptPluginReadmeDialog(
+    val pending = readmePlugin
+    if (pending != null) {
+        ScriptPluginReadmeTabDialog(
             context = context,
-            plugin = plugin,
+            plugin = pending,
             onClose = { readmePlugin = null },
         )
     }
