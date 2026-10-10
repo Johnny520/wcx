@@ -5,7 +5,6 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -16,10 +15,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -63,6 +59,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
@@ -91,7 +90,6 @@ import h.Hchat.ui.FeatureSettingsProvider
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
@@ -2075,26 +2073,179 @@ private fun openMarkdownLink(context: Context, url: String) {
 
 }
 
-
 private const val PRESS_RELEASE_DELAY_MS = 110L
-private const val RINGTONE_SYSTEM_REQUEST_CODE = 0x48435254
-private const val RINGTONE_FILE_REQUEST_CODE = 0x48435255
-private const val REDPACKET_REPLY_FILE_REQUEST_CODE = 0x48435256
-private const val AUTO_REPLY_FILE_REQUEST_CODE = 0x48435257
-private const val CONFIG_EXPORT_REQUEST_CODE = 0x48435258
-private const val CONFIG_IMPORT_REQUEST_CODE = 0x48435259
-private const val SCHEDULED_TASK_FILE_REQUEST_CODE = 0x4843525A
-private const val AUDIO_TRANSFORM_INPUT_REQUEST_CODE = 0x4843525B
-private const val AUDIO_TRANSFORM_OUTPUT_REQUEST_CODE = 0x4843525C
-private const val FAKE_LOCATION_WECHAT_PICKER_REQUEST_CODE = 0x4843525D
-private const val SCRIPT_AGENT_ATTACHMENT_REQUEST_CODE = 0x4843525E
-private const val PLUGIN_MARKET_EXTRA_FILE_REQUEST_CODE = 0x4843525F
+
 private const val SCRIPT_PLUGIN_EXPORT_REQUEST_CODE = 0x48435260
+
 private const val SCRIPT_PLUGIN_IMPORT_REQUEST_CODE = 0x48435261
+
 private const val MARKDOWN_LINK_TAG = "md_link"
+
 private val MARKDOWN_LINK_REGEX = Regex("""\[([^\]]+)]\(([^)\s]+)\)""")
+
 private val NAVIGATION_BUTTON_MIN_INSET = 24.dp
+
 private val NAVIGATION_BUTTON_EXTRA_GAP = 8.dp
+
+private object NavIcons {
+    val Back: ImageVector = navIcon(
+        name = "Rounded.ArrowBack",
+        path = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z"
+    )
+    val Attach: ImageVector = navIcon(
+        name = "Rounded.AttachFile",
+        path = "M16.5,6.5v11c0,2.21 -1.79,4 -4,4s-4,-1.79 -4,-4V5c0,-1.38 1.12,-2.5 2.5,-2.5s2.5,1.12 2.5,2.5v10.5c0,0.55 -0.45,1 -1,1s-1,-0.45 -1,-1V6.5H10v9c0,1.38 1.12,2.5 2.5,2.5s2.5,-1.12 2.5,-2.5V5c0,-2.21 -1.79,-4 -4,-4S7,2.79 7,5v12.5c0,3.04 2.46,5.5 5.5,5.5s5.5,-2.46 5.5,-5.5v-11h-1.5z"
+    )
+    val Add: ImageVector = navIcon(
+        name = "Rounded.Add",
+        path = "M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+    )
+    val Compact: ImageVector = navIcon(
+        name = "Rounded.Summarize",
+        path = "M14,2H6c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V8l-6,-6z M13,9V3.5L18.5,9H13z M8,13h8v2H8v-2z M8,17h8v2H8v-2z M8,9h3v2H8V9z"
+    )
+    val Close: ImageVector = navIcon(
+        name = "Rounded.Close",
+        path = "M18.3,5.71L12,12l6.3,6.29 -1.41,1.42L10.59,13.41 4.29,19.71 2.88,18.29 9.17,12 2.88,5.71 4.29,4.29 10.59,10.59 16.89,4.29z"
+    )
+    val History: ImageVector = navIcon(
+        name = "Rounded.History",
+        path = "M13,3c-4.97,0 -9,4.03 -9,9s4.03,9 9,9c4.63,0 8.44,-3.5 8.94,-8h-2.02c-0.49,3.39 -3.4,6 -6.92,6 -3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7c1.93,0 3.68,0.79 4.95,2.05L15,10h6V4l-2.63,2.63C16.73,4.42 14.95,3 13,3z M12,7v6l5,3 1,-1.64 -4,-2.36V7h-2z"
+    )
+    val Bell: ImageVector = navIcon(
+        name = "Rounded.Notifications",
+        path = "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2z M18,16v-5c0,-3.07 -1.63,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5S10.5,3.17 10.5,4v0.68C7.64,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"
+    )
+    val Modules: ImageVector = navIcon(
+        name = "Rounded.Extension",
+        path = "M20.5,11H19V7c0,-1.1 -0.9,-2 -2,-2h-4V3.5C13,2.12 11.88,1 10.5,1S8,2.12 8,3.5V5H4c-1.1,0 -1.99,0.9 -1.99,2v3.8H3.5c1.49,0 2.7,1.21 2.7,2.7s-1.21,2.7 -2.7,2.7H2V20c0,1.1 0.9,2 2,2h3.8v-1.5c0,-1.49 1.21,-2.7 2.7,-2.7s2.7,1.21 2.7,2.7V22H17c1.1,0 2,-0.9 2,-2v-4h1.5c1.38,0 2.5,-1.12 2.5,-2.5S21.88,11 20.5,11z"
+    )
+    val Settings: ImageVector = navIcon(
+        name = "Rounded.Settings",
+        path = "M19.5,12c0,-0.23 -0.01,-0.45 -0.03,-0.68l1.86,-1.41c0.4,-0.3 0.51,-0.86 0.26,-1.3l-1.87,-3.23c-0.25,-0.44 -0.79,-0.62 -1.25,-0.42l-2.15,0.91c-0.37,-0.26 -0.76,-0.49 -1.17,-0.68l-0.29,-2.31C14.8,2.38 14.37,2 13.87,2h-3.73C9.63,2 9.2,2.38 9.14,2.88L8.85,5.19c-0.41,0.19 -0.8,0.42 -1.17,0.68L5.53,4.96c-0.46,-0.2 -1,-0.02 -1.25,0.42L2.41,8.62c-0.25,0.44 -0.14,0.99 0.26,1.3l1.86,1.41C4.51,11.55 4.5,11.77 4.5,12s0.01,0.45 0.03,0.68l-1.86,1.41c-0.4,0.3 -0.51,0.86 -0.26,1.3l1.87,3.23c0.25,0.44 0.79,0.62 1.25,0.42l2.15,-0.91c0.37,0.26 0.76,0.49 1.17,0.68l0.29,2.31c0.06,0.5 0.49,0.88 0.99,0.88h3.73c0.5,0 0.93,-0.38 0.99,-0.88l0.29,-2.31c0.41,-0.19 0.8,-0.42 1.17,-0.68l2.15,0.91c0.46,0.2 1,0.02 1.25,-0.42l1.87,-3.23c0.25,-0.44 0.14,-0.99 -0.26,-1.3l-1.86,-1.41C19.49,12.45 19.5,12.23 19.5,12z M12.04,15.5c-1.93,0 -3.5,-1.57 -3.5,-3.5s1.57,-3.5 3.5,-3.5s3.5,1.57 3.5,3.5S13.97,15.5 12.04,15.5z"
+    )
+    val More: ImageVector = navIcon(
+        name = "Rounded.MoreVert",
+        path = "M12,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2z M12,10c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2z M12,16c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2z"
+    )
+    val Import: ImageVector = navIcon(
+        name = "Rounded.FileDownload",
+        path = "M19,9h-4V3H9v6H5l7,7 7,-7z M5,18v2h14v-2H5z"
+    )
+    val Export: ImageVector = navIcon(
+        name = "Rounded.FileUpload",
+        path = "M9,16h6v-6h4l-7,-7 -7,7h4v6z M5,18v2h14v-2H5z"
+    )
+    val Practical: ImageVector = navIcon(
+        name = "Rounded.GridView",
+        path = "M5,3h4c1.1,0 2,0.9 2,2v4c0,1.1 -0.9,2 -2,2H5c-1.1,0 -2,-0.9 -2,-2V5c0,-1.1 0.9,-2 2,-2z M15,3h4c1.1,0 2,0.9 2,2v4c0,1.1 -0.9,2 -2,2h-4c-1.1,0 -2,-0.9 -2,-2V5c0,-1.1 0.9,-2 2,-2z M5,13h4c1.1,0 2,0.9 2,2v4c0,1.1 -0.9,2 -2,2H5c-1.1,0 -2,-0.9 -2,-2v-4c0,-1.1 0.9,-2 2,-2z M15,13h4c1.1,0 2,0.9 2,2v4c0,1.1 -0.9,2 -2,2h-4c-1.1,0 -2,-0.9 -2,-2v-4c0,-1.1 0.9,-2 2,-2z"
+    )
+    val Entertainment: ImageVector = navIcon(
+        name = "Rounded.PlayCircle",
+        path = "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10s10,-4.48 10,-10S17.52,2 12,2z M10,15.5v-7c0,-0.4 0.45,-0.64 0.78,-0.42l5.25,3.5c0.3,0.2 0.3,0.64 0,0.84l-5.25,3.5C10.45,16.14 10,15.9 10,15.5z"
+    )
+    val Play: ImageVector = navIcon(
+        name = "Rounded.PlayArrow",
+        path = "M8,5v14l11,-7z"
+    )
+    val Pause: ImageVector = navIcon(
+        name = "Rounded.Pause",
+        path = "M6,19h4V5H6v14z M14,5v14h4V5h-4z"
+    )
+    val Search: ImageVector = navIcon(
+        name = "Rounded.Search",
+        path = "M9.5,3C5.91,3 3,5.91 3,9.5S5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l4.42,4.42c0.29,0.29 0.77,0.29 1.06,0s0.29,-0.77 0,-1.06l-4.42,-4.42C15.91,12.09 16,10.82 16,9.5C16,5.91 13.09,3 9.5,3z M9.5,4.5c2.76,0 5,2.24 5,5s-2.24,5 -5,5s-5,-2.24 -5,-5s2.24,-5 5,-5z"
+    )
+    val Send: ImageVector = navIcon(
+        name = "Rounded.Send",
+        path = "M2.01,21L23,12 2.01,3 2,10l15,2 -15,2z"
+    )
+    val Stop: ImageVector = navIcon(
+        name = "Rounded.Stop",
+        path = "M6,6h12v12H6z"
+    )
+    val Refresh: ImageVector = navIcon(
+        name = "Rounded.Refresh",
+        path = "M17.65,6.35C16.2,4.9 14.21,4 12,4c-4.42,0 -7.99,3.58 -7.99,8s3.57,8 7.99,8c3.73,0 6.84,-2.55 7.73,-6h-2.08c-0.82,2.33 -3.04,4 -5.65,4 -3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6c1.66,0 3.14,0.69 4.22,1.78L13,11h7V4l-2.35,2.35z"
+    )
+    val Copy: ImageVector = navIcon(
+        name = "Rounded.Copy",
+        path = "M16,1H4c-1.1,0 -2,0.9 -2,2v14h2V4h12V1z M19,5H8c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2z"
+    )
+    val Quote: ImageVector = navIcon(
+        name = "Rounded.Reply",
+        path = "M10,9V5l-7,7 7,7v-4.1c5,0 8.5,1.6 11,5.1 -1,-5 -4,-10 -11,-11z"
+    )
+    val Volume: ImageVector = navIcon(
+        name = "Rounded.VolumeUp",
+        path = "M3,9v6h4l5,5V4L7,9H3z M16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02z M14,3.23v2.06c2.89,0.86 5,3.54 5,6.71s-2.11,5.85 -5,6.71v2.06c4.01,-0.91 7,-4.49 7,-8.77s-2.99,-7.86 -7,-8.77z"
+    )
+    val Edit: ImageVector = navIcon(
+        name = "Rounded.Edit",
+        path = "M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25z M20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z"
+    )
+    val Delete: ImageVector = navIcon(
+        name = "Rounded.Delete",
+        path = "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6v12z M8,9h8v10H8V9z M15.5,4l-1,-1h-5l-1,1H5v2h14V4z"
+    )
+    val MoveUp: ImageVector = navIcon(
+        name = "Rounded.KeyboardArrowUp",
+        path = "M7.41,15.41L12,10.83l4.59,4.58L18,14l-6,-6 -6,6z"
+    )
+    val MoveDown: ImageVector = navIcon(
+        name = "Rounded.KeyboardArrowDown",
+        path = "M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6z"
+    )
+    val Expand: ImageVector = navIcon(
+        name = "Rounded.ChevronRight",
+        path = "M9.29,6.71c-0.39,0.39 -0.39,1.02 0,1.41L13.17,12l-3.88,3.88c-0.39,0.39 -0.39,1.02 0,1.41 0.39,0.39 1.02,0.39 1.41,0l4.59,-4.59c0.39,-0.39 0.39,-1.02 0,-1.41L10.7,6.7c-0.38,-0.38 -1.02,-0.38 -1.41,0.01z"
+    )
+    val Pin: ImageVector = navIcon(
+        name = "Rounded.PushPin",
+        path = "M16,9V4l1,-1V2H7v1l1,1v5c0,1.66 -1.34,3 -3,3v2h6v7l1,1 1,-1v-7h6v-2c-1.66,0 -3,-1.34 -3,-3z"
+    )
+    val Lock: ImageVector = navIcon(
+        name = "Rounded.Lock",
+        path = "M18,8h-1V6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2z M9,6c0,-1.66 1.34,-3 3,-3s3,1.34 3,3v2H9V6z M12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2z"
+    )
+    val Unlock: ImageVector = navIcon(
+        name = "Rounded.LockOpen",
+        path = "M12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2z M18,8h-8V6c0,-1.1 0.9,-2 2,-2 0.95,0 1.74,0.66 1.95,1.54l1.93,-0.52C15.43,3.28 13.86,2 12,2 9.79,2 8,3.79 8,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2z"
+    )
+    val Drag: ImageVector = navIcon(
+        name = "Rounded.DragHandle",
+        path = "M4,10.5h16v-2H4v2z M4,15.5h16v-2H4v2z"
+    )
+    val Swipe: ImageVector = navIcon(
+        name = "Rounded.SwapHoriz",
+        path = "M6.99,11L3,15l3.99,4v-3H14v-2H6.99v-3z M21,9l-3.99,-4v3H10v2h7.01v3L21,9z"
+    )
+    val Branch: ImageVector = navIcon(
+        name = "Rounded.AccountTree",
+        path = "M17,11h3c0.55,0 1,-0.45 1,-1V4c0,-0.55 -0.45,-1 -1,-1h-6c-0.55,0 -1,0.45 -1,1v2H9.83C9.42,4.84 8.31,4 7,4 5.34,4 4,5.34 4,7s1.34,3 3,3c1.31,0 2.42,-0.84 2.83,-2H13v2c0,0.55 0.45,1 1,1h1v2H9.83C9.42,11.84 8.31,11 7,11c-1.66,0 -3,1.34 -3,3s1.34,3 3,3c1.31,0 2.42,-0.84 2.83,-2H15v5c0,0.55 0.45,1 1,1h4c0.55,0 1,-0.45 1,-1v-4c0,-0.55 -0.45,-1 -1,-1h-3v-4z"
+    )
+    val Info: ImageVector = navIcon(
+        name = "Rounded.Info",
+        path = "M11,17h2v-6h-2v6z M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z M12,20c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z M11,9h2V7h-2v2z"
+    )
+    val Terminal: ImageVector = navIcon(
+        name = "Rounded.Terminal",
+        path = "M20,4H4C2.9,4 2,4.9 2,6v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V6C22,4.9 21.1,4 20,4z M20,18H4V6h16V18z M18,15h-6v-1.5h6V15z M7.5,15l-1.06,-1.06L8.38,12L6.44,10.06L7.5,9l3,3L7.5,15z"
+    )
+
+    private fun navIcon(name: String, path: String): ImageVector {
+        return ImageVector.Builder(
+            name = name,
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).addPath(
+            pathData = addPathNodes(path),
+            fill = SolidColor(Color.Black)
+        ).build()
+    }
+}
 
 private class SettingsBackHandlerRegistry {
     private val handlers = LinkedHashMap<Any, () -> Unit>()
@@ -2284,24 +2435,8 @@ private object ScriptPluginDocumentBridge {
 private fun Modifier.responsiveTap(
     onClick: () -> Unit,
     onPressedChange: (Boolean) -> Unit = {}
-): Modifier {
-    val currentOnClick by rememberUpdatedState(onClick)
-    val currentOnPressedChange by rememberUpdatedState(onPressedChange)
-    return pointerInput(Unit) {
-        awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            currentOnPressedChange(true)
-            val up = waitForUpOrCancellation()
-            currentOnPressedChange(false)
-            if (up != null) {
-                currentOnClick()
-            }
-        }
-    }
-}
 
 @Composable
-
 private fun rememberPressFeedbackColor(pressed: Boolean): Color {
     var feedbackVisible by remember { mutableStateOf(false) }
     LaunchedEffect(pressed) {
@@ -2325,6 +2460,68 @@ private fun rememberPressFeedbackColor(pressed: Boolean): Color {
 }
 
 @Composable
+private fun SearchBarSurface(
+    query: String,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
+    focusRequester: FocusRequester? = null,
+    onClick: (() -> Unit)? = null,
+    onQueryChange: (String) -> Unit
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(MiuixTheme.colorScheme.secondaryVariant)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(
+            imageVector = NavIcons.Search,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        )
+        if (readOnly) {
+            Text(
+                text = query.ifEmpty { placeholder },
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 16.sp,
+                modifier = Modifier.weight(1f).padding(start = 10.dp)
+            )
+        } else {
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontSize = 16.sp
+                ),
+                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                modifier = Modifier.weight(1f)
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                    .padding(start = 10.dp),
+                decorationBox = { innerTextField ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = placeholder,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                fontSize = 16.sp
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
+            )
+        }
+    }
+}
+
 
 private data class TemplateVariable(
     val token: String,
@@ -2418,45 +2615,16 @@ internal fun PageScaffold(
     }
 }
 
+
 @Composable
 internal fun SettingsCard(
     modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
-) {
-    Card(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp),
-        cornerRadius = 18.dp
-    ) {
-        content()
-    }
-}
-
-@Composable
-internal fun SwitchRow(
-    sp: SharedPreferences,
-    key: String,
-    title: String,
-    summary: String,
-    defaultValue: Boolean
-) {
-    var checked by remember { mutableStateOf(sp.getBoolean(key, defaultValue)) }
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable {
-            checked = !checked
-            sp.edit().putBoolean(key, checked).apply()
-        }.padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-
 
 @Composable
 internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
     SelectRow(title = title, summary = summary, onClick = onClick)
 }
 
-@Composable
-private fun SelectRow(title: String, summary: String, onClick: () -> Unit) {
 
 @Composable
 private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
@@ -2471,6 +2639,7 @@ private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
         )
     }
 }
+
 
 @Composable
 internal fun BottomActionBar(
@@ -2526,7 +2695,6 @@ internal fun BottomActionBar(
 }
 
 
-
 @Composable
 private fun EmptyText(text: String) {
     Text(
@@ -2537,12 +2705,18 @@ private fun EmptyText(text: String) {
     )
 }
 
+
 @Composable
 internal fun InsetDivider(start: Dp = 16.dp) {
     Box(
         modifier = Modifier
             .padding(start = start)
             .fillMaxWidth()
+            .height(Dp.Hairline)
+            .background(MiuixTheme.colorScheme.dividerLine)
+    )
+}
+
 
 /** WCX 入口：脚本 Tab 内容（Hchat Miuix 版）。 */
 @Composable
