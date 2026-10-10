@@ -773,6 +773,24 @@ private fun SearchBarSurface(
     }
 }
 
+private data class TemplateVariable(
+    val token: String,
+    val label: String
+)
+
+private sealed class DetailPage {
+    object Search : DetailPage()
+    data class FeatureGroup(val group: FeatureGroupEntry) : DetailPage()
+    data class Feature(
+        val provider: FeatureSettingsProvider,
+        val sourceGroup: FeatureGroupEntry? = null,
+        val returnToSearch: Boolean = false
+    ) : DetailPage()
+    data class ScriptPluginAgent(val parentFeature: Feature? = null) : DetailPage()
+    data class ScriptPluginMarket(val parentFeature: Feature? = null) : DetailPage()
+    data class ScriptPluginManager(val parentFeature: Feature? = null) : DetailPage()
+}
+
 @Composable
 private fun ClickHintTag() {
     Text(
