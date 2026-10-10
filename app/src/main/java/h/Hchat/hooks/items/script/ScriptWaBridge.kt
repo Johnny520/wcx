@@ -165,10 +165,10 @@ class ScriptWaBridge @JvmOverloads internal constructor(
                 name = groupName,
                 groupData = GroupData(
                     roomId = chatroom.chatroomId,
-                    memberIds = chatroom.memberIds ?: emptyList(),
-                    memberNames = chatroom.rawDisplayNames ?: emptyList(),
-                    memberCount = (chatroom.memberIds ?: emptyList()).size,
-                    owner = chatroom.owner.orEmpty()
+                    memberIds = (chatroom.memberIds as? List<*>)?.mapNotNull { it?.toString() }.orEmpty(),
+                    memberNames = (chatroom.rawDisplayNames as? List<*>)?.mapNotNull { it?.toString() }.orEmpty(),
+                    memberCount = (chatroom.memberIds as? List<*>)?.size ?: 0,
+                    owner = chatroom.owner?.toString().orEmpty()
                 )
             )
         }
@@ -919,7 +919,7 @@ class ScriptWaBridge @JvmOverloads internal constructor(
         return 0L
     }
 
-    fun queryHistoryMsg(talker: String?, startTime: Long, count: Int): List<MsgInfoBean> {
+    fun queryHistoryMsg(talker: String?, startTime: Long, count: Int): List<ScriptMessageBean> {
         if (talker.isNullOrBlank()) return emptyList()
         return WeChatApis.message().store()
             ?.queryHistoryMsg(talker, startTime, count)
