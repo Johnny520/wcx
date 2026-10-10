@@ -112,40 +112,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import h.Hchat.hooks.api.core.WeChatApis
 import h.Hchat.hooks.api.media.WeChatFavoriteItem
-import h.Hchat.hooks.items.conversationgroup.ConversationGroup
-import h.Hchat.hooks.items.conversationgroup.ConversationGroupPickerSupport
-import h.Hchat.hooks.items.customnotify.CustomNotificationRule
-import h.Hchat.hooks.items.customnotify.CustomNotificationRuntime
-import h.Hchat.hooks.items.groupleave.GroupLeaveReplyTemplate
-import h.Hchat.hooks.items.grouplabel.GroupChatLabel
-import h.Hchat.hooks.items.grouplabel.GroupChatLabelStore
-import h.Hchat.hooks.items.groupnicknamecolor.GroupNicknameColorSettings
-import h.Hchat.hooks.items.groupnicknamecolor.GroupNicknameColorStore
-import h.Hchat.hooks.items.grouprename.GroupRenameReplyTemplate
-import h.Hchat.hooks.items.membertitle.MemberTitleSettings
-import h.Hchat.hooks.items.membertitle.MemberTitleStore
-import h.Hchat.hooks.items.messageblock.MessageBlockBinding
-import h.Hchat.hooks.items.messageblock.MessageBlockSettings
-import h.Hchat.hooks.items.messageblock.MessageBlockTemplate
-import h.Hchat.hooks.items.payment.core.PaymentTemplateTimeFormatter
-import h.Hchat.hooks.items.payment.core.RedPacketReplyStep
-import h.Hchat.hooks.items.payment.core.RedPacketRuleBinding
-import h.Hchat.hooks.items.payment.core.RedPacketRuleConfig
-import h.Hchat.hooks.items.payment.core.RedPacketRuleTemplate
-import h.Hchat.hooks.items.payment.core.RedPacketSettings
-import h.Hchat.hooks.items.payment.fakebalance.FakeWalletBalanceSettings
-import h.Hchat.hooks.items.payment.transfer.AutoTransferSettings
-import h.Hchat.hooks.items.payment.transfer.TransferReceiveAccountStore
-import h.Hchat.hooks.items.payment.transfer.TransferRuleBinding
-import h.Hchat.hooks.items.payment.transfer.TransferRuleConfig
-import h.Hchat.hooks.items.payment.transfer.TransferRuleTemplate
-import h.Hchat.hooks.items.realtail.RealNameTailSettings
-import h.Hchat.hooks.items.realtail.RealNameTailStore
-import h.Hchat.hooks.items.roundavatar.RoundAvatarSettings
 import h.Hchat.hooks.items.script.ScriptPluginManager
 import h.Hchat.hooks.items.script.ScriptPluginRuntime
 import h.Hchat.hooks.items.script.ScriptPluginSettings
-import h.Hchat.hooks.items.tablet.WeChatTabletSettings
 import h.Hchat.preferences.HchatStorage
 import h.Hchat.preferences.TermsGate
 import h.Hchat.ui.FeatureSettingsProvider
@@ -838,12 +807,6 @@ private fun rememberPressFeedbackColor(pressed: Boolean): Color {
     ).value
 }
 
-private fun List<FeatureSettingsProvider>.filterByIds(vararg ids: String): List<FeatureSettingsProvider> {
-    val order = ids.toList()
-    return filter { it.featureId() in order }
-        .sortedBy { order.indexOf(it.featureId()) }
-}
-
 @Composable
 private fun SearchBarSurface(
     query: String,
@@ -1047,139 +1010,6 @@ private enum class CustomNotificationDefaultKind {
     PRIVATE,
     GROUP,
     OFFICIAL
-}
-
-private fun FeatureSubRoute.depth(): Int = when (this) {
-    FeatureSubRoute.Main -> 0
-    is FeatureSubRoute.ContactPicker,
-    is FeatureSubRoute.OptionPicker -> 1
-}
-
-private fun RedPacketRoute.depth(): Int = when (this) {
-    RedPacketRoute.Main -> 0
-    RedPacketRoute.TemplateManager,
-    RedPacketRoute.ListManager,
-    RedPacketRoute.ReplySteps,
-    is RedPacketRoute.ContactPicker,
-    is RedPacketRoute.OptionPicker -> 1
-    is RedPacketRoute.TemplateEditor,
-    is RedPacketRoute.BindingEditor,
-    is RedPacketRoute.RuleContactPicker -> 2
-}
-
-private fun AutoTransferRoute.depth(): Int = when (this) {
-    AutoTransferRoute.Main -> 0
-    AutoTransferRoute.TemplateManager,
-    AutoTransferRoute.BindingManager,
-    AutoTransferRoute.BatchApply,
-    is AutoTransferRoute.GlobalReplySteps,
-    is AutoTransferRoute.ContactPicker -> 1
-    is AutoTransferRoute.TemplateEditor,
-    is AutoTransferRoute.BindingEditor -> 2
-}
-
-private fun MessageBlockRoute.depth(): Int = when (this) {
-    MessageBlockRoute.Main -> 0
-    MessageBlockRoute.TemplateManager,
-    is MessageBlockRoute.DefaultRuleEditor,
-    MessageBlockRoute.ListManager -> 1
-    is MessageBlockRoute.TemplateEditor,
-    is MessageBlockRoute.BindingEditor,
-    is MessageBlockRoute.BatchBindingEditor,
-    is MessageBlockRoute.ContactPicker,
-    is MessageBlockRoute.GroupMemberPicker -> 2
-}
-
-private fun GroupLeaveRoute.depth(): Int = when (this) {
-    GroupLeaveRoute.Main -> 0
-    GroupLeaveRoute.GroupManager,
-    GroupLeaveRoute.TemplateManager,
-    GroupLeaveRoute.BatchTemplateBinding,
-    is GroupLeaveRoute.ContactPicker,
-    is GroupLeaveRoute.FavoritePicker -> 1
-    is GroupLeaveRoute.TemplateEditor,
-    is GroupLeaveRoute.GroupEditor -> 2
-}
-
-private fun ScheduledTaskRoute.depth(): Int = when (this) {
-    ScheduledTaskRoute.Main -> 0
-    ScheduledTaskRoute.Editor -> 1
-    ScheduledTaskRoute.ContactPicker,
-    is ScheduledTaskRoute.FavoritePicker -> 2
-}
-
-private fun SelectedMessagesRoute.depth(): Int = when (this) {
-    SelectedMessagesRoute.Main -> 0
-    SelectedMessagesRoute.Editor -> 1
-    SelectedMessagesRoute.ContactPicker,
-    is SelectedMessagesRoute.FavoritePicker -> 2
-}
-
-private fun AudioTransformRoute.depth(): Int = when (this) {
-    AudioTransformRoute.Main -> 0
-    AudioTransformRoute.ContactPicker -> 1
-}
-
-private fun CustomNotificationRoute.depth(): Int = when (this) {
-    CustomNotificationRoute.Main -> 0
-    CustomNotificationRoute.RuleList,
-    is CustomNotificationRoute.DefaultEditor,
-    is CustomNotificationRoute.ContactPicker -> 1
-    CustomNotificationRoute.BatchEditor,
-    is CustomNotificationRoute.RuleEditor,
-    is CustomNotificationRoute.GroupMemberPicker -> 2
-}
-
-private fun KeywordNotificationRoute.depth(): Int = when (this) {
-    KeywordNotificationRoute.Main -> 0
-    KeywordNotificationRoute.KeywordList,
-    KeywordNotificationRoute.TemplateEditor,
-    is KeywordNotificationRoute.ContactPicker -> 1
-    is KeywordNotificationRoute.KeywordEditor -> 2
-}
-
-private fun TextSpeechRoute.depth(): Int = when (this) {
-    TextSpeechRoute.Main -> 0
-    is TextSpeechRoute.ContactPicker -> 1
-}
-
-private fun AutoReplyEditorRoute.depth(): Int = when (this) {
-    AutoReplyEditorRoute.Main -> 0
-    is AutoReplyEditorRoute.OptionPicker,
-    is AutoReplyEditorRoute.ContactPicker,
-    is AutoReplyEditorRoute.GroupMemberPicker -> 1
-}
-
-private fun AutoReplyStepsRoute.depth(): Int = when (this) {
-    AutoReplyStepsRoute.Main -> 0
-    is AutoReplyStepsRoute.OptionPicker,
-    is AutoReplyStepsRoute.ContactPicker,
-    is AutoReplyStepsRoute.FavoritePicker -> 1
-}
-
-private fun AutoReplyAiRoute.depth(): Int = when (this) {
-    AutoReplyAiRoute.Main -> 0
-    AutoReplyAiRoute.Xiaozhi,
-    AutoReplyAiRoute.Zhilia -> 1
-    AutoReplyAiRoute.ZhiliaConfigs,
-    AutoReplyAiRoute.ZhiliaModels,
-    is AutoReplyAiRoute.OptionPicker -> 2
-}
-
-private fun RedPacketReplyStepsRoute.depth(): Int = when (this) {
-    RedPacketReplyStepsRoute.Main -> 0
-    is RedPacketReplyStepsRoute.StepEditor -> 1
-    is RedPacketReplyStepsRoute.FavoritePicker -> 2
-}
-
-private fun MessageBlockContactPickerRoute.depth(): Int = when (this) {
-    MessageBlockContactPickerRoute.Labels -> 0
-    is MessageBlockContactPickerRoute.Contacts -> if (label == null) 0 else 1
-}
-
-private fun GroupMemberPickerRoute.depth(): Int = when (this) {
-    GroupMemberPickerRoute.Groups -> 0
-    is GroupMemberPickerRoute.Members -> 1
 }
 
 private fun conversationRuleCategoryForId(value: String): ConversationRuleCategory {
