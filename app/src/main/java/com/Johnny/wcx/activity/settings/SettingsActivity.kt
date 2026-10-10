@@ -214,7 +214,7 @@ private fun MainPagerScreen(
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
 ) {
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 5 })
     val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
     val scope = rememberCoroutineScope()
     val backdrop = rememberLayerBackdrop()
@@ -238,7 +238,8 @@ private fun MainPagerScreen(
                 when (page) {
                     0 -> HomePager(onOpenFeatures = { scope.launch { pagerState.animateScrollToPage(1) } })
                     1 -> FeaturesPager(onOpenCategory = onOpenCategory)
-                    2 -> LogsPager()
+                    2 -> ScriptsPager()
+                    3 -> LogsPager()
                     else -> SettingsPager(onOpenLicense = onOpenLicense, onOpenAcknowledgements = onOpenAcknowledgements)
                 }
             }
@@ -313,6 +314,7 @@ private data class NavItem(val label: String, val outlined: ImageVector, val fil
 private val TAB_ITEMS = listOf(
     NavItem("主页", MaterialSymbols.Outlined.Home, MaterialSymbols.OutlinedFilled.Home),
     NavItem("功能", MaterialSymbols.Outlined.Tune, MaterialSymbols.OutlinedFilled.Tune),
+    NavItem("脚本", MaterialSymbols.Outlined.Terminal, MaterialSymbols.Outlined.Terminal),
     NavItem("日志", MaterialSymbols.Outlined.Article, MaterialSymbols.OutlinedFilled.Article),
     NavItem("设置", MaterialSymbols.Outlined.Settings, MaterialSymbols.OutlinedFilled.Settings),
 )
