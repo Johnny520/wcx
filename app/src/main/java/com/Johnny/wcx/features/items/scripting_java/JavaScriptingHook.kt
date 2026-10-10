@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -17,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -373,8 +376,15 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
             val entries = listScriptEntries()
             showComposeDialog(context) {
                 var showHelpState by remember { mutableStateOf(showHelp) }
+                var selectedEntry by remember { mutableStateOf<ScriptEntry?>(null) }
+                val detailEntry = selectedEntry
 
-                if (showHelpState) {
+                if (detailEntry != null) {
+                    ScriptDetailScreen(
+                        entry = detailEntry,
+                        onBack = { selectedEntry = null },
+                    )
+                } else if (showHelpState) {
                     ScriptHelpScreen(
                         onDismiss = {
                             showHelpState = false
@@ -439,9 +449,15 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                                 val newState = !enabled
                                                 if (setScriptEnabled(entry.dir, newState)) {
                                                     enabled = newState
+                                                } else {
+                                                    com.Johnny.wcx.utils.android.showToast(
+                                                        "切换脚本「${entry.info.name}」状态失败"
+                                                    )
                                                 }
                                             }
 
+                                            // 交互拆分：仅右侧「开关」负责启用/禁用；
+                                            // 点击文字区域进入脚本详情配置页。
                                             Card(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 colors = androidx.compose.material3.CardDefaults.cardColors(
@@ -449,13 +465,14 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                                 ),
                                             ) {
                                                 ListItem(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable { toggle() },
+                                                    modifier = Modifier.fillMaxWidth(),
                                                     headlineContent = {
                                                         Text(
                                                             entry.info.name,
-                                                            fontWeight = FontWeight.SemiBold
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clickable { selectedEntry = entry }
                                                         )
                                                     },
                                                     supportingContent = {
@@ -465,15 +482,19 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                                                 add(if (enabled) "已启用" else "已禁用")
                                                                 entry.info.version?.let { add("版本 $it") }
                                                                 entry.info.author?.let { add("作者 $it") }
+                                                                add("点击查看配置")
                                                             }.joinToString(" · "),
                                                             style = MaterialTheme.typography.bodySmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clickable { selectedEntry = entry }
                                                         )
                                                     },
                                                     trailingContent = {
                                                         Switch(
                                                             checked = enabled,
-                                                            onCheckedChange = null,
+                                                            onCheckedChange = { toggle() },
                                                         )
                                                     },
                                                 )
@@ -582,6 +603,206 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
             }
         )
     }
+
+    /**
+     * 脚本详情配置页。
+     * - 展示脚本元信息与启用开关；
+     * - 读写该脚本的 config.prop（与 JavaEngine 的 getXxx/putXxx Config API 共用同一文件），
+     *   布尔值渲染为开关，其余渲染为文本输入框（可用于填写 API Key 等参数）；
+     * - 支持新增自定义参数（内部调试选项 / API 输入框均可由此配置）。
+     */
+    @Composable
+    private fun ScriptDetailScreen(
+        entry: ScriptEntry,
+        onBack: () -> Unit,
+    ) {
+        var config by remember(entry.dir) { mutableStateOf(readScriptConfig(entry.dir)) }
+        var newKey by remember(entry.dir) { mutableStateOf("") }
+        var newValue by remember(entry.dir) { mutableStateOf("") }
+        var enabled by remember(entry.dir) { mutableStateOf(entry.enabled) }
+
+        fun persist(next: Map<String, String>) {
+            CoroutineScope(Dispatchers.IO).launch {
+                if (!writeScriptConfig(entry.dir, next)) {
+                    com.Johnny.wcx.utils.android.showToast("保存脚本配置失败")
+                }
+            }
+        }
+
+        AlertDialogContent(
+            title = { Text(entry.info.name) },
+            text = {
+                DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "目录: ${entry.dir.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    entry.info.author?.let {
+                        Text(
+                            "作者: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    entry.info.version?.let {
+                        Text(
+                            "版本: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    entry.info.updateTime?.let {
+                        Text(
+                            "更新: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("启用脚本", modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = { on ->
+                                if (setScriptEnabled(entry.dir, on)) {
+                                    enabled = on
+                                } else {
+                                    com.Johnny.wcx.utils.android.showToast("切换脚本状态失败")
+                                }
+                            },
+                        )
+                    }
+
+                    Text(
+                        "脚本参数 (config.prop)",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+                    if (config.isEmpty()) {
+                        Text(
+                            "该脚本暂无可配置参数，可在下方新增。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        config.entries.sortedBy { it.key }.forEach { (key, value) ->
+                            val isBoolean = value == "true" || value == "false"
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    key,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (isBoolean) {
+                                    Switch(
+                                        checked = value == "true",
+                                        onCheckedChange = { checked ->
+                                            val next = config + (key to checked.toString())
+                                            config = next
+                                            persist(next)
+                                        },
+                                    )
+                                } else {
+                                    OutlinedTextField(
+                                        value = value,
+                                        onValueChange = { text ->
+                                            val next = config + (key to text)
+                                            config = next
+                                            persist(next)
+                                        },
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .weight(1.6f)
+                                            .padding(start = 8.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Text(
+                        "新增参数",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+                    OutlinedTextField(
+                        value = newKey,
+                        onValueChange = { newKey = it },
+                        label = { Text("键名（如 apiKey / debug）") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    )
+                    OutlinedTextField(
+                        value = newValue,
+                        onValueChange = { newValue = it },
+                        label = { Text("值（布尔请填 true / false）") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    )
+                    TextButton(onClick = {
+                        val key = newKey.trim()
+                        when {
+                            key.isEmpty() ->
+                                com.Johnny.wcx.utils.android.showToast("参数名不能为空")
+
+                            config.containsKey(key) ->
+                                com.Johnny.wcx.utils.android.showToast("参数已存在: $key")
+
+                            else -> {
+                                val next = config + (key to newValue)
+                                config = next
+                                newKey = ""
+                                newValue = ""
+                                persist(next)
+                            }
+                        }
+                    }) {
+                        Text("添加并保存")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onBack) { Text("返回") }
+            },
+        )
+    }
+
+    /** 读取脚本 config.prop（与 JavaEngine 的 Config API 共用同一文件）。 */
+    private fun readScriptConfig(scriptDir: Path): Map<String, String> = runCatching {
+        val file = scriptDir.resolve("config.prop").toFile()
+        if (!file.exists()) return@runCatching emptyMap()
+        val props = java.util.Properties()
+        file.reader(Charsets.UTF_8).use { props.load(it) }
+        props.stringPropertyNames().associateWith { props.getProperty(it).orEmpty() }
+    }.onFailure {
+        WeLogger.w(TAG, "读取脚本配置失败: ${scriptDir.name}", it)
+    }.getOrDefault(emptyMap())
+
+    /** 写回脚本 config.prop。 */
+    private fun writeScriptConfig(scriptDir: Path, values: Map<String, String>): Boolean = runCatching {
+        val file = scriptDir.resolve("config.prop").toFile()
+        val props = java.util.Properties()
+        values.forEach { (key, value) -> props.setProperty(key, value) }
+        file.writer(Charsets.UTF_8).use { props.store(it, null) }
+        true
+    }.onFailure {
+        WeLogger.e(TAG, "写入脚本配置失败: ${scriptDir.name}", it)
+    }.getOrDefault(false)
 
     private fun openScriptsDirectory(context: Context) {
         runCatching {

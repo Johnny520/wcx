@@ -307,6 +307,7 @@ internal class HomeSidePanelState(
     }
 
     fun openDateTimeSettings(cardId: String) {
+        if (editing == null) enterEditMode()
         requireDraftDateTimeCard(cardId)
         setRoute(HomeSidePanelRoute.DateTimeSettings(cardId))
     }
@@ -316,6 +317,9 @@ internal class HomeSidePanelState(
     }
 
     fun openWeatherSettings(cardId: String) {
+        // 非编辑态（正常查看侧边栏）点击天气卡片进入设置时，先自动开启编辑会话，
+        // 否则 requireEditing() 会抛 "No HomeSidePanel edit session is active" 导致微信闪退。
+        if (editing == null) enterEditMode()
         val card = requireDraftWeatherCard(cardId)
         _weatherSettings.update { current ->
             current + (cardId to (current[cardId] ?: WeatherSettingsUiState(selectedCity = card.city)))
@@ -382,6 +386,7 @@ internal class HomeSidePanelState(
     }
 
     fun openWalletSettings(cardId: String) {
+        if (editing == null) enterEditMode()
         requireDraftWalletCard(cardId)
         setRoute(HomeSidePanelRoute.WalletSettings(cardId))
     }
@@ -391,6 +396,7 @@ internal class HomeSidePanelState(
     }
 
     fun openHitokotoSettings(cardId: String) {
+        if (editing == null) enterEditMode()
         requireDraftHitokotoCard(cardId)
         setRoute(HomeSidePanelRoute.HitokotoSettings(cardId))
     }

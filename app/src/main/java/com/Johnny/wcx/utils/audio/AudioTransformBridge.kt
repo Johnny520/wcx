@@ -1,5 +1,6 @@
 package com.Johnny.wcx.utils.audio
 
+import dev.ujhhgtg.reflekt.reflekt
 import me.yun.silk.AacCodec
 import me.yun.silk.SilkCodec
 import java.util.function.Consumer
@@ -27,9 +28,9 @@ open class AudioTransformBridge(
         SilkCodec()
     }
 
-    private fun readField(target: Any?, name: String): Any? = runCatching {
+    private fun readField(target: Any?, fieldName: String): Any? = runCatching {
         if (target == null) return@runCatching null
-        dev.ujhhgtg.reflekt.reflekt(target).firstField { this.name = name }.get()
+        target.reflekt().firstField { name(fieldName) }.get()
     }.getOrNull()
 
     fun getFileType(filePath: String?): Int {

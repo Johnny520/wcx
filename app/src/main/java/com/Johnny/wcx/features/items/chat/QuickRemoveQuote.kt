@@ -18,13 +18,17 @@ object QuickRemoveQuote : SwitchFeature(), IResolveDex {
             usingEqStrings("ChatFooterKtHelper", "supportAutoComplete err")
         }
     }
-    private val methodShowMsgQuoteContainer by dexMethod {
+    // 目标：ChatFooter 中 (boolean, boolean) -> void 的引用容器显示方法。
+    // 该签名在 ChatFooter 中存在多个候选（L0/U1/o0/w2 共 4 个），仅凭 类名+参数+返回类型 无法唯一锁定，
+    // 追加方法体内引用的字符串常量 "handleQuoteMsgFillingFrom" 作为判别特征（与 Hchat 实现一致）。
+    // allowMultiple/allowFailure = true：即便目标微信版本出现多候选，也取首个匹配而非抛异常，
+    // 避免整个模块 Dex 初始化失败。
+    private val methodShowMsgQuoteContainer by dexMethod(allowMultiple = true, allowFailure = true) {
         matcher {
             declaredClass = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
             paramTypes("boolean", "boolean")
             returnType = "void"
-            // 原实现写了 usingEqStrings("")（空字符串），该条件无法命中任何字符串常量，
-            // matcher 实际只靠类名/参数/返回类型生效，属于无效条件，这里移除。
+            usingEqStrings("handleQuoteMsgFillingFrom")
         }
     }
 
