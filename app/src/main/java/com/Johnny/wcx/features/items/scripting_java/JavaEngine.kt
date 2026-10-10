@@ -32,6 +32,23 @@ import com.Johnny.wcx.features.api.ui.WeAlertDialogApi
 import com.Johnny.wcx.features.api.ui.WeChatInputBarMenuApi
 import com.Johnny.wcx.features.api.ui.WeChatMessageContextMenuApi
 import com.Johnny.wcx.utils.android.runOnUiThread
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.content.DefaultColumn
+import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Block
 import com.Johnny.wcx.features.api.ui.WeMomentsApi
@@ -613,23 +630,26 @@ object JavaEngine {
                 })
 
             // ===== Module dialogs（模块弹窗，与 Hchat 脚本 API 对应）=====
+            //
+            // 统一使用 WCX 自己的 Compose 卡片弹窗（showComposeDialog + AlertDialogContent），
+            // 与模块内其它 UI 风格一致，避免系统原生 AlertDialog 的观感差异。
 
             setMethod(
                 BshMethod("showModuleDialog", arrayOf(BString, BString)) {
                     val title = it[0] as String
                     val message = it[1] as String
+                    val ctx = getTopMostActivity(true) ?: HostInfo.application
                     runOnUiThread {
-                        val act = getTopMostActivity(true)
-                        if (act == null) {
-                            showToast("$title: $message")
-                            return@runOnUiThread
-                        }
                         runCatching {
-                            android.app.AlertDialog.Builder(act)
-                                .setTitle(title)
-                                .setMessage(message)
-                                .setPositiveButton("确定") { d, _ -> d.dismiss() }
-                                .show()
+                            showComposeDialog(ctx) {
+                                AlertDialogContent(
+                                    title = { Text(title) },
+                                    text = { Text(message) },
+                                    confirmButton = {
+                                        Button({ onDismiss() }) { Text("确定") }
+                                    }
+                                )
+                            }
                         }.onFailure { e -> showToast("弹窗失败：${e.message}") }
                     }
                     return@BshMethod true
@@ -640,20 +660,24 @@ object JavaEngine {
                     val message = it[1] as String
                     @Suppress("UNCHECKED_CAST")
                     val cb = it[2] as Consumer<Any?>
+                    val ctx = getTopMostActivity(true) ?: HostInfo.application
                     runOnUiThread {
-                        val act = getTopMostActivity(true)
-                        if (act == null) return@runOnUiThread
                         runCatching {
-                            android.app.AlertDialog.Builder(act)
-                                .setTitle(title)
-                                .setMessage(message)
-                                .setPositiveButton("确定") { _, _ ->
-                                    runCatching { cb.accept(true) }
-                                }
-                                .setNegativeButton("取消") { _, _ ->
-                                    runCatching { cb.accept(false) }
-                                }
-                                .show()
+                            showComposeDialog(ctx) {
+                                AlertDialogContent(
+                                    title = { Text(title) },
+                                    text = { Text(message) },
+                                    dismissButton = {
+                                        TextButton({ onDismiss() }) { Text("取消") }
+                                    },
+                                    confirmButton = {
+                                        Button({
+                                            onDismiss()
+                                            runCatching { cb.accept(true) }
+                                        }) { Text("确定") }
+                                    }
+                                )
+                            }
                         }.onFailure { e -> showToast("弹窗失败：${e.message}") }
                     }
                     return@BshMethod true
@@ -668,21 +692,35 @@ object JavaEngine {
                     val placeholder = it[3] as String
                     @Suppress("UNCHECKED_CAST")
                     val cb = it[4] as Consumer<Any?>
+                    val ctx = getTopMostActivity(true) ?: HostInfo.application
                     runOnUiThread {
-                        val act = getTopMostActivity(true)
-                        if (act == null) return@runOnUiThread
                         runCatching {
-                            val input = android.widget.EditText(act)
-                            input.setText(initial)
-                            input.hint = placeholder
-                            android.app.AlertDialog.Builder(act)
-                                .setTitle(title)
-                                .setView(input)
-                                .setPositiveButton("确定") { _, _ ->
-                                    runCatching { cb.accept(input.text.toString()) }
-                                }
-                                .setNegativeButton("取消", null)
-                                .show()
+                            showComposeDialog(ctx) {
+                                var value by remember { mutableStateOf(initial) }
+                                AlertDialogContent(
+                                    title = { Text(title) },
+                                    text = {
+                                        DefaultColumn {
+                                            OutlinedTextField(
+                                                value = value,
+                                                onValueChange = { value = it },
+                                                placeholder = { Text(placeholder) },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton({ onDismiss() }) { Text("取消") }
+                                    },
+                                    confirmButton = {
+                                        Button({
+                                            onDismiss()
+                                            runCatching { cb.accept(value) }
+                                        }) { Text("确定") }
+                                    }
+                                )
+                            }
                         }.onFailure { e -> showToast("弹窗失败：${e.message}") }
                     }
                     return@BshMethod true
@@ -696,21 +734,32 @@ object JavaEngine {
                     val choices = (it[2] as List<*>).map { c -> c?.toString() ?: "" }
                     @Suppress("UNCHECKED_CAST")
                     val cb = it[3] as Consumer<Any?>
+                    val ctx = getTopMostActivity(true) ?: HostInfo.application
                     runOnUiThread {
-                        val act = getTopMostActivity(true)
-                        if (act == null) return@runOnUiThread
                         runCatching {
-                            android.app.AlertDialog.Builder(act)
-                                .setTitle(title)
-                                .setSingleChoiceItems(
-                                    Array(choices.size) { i -> choices[i] as CharSequence },
-                                    -1
-                                ) { d, which ->
-                                    runCatching { cb.accept(which) }
-                                    d.dismiss()
-                                }
-                                .setNegativeButton("取消", null)
-                                .show()
+                            showComposeDialog(ctx) {
+                                AlertDialogContent(
+                                    title = { Text(title) },
+                                    text = {
+                                        DefaultColumn {
+                                            choices.forEachIndexed { index, choice ->
+                                                ListItem(
+                                                    headlineContent = { Text(choice) },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            onDismiss()
+                                                            runCatching { cb.accept(index) }
+                                                        }
+                                                )
+                                            }
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton({ onDismiss() }) { Text("取消") }
+                                    }
+                                )
+                            }
                         }.onFailure { e -> showToast("弹窗失败：${e.message}") }
                     }
                     return@BshMethod true
@@ -724,24 +773,45 @@ object JavaEngine {
                     val choices = (it[2] as List<*>).map { c -> c?.toString() ?: "" }
                     @Suppress("UNCHECKED_CAST")
                     val cb = it[3] as Consumer<Any?>
-                    val checked = BooleanArray(choices.size)
+                    val ctx = getTopMostActivity(true) ?: HostInfo.application
                     runOnUiThread {
-                        val act = getTopMostActivity(true)
-                        if (act == null) return@runOnUiThread
                         runCatching {
-                            val items = Array(choices.size) { i -> choices[i] as CharSequence }
-                            android.app.AlertDialog.Builder(act)
-                                .setTitle(title)
-                                .setMultiChoiceItems(
-                                    items, checked
-                                ) { _, which, isChecked -> checked[which] = isChecked }
-                                .setPositiveButton("确定") { _, _ ->
-                                    runCatching {
-                                        cb.accept(checked.indices.filter { checked[it] })
+                            showComposeDialog(ctx) {
+                                val checked = remember { mutableStateListOf<Int>() }
+                                AlertDialogContent(
+                                    title = { Text(title) },
+                                    text = {
+                                        DefaultColumn {
+                                            choices.forEachIndexed { index, choice ->
+                                                ListItem(
+                                                    headlineContent = { Text(choice) },
+                                                    trailingContent = {
+                                                        Switch(
+                                                            checked = index in checked,
+                                                            onCheckedChange = null
+                                                        )
+                                                    },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            if (index in checked) checked.remove(index)
+                                                            else checked.add(index)
+                                                        }
+                                                )
+                                            }
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton({ onDismiss() }) { Text("取消") }
+                                    },
+                                    confirmButton = {
+                                        Button({
+                                            onDismiss()
+                                            runCatching { cb.accept(checked.toList()) }
+                                        }) { Text("确定") }
                                     }
-                                }
-                                .setNegativeButton("取消", null)
-                                .show()
+                                )
+                            }
                         }.onFailure { e -> showToast("弹窗失败：${e.message}") }
                     }
                     return@BshMethod true
