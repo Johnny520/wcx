@@ -91,7 +91,6 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 import kotlinx.coroutines.Dispatchers
@@ -111,8 +110,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text as M3Text
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 
 
 private const val PRESS_RELEASE_DELAY_MS = 110L
@@ -2615,35 +2612,29 @@ internal fun SearchBarSurface(
     )
 }
 
-/** 页面脚手架（顶栏 + 内容）。 */
+/** 页面脚手架（顶栏 + 内容；不依赖 miuix 高级 API，避免版本差异）。 */
 @Composable
 internal fun PageScaffold(
     title: String,
     largeTitle: String,
-    scrollBehavior: MiuixScrollBehavior,
+    scrollBehavior: Any? = null,
     onBack: (() -> Unit)? = null,
     @Suppress("UNUSED_PARAMETER") bottomBar: (@Composable () -> Unit)? = null,
+    @Suppress("UNUSED_PARAMETER") largeTitleUnused: String = largeTitle,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = title,
-                scrollBehavior = scrollBehavior,
-                navigationIcon = {
-                    if (onBack != null) {
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 12.dp)
-                                .clickable(onClick = onBack)
-                        ) {
-                            Icon(imageVector = NavIcons.Back, contentDescription = "返回")
-                        }
-                    }
-                },
+    Column(modifier = Modifier.fillMaxSize()) {
+        BasicComponent(onClick = onBack) {
+            Text(
+                text = if (onBack != null) "← $title" else title,
+                fontSize = MiuixTheme.textStyles.headline1.fontSize,
+                fontWeight = FontWeight.Medium,
+                color = if (onBack != null) MiuixTheme.colorScheme.primary
+                else BasicComponentDefaults.titleColor().color,
             )
-        },
-    ) { padding -> content(padding) }
+        }
+        content(PaddingValues(0.dp))
+    }
 }
 
 
