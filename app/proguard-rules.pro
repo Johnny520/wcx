@@ -94,3 +94,14 @@
 # R$plurals 类本身必须保留：R8 会因 R$plurals 成员被常量内联而整体移除该类，
 # 但 Kotlin 对 pluralStringResource(R.plurals.*) 的编译引用仍指向它。
 -keep class **.R$plurals { *; }
+# --- Hchat 脚本子系统迁移：依赖的容错规则 ---
+# kavaref-core 部分内部类在运行时按需加载，R8 静态分析缺失（不影响实际功能）
+-dontwarn com.highcapable.kavaref.**
+# 迁移引入的反射/DexKit 相关库
+-dontwarn io.github.skylot.jadx.**
+-dontwarn com.android.tools.smali.**
+-dontwarn com.github.REAndroid.**
+-dontwarn org.jf.dexlib2.**
+-dontwarn dev.rikka.ndk.thirdparty.**
+-keep class com.highcapable.kavaref.** { *; }
+-keep class h.Hchat.** { *; }
