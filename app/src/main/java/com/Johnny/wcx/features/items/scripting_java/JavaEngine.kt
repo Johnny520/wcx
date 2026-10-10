@@ -230,6 +230,30 @@ object JavaEngine {
         }
     }
 
+    /**
+     * 分发给全部脚本的 onProtobufPacket(Object packet) 回调。
+     * packet 为一个 Map，含 direction/uri/cgiId/bytes 字段。
+     */
+    fun executeAllOnProtobufPacket(
+        scripts: Map<String, JavaPlugin>,
+        packet: Any
+    ) {
+        scripts.values.forEach { plugin ->
+            try {
+                val bshMethod = plugin.interpreter.nameSpace.getMethod(
+                    "onProtobufPacket",
+                    arrayOf(Any::class.java)
+                )
+                bshMethod?.apply {
+                    invoke(arrayOf(packet), plugin.interpreter)
+                    WeLogger.i(TAG, "onProtobufPacket executed for script ${plugin.name}")
+                }
+            } catch (e: Exception) {
+                WeLogger.e(TAG, "onProtobufPacket execution failed for script ${plugin.name}", e)
+            }
+        }
+    }
+
     fun executeAllOnNewFriend(
         scripts: Map<String, JavaPlugin>,
         wxid: String,
@@ -650,6 +674,52 @@ object JavaEngine {
             setMethod(
                 BshMethod("getTalkerByMsgSvrId", arrayOf(java.lang.Long.TYPE)) {
                     WeMessageApi.getTalkerByMsgSvrId(it[0] as Long) ?: ""
+                })
+
+            // ===== SNS / Moments（对齐 Hchat 脚本 API，基于 WeMomentsApi）=====
+
+            setMethod(
+                BshMethod("getSnsInfo", arrayOf(java.lang.Long.TYPE)) {
+                    WeMomentsApi.getSnsInfoBySnsId(it[0] as Long)
+                })
+            setMethod(
+                BshMethod("getSnsContentText", arrayOf(java.lang.Long.TYPE)) {
+                    val info = WeMomentsApi.getSnsInfoBySnsId(it[0] as Long) ?: return@BshMethod ""
+                    WeMomentsApi.getContentText(info) ?: ""
+                })
+            setMethod(
+                BshMethod("getSnsTableId", arrayOf(java.lang.Long.TYPE)) {
+                    val info = WeMomentsApi.getSnsInfoBySnsId(it[0] as Long) ?: return@BshMethod ""
+                    WeMomentsApi.getSnsTableId(info) ?: ""
+                })
+            setMethod(
+                BshMethod("isSnsLiked", arrayOf(java.lang.Long.TYPE)) {
+                    val info = WeMomentsApi.getSnsInfoBySnsId(it[0] as Long) ?: return@BshMethod false
+                    WeMomentsApi.isLiked(info)
+                })
+            setMethod(
+                BshMethod("isSnsDeleted", arrayOf(java.lang.Long.TYPE)) {
+                    val info = WeMomentsApi.getSnsInfoBySnsId(it[0] as Long) ?: return@BshMethod false
+                    WeMomentsApi.isDeleted(info)
+                })
+            setMethod(
+                BshMethod("isSnsAd", arrayOf(java.lang.Long.TYPE)) {
+                    val info = WeMomentsApi.getSnsInfoBySnsId(it[0] as Long) ?: return@BshMethod false
+                    WeMomentsApi.isAd(info)
+                })
+            setMethod(
+                BshMethod("likeSns", arrayOf(java.lang.Long.TYPE)) {
+                    val info = WeMomentsApi.getSnsInfoBySnsId(it[0] as Long) ?: return@BshMethod false
+                    runCatching { WeMomentsApi.like(info) }.isSuccess
+                })
+            setMethod(
+                BshMethod("unlikeSns", arrayOf(java.lang.Long.TYPE)) {
+                    val info = WeMomentsApi.getSnsInfoBySnsId(it[0] as Long) ?: return@BshMethod false
+                    runCatching { WeMomentsApi.unlike(info) }.isSuccess
+                })
+            setMethod(
+                BshMethod("postSnsText", arrayOf(BString)) {
+                    WeMomentsApi.postText(it[0] as String)
                 })
 
             // ===== Menu registration（与 Hchat 脚本 API 同名，便于脚本互通）=====

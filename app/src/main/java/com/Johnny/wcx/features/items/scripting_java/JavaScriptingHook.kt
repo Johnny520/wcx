@@ -33,6 +33,8 @@ import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
+import com.Johnny.wcx.features.api.net.WePacketManager
+import com.Johnny.wcx.features.api.net.abc.IWePacketInterceptor
 import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -211,6 +213,38 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
 
     val scripts = ConcurrentHashMap<String, JavaPlugin>()
 
+    private val packetInterceptor = object : IWePacketInterceptor {
+        override fun onRequest(uri: String, cgiId: Int, reqBytes: ByteArray): ByteArray? {
+            runCatching {
+                JavaEngine.executeAllOnProtobufPacket(
+                    scripts,
+                    mapOf(
+                        "direction" to "request",
+                        "uri" to uri,
+                        "cgiId" to cgiId,
+                        "bytes" to reqBytes,
+                    )
+                )
+            }.onFailure { WeLogger.e(TAG, "onProtobufPacket(request) dispatch failed", it) }
+            return null
+        }
+
+        override fun onResponse(uri: String, cgiId: Int, respBytes: ByteArray): ByteArray? {
+            runCatching {
+                JavaEngine.executeAllOnProtobufPacket(
+                    scripts,
+                    mapOf(
+                        "direction" to "response",
+                        "uri" to uri,
+                        "cgiId" to cgiId,
+                        "bytes" to respBytes,
+                    )
+                )
+            }.onFailure { WeLogger.e(TAG, "onProtobufPacket(response) dispatch failed", it) }
+            return null
+        }
+    }
+
     private data class ScriptEntry(
         val dir: Path,
         val info: JavaPluginInfo,
@@ -225,6 +259,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
 
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
+        WePacketManager.addInterceptor(packetInterceptor)
 
         WeMessageApi.methodMsgInfoHandleApiInsertMessage.hookAfter {
             val msgObj = args[0] ?: return@hookAfter
@@ -613,6 +648,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
 
     override fun onDisable() {
         WeDatabaseListenerApi.removeListener(this)
+        WePacketManager.removeInterceptor(packetInterceptor)
         JavaHookApi.unhookEverything()
         JavaEngine.executeAllOnUnload(scripts)
         scripts.clear()
