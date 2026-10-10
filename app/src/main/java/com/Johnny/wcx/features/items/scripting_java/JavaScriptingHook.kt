@@ -443,6 +443,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                                     },
                                                 )
                                             }
+                                        }
                                     }
                                 }
                                 TextButton(onClick = {
