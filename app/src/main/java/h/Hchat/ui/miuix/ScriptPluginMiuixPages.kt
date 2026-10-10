@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -24,7 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,13 +74,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -127,9 +123,7 @@ private const val PRESS_RELEASE_DELAY_MS = 110L
 
 private const val SCRIPT_PLUGIN_EXPORT_REQUEST_CODE = 0x48435260
 private const val SCRIPT_PLUGIN_IMPORT_REQUEST_CODE = 0x48435261
-private const val MARKDOWN_LINK_TAG = "md_link"
-private val MARKDOWN_LINK_REGEX = Regex("""\[([^\]]+)]\(([^)\s]+)\)""")
-private val NAVIGATION_BUTTON_MIN_INSET = 24.dp
+
 private val NAVIGATION_BUTTON_EXTRA_GAP = 8.dp
 
 private object NavIcons {
@@ -2379,16 +2373,7 @@ private fun MarkdownBullet(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             fontSize = fontSize,
             modifier = Modifier.padding(end = 8.dp)
-        )
-        nextState = MarkdownTextResult(
-            context = context,
-            text = text,
-            inlineState = inlineState,
-            fontSize = fontSize,
-            modifier = Modifier.weight(1f)
-        )
-    }
-    return nextState
+
 }
 
 @Composable
@@ -2454,138 +2439,10 @@ private fun MarkdownTextResult(
 ): MarkdownInlineState {
     val primary = MiuixTheme.colorScheme.primary
     val result = remember(text, primary, inlineState.bold) {
-        buildMarkdownAnnotatedString(text, primary, inlineState)
-    }
-    ClickableText(
-        text = result.text,
-        modifier = modifier,
-        style = TextStyle(color = color, fontSize = fontSize, fontWeight = fontWeight),
-        onClick = { offset ->
-            result.text.getStringAnnotations(MARKDOWN_LINK_TAG, offset, offset)
-                .firstOrNull()
-                ?.let { annotation -> openMarkdownLink(context, annotation.item) }
-        }
-    )
-    return result.state
+
 }
 
 private data class MarkdownInlineState(val bold: Boolean = false)
-
-private data class MarkdownInlineResult(
-    val text: AnnotatedString,
-    val state: MarkdownInlineState
-)
-
-private fun buildMarkdownAnnotatedString(
-    text: String,
-    accent: Color,
-    initialState: MarkdownInlineState
-): MarkdownInlineResult {
-    var state = initialState
-    val annotated = buildAnnotatedString {
-        state = appendInlineMarkdown(text, accent, state)
-    }
-    return MarkdownInlineResult(annotated, state)
-}
-
-private fun AnnotatedString.Builder.appendInlineMarkdown(
-    text: String,
-    accent: Color,
-    initialState: MarkdownInlineState
-): MarkdownInlineState {
-    var state = initialState
-    var segmentStart = 0
-    MARKDOWN_LINK_REGEX.findAll(text).forEach { match ->
-        if (match.range.first > segmentStart) {
-            state = appendInlineMarkdownSegment(
-                text.substring(segmentStart, match.range.first),
-                accent,
-                state
-            )
-        }
-        val label = match.groupValues[1]
-        val url = match.groupValues[2].trim()
-        if (label.isNotBlank() && url.isNotBlank()) {
-            pushStringAnnotation(MARKDOWN_LINK_TAG, url)
-            appendStyledInline(label, accent, state, link = true)
-            pop()
-        } else {
-            append(match.value)
-        }
-        segmentStart = match.range.last + 1
-    }
-    if (segmentStart < text.length) {
-        state = appendInlineMarkdownSegment(text.substring(segmentStart), accent, state)
-    }
-    return state
-}
-
-private fun AnnotatedString.Builder.appendInlineMarkdownSegment(
-    text: String,
-    accent: Color,
-    initialState: MarkdownInlineState
-): MarkdownInlineState {
-    var state = initialState
-    var index = 0
-    while (index < text.length) {
-        when {
-            text.startsWith("**", index) -> {
-                state = state.copy(bold = !state.bold)
-                index += 2
-            }
-            text[index] == '`' -> {
-                val end = text.indexOf('`', index + 1)
-                if (end > index) {
-                    withStyle(SpanStyle(color = accent, fontFamily = FontFamily.Monospace)) {
-                        append(text.substring(index + 1, end))
-                    }
-                    index = end + 1
-                } else {
-                    append(text[index])
-                    index++
-                }
-            }
-            else -> {
-                appendStyledInline(text[index].toString(), accent, state, link = false)
-                index++
-            }
-        }
-    }
-    return state
-}
-
-private fun AnnotatedString.Builder.appendStyledInline(
-    value: String,
-    accent: Color,
-    state: MarkdownInlineState,
-    link: Boolean
-) {
-    val style = SpanStyle(
-        color = if (link) accent else Color.Unspecified,
-        fontWeight = when {
-            link -> FontWeight.Medium
-            state.bold -> FontWeight.SemiBold
-            else -> null
-        }
-    )
-    withStyle(style) {
-        append(value)
-    }
-}
-
-private fun openMarkdownLink(context: Context, url: String) {
-    val value = url.trim()
-    if (value.isBlank()) return
-    runCatching {
-        val normalized = if (value.contains("://")) value else "https://$value"
-        val uri = Uri.parse(normalized)
-        val intent = Intent(Intent.ACTION_VIEW, uri)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-    }
-}
-
-}
 
 @Composable
 internal fun PageScaffold(
@@ -2675,6 +2532,55 @@ internal fun SettingsCard(
 }
 
 @Composable
+internal fun SwitchRow(
+    sp: SharedPreferences,
+    key: String,
+    title: String,
+    summary: String,
+    defaultValue: Boolean
+) {
+    var checked by remember { mutableStateOf(sp.getBoolean(key, defaultValue)) }
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable {
+            checked = !checked
+            sp.edit().putBoolean(key, checked).apply()
+        }.padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+
+}
+
+@Composable
+internal fun SwitchRow(
+    checked: Boolean,
+    title: String,
+    summary: String,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().then(
+            if (enabled) {
+                Modifier.clickable { onCheckedChange(!checked) }
+            } else {
+                Modifier
+            }
+        ).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = { if (enabled) onCheckedChange(it) }
+        )
+    }
+}
+
+@Composable
 internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
     SelectRow(title = title, summary = summary, onClick = onClick)
 }
@@ -2688,20 +2594,7 @@ private fun SelectRow(title: String, summary: String, onClick: () -> Unit) {
             .clip(RoundedCornerShape(12.dp))
             .background(pressFeedbackColor)
             .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            if (summary.isNotBlank()) {
-                Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-            }
-        }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
-    }
+
 }
 
 @Composable
@@ -2780,9 +2673,7 @@ private fun navigationButtonBottomInset(): Dp {
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val resourceBottom = remember(context, density) {
         with(density) { navigationBarHeightPx(context).toDp() }
-    }
-    val bottomInset = if (navigationBottom > resourceBottom) navigationBottom else resourceBottom
-    return if (bottomInset >= NAVIGATION_BUTTON_MIN_INSET) bottomInset else 0.dp
+
 }
 
 private fun navigationBarHeightPx(context: Context): Int {
@@ -2846,6 +2737,12 @@ internal fun InsetDivider(start: Dp = 16.dp) {
             .background(MiuixTheme.colorScheme.dividerLine)
     )
 }
+}
+}
+}
+}
+}
+
 
 /** WCX 入口：脚本 Tab 内容（Hchat Miuix 版）。 */
 @Composable
