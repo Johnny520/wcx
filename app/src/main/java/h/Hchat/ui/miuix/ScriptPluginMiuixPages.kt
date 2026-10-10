@@ -321,7 +321,6 @@ private class SettingsBackHandlerRegistry {
 private val LocalSettingsBackHandlerRegistry = staticCompositionLocalOf<SettingsBackHandlerRegistry?> { null }
 
 @Composable
-
 private fun RegisterSettingsBackHandler(onBack: (() -> Unit)?) {
     val registry = LocalSettingsBackHandlerRegistry.current
     val currentOnBack by rememberUpdatedState(onBack)
@@ -477,6 +476,7 @@ private object ScriptPluginDocumentBridge {
     }
 }
 
+@Composable
 private fun Modifier.responsiveTap(
     onClick: () -> Unit,
     onPressedChange: (Boolean) -> Unit = {}
@@ -497,7 +497,6 @@ private fun Modifier.responsiveTap(
 }
 
 @Composable
-
 private fun rememberPressFeedbackColor(pressed: Boolean): Color {
     var feedbackVisible by remember { mutableStateOf(false) }
     LaunchedEffect(pressed) {
@@ -520,14 +519,13 @@ private fun rememberPressFeedbackColor(pressed: Boolean): Color {
     ).value
 }
 
-@Composable
-
 private fun List<FeatureSettingsProvider>.filterByIds(vararg ids: String): List<FeatureSettingsProvider> {
     val order = ids.toList()
     return filter { it.featureId() in order }
         .sortedBy { order.indexOf(it.featureId()) }
 }
 
+@Composable
 private fun SearchBarSurface(
     query: String,
     placeholder: String,
@@ -591,7 +589,6 @@ private fun SearchBarSurface(
 }
 
 @Composable
-
 private fun ScriptPluginMiuixPage(
     context: Context,
     provider: FeatureSettingsProvider,
@@ -633,6 +630,7 @@ private fun ScriptPluginMiuixPage(
     }
 }
 
+@Composable
 private fun ClickHintTag() {
     Text(
         text = "单击",
@@ -653,7 +651,6 @@ private fun ClickHintTag() {
 private object ScriptPluginSettingsMiuixContent {
 
 @Composable
-
 fun ScriptPluginSettingsContent(
     context: Context,
     onOpenReadme: (ScriptPluginRuntime.ScriptPlugin) -> Unit,
@@ -900,7 +897,6 @@ fun ScriptPluginSettingsContent(
 }
 
 @Composable
-
 fun ScriptPluginManagerPage(
     context: Context,
     onBack: () -> Unit
@@ -1357,7 +1353,6 @@ fun ScriptPluginManagerPage(
 }
 
 @Composable
-
 private fun ScriptPluginSelectionToolbar(
     selectedCount: Int,
     allVisibleSelected: Boolean,
@@ -1392,7 +1387,6 @@ private fun ScriptPluginSelectionToolbar(
 }
 
 @Composable
-
 private fun ScriptPluginBatchActions(
     enabled: Boolean,
     onPin: () -> Unit,
@@ -1419,7 +1413,6 @@ private fun ScriptPluginBatchActions(
 }
 
 @Composable
-
 private fun ScriptPluginCompactAction(
     text: String,
     enabled: Boolean,
@@ -1444,7 +1437,6 @@ private fun ScriptPluginCompactAction(
 }
 
 @Composable
-
 private fun ScriptPluginManagerCommandRow(
     icon: ImageVector,
     title: String,
@@ -1474,7 +1466,6 @@ private fun ScriptPluginManagerCommandRow(
 }
 
 @Composable
-
 private fun ScriptPluginManagerRow(
     modifier: Modifier,
     item: ScriptPluginManager.ManagedPlugin,
@@ -1611,7 +1602,6 @@ private fun ScriptPluginManagerRow(
 }
 
 @Composable
-
 private fun ScriptPluginActionDialog(
     plugin: ScriptPluginRuntime.ScriptPlugin,
     pinned: Boolean,
@@ -1641,7 +1631,6 @@ private fun ScriptPluginActionDialog(
 }
 
 @Composable
-
 private fun ScriptPluginDialogActionRow(
     icon: ImageVector,
     text: String,
@@ -1671,7 +1660,6 @@ private fun ScriptPluginDialogActionRow(
 }
 
 @Composable
-
 private fun ScriptPluginRenameDialog(
     plugin: ScriptPluginRuntime.ScriptPlugin,
     onDismiss: () -> Unit,
@@ -1726,7 +1714,6 @@ private fun ScriptPluginRenameDialog(
 }
 
 @Composable
-
 private fun ScriptPluginDeleteDialog(
     pluginNames: List<String>,
     onDismiss: () -> Unit,
@@ -1770,7 +1757,6 @@ private fun ScriptPluginDeleteDialog(
 }
 
 @Composable
-
 private fun ScriptPluginImportDialog(
     inspection: ScriptPluginManager.ImportInspection,
     overwriteIds: Set<String>,
@@ -1924,7 +1910,6 @@ private fun showScriptPluginManagerError(context: Context, error: Throwable) {
 }
 
 @Composable
-
 private fun PathSwitchRow(
     checked: Boolean,
     title: String,
@@ -1972,7 +1957,6 @@ private fun PathSwitchRow(
 }
 
 @Composable
-
 private fun ScriptPluginRow(
     checked: Boolean,
     title: String,
@@ -2041,7 +2025,6 @@ private fun ScriptPluginRow(
 }
 
 @Composable
-
 private fun ScriptPluginPathDialog(
     context: Context,
     title: String,
@@ -2088,7 +2071,6 @@ private fun ScriptPluginPathDialog(
 }
 
 @Composable
-
 fun Text(
     context: Context,
     text: String,
@@ -2101,7 +2083,6 @@ fun Text(
 }
 
 @Composable
-
 private fun MarkdownTextResult(
     context: Context,
     text: String,
@@ -2247,7 +2228,6 @@ private fun openMarkdownLink(context: Context, url: String) {
 }
 
 @Composable
-
 internal fun PageScaffold(
     title: String,
     largeTitle: String,
@@ -2322,7 +2302,6 @@ internal fun PageScaffold(
 }
 
 @Composable
-
 internal fun SettingsCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
@@ -2336,13 +2315,11 @@ internal fun SettingsCard(
 }
 
 @Composable
-
 internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
     SelectRow(title = title, summary = summary, onClick = onClick)
 }
 
 @Composable
-
 private fun SelectRow(title: String, summary: String, onClick: () -> Unit) {
     var pressed by remember { mutableStateOf(false) }
     val pressFeedbackColor = rememberPressFeedbackColor(pressed)
@@ -2368,7 +2345,6 @@ private fun SelectRow(title: String, summary: String, onClick: () -> Unit) {
 }
 
 @Composable
-
 private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
     Box(
         modifier = Modifier.size(30.dp),
@@ -2383,7 +2359,6 @@ private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
 }
 
 @Composable
-
 internal fun BottomActionBar(
     primaryText: String,
     onPrimaryClick: () -> Unit,
@@ -2437,7 +2412,6 @@ internal fun BottomActionBar(
 }
 
 @Composable
-
 private fun navigationButtonBottomInset(): Dp {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -2477,7 +2451,6 @@ private fun isGestureNavigationMode(context: Context): Boolean {
 }
 
 @Composable
-
 private fun BottomBarButton(text: String, modifier: Modifier, filled: Boolean, onClick: () -> Unit) {
     val bg = if (filled) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.secondaryVariant
     val fg = if (filled) Color.White else MiuixTheme.colorScheme.onSecondaryVariant
@@ -2494,7 +2467,6 @@ private fun BottomBarButton(text: String, modifier: Modifier, filled: Boolean, o
 }
 
 @Composable
-
 private fun EmptyText(text: String) {
     Text(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
@@ -2505,7 +2477,6 @@ private fun EmptyText(text: String) {
 }
 
 @Composable
-
 internal fun InsetDivider(start: Dp = 16.dp) {
     Box(
         modifier = Modifier
