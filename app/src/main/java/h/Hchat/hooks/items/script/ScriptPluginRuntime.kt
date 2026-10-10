@@ -14,7 +14,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import dalvik.system.DexClassLoader
-import h.Hchat.BuildConfig
+import com.Johnny.wcx.BuildConfig
 import h.Hchat.dexkit.DexBridgeHolder
 import h.Hchat.dexkit.DexFinder
 import h.Hchat.hooks.api.core.WeChatApis
