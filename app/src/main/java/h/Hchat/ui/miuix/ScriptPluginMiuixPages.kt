@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -52,6 +53,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +70,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.state.ToggleableState
@@ -88,6 +91,7 @@ import h.Hchat.hooks.items.script.ScriptPluginManager
 import h.Hchat.hooks.items.script.ScriptPluginRuntime
 import h.Hchat.hooks.items.script.ScriptPluginSettings
 import h.Hchat.preferences.HchatStorage
+import h.Hchat.preferences.TermsGate
 import h.Hchat.ui.FeatureSettingsProvider
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -110,6 +114,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -2071,6 +2076,366 @@ private fun ScriptPluginPathDialog(
 }
 
 @Composable
+fun FirstUseAgreementDialog(
+    context: Context,
+    onCancel: () -> Unit,
+    onAccepted: () -> Unit
+) {
+    var input by remember { mutableStateOf("") }
+    var remainingSeconds by remember { mutableStateOf(30) }
+    val acceptedText = TermsGate.AGREEMENT_TEXT
+    LaunchedEffect(Unit) {
+        while (remainingSeconds > 0) {
+            delay(1000L)
+            remainingSeconds -= 1
+        }
+    }
+    val agreement = remember {
+        """
+        Hchat 使用协议与免责声明
+
+        1. 本模块为免费模块，仅供个人学习、研究、测试、逆向分析和备份用途使用，不提供任何商业授权、售后承诺或稳定性保证。
+        2. 本模块与微信、腾讯及其关联主体无关，不代表官方立场，也不是官方客户端、官方插件或官方服务的一部分。
+        3. 禁止倒卖、付费分发、捆绑销售、二次打包收费、引流售卖、以捐赠名义收费，禁止冒充作者、官方渠道或授权代理发布。
+        4. 请勿在国内公开平台、群组、论坛、短视频平台、网盘分享页、应用市场或其它公开渠道传播、推广、引流、售卖或组织分发本模块。
+        5. 本模块可能会修改微信运行时行为，使用后可能出现功能异常、消息异常、账号风控、限制登录、数据异常、闪退、掉线、模块冲突或其它不可预期问题。
+        6. 使用者应自行确认所在地法律法规、平台协议、设备环境和账号风险；因安装、使用、传播、修改、二次分发或与其它模块共存产生的任何后果均由使用者自行承担。
+        7. 禁止将本模块用于骚扰、欺诈、刷量、营销轰炸、盗取信息、破坏服务稳定性、绕过平台风控、侵犯他人权益或其它违法违规用途。
+        8. 本模块不保证适配所有微信版本、系统版本、设备环境、热更新状态和其它模块共存环境，也不承诺持续维护、及时修复或提供任何形式的服务保障。
+        9. 如果你不同意以上任一条款，请点击取消并停止使用本模块。
+
+        如果你理解并接受以上内容，请在下方输入“$acceptedText”后继续使用。
+        """.trimIndent()
+    }
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val dialogMaxHeight = (screenHeight * 0.78f).coerceAtMost(640.dp)
+    val agreementMaxHeight = (screenHeight * 0.42f).coerceIn(220.dp, 430.dp)
+    WindowDialog(
+        show = true,
+        title = "使用协议",
+        onDismissRequest = {},
+        content = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = dialogMaxHeight)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = agreementMaxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MiuixTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = agreement,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp
+                    )
+                }
+                Text(
+                    text = "请输入“$acceptedText”确认",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 14.dp)
+                )
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 15.sp
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .padding(horizontal = 12.dp, vertical = 11.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(
+                        text = "取消",
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    TextButton(
+                        text = if (remainingSeconds > 0) "继续（${remainingSeconds}s）" else "同意并继续",
+                        onClick = {
+                            if (remainingSeconds > 0) {
+                                Toast.makeText(context, "请等待 ${remainingSeconds} 秒后继续", Toast.LENGTH_SHORT).show()
+                            } else if (input.trim() == acceptedText) {
+                                if (TermsGate.accept(context)) {
+                                    onAccepted()
+                                } else {
+                                    Toast.makeText(context, "协议状态保存失败，请重试", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                Toast.makeText(context, "请输入“$acceptedText”后继续", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun ScriptPluginReadmeDialog(
+    context: Context,
+    plugin: ScriptPluginRuntime.ScriptPlugin,
+    onClose: () -> Unit
+) {
+    val readme = remember(plugin.id) {
+        runCatching {
+            val file = File(plugin.dir, "README.md")
+            if (file.isFile) file.readText(Charsets.UTF_8) else ""
+        }.getOrDefault("")
+    }
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val dialogMaxHeight = (screenHeight * 0.78f).coerceAtMost(640.dp)
+    val readmeMaxHeight = (screenHeight * 0.58f).coerceIn(240.dp, 520.dp)
+
+    WindowDialog(
+        show = true,
+        title = plugin.displayName ?: "未知",
+        onDismissRequest = onClose,
+        content = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = dialogMaxHeight)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = readmeMaxHeight)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    if (readme.isBlank()) {
+                        Text(
+                            text = "暂无说明",
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 10.dp)
+                        )
+                    } else {
+                        MarkdownUi.Content(context, readme)
+                    }
+                }
+                TextButton(
+                    text = "关闭",
+                    onClick = onClose,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    colors = ButtonDefaults.textButtonColorsPrimary()
+                )
+            }
+        }
+    )
+}
+
+}
+
+private object MarkdownUi {
+
+@Composable
+fun Content(
+    context: Context,
+    markdown: String,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+    bodyFontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+    onCopyCode: ((String) -> Unit)? = null
+) {
+    val lines = markdown.replace("\r\n", "\n").replace('\r', '\n').lines()
+    var inCodeBlock = false
+    var inlineState = MarkdownInlineState()
+    val codeLines = ArrayList<String>()
+    Column(modifier = Modifier.fillMaxWidth().padding(contentPadding)) {
+        lines.forEach { rawLine ->
+            val line = rawLine.trimEnd()
+            if (line.trimStart().startsWith("```")) {
+                if (inCodeBlock) {
+                    CodeBlock(codeLines.joinToString("\n"), onCopyCode)
+                    codeLines.clear()
+                    inCodeBlock = false
+                } else {
+                    inCodeBlock = true
+                    codeLines.clear()
+                }
+                return@forEach
+            }
+            if (inCodeBlock) {
+                codeLines += rawLine
+                return@forEach
+            }
+            val nextState = MarkdownLine(context, line, inlineState, bodyFontSize)
+            inlineState = nextState
+        }
+        if (inCodeBlock && codeLines.isNotEmpty()) {
+            CodeBlock(codeLines.joinToString("\n"), onCopyCode)
+        }
+    }
+}
+
+@Composable
+private fun MarkdownLine(
+    context: Context,
+    line: String,
+    inlineState: MarkdownInlineState,
+    bodyFontSize: androidx.compose.ui.unit.TextUnit = 13.sp
+): MarkdownInlineState {
+    val trimmed = line.trim()
+    return when {
+        trimmed.isBlank() -> {
+            Box(modifier = Modifier.height(8.dp))
+            inlineState
+        }
+        trimmed.matches(Regex("""-{3,}|_{3,}|\*{3,}""")) -> {
+            Box(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .height(1.dp)
+                    .background(MiuixTheme.colorScheme.outline)
+            )
+            inlineState
+        }
+        trimmed.startsWith("#") -> {
+            val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 6)
+            val text = trimmed.drop(level).trim()
+            MarkdownTextResult(
+                context = context,
+                text = text,
+                inlineState = inlineState,
+                modifier = Modifier.padding(top = if (level <= 2) 10.dp else 8.dp, bottom = 4.dp),
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = when (level) {
+                    1 -> 22.sp
+                    2 -> 19.sp
+                    3 -> 17.sp
+                    else -> 15.sp
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        trimmed.startsWith(">") -> {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Box(
+                    modifier = Modifier.padding(end = 8.dp)
+                        .size(width = 3.dp, height = 20.dp)
+                        .background(MiuixTheme.colorScheme.primary)
+                )
+                MarkdownTextResult(
+                    context = context,
+                    text = trimmed.removePrefix(">").trim(),
+                    inlineState = inlineState,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = bodyFontSize,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            inlineState
+        }
+        trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") -> {
+            MarkdownBullet(context, trimmed.drop(2).trim(), inlineState, fontSize = bodyFontSize)
+        }
+        Regex("""^\d+[.)]\s+.*""").matches(trimmed) -> {
+            val marker = trimmed.substringBefore(' ').trim()
+            MarkdownBullet(context, trimmed.removePrefix(marker).trim(), inlineState, marker, bodyFontSize)
+        }
+        else -> {
+            MarkdownTextResult(
+                context = context,
+                text = line,
+                inlineState = inlineState,
+                fontSize = bodyFontSize,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MarkdownBullet(
+    context: Context,
+    text: String,
+    inlineState: MarkdownInlineState,
+    marker: String = "•",
+    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp
+): MarkdownInlineState {
+    var nextState = inlineState
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text = marker,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = fontSize,
+            modifier = Modifier.padding(end = 8.dp)
+        )
+        nextState = MarkdownTextResult(
+            context = context,
+            text = text,
+            inlineState = inlineState,
+            fontSize = fontSize,
+            modifier = Modifier.weight(1f)
+        )
+    }
+    return nextState
+}
+
+@Composable
+fun CodeBlock(code: String, onCopy: ((String) -> Unit)? = null) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MiuixTheme.colorScheme.surfaceVariant)
+    ) {
+        if (onCopy != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 4.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "代码",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Image(
+                    imageVector = NavIcons.Copy,
+                    contentDescription = "复制代码",
+                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(4.dp))
+                        .clickable { onCopy(code) }
+                        .padding(6.dp)
+                )
+            }
+        }
+        Text(
+            text = code,
+            color = MiuixTheme.colorScheme.onSurface,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+        )
+    }
+}
+
+@Composable
 fun Text(
     context: Context,
     text: String,
@@ -2503,4 +2868,10 @@ fun ScriptPluginMiuixTabContent(
         onOpenAgent = onOpenAgent,
         onOpenManager = onOpenManager,
     )
+}
+
+/** WCX 入口：脚本管理页（Tab 内导航）。 */
+@Composable
+fun ScriptPluginManagerTabPage(context: Context, onBack: () -> Unit) {
+    ScriptPluginSettingsMiuixContent.ScriptPluginManagerPage(context = context, onBack = onBack)
 }
