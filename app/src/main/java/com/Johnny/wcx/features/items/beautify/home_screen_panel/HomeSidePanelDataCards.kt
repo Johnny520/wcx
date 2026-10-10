@@ -3,7 +3,9 @@ package com.Johnny.wcx.features.items.beautify.home_screen_panel
 import androidx.annotation.StringRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -161,6 +163,7 @@ internal fun HomeSidePanelDateTimeCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun HomeSidePanelWeatherCard(
     card: WeatherCardConfig,
@@ -181,12 +184,13 @@ internal fun HomeSidePanelWeatherCard(
         is WeatherCardContent.Preview -> content.snapshot
     }
     val shape = RoundedCornerShape(24.dp)
-    // 点击天气卡片直接进入该卡片的设置（改位置/定位），取代原先的“点击刷新”；
-    // 未提供 onEditCard 时回退为刷新，保持既有能力。
+    // 点击天气卡片 = 刷新天气；长按天气卡片 = 进入该卡片设置（改位置/定位）。
+    // 未提供 onEditCard 时长按不生效，点击刷新仍保持可用。
     val clickModifier = if (interactionEnabled && !editMode && runtime != null) {
-        Modifier.clickable {
-            onEditCard?.invoke(card.id) ?: onRefresh(card.id)
-        }
+        Modifier.combinedClickable(
+            onLongClick = onEditCard?.let { edit -> { edit(card.id) } },
+            onClick = { onRefresh(card.id) },
+        )
     } else {
         Modifier
     }
@@ -485,6 +489,7 @@ internal fun HomeSidePanelWalletCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun HomeSidePanelHitokotoCard(
     card: HitokotoCardConfig,
@@ -509,8 +514,12 @@ internal fun HomeSidePanelHitokotoCard(
 
         is HitokotoCardContent.Preview -> content.snapshot
     }
+    // 点击一言卡片 = 刷新一言；长按一言卡片 = 进入该卡片设置。
     val clickModifier = if (interactionEnabled && !editMode && runtime != null) {
-        Modifier.clickable { onRefresh(card.id) }
+        Modifier.combinedClickable(
+            onLongClick = onEditCard?.let { edit -> { edit(card.id) } },
+            onClick = { onRefresh(card.id) },
+        )
     } else {
         Modifier
     }
