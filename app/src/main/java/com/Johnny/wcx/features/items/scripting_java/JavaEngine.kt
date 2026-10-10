@@ -54,6 +54,7 @@ import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Block
 import com.Johnny.wcx.features.api.ui.WeMomentsApi
 import com.Johnny.wcx.utils.AudioUtils
+import com.Johnny.wcx.utils.audio.AudioTransformBridge
 import com.Johnny.wcx.utils.BshSnapshotDecompiler
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
@@ -97,6 +98,11 @@ import kotlin.io.path.nameWithoutExtension
 object JavaEngine {
 
     private const val TAG = "JavaEngine"
+
+    /** 音频转码桥（迁移自 Hchat 的 me.yun.silk 栈）。 */
+    private val audioBridge: AudioTransformBridge by lazy {
+        AudioTransformBridge { msg -> WeLogger.d(TAG, "[audio] $msg") }
+    }
     private const val WA_MODULE_VER = 1418
 
     fun executeAllOnLoad(scripts: Map<String, JavaPlugin>) {
@@ -599,6 +605,169 @@ object JavaEngine {
             setMethod(
                 BshMethod("findClass", arrayOf(BString)) {
                     runCatching { ClassLoaders.HOST.loadClass(it[0] as String) }.getOrNull()
+                })
+
+            // ===== Audio transform（迁移自 Hchat 音频栈，共 40 个函数）=====
+
+            setMethod(
+                BshMethod("getFileType", arrayOf(BString)) {
+                    audioBridge.getFileType(it[0] as String)
+                })
+            setMethod(
+                BshMethod("flacToSilk", arrayOf(BString, BString, int)) {
+                    audioBridge.flacToSilk(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("oggToSilk", arrayOf(BString, BString, int)) {
+                    audioBridge.oggToSilk(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("pcmToSilk", arrayOf(BString, BString, int, int, int)) {
+                    audioBridge.pcmToSilk(
+                        it[0] as String, it[1] as String,
+                        it[2] as Int, it[3] as Int, it[4] as Int
+                    )
+                })
+            setMethod(
+                BshMethod("autoToSilk", arrayOf(BString, BString, int)) {
+                    audioBridge.autoToSilk(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("silkToMp3", arrayOf(BString, BString, int)) {
+                    audioBridge.silkToMp3(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("silkToPcm", arrayOf(BString, BString, int)) {
+                    audioBridge.silkToPcm(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("mp3ToPcm", arrayOf(BString, BString)) {
+                    audioBridge.mp3ToPcm(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("wavToPcm", arrayOf(BString, BString)) {
+                    audioBridge.wavToPcm(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("flacToPcm", arrayOf(BString, BString)) {
+                    audioBridge.flacToPcm(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("oggToPcm", arrayOf(BString, BString)) {
+                    audioBridge.oggToPcm(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("autoToPcm", arrayOf(BString, BString)) {
+                    audioBridge.autoToPcm(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("getAudioInfo", arrayOf(BString)) {
+                    audioBridge.getAudioInfo(it[0] as String)
+                })
+            setMethod(
+                BshMethod("decodeAacFile", arrayOf(BString, BString)) {
+                    audioBridge.decodeAacFile(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("encodePcmToAac", arrayOf(BString, BString, int, int)) {
+                    audioBridge.encodePcmToAac(
+                        it[0] as String, it[1] as String, it[2] as Int, it[3] as Int
+                    )
+                })
+            setMethod(
+                BshMethod("encodePcmToM4a", arrayOf(BString, BString, int, int)) {
+                    audioBridge.encodePcmToM4a(
+                        it[0] as String, it[1] as String, it[2] as Int, it[3] as Int
+                    )
+                })
+            setMethod(
+                BshMethod("mp4ToSilk", arrayOf(BString, BString, int)) {
+                    audioBridge.mp4ToSilk(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("silkToM4a", arrayOf(BString, BString, int)) {
+                    audioBridge.silkToM4a(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("mp4ToM4a", arrayOf(BString, BString, int)) {
+                    audioBridge.mp4ToM4a(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("mp4ToAac", arrayOf(BString, BString, int)) {
+                    audioBridge.mp4ToAac(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("m4aToSilk", arrayOf(BString, BString, int)) {
+                    audioBridge.m4aToSilk(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("aacToSilk", arrayOf(BString, BString, int)) {
+                    audioBridge.aacToSilk(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("m4aToAac", arrayOf(BString, BString, int)) {
+                    audioBridge.m4aToAac(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("m4aToM4a", arrayOf(BString, BString, int)) {
+                    audioBridge.m4aToM4a(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("autoToAac", arrayOf(BString, BString, int)) {
+                    audioBridge.autoToAac(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("autoToM4a", arrayOf(BString, BString, int)) {
+                    audioBridge.autoToM4a(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("autoAacToSilk", arrayOf(BString, BString, int)) {
+                    audioBridge.autoAacToSilk(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("silkToAac", arrayOf(BString, BString, int)) {
+                    audioBridge.silkToAac(it[0] as String, it[1] as String, it[2] as Int)
+                })
+            setMethod(
+                BshMethod("aacToPcm", arrayOf(BString, BString)) {
+                    audioBridge.aacToPcm(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("pcmToAac", arrayOf(BString, BString, int, int)) {
+                    audioBridge.pcmToAac(
+                        it[0] as String, it[1] as String, it[2] as Int, it[3] as Int
+                    )
+                })
+            setMethod(
+                BshMethod("pcmToM4a", arrayOf(BString, BString, int, int)) {
+                    audioBridge.pcmToM4a(
+                        it[0] as String, it[1] as String, it[2] as Int, it[3] as Int
+                    )
+                })
+            setMethod(
+                BshMethod("m4aToPcm", arrayOf(BString, BString)) {
+                    audioBridge.m4aToPcm(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("decodeM4aFile", arrayOf(BString, BString)) {
+                    audioBridge.decodeM4aFile(it[0] as String, it[1] as String)
+                })
+            setMethod(
+                BshMethod("getDurationLimited", arrayOf(BString)) {
+                    audioBridge.getDurationLimited(it[0] as String)
+                })
+            setMethod(
+                BshMethod("getAudioError", arrayOf(int)) {
+                    audioBridge.getErrorMessage(it[0] as Int)
+                })
+            setMethod(
+                BshMethod("startTransform", arrayOf(int, BString, BString, int, Consumer::class.java)) {
+                    val cb = it[4] as Consumer<Any?>
+                    audioBridge.startTransform(
+                        it[0] as Int, it[1] as String, it[2] as String, it[3] as Int
+                    ) { event ->
+                        runCatching { cb.accept(event) }
+                    }
                 })
 
             // ===== Conversation / Group / Message extras（对齐 Hchat 脚本 API）=====
