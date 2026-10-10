@@ -248,7 +248,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
         }
     }
 
-    private data class ScriptEntry(
+    internal data class ScriptEntry(
         val dir: Path,
         val info: JavaPluginInfo,
         val enabled: Boolean,
@@ -612,7 +612,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
      * - 支持新增自定义参数（内部调试选项 / API 输入框均可由此配置）。
      */
     @Composable
-    private fun ScriptDetailScreen(
+    internal fun ScriptDetailScreen(
         entry: ScriptEntry,
         onBack: () -> Unit,
     ) {
@@ -826,7 +826,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
         emptyList()
     }
 
-    private fun listScriptEntries(): List<ScriptEntry> = runCatching {
+    internal fun listScriptEntries(): List<ScriptEntry> = runCatching {
         safeListScriptDirs()
             .sortedBy { it.name }
             .mapNotNull { scriptDir ->
@@ -852,10 +852,10 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
         emptyList()
     }
 
-    private fun isScriptEnabled(scriptDir: Path): Boolean =
+    internal fun isScriptEnabled(scriptDir: Path): Boolean =
         !(scriptDir / DISABLED_FLAG).exists()
 
-    private fun setScriptEnabled(scriptDir: Path, enabled: Boolean): Boolean = runCatching {
+    internal fun setScriptEnabled(scriptDir: Path, enabled: Boolean): Boolean = runCatching {
         val disabledFlag = scriptDir / DISABLED_FLAG
         if (enabled) {
             disabledFlag.deleteIfExists()
