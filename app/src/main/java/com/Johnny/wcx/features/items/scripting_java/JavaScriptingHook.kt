@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Card
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -24,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import bsh.Interpreter
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
@@ -347,7 +349,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                     )
                 } else {
                     AlertDialogContent(
-                        title = { Text("Java 脚本") },
+                        title = { Text("脚本插件") },
                         text = {
                             DefaultColumn {
                                 // 显示扫描错误
@@ -383,10 +385,18 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                         Text("正在扫描脚本目录...")
                                     }
                                 } else {
+                                    val enabledCount = entries.count { it.enabled }
+                                    Text(
+                                        text = "已启用 $enabledCount / 共 ${entries.size}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
                                     LazyColumn(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .heightIn(max = 400.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
                                         items(entries, key = { it.dir.name }) { entry ->
                                             var enabled by remember(entry.dir) { mutableStateOf(entry.enabled) }
@@ -397,29 +407,42 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
                                                 }
                                             }
 
-                                            ListItem(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { toggle() },
-                                                headlineContent = { Text(entry.info.name) },
-                                                supportingContent = {
-                                                    Text(
-                                                        buildList {
-                                                            add(entry.dir.name)
-                                                            add(if (enabled) "已启用" else "已禁用")
-                                                            entry.info.version?.let { add("版本 $it") }
-                                                            entry.info.author?.let { add("作者 $it") }
-                                                        }.joinToString(" · ")
-                                                    )
-                                                },
-                                                trailingContent = {
-                                                    Switch(
-                                                        checked = enabled,
-                                                        onCheckedChange = null,
-                                                    )
-                                                },
-                                            )
-                                        }
+                                            Card(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                colors = androidx.compose.material3.CardDefaults.cardColors(
+                                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                                                ),
+                                            ) {
+                                                ListItem(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable { toggle() },
+                                                    headlineContent = {
+                                                        Text(
+                                                            entry.info.name,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    },
+                                                    supportingContent = {
+                                                        Text(
+                                                            buildList {
+                                                                add(entry.dir.name)
+                                                                add(if (enabled) "已启用" else "已禁用")
+                                                                entry.info.version?.let { add("版本 $it") }
+                                                                entry.info.author?.let { add("作者 $it") }
+                                                            }.joinToString(" · "),
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    },
+                                                    trailingContent = {
+                                                        Switch(
+                                                            checked = enabled,
+                                                            onCheckedChange = null,
+                                                        )
+                                                    },
+                                                )
+                                            }
                                     }
                                 }
                                 TextButton(onClick = {
