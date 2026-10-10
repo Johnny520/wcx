@@ -7,7 +7,6 @@ import h.Hchat.hooks.api.message.WeChatMessageStoreApi
 import h.Hchat.hooks.api.model.WeChatMessage
 import h.Hchat.hooks.api.model.WeChatMessageTypes
 import h.Hchat.hooks.api.model.WeChatQuoteMsg
-import me.hd.wauxv.data.bean.MsgInfoBean
 import java.util.Collections
 import kotlin.math.abs
 
@@ -18,7 +17,73 @@ class ScriptMessageBean private constructor(
     private val event: Events.MessageReceived?,
     private val observed: WeChatMessageObserveApi.ObservedMessage?,
     private val stored: WeChatMessage?
-) : MsgInfoBean() {
+) {
+    // ---------------------------------------------------------------------
+    // 迁移说明（路线 A：改 Hchat 侧适配 WCX）
+    //
+    // 原实现为 `ScriptMessageBean : me.hd.wauxv.data.bean.MsgInfoBean`，依赖 Hchat 侧的“扁平字段” MsgInfoBean。
+    // 在 WCX 仓库中，同一 FQN 下已是“包装型” `class MsgInfoBean(@JvmField val origin: Any)`（final、字段全为 val、
+    // 无扁平字段），既不能被继承，语义也完全不同，因此这里不再继承该类型，改为把脚本需要访问的扁平字段
+    // 内联进本类（ScriptMessageBean 自身）。
+    //
+    // 对外语义与 Hchat 版保持一致：脚本按“公有字段名”访问（如 msg.content / msg.talker / msg.msgType），
+    // 本类原有的 getXxx() 方法全部保留。字段使用 @JvmField 是为了暴露公有字段、并避免与已存在的
+    // getXxx() 方法产生 JVM 访问器命名冲突（否则 `var content` 会生成 getContent() 与 `fun getContent()` 冲突）。
+    // ---------------------------------------------------------------------
+    @JvmField
+    var xml: String = ""
+
+    @JvmField
+    var sender: String = ""
+
+    @JvmField
+    var senderId: String = ""
+
+    @JvmField
+    var sendTalker: String = ""
+
+    @JvmField
+    var talker: String = ""
+
+    @JvmField
+    var talkerId: String = ""
+
+    @JvmField
+    var content: String = ""
+
+    @JvmField
+    var text: String = ""
+
+    @JvmField
+    var msgId: Long = 0L
+
+    @JvmField
+    var msgType: String = ""
+
+    @JvmField
+    var type: String = ""
+
+    @JvmField
+    var createTime: Long = 0L
+
+    @JvmField
+    var msgSvrId: Long = 0L
+
+    @JvmField
+    var msgSource: String = ""
+
+    @JvmField
+    var selfWxId: String = ""
+
+    @JvmField
+    var source: String = ""
+
+    @JvmField
+    var kind: String = ""
+
+    @JvmField
+    var nativeUrl: String = ""
+
     init {
         xml = getXml()
         sender = getSender()
@@ -332,7 +397,7 @@ class ScriptMessageBean private constructor(
 
     private fun toWaImageMsg(imageMsg: Any?): Any? {
         if (imageMsg == null) return null
-        if (imageMsg is MsgInfoBean.ImageMsg) return imageMsg
+        if (imageMsg is ImageMsg) return imageMsg
         val md5 = callString(imageMsg, "getMd5", "md5")
         val bigUrl = callString(imageMsg, "getBigImgUrl", "bigImgUrl")
         val midUrl = callString(imageMsg, "getMidImgUrl", "midImgUrl")
@@ -344,7 +409,7 @@ class ScriptMessageBean private constructor(
         val bigLength = callInt(imageMsg, "getBigLength", "bigLength")
         val midLength = callInt(imageMsg, "getMidLength", "midLength")
         val thumbLength = callInt(imageMsg, "getThumbLength", "thumbLength")
-        return MsgInfoBean.ImageMsg(md5, bigUrl, midUrl, thumbUrl, key, bigLength, midLength, thumbLength)
+        return ImageMsg(md5, bigUrl, midUrl, thumbUrl, key, bigLength, midLength, thumbLength)
     }
 
     private fun firstNotBlank(vararg values: String?): String {
@@ -391,6 +456,96 @@ class ScriptMessageBean private constructor(
 
     override fun toString(): String {
         return "ScriptMessageBean(talker=${getTalker()}, sender=${getSender()}, type=${getMsgType()}, send=${isSend()}, content=${getContent()})"
+    }
+
+    /**
+     * 迁移自 Hchat `me.hd.wauxv.data.bean.MsgInfoBean.ImageMsg`（路线 A：内联到脚本子系统自有数据类）。
+     *
+     * WCX 仓库中 `me.hd.wauxv.data.bean.MsgInfoBean` 已被占用（包装型），无法再承载 Hchat 的扁平 ImageMsg，
+     * 故把它内联为本类的嵌套类型。为保持脚本可见的“公有字段 + getter”语义，字段用 @JvmField 暴露为公有字段，
+     * 并保留原 Java 版全部构造签名与 getter（供 BeanShell 反射或脚本直接调用）。
+     */
+    class ImageMsg {
+        @JvmField
+        var md5: String = ""
+
+        @JvmField
+        var bigImgUrl: String = ""
+
+        @JvmField
+        var midImgUrl: String = ""
+
+        @JvmField
+        var thumbUrl: String = ""
+
+        @JvmField
+        var key: String = ""
+
+        @JvmField
+        var bigLength: Int = 0
+
+        @JvmField
+        var midLength: Int = 0
+
+        @JvmField
+        var thumbLength: Int = 0
+
+        constructor()
+
+        constructor(md5: String?, bigImgUrl: String?, midImgUrl: String?, thumbUrl: String?, key: String?) : this(
+            md5,
+            bigImgUrl,
+            midImgUrl,
+            thumbUrl,
+            key,
+            0,
+            0,
+            0
+        )
+
+        constructor(
+            md5: String?,
+            bigImgUrl: String?,
+            midImgUrl: String?,
+            thumbUrl: String?,
+            key: String?,
+            bigLength: Int,
+            midLength: Int,
+            thumbLength: Int
+        ) {
+            this.md5 = md5 ?: ""
+            this.bigImgUrl = bigImgUrl ?: ""
+            this.midImgUrl = midImgUrl ?: ""
+            this.thumbUrl = thumbUrl ?: ""
+            this.key = key ?: ""
+            this.bigLength = Math.max(0, bigLength)
+            this.midLength = Math.max(0, midLength)
+            this.thumbLength = Math.max(0, thumbLength)
+        }
+
+        fun getMd5(): String = md5
+
+        fun getBigImgUrl(): String = bigImgUrl
+
+        fun getMidImgUrl(): String = midImgUrl
+
+        fun getThumbUrl(): String = thumbUrl
+
+        fun getCdnUrl(): String {
+            if (thumbUrl.isNotEmpty()) return thumbUrl
+            if (midImgUrl.isNotEmpty()) return midImgUrl
+            return bigImgUrl
+        }
+
+        fun getKey(): String = key
+
+        fun getAesKey(): String = key
+
+        fun getBigLength(): Int = bigLength
+
+        fun getMidLength(): Int = midLength
+
+        fun getThumbLength(): Int = thumbLength
     }
 }
 

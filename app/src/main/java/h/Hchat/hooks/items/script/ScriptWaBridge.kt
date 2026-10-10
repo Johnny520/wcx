@@ -19,8 +19,8 @@ import h.Hchat.hooks.api.runtime.WeChatDatabaseApi
 import h.Hchat.hooks.items.quickread.QuickMarkReadRuntime
 import h.Hchat.hooks.items.shortvideo.FinderMediaDownloadSupport
 import h.Hchat.utils.HchatMediaDownloader
-import me.hd.wauxv.data.bean.MsgInfoBean
 import me.hd.wauxv.data.bean.info.FriendInfo
+import me.hd.wauxv.data.bean.info.GroupData
 import me.hd.wauxv.data.bean.info.GroupInfo
 import me.hd.wauxv.plugin.api.callback.PluginCallBack
 import me.yun.silk.SilkCodec
@@ -108,18 +108,18 @@ class ScriptWaBridge @JvmOverloads internal constructor(
 
     fun getFriendList(): List<FriendInfo> {
         return rawFriendList().map { contact ->
+            // TODO(migration): 路线 A —— 改用 WCX 版 FriendInfo 的成员（同名 FQN）。
+            //   Hchat 版 FriendInfo 为 11 参构造：(wxid, nickname, remark, alias, avatarUrl, avatarBackupUrl,
+            //     encryptedUsername, province, city, gender, type)
+            //   WCX 版 FriendInfo 仅有：wxid/alias/remark/nickname/type/sourceExtInfo/createTime
+            //   下列成员在 WCX 版中缺失、此处未透出，脚本若依赖需人工确认（必要时在 WCX 版补成员）：
+            //     avatarUrl / avatarBackupUrl / encryptedUsername / province / city / gender
             FriendInfo(
-                contact.wxId,
-                contact.nickname,
-                contact.remarkName,
-                contact.customWxId,
-                contact.avatarUrl,
-                contact.avatarBackupUrl,
-                contact.encryptedUsername,
-                contact.province,
-                contact.city,
-                contact.gender,
-                contact.type
+                wxid = contact.wxId,
+                alias = contact.customWxId,
+                remark = contact.remarkName,
+                nickname = contact.nickname,
+                type = contact.type
             )
         }
     }
@@ -159,14 +159,22 @@ class ScriptWaBridge @JvmOverloads internal constructor(
         return rawGroupList().map { chatroom ->
             val contact = groupContacts[chatroom.chatroomId]
             val groupName = firstNotBlank(chatroom.name, contact?.nickname, chatroom.chatroomId)
+            // TODO(migration): 路线 A —— 改用 WCX 版 GroupInfo 的成员（同名 FQN）。
+            //   Hchat 版 GroupInfo 为 7 参构造：(roomId, name, nickname, remarkName, owner, memberList, rawDisplayNames)
+            //   WCX 版 GroupInfo 为：(roomId, remark, name, groupData)
+            //   原直接透出的 owner/memberList/memberCount 改由 groupData 承载（用 Hchat 已取到的群数据填充，
+            //   避免新增 DB 查询）；原 nickname / displayName / rawDisplayNames 在 WCX 版中无对应成员、此处未透出，
+            //   脚本若依赖需人工确认。
             GroupInfo(
-                chatroom.chatroomId,
-                groupName,
-                firstNotBlank(contact?.nickname, groupName),
-                contact?.remarkName.orEmpty(),
-                chatroom.owner,
-                chatroom.memberIds,
-                chatroom.rawDisplayNames
+                roomId = chatroom.chatroomId,
+                name = groupName,
+                remark = contact?.remarkName.orEmpty(),
+                groupData = GroupData(
+                    roomId = chatroom.chatroomId,
+                    memberIds = chatroom.memberIds,
+                    memberCount = chatroom.memberCount(),
+                    owner = chatroom.owner
+                )
             )
         }
     }
@@ -913,7 +921,7 @@ class ScriptWaBridge @JvmOverloads internal constructor(
         }.getOrDefault(0L)
     }
 
-    fun queryHistoryMsg(talker: String?, startTime: Long, count: Int): List<MsgInfoBean> {
+    fun queryHistoryMsg(talker: String?, startTime: Long, count: Int): List<ScriptMessageBean> {
         if (talker.isNullOrBlank()) return emptyList()
         return WeChatApis.message().store()
             ?.queryHistoryMsg(talker, startTime, count)
