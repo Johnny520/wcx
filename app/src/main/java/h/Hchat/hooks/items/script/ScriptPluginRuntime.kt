@@ -1397,7 +1397,7 @@ object ScriptPluginRuntime {
             null
         }
         val root = mediaRoot ?: File("/storage/emulated/0/Android/media/${appContext.packageName}")
-        return File(root, "Hchat/脚本插件")
+        return File(root, "WCX/脚本插件")
     }
 
     fun ensureDirs(context: Context): File {

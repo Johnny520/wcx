@@ -7,6 +7,7 @@ import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.dexkit.cache.DexCacheManager
 import com.Johnny.wcx.features.core.FeaturesLoader
+import com.Johnny.wcx.features.hchat.HchatScriptBootstrap
 import com.Johnny.wcx.dynamic.LocalAdaptationEngine
 import com.Johnny.wcx.dynamic.SelfHealingMonitor
 import com.Johnny.wcx.loader.utils.ActivityProxy
@@ -51,6 +52,14 @@ object WeLauncher {
         runCatching {
             FeaturesLoader.loadFeatures()
         }.onFailure { WeLogger.e(TAG, "failed to load hooks", it) }
+
+        // 接入 Hchat 脚本子系统（脚本插件运行时 + 公共微信 API）。
+        // 仅在主进程安装；DexKit 在安装过程中按需创建。
+        if (TargetProcesses.isInMain) {
+            runCatching {
+                HchatScriptBootstrap.install()
+            }.onFailure { WeLogger.e(TAG, "failed to install Hchat script subsystem", it) }
+        }
     }
 
     private const val TAG = "WeLauncher"

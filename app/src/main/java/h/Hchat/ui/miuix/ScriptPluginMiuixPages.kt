@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
@@ -2625,7 +2626,12 @@ internal fun PageScaffold(
     @Suppress("UNUSED_PARAMETER") largeTitleUnused: String = largeTitle,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    // 脚本管理/导入页是全屏 PageScaffold，顶栏需避开状态栏，否则「返回」会贴到状态栏。
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
         BasicComponent(onClick = onBack) {
             Text(
                 text = if (onBack != null) "← $title" else title,

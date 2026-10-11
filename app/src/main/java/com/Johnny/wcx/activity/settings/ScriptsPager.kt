@@ -1,6 +1,8 @@
 package com.Johnny.wcx.activity.settings
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -8,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.Johnny.wcx.utils.android.showToast
@@ -36,13 +39,16 @@ fun ScriptsPager() {
     } else {
         MiuixListScaffold(title = "脚本") {
             item {
-                ScriptPluginMiuixTabContent(
-                    context = context,
-                    onOpenManager = { showManager = true },
-                    onOpenReadme = { plugin -> readmePlugin = plugin },
-                    onOpenMarket = { showToast("插件市场：迁移中") },
-                    onOpenAgent = { showToast("脚本 Agent：迁移中") },
-                )
+                // 父级 Pager 与内层 TopAppBar 各有一层 backdrop；内容滚动越界会被采样成顶部灰块，这里裁剪掉溢出绘制。
+                Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
+                    ScriptPluginMiuixTabContent(
+                        context = context,
+                        onOpenManager = { showManager = true },
+                        onOpenReadme = { plugin -> readmePlugin = plugin },
+                        onOpenMarket = { showToast("插件市场：迁移中") },
+                        onOpenAgent = { showToast("脚本 Agent：迁移中") },
+                    )
+                }
             }
             item {
                 Spacer(Modifier.height(CONTENT_BOTTOM_INSET))
