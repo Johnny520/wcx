@@ -108,3 +108,9 @@
 
 -dontwarn com.termux.**
 -keep class com.termux.** { *; }
+
+# 内置 rhino jar (app/libs/rhino-45f29f6.jar) 含 fork 的 Kotlin 可空性检测扩展
+# (org.mozilla.kotlin.KotlinNullabilityDetector)，其引用 Kotlin 编译器内部 metadata API
+# (kotlin.metadata.*)，运行环境不提供该依赖。禁用 R8 缺失类告警，不影响常规 JS 功能。
+-dontwarn kotlin.metadata.**
+-dontwarn org.mozilla.kotlin.**
