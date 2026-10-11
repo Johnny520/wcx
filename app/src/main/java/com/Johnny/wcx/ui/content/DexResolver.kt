@@ -49,6 +49,9 @@ import kotlinx.coroutines.launch
 import org.luckypray.dexkit.DexKitBridge
 import java.io.PrintWriter
 import java.io.StringWriter
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.mutableLongStateOf
+import com.Johnny.wcx.BuildConfig
 
 private sealed class ScanProgress {
     data class Start(val displayName: String) : ScanProgress()
@@ -80,6 +83,8 @@ fun DexResolver(
     var phase by remember { mutableStateOf<DialogPhase>(DialogPhase.Idle) }
     var currentTask by remember { mutableStateOf("正在适配...") }
     var completed by remember { mutableIntStateOf(0) }
+    var elapsedMs by remember { mutableLongStateOf(0L) }
+    var showDetails by remember { mutableStateOf(false) }
     val scanResults = remember { mutableStateMapOf<String, ScanResult>() }
 
     fun updateProgress(progress: ScanProgress) {
@@ -123,6 +128,10 @@ fun DexResolver(
 
     fun startScanning() {
         phase = DialogPhase.Scanning
+        completed = 0
+        elapsedMs = 0L
+        scanResults.clear()
+        val startedAt = android.os.SystemClock.elapsedRealtime()
         scope.launch {
             try {
                 val progressChannel = Channel<ScanProgress>(Channel.UNLIMITED)
@@ -150,6 +159,7 @@ fun DexResolver(
                 progressChannel.close()
 
                 val failed = results.filterIsInstance<ScanResult.Failed>()
+                elapsedMs = android.os.SystemClock.elapsedRealtime() - startedAt
                 phase = DialogPhase.Done(failed)
             } catch (e: Exception) {
                 WeLogger.e(TAG, "scanning failed", e)
@@ -157,6 +167,12 @@ fun DexResolver(
             }
         }
     }
+
+    val total = outdatedItems.size
+    val okCount = scanResults.values.count { it is ScanResult.Success }
+    val failCount = scanResults.values.count { it is ScanResult.Failed }
+    val pendingCount = (total - okCount - failCount).coerceAtLeast(0)
+    val hostInfo = remember { hostVersionInfo(context) }
 
     Surface(
         shape = MaterialTheme.shapes.extraLarge,
@@ -169,114 +185,195 @@ fun DexResolver(
             modifier = Modifier
                 .padding(20.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Title with icon
+            // ---- 顶栏：标题 + 关闭 ----
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "DEX 缓存更新",
-                    style = MaterialTheme.typography.headlineSmall,
+                    text = "DEX 适配",
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
+                TextButton(onClick = dismiss) { Text("✕") }
+            }
 
-                // Badge showing count
-                if (phase is DialogPhase.Idle || phase is DialogPhase.Scanning) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Text(
-                            text = "${outdatedItems.size}",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Bold
+            // ---- 状态摘要 ----
+            val (statusTitle, statusLine) = when (val p = phase) {
+                is DialogPhase.Idle -> "等待适配" to
+                        "检测到 $total 个功能需要更新 DEX 缓存；直接关闭对话框相关功能不会被加载。"
+                is DialogPhase.Scanning -> "正在适配…" to (currentTask)
+                is DialogPhase.Done -> if (p.failed.isEmpty())
+                    "适配检查完成" to "已检查 $total / $total 项，本轮接口检查全部通过。"
+                else
+                    "适配完成（部分失败）" to "已检查 $total / $total 项，其中 ${p.failed.size} 项失败（不影响其他功能使用）。"
+                is DialogPhase.Error -> "适配失败" to p.message
+            }
+            Text(text = statusTitle, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(text = statusLine, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // ---- 版本信息 ----
+            val moduleVer = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+            Text(
+                text = "模块版本：$moduleVer\n当前微信：${hostInfo.first}\n内部版本：${hostInfo.second}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // ---- 蓝色分隔线 ----
+            HorizontalDivider(color = MaterialTheme.colorScheme.primary, thickness = 2.dp)
+
+            // ---- 四项统计 ----
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StatCell("耗时", if (elapsedMs > 0) "%.1fs".format(elapsedMs / 1000f) else "-", Modifier.weight(1f))
+                StatCell("通过", "$okCount", Modifier.weight(1f))
+                StatCell("异常", "$failCount", Modifier.weight(1f))
+                StatCell("待验证", "$pendingCount", Modifier.weight(1f))
+            }
+            Text(
+                text = "检查通过表示接口可用，不等于所有使用场景已验证。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // ---- 扫描进度 ----
+            AnimatedVisibility(visible = phase is DialogPhase.Scanning) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LinearWavyProgressIndicator(
+                        progress = { if (total == 0) 0f else completed.toFloat() / total },
+                        modifier = Modifier.fillMaxWidth(),
+                        amplitude = { progress -> if (progress == 0f || progress == 1f) 0f else 1f }
+                    )
+                    Text(text = "总进度: $completed/$total", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+
+            // ---- 检查明细（可展开） ----
+            if (total > 0) {
+                TextButton(
+                    onClick = { showDetails = !showDetails },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (showDetails) "收起明细 ∧" else "检查明细 ∨") }
+            }
+            AnimatedVisibility(visible = showDetails) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    scanResults.values.forEach { r ->
+                        val ok = r is ScanResult.Success
+                        val name = when (r) {
+                            is ScanResult.Success -> r.displayName
+                            is ScanResult.Failed -> r.displayName
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(name, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                text = if (ok) "通过" else "异常",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (ok) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                    val donePhase = phase as? DialogPhase.Done
+                    donePhase?.failed?.takeIf { it.isNotEmpty() }?.let { failed ->
+                        ErrorDetailsSection(
+                            failedResults = failed,
+                            onCopy = {
+                                copyToClipboard(context, buildErrorReport(failed))
+                                showToast(context, "已复制")
+                            }
                         )
                     }
                 }
             }
 
-            HorizontalDivider()
-
-            // Tip text
-            val tipText = when (val p = phase) {
-                is DialogPhase.Idle ->
-                    "检测到 ${outdatedItems.size} 个功能需要更新 DEX 缓存, 开始适配后将自动扫描并更新。" +
-                            "若直接关闭对话框, 相关功能将不会被加载"
-
-                is DialogPhase.Scanning -> null
-                is DialogPhase.Done ->
-                    if (p.failed.isEmpty()) "适配完成! 所有功能已成功更新 DEX 缓存"
-                    else "适配完成, 但有 ${p.failed.size} 个功能失败 (不影响其他功能使用)"
-
-                is DialogPhase.Error -> p.message
+            // ---- 按钮组 ----
+            if (phase is DialogPhase.Idle) {
+                Button(onClick = ::startScanning, modifier = Modifier.fillMaxWidth()) { Text("开始适配") }
             }
-            if (tipText != null) {
-                Text(text = tipText, style = MaterialTheme.typography.bodyMedium)
-            }
-
-            // Progress
-            AnimatedVisibility(visible = phase is DialogPhase.Scanning) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(text = currentTask, style = MaterialTheme.typography.bodyMedium)
-                    LinearWavyProgressIndicator(
-                        progress = { if (outdatedItems.isEmpty()) 0f else completed.toFloat() / outdatedItems.size },
-                        modifier = Modifier.fillMaxWidth(),
-                        amplitude = { progress ->
-                            if (progress == 0f || progress == 1f) {
-                                0f
-                            } else {
-                                1f
-                            }
-                        }
-                    )
-                    Text(
-                        text = "总进度: $completed/${outdatedItems.size}",
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth()) // indeterminate sub-bar
-                }
-            }
-
-            // Error details (Done with failures)
-            val donePhase = phase as? DialogPhase.Done
-            AnimatedVisibility(visible = donePhase?.failed?.isNotEmpty() == true) {
-                donePhase?.failed?.let { failed ->
-                    ErrorDetailsSection(
-                        failedResults = failed,
-                        onCopy = {
-                            val report = buildErrorReport(failed)
-                            copyToClipboard(context, report)
-                            showToast(context, "已复制")
-                        }
-                    )
-                }
-            }
-
-            // Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
-            ) {
-                if (phase !is DialogPhase.Scanning) {
-                    TextButton(onClick = dismiss) { Text("关闭") }
-                }
-                if (phase is DialogPhase.Idle) {
-                    Button(onClick = ::startScanning) { Text("开始适配") }
-                }
-                if (phase is DialogPhase.Done || phase is DialogPhase.Error) {
-                    Button(onClick = {
+            if (phase is DialogPhase.Done || phase is DialogPhase.Error) {
+                Button(
+                    onClick = {
                         dismiss()
                         restartHost()
-                    }) { Text("重启微信") }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("重启微信") }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val failed = scanResults.values.filterIsInstance<ScanResult.Failed>()
+                        if (failed.isEmpty()) {
+                            showToast(context, "暂无失败明细，已复制适配摘要")
+                            copyToClipboard(context, buildErrorReport(emptyList()))
+                        } else {
+                            copyToClipboard(context, buildErrorReport(failed))
+                            showToast(context, "已复制详细报告")
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("详细报告") }
+                if (phase !is DialogPhase.Scanning) {
+                    OutlinedButton(onClick = { startScanning() }, modifier = Modifier.weight(1f)) {
+                        Text("重新检查")
+                    }
                 }
             }
         }
     }
+}
+
+/** 统计小卡片：上方标签 + 下方数值。 */
+@Composable
+private fun StatCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+/** 宿主（微信）版本信息：versionName to longVersionCode。 */
+private fun hostVersionInfo(context: Context): Pair<String, Long> = try {
+    val info = context.packageManager.getPackageInfo("com.tencent.mm", 0)
+    val name = info.versionName ?: "未知"
+    val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+        info.longVersionCode
+    } else {
+        @Suppress("DEPRECATION") info.versionCode.toLong()
+    }
+    name to code
+} catch (e: Throwable) {
+    WeLogger.e(TAG, "读取宿主版本失败", e)
+    "未知" to 0L
 }
 
 @Composable
@@ -314,7 +411,11 @@ private fun ErrorDetailsSection(
 }
 
 private fun buildErrorReport(failedResults: List<ScanResult.Failed>) = buildString {
-    append("=== WCX Dex 扫描错误报告 ===\n\n")
+    append("=== WCX Dex 扫描报告 ===\n\n")
+    if (failedResults.isEmpty()) {
+        append("无失败项。\n")
+        return@buildString
+    }
     failedResults.forEachIndexed { i, r ->
         append("${i + 1}. ${r.displayName}\n")
         append("   错误信息: ${r.error.message}\n")

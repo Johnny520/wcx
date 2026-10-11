@@ -15,6 +15,7 @@ dependencyResolutionManagement {
                 maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/")
         maven("https://jitpack.io") {
             content {
+                includeGroup("com.github.REAndroid")
                 includeGroup("com.github.Ujhhgtg")
                 includeGroup("com.github.Ujhhgtg.rhino")
                 includeGroup("com.github.topjohnwu.libsu")
