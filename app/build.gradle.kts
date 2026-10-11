@@ -345,7 +345,7 @@ dependencies {
     implementation(libs.okhttp3.okhttp)
     implementation(libs.jsoup)
 
-    implementation(libs.rhino)
+    implementation(files("libs/rhino-45f29f6.jar"))
 
     implementation(libs.fastjson2)
 

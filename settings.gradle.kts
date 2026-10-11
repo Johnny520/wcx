@@ -17,7 +17,6 @@ dependencyResolutionManagement {
             content {
                 includeGroup("com.github.REAndroid")
                 includeGroup("com.github.Ujhhgtg")
-                includeGroup("com.github.Ujhhgtg.rhino")
                 includeGroup("com.github.topjohnwu.libsu")
             }
         }
