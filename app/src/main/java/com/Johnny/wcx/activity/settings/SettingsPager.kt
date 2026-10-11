@@ -1304,6 +1304,58 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
+                        text = "本模块的脚本功能（脚本插件运行时、在线插件市场、脚本 Agent 等）实现来源于 Hchat 项目，在此致谢。",
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        lineHeight = 22.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                runCatching {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        "https://github.com/ljh520134/Hchat-alt-entry".toUri()
+                                    )
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    context.startActivity(intent)
+                                }.onFailure {
+                                    WeLogger.e("Settings", "failed to open Hchat url", it)
+                                }
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "Hchat",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = ":",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        Text(
+                            text = "https://github.com/ljh520134/Hchat-alt-entry",
+                            fontSize = 13.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            textDecoration = TextDecoration.Underline,
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
                         text = "首先，我想明确一点：二次创作本身是一件非常好的事情。无论是新增实用功能，还是修复原有缺陷、优化使用体验，这些贡献都能切实提升项目的实用价值，让工具变得更好用、更完善。\n\n在遵守开源精神的前提下，发挥各自的创意与技术，打磨出更优秀、更强大的作品。如果这些改进能够继续以免费的形式开放分享给社区，让更多人受益，甚至可以说，技术进步的最终意义，本就是服务更多人（请允许我在此稍作夸大其词）。\n\n在二次发布或衍生项目中，保留原项目的开源信息、作者署名及相关声明。这既是对开源社区基本规则的尊重，也是对原作者的劳动成果的一种认可。\n当然，是否保留这些信息，最终取决于每位开发者的个人判断与选择。",
                         fontSize = 14.sp,
                         color = MiuixTheme.colorScheme.onSurface,
