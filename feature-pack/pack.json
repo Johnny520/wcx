@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "updated": "2026-10-15T18:40:00Z",
+  "note": "WCX DexKit 特征包。按微信版本(dotted)覆盖 hook 点定位锚点；无精确版本时回落 default 段。classAnchors/methodAnchors 是「字符串组」数组：组内 AND、组间 OR。更新本文件即可让已发布模块生效，无需重发 APK。",
+  "packs": {
+    "default": {
+      "sendTextMsg": {
+        "classAnchors": [
+          ["/cgi-bin/micromsg-bin/newsendmsg"],
+          ["MicroMsg.NetSceneSendMsg"],
+          ["NetSceneSendMsg"],
+          ["newsendmsg"]
+        ],
+        "methodAnchors": [
+          ["/cgi-bin/micromsg-bin/newsendmsg"],
+          ["MicroMsg.NetSceneSendMsg"],
+          ["NetSceneSendMsg"]
+        ],
+        "ctorTypes": []
+      }
+    }
+  }
+}
