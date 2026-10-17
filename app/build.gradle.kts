@@ -329,7 +329,7 @@ dependencies {
     implementation("com.alibaba.fastjson2:fastjson2:2.0.61.android8")
     implementation("androidx.navigationevent:navigationevent:1.1.2")
     implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.2")
 
     implementation(project(":libs:common:bsh"))
 
