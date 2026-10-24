@@ -166,7 +166,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
      * 「撤回前根本没下载过」的图片和语音, 所以直接跳过这个方法: 微信压根不认为发生过撤回,
      * 拦截后的消息才和没撤回时完全一样 —— 图片能打开、语音能播放, 且什么时候点都行。
      */
-    private val methodRevokeHandler by dexMethod {
+    private val methodRevokeHandler by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("doRevokeMsg xmlSrvMsgId=%d talker=%s isGet=%s")
         }
