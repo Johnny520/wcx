@@ -73,7 +73,13 @@ object WeContactPrefsScreenApi : ApiFeature() {
                                     setKeyMethod.invoke(pref, item.key)
                                     setTitleMethod.invoke(pref, item.title)
                                     item.summary?.let { summary -> setSummaryMethod.invoke(pref, summary) }
-                                    addPreferenceMethod.invoke(adapterInstance, pref, item.position)
+                                    // position < 0 表示追加到末尾；大于现有条目数时夹到末尾，
+                                    // 避免 IndexOutOfBounds 把整行吞掉。
+                                    val count = runCatching { (adapterInstance as? BaseAdapter)?.count }
+                                        .getOrDefault(0)
+                                    val pos = if (item.position < 0) count
+                                    else item.position.coerceIn(0, count)
+                                    addPreferenceMethod.invoke(adapterInstance, pref, pos)
                                 }
                             } catch (ex: Exception) {
                                 WeLogger.e(

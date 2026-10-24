@@ -66,8 +66,8 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
                     Instant.ofEpochSecond(addedAt).atZone(ZoneId.systemDefault()).toLocalDate()
                 }.getOrNull() ?: return emptyList()
                 val days = ChronoUnit.DAYS.between(date, LocalDate.now()).coerceAtLeast(0)
-                val text = "${date.format(dateFormatter)}（${days}天）"
-                if (source == Source.ESTIMATED) "$text · 按最早聊天记录估算" else text
+                val text = "${date.format(dateFormatter)} · ${days}天"
+                if (source == Source.ESTIMATED) "$text（按最早聊天记录）" else text
             }
         }
 
@@ -76,6 +76,8 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
                 key = KEY,
                 title = "添加时间",
                 summary = summary,
+                // 排到「昵称 / 微信号 / 地区」之后（第 5 项），而不是追加到页面最底部
+                position = 4,
             )
         )
     }
