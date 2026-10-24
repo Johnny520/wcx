@@ -31,7 +31,9 @@ object WeContactPrefsScreenApi : ApiFeature() {
         val key: String,
         val title: String,
         val summary: String? = null,
-        val position: Int = -1
+        val position: Int = -1,
+        /** 若给出，则插到「key 里包含该片段的 Preference」之后（优先于 [position]）。 */
+        val afterKeyPart: String? = null,
     )
 
     private const val TAG = "WeContactPrefsScreenApi"
@@ -77,8 +79,12 @@ object WeContactPrefsScreenApi : ApiFeature() {
                                     // 避免 IndexOutOfBounds 把整行吞掉。
                                     val count = runCatching { (adapterInstance as? BaseAdapter)?.count }
                                         .getOrDefault(0)
-                                    val pos = if (item.position < 0) count
+                                    var pos = if (item.position < 0) count
                                     else item.position.coerceIn(0, count)
+                                    item.afterKeyPart?.let { part ->
+                                        val idx = findPreferenceIndex(adapterInstance, count, part)
+                                        if (idx >= 0) pos = (idx + 1).coerceIn(0, count)
+                                    }
                                     addPreferenceMethod.invoke(adapterInstance, pref, pos)
                                 }
                             } catch (ex: Exception) {
@@ -119,6 +125,19 @@ object WeContactPrefsScreenApi : ApiFeature() {
                 }
             }
         }
+    }
+
+    /** 在已存在的 Preference 里找「key 含指定片段」的那一条，用于把新条目插到它后面。 */
+    private fun findPreferenceIndex(adapter: Any, count: Int, keyPart: String): Int {
+        val getItem = adapter.javaClass.methods.firstOrNull {
+            it.name == "getItem" && it.parameterTypes.size == 1
+        } ?: return -1
+        for (i in 0 until count) {
+            val item = runCatching { getItem.invoke(adapter, i) }.getOrNull() ?: continue
+            val key = runCatching { prefKeyField.get(item) as? String }.getOrNull() ?: continue
+            if (key.contains(keyPart, ignoreCase = true)) return i
+        }
+        return -1
     }
 
     private fun initReflection() {
