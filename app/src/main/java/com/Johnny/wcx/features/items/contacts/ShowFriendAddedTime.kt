@@ -54,6 +54,10 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
     }
 
     override fun getContactInfoItem(activity: Activity): List<WeContactPrefsScreenApi.PreferenceItem> {
+        // 群聊资料页不该出现「添加时间」：那里微信自己有「进群时间」，
+        // 而群成员的「添加时间」按最早聊天记录估算基本都是错的。
+        if (isChatroomInfoPage(activity)) return emptyList()
+
         val username = resolveUsername(activity) ?: run {
             val keys = runCatching { activity.intent?.extras?.keySet()?.toList() }.getOrNull()
             WeLogger.w(TAG, "no contact username in intent extras: $keys")
@@ -85,6 +89,14 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
                 position = WeContactPrefsScreenApi.POSITION_TOP_OF_INJECTED,
             )
         )
+    }
+
+    /** 群聊「聊天信息」页：类名固定，另外 intent 里带 RoomInfo_Contact_User 也是该页面。 */
+    private fun isChatroomInfoPage(activity: Activity): Boolean {
+        if (activity.javaClass.name.endsWith("ChatroomInfoUI")) return true
+        return runCatching {
+            activity.intent?.hasExtra("RoomInfo_Contact_User") == true
+        }.getOrDefault(false)
     }
 
     private fun resolveUsername(activity: Activity): String? {
