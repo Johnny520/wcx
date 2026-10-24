@@ -70,15 +70,15 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
                     Instant.ofEpochSecond(addedAt).atZone(ZoneId.systemDefault()).toLocalDate()
                 }.getOrNull() ?: return emptyList()
                 val days = ChronoUnit.DAYS.between(date, LocalDate.now()).coerceAtLeast(0)
-                val text = "${date.format(dateFormatter)} · ${days}天"
-                if (source == Source.ESTIMATED) "$text（按最早聊天记录）" else text
+                val text = "${date.format(dateFormatter)}（${days}天）"
+                if (source == Source.ESTIMATED) "$text · 按最早聊天记录" else text
             }
         }
 
         return listOf(
             WeContactPrefsScreenApi.PreferenceItem(
                 key = KEY,
-                title = "好友天数",
+                title = "添加时间（天数）",
                 summary = summary,
                 // 期望位置：紧跟「地区」那一行（截图里的第 4 行）。
                 // 微信这行的 key 各版本不同，多给几个候选；全都找不到就插到列表第一条。
