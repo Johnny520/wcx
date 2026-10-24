@@ -133,7 +133,7 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
             if (disOutCall || disInCall) {
                 // 8.0.76 的 kj 返回 boolean；旧版 playSound 为 void。
                 // 无论哪种返回类型，置 result 都会跳过原方法体，从而不播放铃声。
-                param.result = false
+                param.result = null
                 WeLogger.d(TAG, "blocked scene=start, isOutCall=$isOutCall, method=${param.method.name}")
             }
         } catch (e: Throwable) {
@@ -147,7 +147,9 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
             val disOutCall = isOutCall && disableOutCall
             val disInCall = !isOutCall && disableInCall
             if ((disOutCall || disInCall) && canSkip(param)) {
-                param.result = true // void 方法，置任意值即可跳过原方法
+                // void 方法只能置 null；之前写 true 会被 Xposed 判定「返回值类型不匹配」，
+                // 直接抛 ClassCastException 把微信搞崩。
+                param.result = null
                 WeLogger.d(TAG, "blocked startRing, isOutCall=$isOutCall")
             }
         } catch (e: Throwable) {
@@ -157,7 +159,7 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
 
     private fun tryBlockIncomingRing(param: XC_MethodHook.MethodHookParam) {
         if (disableInCall && canSkip(param)) {
-            param.result = true // void 方法，跳过 ZIDL_HBV 的播放逻辑
+            param.result = null // void 方法必须置 null，否则触发返回值类型校验异常
             WeLogger.d(TAG, "blocked incoming ring, method=${param.method.name}")
         }
     }
