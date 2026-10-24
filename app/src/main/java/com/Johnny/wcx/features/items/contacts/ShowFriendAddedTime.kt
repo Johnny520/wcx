@@ -80,10 +80,10 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
                 key = KEY,
                 title = "添加时间",
                 summary = summary,
-                // 优先插到「地区」那一行之后（就是截图里的位置）；微信这行的 key 各版本不同，
-                // 找不到时退到昵称后面（第 2 行），总之不再落到页面最底部。
-                position = 1,
-                afterKeyPart = "area",
+                // 期望位置：紧跟「地区」那一行（截图里的第 4 行）。
+                // 微信这行的 key 各版本不同，多给几个候选；全都找不到就插到列表第一条。
+                position = 0,
+                afterKeyParts = listOf("area", "region", "diqu", "location"),
             )
         )
     }

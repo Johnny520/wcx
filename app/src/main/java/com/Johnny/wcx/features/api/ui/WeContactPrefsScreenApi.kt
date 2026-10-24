@@ -32,8 +32,8 @@ object WeContactPrefsScreenApi : ApiFeature() {
         val title: String,
         val summary: String? = null,
         val position: Int = -1,
-        /** 若给出，则插到「key 里包含该片段的 Preference」之后（优先于 [position]）。 */
-        val afterKeyPart: String? = null,
+        /** 若给出，则依次尝试，插到「key 里包含该片段的第一条 Preference」之后（优先于 [position]）。 */
+        val afterKeyParts: List<String> = emptyList(),
     )
 
     private const val TAG = "WeContactPrefsScreenApi"
@@ -81,9 +81,12 @@ object WeContactPrefsScreenApi : ApiFeature() {
                                         .getOrDefault(0)
                                     var pos = if (item.position < 0) count
                                     else item.position.coerceIn(0, count)
-                                    item.afterKeyPart?.let { part ->
+                                    for (part in item.afterKeyParts) {
                                         val idx = findPreferenceIndex(adapterInstance, count, part)
-                                        if (idx >= 0) pos = (idx + 1).coerceIn(0, count)
+                                        if (idx >= 0) {
+                                            pos = (idx + 1).coerceIn(0, count)
+                                            break
+                                        }
                                     }
                                     addPreferenceMethod.invoke(adapterInstance, pref, pos)
                                 }
