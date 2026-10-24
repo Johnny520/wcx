@@ -187,6 +187,19 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
 
     private fun encodeKey(talker: String, serverId: Long) = "$talker$RECORD_SEPARATOR$serverId"
 
+    /**
+     * SQLite 取出来的值类型不固定（Boolean / Byte / Int / Long / String 都可能），
+     * 直接 `as? Number` 在某些列上会得到 null，导致「是不是自己发的」判断失效 ——
+     * 表现出来就是关了「防撤回自己的消息」仍然拦自己的撤回。这里统一兜住。
+     */
+    private fun asSelfSent(value: Any?): Boolean = when (value) {
+        null -> false
+        is Boolean -> value
+        is Number -> value.toInt() != 0
+        is String -> value == "1" || value.equals("true", ignoreCase = true)
+        else -> false
+    }
+
     override fun onEnable() {
         recalledKeyCache = recalledRecords
         WeXmlParserApi.addListener(this)
@@ -241,7 +254,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         val talker = row["talker"] as? String ?: return
         val msgId = (row["msgId"] as? Number)?.toLong() ?: 0L
         val createTime = (row["createTime"] as? Number)?.toLong() ?: 0L
-        val isSend = (row["isSend"] as? Number)?.toInt() == 1
+        val isSend = asSelfSent(row["isSend"])
         val content = row["content"] as? String ?: ""
 
         if (displayStyle == STYLE_LEGACY) {
@@ -276,7 +289,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
             WeDatabaseApi.executeQuery(
                 "SELECT isSend FROM message WHERE msgSvrId = ?",
                 arrayOf<Any>(msgSvrId.toString())
-            ).firstOrNull()?.get("isSend")?.let { (it as? Number)?.toInt() == 1 }
+            ).firstOrNull()?.get("isSend")?.let { asSelfSent(it) }
         }.getOrNull()
         return when (isSend) {
             null -> true
@@ -335,8 +348,11 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         // 原始行本来就是系统消息 → 不是「正常消息被改写」，不要动。
         if ((raw["type"] as? Number)?.toInt() == MessageType.SYSTEM.code) return
 
-        val isSend = (raw["isSend"] as? Number)?.toInt() == 1
-        if (isSend && !recallOutgoing) return
+        val isSend = asSelfSent(raw["isSend"])
+        if (isSend && !recallOutgoing) {
+            WeLogger.i(TAG, "self revoke allowed (recallOutgoing=false), skip: msgId=$msgId")
+            return
+        }
 
         restoreRow(values, raw)
 
