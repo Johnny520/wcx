@@ -481,8 +481,13 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
                 if (cursor.moveToFirst()) {
                     val msgInfo = MessageInfo(WeMessageApi.convertMsgInfoInstanceFromCursor(cursor))
 
-                    if (msgInfo.isSelfSender && !recallOutgoing) {
-                        WeLogger.i(TAG, "sender is self and not recall outgoing, skipping")
+                    // 直接读数据库的 isSend 列判断, 不依赖 MessageInfo 的反射字段（反射取不到时会
+                    // 默认成 0, 把「自己撤回」误判成「别人撤回」, 于是多插一条旧版提示）。
+                    val isSelfSentRow = runCatching {
+                        cursor.getInt(cursor.getColumnIndexOrThrow("isSend")) == 1
+                    }.getOrDefault(msgInfo.isSelfSender)
+                    if (isSelfSentRow && !recallOutgoing) {
+                        WeLogger.i(TAG, "sender is self and not recall outgoing, skipping (xml path)")
                         return
                     }
 
