@@ -77,7 +77,9 @@ object WeContactPrefsScreenApi : ApiFeature() {
                                     item.summary?.let { summary -> setSummaryMethod.invoke(pref, summary) }
                                     // position < 0 表示追加到末尾；大于现有条目数时夹到末尾，
                                     // 避免 IndexOutOfBounds 把整行吞掉。
-                                    val count = runCatching { (adapterInstance as? BaseAdapter)?.count }
+                                    // 注意 ?.count 是可空的，必须补 ?: 0，否则 count 变成 Int?
+                                    // 后面 coerceIn 会类型不匹配（之前的编译失败就是这里）。
+                                    val count = runCatching { (adapterInstance as? BaseAdapter)?.count ?: 0 }
                                         .getOrDefault(0)
                                     var pos = if (item.position < 0) count
                                     else item.position.coerceIn(0, count)
