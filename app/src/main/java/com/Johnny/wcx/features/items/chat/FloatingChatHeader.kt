@@ -62,6 +62,8 @@ import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.content.m3.BaseItemContainer
+import com.Johnny.wcx.ui.content.m3.DropDownMenuWidget
+import com.Johnny.wcx.ui.content.m3.DropdownOption
 import com.Johnny.wcx.ui.content.m3.BaseWidget
 import com.Johnny.wcx.ui.content.m3.IntNumberPickerWidget
 import com.Johnny.wcx.ui.content.m3.SegmentedColumn
@@ -103,6 +105,9 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
     private const val MAX_EXTRA_GAP = 24
     private const val MIN_ELEVATION = 0
     private const val MAX_ELEVATION = 16
+
+    private const val HEADER_STYLE_INTEGRATED = "INTEGRATED"
+    private const val HEADER_STYLE_SEPARATED = "SEPARATED"
 
     private const val RECONCILE_LAYOUT = 1
     private const val RECONCILE_TIPS = 1 shl 1
@@ -216,10 +221,28 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
     private var elevationDp by prefOption("floating_chat_header_elevation", DEFAULT_ELEVATION)
     private var capsuleLengthDp by prefOption("floating_chat_header_capsule_length", 0)
     private var backgroundTransparency by prefOption("floating_chat_header_background_transparency", 5)
-    /** 三段式（返回/标题/更多三段独立胶囊 + 顶部渐变遮罩）；关闭则退回整块悬浮卡片。 */
-    // 默认关闭：这个样式依赖微信标题栏内部结构，换个微信版本就可能不生效。
-    // 作为「可选美化项」交给用户手动开，避免升级后看起来「开关开着但没效果」。
-    private var segmentedHeader by prefOption("floating_chat_header_segmented", false)
+    /**
+     * 标题栏布局：一体式（整块悬浮卡片）/ 分段式（返回、标题、更多三段独立胶囊 + 顶部渐变遮罩）。
+     * 空字符串表示还没选过，沿用旧键 [legacySegmentedHeader] 的值。
+     */
+    private var headerLayoutStyleName by prefOption("floating_chat_header_layout_style", "")
+
+    /** 旧配置键：升级前用「三段式标题栏」开关设置过的人沿用其状态。 */
+    private var legacySegmentedHeader by prefOption("floating_chat_header_segmented", false)
+
+    // 分段式依赖微信标题栏内部结构，换个微信版本就可能不生效，默认仍是一体式。
+    private val segmentedHeader: Boolean
+        get() = when (headerLayoutStyleName) {
+            HEADER_STYLE_SEPARATED -> true
+            HEADER_STYLE_INTEGRATED -> false
+            else -> legacySegmentedHeader
+        }
+
+    private fun setHeaderLayoutStyle(name: String) {
+        headerLayoutStyleName = name
+        // 同步旧键，回退到旧版本时状态不会错位
+        legacySegmentedHeader = name == HEADER_STYLE_SEPARATED
+    }
 
     /** 每个窗口是否已由本特性启用状态栏 edge-to-edge。 */
     private val edgeToEdgeApplied = WeakHashMap<Window, Boolean>()
@@ -2765,12 +2788,16 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
                             }
                             item {
                                 BaseItemContainer {
-                                    SwitchWidget(
-                                        title = "三段式标题栏",
-                                        description = "返回/标题/更多分成三段独立胶囊，中间附带未读图标；关闭则整块卡片",
-                                        checked = segmentedHeader,
-                                        onCheckedChange = {
-                                            segmentedHeader = it
+                                    DropDownMenuWidget(
+                                        title = "标题栏布局",
+                                        description = "一体式：整块悬浮卡片；分段式：返回 / 标题 / 更多分成三段独立胶囊",
+                                        value = if (segmentedHeader) HEADER_STYLE_SEPARATED else HEADER_STYLE_INTEGRATED,
+                                        options = listOf(
+                                            DropdownOption(HEADER_STYLE_INTEGRATED, "一体式"),
+                                            DropdownOption(HEADER_STYLE_SEPARATED, "分段式"),
+                                        ),
+                                        onValueChange = { value ->
+                                            setHeaderLayoutStyle(value)
                                             segmentedHeaders.keys.toList().forEach { view -> view.invalidate() }
                                             scheduleAllLayouts(RECONCILE_LAYOUT)
                                         },

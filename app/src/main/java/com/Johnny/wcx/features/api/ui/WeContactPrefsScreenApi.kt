@@ -31,10 +31,18 @@ object WeContactPrefsScreenApi : ApiFeature() {
         val key: String,
         val title: String,
         val summary: String? = null,
-        val position: Int = -1
+        val position: Int = -1,
+        /** 若给出，则依次尝试，插到「key 里包含该片段的第一条 Preference」之后（优先于 [position]）。 */
+        val afterKeyParts: List<String> = emptyList(),
     )
 
     private const val TAG = "WeContactPrefsScreenApi"
+
+    /**
+     * 特殊 position：插在「所有注入项」的最前面（仍在微信原生条目之后，不会挤乱头像/地区）。
+     * providers 的注册顺序由加载顺序决定、不可控，所以用这个标记显式排序。
+     */
+    const val POSITION_TOP_OF_INJECTED = -2
 
     private val providers = CopyOnWriteArrayList<IContactInfoProvider>()
 
@@ -65,22 +73,49 @@ object WeContactPrefsScreenApi : ApiFeature() {
                 firstMethod { name = "initView" }
                     .hookAfter {
                         val adapterInstance = adapterField.get(thisObject as Activity)
+
+                        // 先收集所有 provider 的条目，再按「注入区置顶」标记稳定排序：
+                        // 标记过的排最前，其余保持 providers 的顺序。
+                        val collected = mutableListOf<PreferenceItem>()
                         for (provider in providers) {
                             try {
-                                val items = provider.getContactInfoItem(thisObject as Activity)
-                                for (item in items) {
-                                    val pref = prefConstructor.newInstance(thisObject as Context)
-                                    setKeyMethod.invoke(pref, item.key)
-                                    setTitleMethod.invoke(pref, item.title)
-                                    item.summary?.let { summary -> setSummaryMethod.invoke(pref, summary) }
-                                    addPreferenceMethod.invoke(adapterInstance, pref, item.position)
-                                }
+                                collected += provider.getContactInfoItem(thisObject as Activity)
                             } catch (ex: Exception) {
                                 WeLogger.e(
                                     TAG,
                                     "provider ${provider.javaClass.name} threw while providing contact info item",
                                     ex
                                 )
+                            }
+                        }
+                        val ordered = collected.sortedBy {
+                            if (it.position == POSITION_TOP_OF_INJECTED) 0 else 1
+                        }
+
+                        for (item in ordered) {
+                            try {
+                                    val pref = prefConstructor.newInstance(thisObject as Context)
+                                    setKeyMethod.invoke(pref, item.key)
+                                    setTitleMethod.invoke(pref, item.title)
+                                    item.summary?.let { summary -> setSummaryMethod.invoke(pref, summary) }
+                                    // position < 0 表示追加到末尾；大于现有条目数时夹到末尾，
+                                    // 避免 IndexOutOfBounds 把整行吞掉。
+                                    // 注意 ?.count 是可空的，必须补 ?: 0，否则 count 变成 Int?
+                                    // 后面 coerceIn 会类型不匹配（之前的编译失败就是这里）。
+                                    val count = runCatching { (adapterInstance as? BaseAdapter)?.count ?: 0 }
+                                        .getOrDefault(0)
+                                    var pos = if (item.position < 0) count
+                                    else item.position.coerceIn(0, count)
+                                    for (part in item.afterKeyParts) {
+                                        val idx = findPreferenceIndex(adapterInstance, count, part)
+                                        if (idx >= 0) {
+                                            pos = (idx + 1).coerceIn(0, count)
+                                            break
+                                        }
+                                    }
+                                    addPreferenceMethod.invoke(adapterInstance, pref, pos)
+                            } catch (ex: Exception) {
+                                WeLogger.e(TAG, "failed to add contact info item ${item.key}", ex)
                             }
                         }
                     }
@@ -113,6 +148,19 @@ object WeContactPrefsScreenApi : ApiFeature() {
                 }
             }
         }
+    }
+
+    /** 在已存在的 Preference 里找「key 含指定片段」的那一条，用于把新条目插到它后面。 */
+    private fun findPreferenceIndex(adapter: Any, count: Int, keyPart: String): Int {
+        val getItem = adapter.javaClass.methods.firstOrNull {
+            it.name == "getItem" && it.parameterTypes.size == 1
+        } ?: return -1
+        for (i in 0 until count) {
+            val item = runCatching { getItem.invoke(adapter, i) }.getOrNull() ?: continue
+            val key = runCatching { prefKeyField.get(item) as? String }.getOrNull() ?: continue
+            if (key.contains(keyPart, ignoreCase = true)) return i
+        }
+        return -1
     }
 
     private fun initReflection() {
