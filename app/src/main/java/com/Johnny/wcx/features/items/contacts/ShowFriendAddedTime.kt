@@ -13,9 +13,9 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 @Feature(
-    name = "显示添加时间",
+    name = "显示好友天数",
     categories = ["联系人与群组"],
-    description = "在联系人详情页显示成为好友的日期与天数；微信没记录时按最早聊天记录估算",
+    description = "在联系人详情页显示成为好友的日期与好友天数；微信没记录时按最早聊天记录估算",
 )
 object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactInfoProvider {
 
@@ -78,7 +78,7 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
         return listOf(
             WeContactPrefsScreenApi.PreferenceItem(
                 key = KEY,
-                title = "添加时间",
+                title = "好友天数",
                 summary = summary,
                 // 期望位置：紧跟「地区」那一行（截图里的第 4 行）。
                 // 微信这行的 key 各版本不同，多给几个候选；全都找不到就插到列表第一条。
@@ -131,7 +131,7 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
     }.onFailure { WeLogger.w(TAG, "load rcontact failed: ${it.message}") }
         .getOrNull()
 
-    /** 兜底：最早一条聊天记录的时间（老版本微信没有添加时间字段时用）。 */
+    /** 兜底：最早一条聊天记录的时间（老版本微信没有记录好友天数所需字段时用）。 */
     private fun queryFirstMessageTime(username: String): Long? = runCatching {
         WeDatabaseApi.executeQuery(
             "SELECT createTime FROM message WHERE talker = ? ORDER BY createTime ASC LIMIT 1",
