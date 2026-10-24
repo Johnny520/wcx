@@ -32,8 +32,14 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
     @Volatile
     private var columnsProbed = false
 
-    /** 添加时间的来源：精确 / 估算 / 未知，决定摘要怎么写。 */
-    private enum class Source { EXACT, ESTIMATED, UNKNOWN }
+    /**
+     * 添加时间的来源，决定摘要怎么写：
+     * - EXACT：微信记录了添加时间
+     * - ESTIMATED：没记录，用最早聊天记录估算
+     * - NOT_RECORDED：当前微信有该字段，但这条好友没值（添加于微信开始记录之前）
+     * - UNSUPPORTED：当前微信版本压根没有这个字段
+     */
+    private enum class Source { EXACT, ESTIMATED, NOT_RECORDED, UNSUPPORTED }
 
     override fun onEnable() {
         WeContactPrefsScreenApi.addProvider(this)
@@ -51,14 +57,15 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
 
         val (addedAt, source) = resolveAddedTime(username)
         val summary = when (source) {
-            Source.UNKNOWN -> "未知（微信未记录）"
+            Source.UNSUPPORTED -> "当前微信版本不支持查询"
+            Source.NOT_RECORDED -> "该好友添加于微信记录此时间之前，无法查询"
             else -> {
                 val date = runCatching {
                     Instant.ofEpochSecond(addedAt).atZone(ZoneId.systemDefault()).toLocalDate()
                 }.getOrNull() ?: return emptyList()
                 val days = ChronoUnit.DAYS.between(date, LocalDate.now()).coerceAtLeast(0)
                 val text = "${date.format(dateFormatter)}（${days}天）"
-                if (source == Source.ESTIMATED) "$text 按最早聊天记录估算" else text
+                if (source == Source.ESTIMATED) "$text · 按最早聊天记录估算" else text
             }
         }
 
@@ -79,13 +86,19 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
      * 的时间做近似，文案上标明是估算，避免被当成准确值。
      */
     private fun resolveAddedTime(username: String): Pair<Long, Source> {
-        queryAddedTime(username)?.let { return it to Source.EXACT }
+        val column = resolveTimeColumn()
+        if (column == null) {
+            // 当前微信版本没有这个字段：能估算就估算，不能就明确告诉用户是版本不支持。
+            queryFirstMessageTime(username)?.let { return it to Source.ESTIMATED }
+            return 0L to Source.UNSUPPORTED
+        }
+        queryAddedTimeByColumn(column, username)?.let { return it to Source.EXACT }
+        // 字段在，但这条好友没有值 —— 说明加好友的时间早于微信开始记录该信息。
         queryFirstMessageTime(username)?.let { return it to Source.ESTIMATED }
-        return 0L to Source.UNKNOWN
+        return 0L to Source.NOT_RECORDED
     }
 
-    private fun queryAddedTime(username: String): Long? {
-        val column = resolveTimeColumn() ?: return null
+    private fun queryAddedTimeByColumn(column: String, username: String): Long? {
         return runCatching {
             WeDatabaseApi.executeQuery(
                 "SELECT $column FROM rcontact WHERE username = ? LIMIT 1",
