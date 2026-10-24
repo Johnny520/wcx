@@ -192,7 +192,8 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
      * 直接 `as? Number` 在某些列上会得到 null，导致「是不是自己发的」判断失效 ——
      * 表现出来就是关了「防撤回自己的消息」仍然拦自己的撤回。这里统一兜住。
      */
-    private val revokeNewMsgIdRegex = Regex("<newmsgid>\\s*(\\d+)\\s*</newmsgid>")
+    // 兼容 <newmsgid>123</newmsgid>、newmsgid>123 以及 CDATA 包裹的写法
+    private val revokeNewMsgIdRegex = Regex("newmsgid>\\s*(\\d+)")
 
     /**
      * 从 revokemsg 的 XML 里取「被撤回那条消息」的 msgSvrId。
@@ -202,6 +203,35 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
      */
     private fun parseRevokeNewMsgId(xml: String): Long? =
         revokeNewMsgIdRegex.find(xml)?.groupValues?.get(1)?.toLongOrNull()
+
+    /** 取 revokemsg 里的 replacemsg（微信生成的「谁撤回了一条消息」文案）。 */
+    private fun parseReplaceMsg(xml: String): String {
+        val marker = "replacemsg>"
+        val i = xml.indexOf(marker)
+        if (i < 0) return ""
+        val start = i + marker.length
+        var end = xml.indexOf("</replacemsg>", start)
+        if (end < 0) end = xml.length
+        return xml.substring(start, end)
+            .removePrefix("<![CDATA[")
+            .removeSuffix("]]>")
+            .trim()
+    }
+
+    /**
+     * 判定「这次撤回是不是自己发起的」。
+     *
+     * 自己撤回时微信会立刻把原消息改写成系统提示，连 isSend 都会变 0，所以查库判断并不可靠；
+     * 而 replacemsg 是微信本地生成的文案，中文是「你撤回了一条消息」、英文是「You recalled…」，
+     * 这是最直接的判据。
+     */
+    private fun isSelfRecallByXml(xml: String): Boolean {
+        val msg = parseReplaceMsg(xml)
+        if (msg.isBlank()) return false
+        return msg.startsWith("你") ||
+            msg.startsWith("You", ignoreCase = true) ||
+            msg.contains("你撤回")
+    }
 
     private fun asIntValue(value: Any?): Int = when (value) {
         is Number -> value.toInt()
@@ -242,11 +272,12 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
                     val xmlArg = args.firstOrNull { it is String && (it as String).contains("revokemsg") } as? String
                     val srvId = xmlArg?.let { parseRevokeNewMsgId(it) }
                         ?: (args.firstOrNull { it is Long } as? Long ?: 0L)
-                    if (shouldBlockRevoke(srvId)) {
+                    val selfHint = xmlArg?.let { isSelfRecallByXml(it) } ?: false
+                    if (shouldBlockRevoke(srvId, selfHint)) {
                         result = null
                         WeLogger.i(TAG, "blocked revoke handler (msgSvrId=$srvId)")
                         // 跳过微信的处理后, 它连「这条消息被撤回了」都不会再记录, 所以标记要我们自己补。
-                        runCatching { markRecalled(srvId) }
+                        runCatching { markRecalled(srvId, selfHint) }
                             .onFailure { WeLogger.w(TAG, "markRecalled failed: ${it.message}") }
                     } else {
                         WeLogger.i(TAG, "let self revoke pass (msgSvrId=$srvId)")
@@ -260,7 +291,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
      * 微信被跳过之后不会再有「撤回」这一步, 徽标 / 旧版提示必须由我们自己标记。
      * 这里按 msgSvrId 反查原消息, 取出会话与发送时间。
      */
-    private fun markRecalled(msgSvrId: Long) {
+    private fun markRecalled(msgSvrId: Long, selfHint: Boolean = false) {
         if (msgSvrId == 0L) return
         val row = runCatching {
             WeDatabaseApi.executeQuery(
@@ -280,7 +311,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         val talker = row["talker"] as? String ?: return
         val msgId = (row["msgId"] as? Number)?.toLong() ?: 0L
         val createTime = (row["createTime"] as? Number)?.toLong() ?: 0L
-        val isSend = asSelfSent(row["isSend"])
+        val isSend = selfHint || asSelfSent(row["isSend"])
         val content = row["content"] as? String ?: ""
 
         // 「防撤回自己的消息」没开时, 自己撤回既不该拦, 也不该插提示。
@@ -316,7 +347,9 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
     }
 
     /** 自己的消息是否也要拦：由「防撤回自己的消息」开关决定；查不到原消息时按「拦」处理。 */
-    private fun shouldBlockRevoke(msgSvrId: Long): Boolean {
+    private fun shouldBlockRevoke(msgSvrId: Long, selfHint: Boolean = false): Boolean {
+        // XML 明确写了「你撤回了一条消息」→ 按开关决定放不放
+        if (selfHint) return recallOutgoing
         if (msgSvrId == 0L) return true
         val isSend = runCatching {
             WeDatabaseApi.executeQuery(
@@ -509,8 +542,9 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
             }
             val msgInfo = MessageInfo(WeMessageApi.convertMsgInfoInstanceFromCursor(cursor))
 
-            // 两路取「或」：数据库 isSend 列 + MessageInfo 反射值，任一命中就按自己发的处理。
-            val isSelfSentRow = msgInfo.isSelfSender || runCatching {
+            // 三路取「或」：XML 的 replacemsg 文案 + 数据库 isSend 列 + MessageInfo 反射值，
+            // 任一命中就按自己发的处理（宁可放过，也不能给自己撤回插提示）。
+            val isSelfSentRow = isSelfRecallByXml(xmlContent) || msgInfo.isSelfSender || runCatching {
                 cursor.getInt(cursor.getColumnIndexOrThrow("isSend")) == 1
             }.getOrDefault(false)
             if (isSelfSentRow && !recallOutgoing) {
@@ -523,6 +557,8 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
             runCatching { cacheRawSnapshot(newMsgId) }
 
             if (displayStyle == STYLE_LEGACY) {
+                // 同一条撤回可能同时走 XML 与 doRevokeMsg 两条路，提示只插一次。
+                if (msgInfo.id != 0L && !noticeNotified.add(msgInfo.id)) return
                 val senderName = resolveSenderName(msgInfo, emptyMap())
                 val noticeText =
                     buildLegacyNotice(senderName, msgInfo.createTime, msgInfo.humanReadableRepr)
