@@ -192,6 +192,23 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
      * 直接 `as? Number` 在某些列上会得到 null，导致「是不是自己发的」判断失效 ——
      * 表现出来就是关了「防撤回自己的消息」仍然拦自己的撤回。这里统一兜住。
      */
+    private val revokeNewMsgIdRegex = Regex("<newmsgid>\\s*(\\d+)\\s*</newmsgid>")
+
+    /**
+     * 从 revokemsg 的 XML 里取「被撤回那条消息」的 msgSvrId。
+     *
+     * 之前依赖解析结果里的 `$.sysmsg.$type` 和 `.sysmsg.revokemsg.newmsgid`，
+     * 但在 8.0.79 上实测 `type` 恒为 null，整条 XML 分支从来没执行过。自己解析最稳。
+     */
+    private fun parseRevokeNewMsgId(xml: String): Long? =
+        revokeNewMsgIdRegex.find(xml)?.groupValues?.get(1)?.toLongOrNull()
+
+    private fun asIntValue(value: Any?): Int = when (value) {
+        is Number -> value.toInt()
+        is String -> value.toIntOrNull() ?: 0
+        else -> 0
+    }
+
     private fun asSelfSent(value: Any?): Boolean = when (value) {
         null -> false
         is Boolean -> value
@@ -220,7 +237,11 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         runCatching {
             methodRevokeHandler.hookBefore {
                 runCatching {
-                    val srvId = args.firstOrNull { it is Long } as? Long ?: 0L
+                    // 优先用 XML 里的 newmsgid（被撤回消息的真实 msgSvrId），
+                    // 拿不到再退回方法参数里的 long —— 实测那个 long 不一定是目标消息的 id。
+                    val xmlArg = args.firstOrNull { it is String && (it as String).contains("revokemsg") } as? String
+                    val srvId = xmlArg?.let { parseRevokeNewMsgId(it) }
+                        ?: (args.firstOrNull { it is Long } as? Long ?: 0L)
                     if (shouldBlockRevoke(srvId)) {
                         result = null
                         WeLogger.i(TAG, "blocked revoke handler (msgSvrId=$srvId)")
@@ -251,6 +272,11 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
             return
         }
 
+        if (asIntValue(row["type"]) == MessageType.SYSTEM.code) {
+            // 说明这个 id 指到的是「撤回提示」那条系统消息，不是被撤回的原消息 —— 不能拿它插提示。
+            WeLogger.w(TAG, "markRecalled: srvId=$msgSvrId hit a system message, skip")
+            return
+        }
         val talker = row["talker"] as? String ?: return
         val msgId = (row["msgId"] as? Number)?.toLong() ?: 0L
         val createTime = (row["createTime"] as? Number)?.toLong() ?: 0L
@@ -353,7 +379,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         val msgId = extractMsgId(whereClause, whereArgs) ?: return
         val raw = rawRowCache[msgId] ?: queryRawRow(msgId)?.also { rawRowCache[msgId] = it } ?: return
         // 原始行本来就是系统消息 → 不是「正常消息被改写」，不要动。
-        if ((raw["type"] as? Number)?.toInt() == MessageType.SYSTEM.code) return
+        if (asIntValue(raw["type"]) == MessageType.SYSTEM.code) return
 
         val isSend = asSelfSent(raw["isSend"])
         if (isSend && !recallOutgoing) {
@@ -462,62 +488,57 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
 
     override fun onParse(param: XC_MethodHook.MethodHookParam, result: MutableMap<String, Any?>) {
         val args = param.args
-        val xmlContent = args[0] as? String ?: ""
-        val rootTag = args[1] as? String ?: ""
+        val xmlContent = args[0] as? String ?: return
+        if (!xmlContent.contains("revokemsg")) return
 
-        if (rootTag != "sysmsg" || !xmlContent.contains("revokemsg")) {
+        // 不依赖微信解析结果（8.0.79 上 `$.sysmsg.$type` 恒为 null），直接自己从 XML 取 newmsgid。
+        val newMsgId = parseRevokeNewMsgId(xmlContent) ?: run {
+            WeLogger.w(TAG, "xml revokemsg seen but newmsgid missing")
             return
         }
 
-        WeLogger.i(TAG, "xml revokemsg seen, type=${result[TYPE_KEY]}")
+        val cursor = WeDatabaseApi.rawQuery(
+            "SELECT type,content,talker,createTime,lvbuffer,msgId,msgSvrId,isSend FROM message WHERE msgSvrId = ?",
+            arrayOf<Any>(newMsgId.toString())
+        )
 
-        if (result[TYPE_KEY] == "revokemsg") {
-            val cursor = WeDatabaseApi.rawQuery(
-                "SELECT type,content,talker,createTime,lvbuffer,msgId,msgSvrId,isSend FROM message WHERE msgSvrId = ?",
-                arrayOf(result[".sysmsg.revokemsg.newmsgid"] as? String? ?: return)
-            )
+        cursor.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                WeLogger.i(TAG, "xml revokemsg: message not found (newMsgId=$newMsgId)")
+                return
+            }
+            val msgInfo = MessageInfo(WeMessageApi.convertMsgInfoInstanceFromCursor(cursor))
 
-            cursor.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val msgInfo = MessageInfo(WeMessageApi.convertMsgInfoInstanceFromCursor(cursor))
+            // 两路取「或」：数据库 isSend 列 + MessageInfo 反射值，任一命中就按自己发的处理。
+            val isSelfSentRow = msgInfo.isSelfSender || runCatching {
+                cursor.getInt(cursor.getColumnIndexOrThrow("isSend")) == 1
+            }.getOrDefault(false)
+            if (isSelfSentRow && !recallOutgoing) {
+                WeLogger.i(TAG, "sender is self and not recall outgoing, skipping (xml path)")
+                return
+            }
 
-                    // 直接读数据库的 isSend 列判断, 不依赖 MessageInfo 的反射字段（反射取不到时会
-                    // 默认成 0, 把「自己撤回」误判成「别人撤回」, 于是多插一条旧版提示）。
-                    // 两路取「或」：任一来源表明是自己发的就按自己处理，宁可放过也不误插提示。
-                    val isSelfSentRow = msgInfo.isSelfSender || runCatching {
-                        cursor.getInt(cursor.getColumnIndexOrThrow("isSend")) == 1
-                    }.getOrDefault(false)
-                    if (isSelfSentRow && !recallOutgoing) {
-                        WeLogger.i(TAG, "sender is self and not recall outgoing, skipping (xml path)")
-                        return
-                    }
+            // 到这里才确定要拦：先阻止微信自己插提示，再缓存快照、按样式展示。
+            result[TYPE_KEY] = null
+            runCatching { cacheRawSnapshot(newMsgId) }
 
-                    // 此刻数据库还是撤回前的样子, 先把整行存下来, 后面即使微信改写了也能原样还原。
-                    runCatching { cacheRawSnapshot(msgInfo.serverId) }
-
-                    result[TYPE_KEY] = null
-
-                    if (displayStyle == STYLE_LEGACY) {
-                        // 旧版样式：插一条灰色系统提示，原消息保持不动（不加徽标、不变淡）。
-                        val senderName = resolveSenderName(msgInfo, result)
-                        val noticeText =
-                            buildLegacyNotice(senderName, msgInfo.createTime, msgInfo.humanReadableRepr)
-                        WeMessageApi.createSimpleMsgInfoAndInsert(
-                            MessageType.SYSTEM.code,
-                            msgInfo.talker,
-                            noticeText,
-                            msgInfo.createTime + 1
-                        )
-                        WeLogger.i(TAG, "blocked message revoke (legacy notice inserted)")
-                    } else {
-                        val key = encodeKey(msgInfo.talker, msgInfo.serverId)
-                        recalledKeyCache = recalledKeyCache + key
-                        recalledRecords = recalledKeyCache
-
-                        WeLogger.i(TAG, "recorded message revoke: $key")
-                        refreshBoundViews(msgInfo)
-                    }
-                }
+            if (displayStyle == STYLE_LEGACY) {
+                val senderName = resolveSenderName(msgInfo, emptyMap())
+                val noticeText =
+                    buildLegacyNotice(senderName, msgInfo.createTime, msgInfo.humanReadableRepr)
+                WeMessageApi.createSimpleMsgInfoAndInsert(
+                    MessageType.SYSTEM.code,
+                    msgInfo.talker,
+                    noticeText,
+                    msgInfo.createTime + 1
+                )
+                WeLogger.i(TAG, "xml path: legacy notice inserted (newMsgId=$newMsgId)")
+            } else {
+                val key = encodeKey(msgInfo.talker, newMsgId)
+                recalledKeyCache = recalledKeyCache + key
+                recalledRecords = recalledKeyCache
+                WeLogger.i(TAG, "xml path: recorded revoke: $key")
+                refreshBoundViews(msgInfo.talker, newMsgId)
             }
         }
     }
