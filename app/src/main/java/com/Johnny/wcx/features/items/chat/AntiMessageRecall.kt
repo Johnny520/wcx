@@ -257,6 +257,13 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         val isSend = asSelfSent(row["isSend"])
         val content = row["content"] as? String ?: ""
 
+        // 「防撤回自己的消息」没开时, 自己撤回既不该拦, 也不该插提示。
+        // 放在最前面兜住所有调用路径（doRevokeMsg 放行判断、XML 路径、数据库兜底）。
+        if (isSend && !recallOutgoing) {
+            WeLogger.i(TAG, "markRecalled: self revoke allowed, skip (msgSvrId=$msgSvrId)")
+            return
+        }
+
         if (displayStyle == STYLE_LEGACY) {
             // 旧版样式: 插一条灰色系统提示, 原消息保持不动。
             if (msgId == 0L || !noticeNotified.add(msgId)) return
