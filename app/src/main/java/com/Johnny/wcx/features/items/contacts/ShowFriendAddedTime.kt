@@ -21,7 +21,8 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
 
     private const val TAG = "ShowFriendAddedTime"
     private const val KEY = "wcx_friend_added_time"
-    private const val EXTRA_CONTACT_USER = "Contact_User"
+    /** 资料页把「当前查看谁」放在 intent 里，不同微信版本/入口的 key 不完全一致，全部试一遍。 */
+    private val USERNAME_EXTRAS = listOf("Contact_User", "Chat_User", "Contact_User_Name", "Contact_UUID")
 
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
@@ -50,10 +51,11 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
     }
 
     override fun getContactInfoItem(activity: Activity): List<WeContactPrefsScreenApi.PreferenceItem> {
-        val username = runCatching { activity.intent?.getStringExtra(EXTRA_CONTACT_USER) }
-            .getOrNull()
-            ?.takeIf { it.isNotBlank() }
-            ?: return emptyList()
+        val username = resolveUsername(activity) ?: run {
+            val keys = runCatching { activity.intent?.extras?.keySet()?.toList() }.getOrNull()
+            WeLogger.w(TAG, "no contact username in intent extras: $keys")
+            return emptyList()
+        }
 
         val (addedAt, source) = resolveAddedTime(username)
         val summary = when (source) {
@@ -76,6 +78,15 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
                 summary = summary,
             )
         )
+    }
+
+    private fun resolveUsername(activity: Activity): String? {
+        val intent = runCatching { activity.intent }.getOrNull() ?: return null
+        for (key in USERNAME_EXTRAS) {
+            val value = runCatching { intent.getStringExtra(key) }.getOrNull()
+            if (!value.isNullOrBlank()) return value
+        }
+        return null
     }
 
     /** 这一行只是展示，点击不做任何事。 */
