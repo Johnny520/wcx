@@ -193,7 +193,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
      * 表现出来就是关了「防撤回自己的消息」仍然拦自己的撤回。这里统一兜住。
      */
     // 兼容 <newmsgid>123</newmsgid>、newmsgid>123 以及 CDATA 包裹的写法
-    private val revokeNewMsgIdRegex = Regex("newmsgid>\\s*(\\d+)")
+    private val revokeNewMsgIdRegex = Regex("newmsgid[^0-9]{0,24}(\\d{6,})")
 
     /**
      * 从 revokemsg 的 XML 里取「被撤回那条消息」的 msgSvrId。
@@ -227,11 +227,18 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
      */
     private fun isSelfRecallByXml(xml: String): Boolean {
         val msg = parseReplaceMsg(xml)
-        if (msg.isBlank()) return false
-        return msg.startsWith("你") ||
-            msg.startsWith("You", ignoreCase = true) ||
-            msg.contains("你撤回")
+        if (msg.isNotBlank() && looksLikeSelfRecall(msg)) return true
+        // replacemsg 取不到时直接看整段 XML：自己撤回的文案一定带「你撤回」。
+        return looksLikeSelfRecall(xml)
     }
+
+    /** 微信给自己生成的撤回文案：中文「你撤回了一条消息」、英文「You recalled a message」。 */
+    private fun looksLikeSelfRecall(text: String): Boolean =
+        text.contains("你撤回") || text.contains("You recalled", ignoreCase = true)
+
+    /** 数据库里被改写过的消息，自己撤回时内容就是「你撤回了一条消息」。 */
+    private fun contentSaysSelfRecall(content: String): Boolean =
+        content.contains("你撤回") || content.contains("You recalled", ignoreCase = true)
 
     private fun asIntValue(value: Any?): Int = when (value) {
         is Number -> value.toInt()
@@ -272,7 +279,8 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
                     val xmlArg = args.firstOrNull { it is String && (it as String).contains("revokemsg") } as? String
                     val srvId = xmlArg?.let { parseRevokeNewMsgId(it) }
                         ?: (args.firstOrNull { it is Long } as? Long ?: 0L)
-                    val selfHint = xmlArg?.let { isSelfRecallByXml(it) } ?: false
+                    // doRevokeMsg 的参数里不一定带完整 XML，把所有字符串参数扫一遍找「你撤回」。
+                    val selfHint = args.filterIsInstance<String>().any { looksLikeSelfRecall(it) }
                     if (shouldBlockRevoke(srvId, selfHint)) {
                         result = null
                         WeLogger.i(TAG, "blocked revoke handler (msgSvrId=$srvId)")
@@ -295,7 +303,7 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         if (msgSvrId == 0L) return
         val row = runCatching {
             WeDatabaseApi.executeQuery(
-                "SELECT msgId,talker,createTime,isSend,content FROM message WHERE msgSvrId = ?",
+                "SELECT msgId,type,talker,createTime,isSend,content FROM message WHERE msgSvrId = ?",
                 arrayOf<Any>(msgSvrId.toString())
             ).firstOrNull()
         }.getOrNull() ?: run {
@@ -313,6 +321,12 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         val createTime = (row["createTime"] as? Number)?.toLong() ?: 0L
         val isSend = selfHint || asSelfSent(row["isSend"])
         val content = row["content"] as? String ?: ""
+
+        // 这条已经被改写成「你撤回了一条消息」——自己撤回，不插提示。
+        if (contentSaysSelfRecall(content)) {
+            WeLogger.i(TAG, "markRecalled: self recall detected from rewritten content, skip")
+            return
+        }
 
         // 「防撤回自己的消息」没开时, 自己撤回既不该拦, 也不该插提示。
         // 放在最前面兜住所有调用路径（doRevokeMsg 放行判断、XML 路径、数据库兜底）。
@@ -544,7 +558,9 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
 
             // 三路取「或」：XML 的 replacemsg 文案 + 数据库 isSend 列 + MessageInfo 反射值，
             // 任一命中就按自己发的处理（宁可放过，也不能给自己撤回插提示）。
-            val isSelfSentRow = isSelfRecallByXml(xmlContent) || msgInfo.isSelfSender || runCatching {
+            val isSelfSentRow = isSelfRecallByXml(xmlContent) ||
+                contentSaysSelfRecall(msgInfo.content.orEmpty()) ||
+                msgInfo.isSelfSender || runCatching {
                 cursor.getInt(cursor.getColumnIndexOrThrow("isSend")) == 1
             }.getOrDefault(false)
             if (isSelfSentRow && !recallOutgoing) {
