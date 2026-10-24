@@ -26,6 +26,9 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
 
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
+    /** rcontact.type 的最低位表示「这是一个好友」。 */
+    private const val CONTACT_FLAG_FRIEND = 0x1
+
     /** rcontact 里存放「添加时间」的列名；第一次查表后缓存，避免每次进资料页都 PRAGMA。 */
     @Volatile
     private var timeColumn: String? = null
@@ -40,7 +43,7 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
      * - NOT_RECORDED：当前微信有该字段，但这条好友没值（添加于微信开始记录之前）
      * - UNSUPPORTED：当前微信版本压根没有这个字段
      */
-    private enum class Source { EXACT, ESTIMATED, NOT_RECORDED, UNSUPPORTED }
+    private enum class Source { EXACT, ESTIMATED, NOT_RECORDED, NOT_FRIEND, UNSUPPORTED }
 
     override fun onEnable() {
         WeContactPrefsScreenApi.addProvider(this)
@@ -59,6 +62,7 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
 
         val (addedAt, source) = resolveAddedTime(username)
         val summary = when (source) {
+            Source.NOT_FRIEND -> "该好友未添加，无法查看添加时间"
             Source.UNSUPPORTED -> "当前微信版本不支持查询"
             Source.NOT_RECORDED -> "该好友添加于微信记录此时间之前，无法查询"
             else -> {
@@ -99,27 +103,31 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
      * 的时间做近似，文案上标明是估算，避免被当成准确值。
      */
     private fun resolveAddedTime(username: String): Pair<Long, Source> {
+        val row = loadContactRow(username)
+        // rcontact 里根本没有这个人（陌生人 / 群成员资料页）→ 未添加
+        if (row == null) return 0L to Source.NOT_FRIEND
+
+        // type 的最低位是「好友」标志；没有这一位说明对方不是好友（群成员、陌生人等）。
+        val type = (row["type"] as? Number)?.toInt() ?: 0
+        val isFriend = (type and CONTACT_FLAG_FRIEND) != 0
+        if (!isFriend) return 0L to Source.NOT_FRIEND
+
         val column = resolveTimeColumn()
-        if (column == null) {
-            // 当前微信版本没有这个字段：能估算就估算，不能就明确告诉用户是版本不支持。
-            queryFirstMessageTime(username)?.let { return it to Source.ESTIMATED }
-            return 0L to Source.UNSUPPORTED
-        }
-        queryAddedTimeByColumn(column, username)?.let { return it to Source.EXACT }
-        // 字段在，但这条好友没有值 —— 说明加好友的时间早于微信开始记录该信息。
+        val epoch = column?.let { normalizeEpoch(row[it]) }
+        if (epoch != null) return epoch to Source.EXACT
+
+        // 是好友但没有记录：能按最早聊天记录估算就估算
         queryFirstMessageTime(username)?.let { return it to Source.ESTIMATED }
-        return 0L to Source.NOT_RECORDED
+        return 0L to if (column == null) Source.UNSUPPORTED else Source.NOT_RECORDED
     }
 
-    private fun queryAddedTimeByColumn(column: String, username: String): Long? {
-        return runCatching {
-            WeDatabaseApi.executeQuery(
-                "SELECT $column FROM rcontact WHERE username = ? LIMIT 1",
-                arrayOf<Any>(username)
-            ).firstOrNull()?.get(column)?.let { normalizeEpoch(it) }
-        }.onFailure { WeLogger.w(TAG, "query added time failed: ${it.message}") }
-            .getOrNull()
-    }
+    private fun loadContactRow(username: String): Map<String, Any?>? = runCatching {
+        WeDatabaseApi.executeQuery(
+            "SELECT * FROM rcontact WHERE username = ? LIMIT 1",
+            arrayOf<Any>(username)
+        ).firstOrNull()
+    }.onFailure { WeLogger.w(TAG, "load rcontact failed: ${it.message}") }
+        .getOrNull()
 
     /** 兜底：最早一条聊天记录的时间（老版本微信没有添加时间字段时用）。 */
     private fun queryFirstMessageTime(username: String): Long? = runCatching {
