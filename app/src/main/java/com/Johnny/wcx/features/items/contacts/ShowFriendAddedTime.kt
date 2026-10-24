@@ -13,9 +13,9 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 @Feature(
-    name = "显示好友天数",
+    name = "显示添加时间",
     categories = ["联系人与群组"],
-    description = "在联系人详情页显示成为好友的日期与好友天数；微信没记录时按最早聊天记录估算",
+    description = "在联系人详情页显示添加好友的日期与已添加天数；微信没记录时按最早聊天记录估算",
 )
 object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactInfoProvider {
 
@@ -78,7 +78,7 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
         return listOf(
             WeContactPrefsScreenApi.PreferenceItem(
                 key = KEY,
-                title = "添加时间（天数）",
+                title = "添加时间",
                 summary = summary,
                 // 期望位置：紧跟「地区」那一行（截图里的第 4 行）。
                 // 微信这行的 key 各版本不同，多给几个候选；全都找不到就插到列表第一条。
