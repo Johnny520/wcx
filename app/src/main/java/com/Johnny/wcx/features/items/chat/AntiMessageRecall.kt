@@ -483,9 +483,10 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
 
                     // 直接读数据库的 isSend 列判断, 不依赖 MessageInfo 的反射字段（反射取不到时会
                     // 默认成 0, 把「自己撤回」误判成「别人撤回」, 于是多插一条旧版提示）。
-                    val isSelfSentRow = runCatching {
+                    // 两路取「或」：任一来源表明是自己发的就按自己处理，宁可放过也不误插提示。
+                    val isSelfSentRow = msgInfo.isSelfSender || runCatching {
                         cursor.getInt(cursor.getColumnIndexOrThrow("isSend")) == 1
-                    }.getOrDefault(msgInfo.isSelfSender)
+                    }.getOrDefault(false)
                     if (isSelfSentRow && !recallOutgoing) {
                         WeLogger.i(TAG, "sender is self and not recall outgoing, skipping (xml path)")
                         return
@@ -546,6 +547,9 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         val nameFromXml = NAME_REGEX.find(replaceMsg.orEmpty())?.groupValues?.get(2).orEmpty()
         val fallback = nameFromXml.ifBlank { if (msgInfo.isSelfSender) "自己" else "有人" }
         return runCatching {
+            // 自己撤回时必须显示「自己」——私聊里 talker 就是对方，按 talker 取名会把
+            // 「你自己撤回」写成「对方撤回」，这就是旧版提示里名字对不上的原因。
+            if (msgInfo.isSend != 0) return@runCatching "自己"
             val senderWxId = msgInfo.sender
             when {
                 senderWxId.isBlank() -> fallback
