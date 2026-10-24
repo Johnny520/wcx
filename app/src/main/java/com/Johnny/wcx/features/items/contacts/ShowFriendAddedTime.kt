@@ -80,11 +80,9 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
                 key = KEY,
                 title = "添加时间",
                 summary = summary,
-                // 期望位置：紧跟「微信号 / 地区」这两行之后。
-                // 资料页里「地区」不一定是一个带 key 的 Preference（实测 afterKeyParts 没命中，
-                // 于是被顶到了第一行），所以主用固定索引 2：微信号(0) / 地区(1) 之后。
-                position = 2,
-                afterKeyParts = listOf("area", "region", "diqu", "location"),
+                // 放在「注入区」第一位：仍然追加在微信原生布局（头像/昵称/微信号/地区）之后，
+                // 只是排到其它注入项（获取实名尾字、捡漏红包…）前面，不会挤乱原生布局。
+                position = WeContactPrefsScreenApi.POSITION_TOP_OF_INJECTED,
             )
         )
     }

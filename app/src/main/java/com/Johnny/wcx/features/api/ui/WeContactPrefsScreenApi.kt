@@ -38,6 +38,12 @@ object WeContactPrefsScreenApi : ApiFeature() {
 
     private const val TAG = "WeContactPrefsScreenApi"
 
+    /**
+     * 特殊 position：插在「所有注入项」的最前面（仍在微信原生条目之后，不会挤乱头像/地区）。
+     * providers 的注册顺序由加载顺序决定、不可控，所以用这个标记显式排序。
+     */
+    const val POSITION_TOP_OF_INJECTED = -2
+
     private val providers = CopyOnWriteArrayList<IContactInfoProvider>()
 
     fun addProvider(provider: IContactInfoProvider) {
@@ -67,10 +73,27 @@ object WeContactPrefsScreenApi : ApiFeature() {
                 firstMethod { name = "initView" }
                     .hookAfter {
                         val adapterInstance = adapterField.get(thisObject as Activity)
+
+                        // 先收集所有 provider 的条目，再按「注入区置顶」标记稳定排序：
+                        // 标记过的排最前，其余保持 providers 的顺序。
+                        val collected = mutableListOf<PreferenceItem>()
                         for (provider in providers) {
                             try {
-                                val items = provider.getContactInfoItem(thisObject as Activity)
-                                for (item in items) {
+                                collected += provider.getContactInfoItem(thisObject as Activity)
+                            } catch (ex: Exception) {
+                                WeLogger.e(
+                                    TAG,
+                                    "provider ${provider.javaClass.name} threw while providing contact info item",
+                                    ex
+                                )
+                            }
+                        }
+                        val ordered = collected.sortedBy {
+                            if (it.position == POSITION_TOP_OF_INJECTED) 0 else 1
+                        }
+
+                        for (item in ordered) {
+                            try {
                                     val pref = prefConstructor.newInstance(thisObject as Context)
                                     setKeyMethod.invoke(pref, item.key)
                                     setTitleMethod.invoke(pref, item.title)
@@ -91,13 +114,8 @@ object WeContactPrefsScreenApi : ApiFeature() {
                                         }
                                     }
                                     addPreferenceMethod.invoke(adapterInstance, pref, pos)
-                                }
                             } catch (ex: Exception) {
-                                WeLogger.e(
-                                    TAG,
-                                    "provider ${provider.javaClass.name} threw while providing contact info item",
-                                    ex
-                                )
+                                WeLogger.e(TAG, "failed to add contact info item ${item.key}", ex)
                             }
                         }
                     }
