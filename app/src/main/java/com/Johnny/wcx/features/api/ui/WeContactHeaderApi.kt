@@ -67,15 +67,18 @@ object WeContactHeaderApi : ApiFeature(), IResolveDex {
             return
         }
         bindHeader.hookAfter {
-            runCatching { injectRows() }.onFailure {
+            // args / thisObject 只在 hook 回调作用域内可见，先取出来再交给普通函数处理。
+            val root = args.getOrNull(0) as? View
+            val header = thisObject as? View.OnLongClickListener
+            runCatching { injectRows(root, header) }.onFailure {
                 WeLogger.w(TAG, "注入头部文字失败：" + (it.message ?: it.javaClass.simpleName))
             }
         }
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun injectRows() {
-        val root = args[0] as? View ?: return
+    private fun injectRows(root: View?, header: View.OnLongClickListener?) {
+        if (root == null || header == null) return
         // 宿主只有在 preference attach 之后才创建 ViewHolder。
         if (root.tag == null) return
 
@@ -88,7 +91,6 @@ object WeContactHeaderApi : ApiFeature(), IResolveDex {
         var context = root.context
         while (context is ContextWrapper && context !is Activity) context = context.baseContext
         val activity = context as? Activity ?: return
-        val header = thisObject as? View.OnLongClickListener ?: return
 
         // 原生 ViewHolder 把昵称、备注、微信号、地区这几行都指向同一个 longClick 监听器，
         // 用这个身份定位模板，比按文案或混淆 ID 都稳。
