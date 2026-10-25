@@ -46,12 +46,23 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.luckypray.dexkit.DexKitBridge
 import java.io.PrintWriter
 import java.io.StringWriter
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.mutableLongStateOf
 import com.Johnny.wcx.BuildConfig
+
+/**
+ * DexKit 每次查询都会在 native 层扫描 dex。此前是所有 item 一次性全部并发发起
+ * （Flow.map 里直接 async，等于不限并发），几百个查询同时跑会让内存暴涨、线程频繁切换，
+ * 实机上反而更慢，也容易触发系统低内存回收。
+ *
+ * 限到 3 路并发：既保留并行收益，又把内存峰值压在可控范围。
+ */
+private val dexScanSemaphore = Semaphore(3)
 
 private sealed class ScanProgress {
     data class Start(val displayName: String) : ScanProgress()
@@ -145,11 +156,13 @@ fun DexResolver(
                 val results = outdatedItems.asFlow()
                     .map { item ->
                         async(Dispatchers.IO) {
-                            scanItem(
-                                item,
-                                DexKit,
-                                progressChannel
-                            )
+                            dexScanSemaphore.withPermit {
+                                scanItem(
+                                    item,
+                                    DexKit,
+                                    progressChannel
+                                )
+                            }
                         }
                     }
                     .buffer(8)
