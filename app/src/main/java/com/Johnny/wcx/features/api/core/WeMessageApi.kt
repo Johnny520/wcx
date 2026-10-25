@@ -170,7 +170,9 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
     private val classImportMultiVideo by dexClass {
         matcher {
-            usingEqStrings("MicroMsg.GetVideoMetadata", "get video file name, dataString ")
+            // 8.0.79 起 "get video file name, dataString " 已被删除，只保留 TAG 串定位。
+            // "MicroMsg.GetVideoMetadata" 在 8.0.71~8.0.79 唯一存在，跨版本通用。
+            usingEqStrings("MicroMsg.GetVideoMetadata")
         }
     }
     private val classAppMessage by dexClass {
@@ -524,7 +526,10 @@ object WeMessageApi : ApiFeature(), IResolveDex {
                 matcher {
                     name = "<init>"
                     declaredClass {
-                        usingEqStrings("MicroMsg.NetSceneUploadMsgImg", "/cgi-bin/micromsg-bin/uploadmsgimg")
+                        // 8.0.79 起 "MicroMsg.NetSceneUploadMsgImg" 这个 TAG 串已不存在
+                        // （只剩 MicroMsg.OnNetSceneUploadMsgImgEnd），继续要求它会永远匹配不到，
+                        // 导致发图片拿不到 NetSceneUploadMsgImg 构造器。cgi 串全版本唯一，单独使用即可。
+                        usingEqStrings("/cgi-bin/micromsg-bin/uploadmsgimg")
                     }
                     paramTypes(int, BString, BString, BString, int, null, int, BString, BString, bool, int)
                 }
