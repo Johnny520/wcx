@@ -1,7 +1,6 @@
 package com.Johnny.wcx.features.items.beautify.home_screen_panel
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -17,16 +16,12 @@ import com.composables.icons.materialsymbols.outlinedfilled.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Update
 import com.composables.icons.materialsymbols.outlinedfilled.Wallet
 
-import com.Johnny.wcx.activity.settings.SettingsActivity
-import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.items.beautify.BeautifyText
-import com.Johnny.wcx.features.items.beautify.beautifyText
+import com.Johnny.wcx.features.items.beautify.WeChatQuickActions
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.killHost
 import com.Johnny.wcx.utils.restartHost
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 internal data class HomeSidePanelActionSpec(
     val kind: HomeSidePanelActionKind,
@@ -108,22 +103,15 @@ internal class HomeSidePanelActionExecutor(
         // HomeSidePanel.animateTo 在动画被 cancel 时 onAnimationEnd 会直接 return，
         // afterClosed 将永不触发，导致动作丢失（表现为“点击无反应”）。
         WeLogger.i(TAG, "侧边栏动作触发：$kind")
-        closePanel(null)
+        // 关闭浮层失败（动画/手势状态异常）绝不能连累动作执行，否则就是「点了没反应」。
+        runCatching { closePanel(null) }
+            .onFailure { WeLogger.w(TAG, "关闭面板失败，继续执行动作：$kind", it) }
         runCatching { executeAfterPanelClosed(kind) }
             .onFailure { WeLogger.e(TAG, "侧边栏动作执行异常：$kind", it) }
     }
 
     fun openPaymentCode() {
-        closePanel {
-            val opened = tryStartActivity(
-                Intent().setClassName(activity.packageName, PAYMENT_CODE_CLASS),
-            ) || tryStartActivity(
-                Intent().setClassName(activity.packageName, PAYMENT_CODE_FALLBACK_CLASS),
-            )
-            if (!opened) {
-                publishMessage(beautifyText("当前微信版本无法打开此动作"))
-            }
-        }
+        closePanel { WeChatQuickActions.openPaymentCode(activity) }
     }
 
     private fun executeAfterPanelClosed(kind: HomeSidePanelActionKind) {
@@ -154,33 +142,13 @@ internal class HomeSidePanelActionExecutor(
                 startWeChatActivity("com.tencent.mm.plugin.fav.ui.FavoriteIndexUI")
             }
 
-            HomeSidePanelActionKind.WEKIT_SETTINGS -> startActivity(
-                Intent(activity, SettingsActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            HomeSidePanelActionKind.WEKIT_SETTINGS -> WeChatQuickActions.openModuleSettings(activity)
 
             HomeSidePanelActionKind.RESTART_WECHAT -> restartHost()
             HomeSidePanelActionKind.FORCE_STOP_WECHAT -> killHost()
-            HomeSidePanelActionKind.MARK_ALL_READ -> scope.launch(Dispatchers.IO) {
-                // 只改数据库时聊天列表上的角标不会立刻消失，用户会以为「点了没反应」，
-                // 所以标完已读必须再刷新一次会话列表。
-                val updated = runCatching { WeConversationApi.markAllAsRead() }
-                    .onFailure { WeLogger.w(TAG, "标全部已读失败：" + (it.message ?: it.javaClass.simpleName)) }
-                    .isSuccess
-                val refreshed = runCatching { WeConversationApi.reloadConversations() }
-                    .onFailure { WeLogger.w(TAG, "刷新会话列表失败：" + (it.message ?: it.javaClass.simpleName)) }
-                    .isSuccess
-                WeLogger.i(TAG, "标全部已读：更新=$updated，刷新=$refreshed")
-                publishMessage(
-                    beautifyText(
-                        when {
-                            !updated -> "标为已读失败，详见日志"
-                            !refreshed -> "已标为已读，刷新列表失败"
-                            else -> "已将全部未读消息标为已读"
-                        }
-                    )
-                )
-            }
+            // 与 FAB 共用同一份实现：标已读 + 刷新会话列表，结果用 Toast 提示
+            // （浮层此时已关闭，面板内消息用户看不到，会被当成「点了没反应」）。
+            HomeSidePanelActionKind.MARK_ALL_READ -> WeChatQuickActions.markAllReadAsync(activity)
         }
     }
 
@@ -188,36 +156,10 @@ internal class HomeSidePanelActionExecutor(
         className: String,
         extras: Intent.() -> Unit = {},
     ) {
-        startActivity(Intent().setClassName(activity.packageName, className).apply(extras))
-    }
-
-    private fun startActivity(intent: Intent) {
-        if (!tryStartActivity(intent)) {
-            publishMessage(beautifyText("当前微信版本无法打开此动作"))
-        }
-    }
-
-    private fun tryStartActivity(intent: Intent): Boolean {
-        val target = intent.component?.className ?: intent.action ?: "?"
-        return try {
-            activity.startActivity(intent)
-            true
-        } catch (e: ActivityNotFoundException) {
-            WeLogger.w(TAG, "启动失败（ActivityNotFound）：$target")
-            false
-        } catch (e: Throwable) {
-            // 除 ActivityNotFound 外还可能是 SecurityException / 目标 Activity 需要额外参数等，
-            // 这些以前全部被吞掉，表现就是「点了没反应」。
-            WeLogger.e(TAG, "启动失败（${e.javaClass.simpleName}）：$target", e)
-            false
-        }
+        WeChatQuickActions.openWeChatActivity(activity, className, extras)
     }
 
     private companion object {
         const val TAG = "HomeSidePanelAction"
-        const val PAYMENT_CODE_CLASS =
-            "com.tencent.mm.plugin.offline.ui.WalletOfflineCoinPurseUI"
-        const val PAYMENT_CODE_FALLBACK_CLASS =
-            "com.tencent.mm.plugin.mall.ui.MallIndexUIv2"
     }
 }

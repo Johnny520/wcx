@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import android.content.Context
-import android.content.Intent
 import android.view.View
 import com.Johnny.wcx.constants.PackageNames
 import androidx.activity.ComponentActivity
@@ -90,8 +89,6 @@ import com.composables.icons.materialsymbols.outlinedfilled.Update
 import com.composables.icons.materialsymbols.outlinedfilled.Wallet
 import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
-import com.Johnny.wcx.activity.settings.SettingsActivity
-import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
@@ -209,12 +206,9 @@ object AddMainScreenFab : ClickableFeature() {
         }
     }
 
-    private fun startActivityByName(context: Context, className: String) {
-        val intent = Intent().apply {
-            setClassName(context.packageName, className)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
+    private fun startActivityByName(context: Context, className: String): Boolean {
+        val host = context as? Activity ?: return false
+        return WeChatQuickActions.openWeChatActivity(host, className)
     }
 
     override fun onEnable() {
@@ -304,36 +298,33 @@ object AddMainScreenFab : ClickableFeature() {
                 val icon = iconPool[item.iconName] ?: MaterialSymbols.OutlinedFilled.Add
                 val action: () -> Unit = when (item.type) {
                     FabType.START_ACTIVITY -> {
-                        { item.targetActivity?.let {
-                            try {
-                                startActivityByName(activity, it)
-                            } catch (e: Throwable) {
-                                WeLogger.e(TAG, "START_ACTIVITY 启动失败: $it", e)
+                        {
+                            val target = item.targetActivity
+                            WeLogger.i(TAG, "FAB 动作：${item.type}/${item.name} -> $target")
+                            if (target == null) {
+                                showToast("该按钮未配置目标页面")
+                            } else if (!startActivityByName(activity, target)) {
+                                showToast("打开失败，详见日志")
                             }
-                        } }
+                        }
                     }
 
                     FabType.MARK_ALL_READ -> {
                         {
-                            try {
-                                WeConversationApi.markAllAsRead()
-                                showToast("已将全部未读消息标为已读")
-                            } catch (e: Throwable) {
-                                WeLogger.e(TAG, "清空未读失败", e)
-                            }
+                            WeLogger.i(TAG, "FAB 动作：${item.type}/${item.name}")
+                            WeChatQuickActions.markAllReadAsync(activity)
                         }
                     }
 
                     FabType.MODULE_SETTINGS -> {
                         {
                             try {
-                                // Bug Fix (v201): 对齐 WeKit 上游的最简 Intent 启动方式。
-                                // 之前 v196 加的 setPackage(PackageNames.MODULE) 实际上是无效的，
-                                // 真正的代理路由依赖 WeLauncher.init() 中的 ActivityProxy.init()
-                                // 钩子 IActivityManager.startActivity()。去掉 setPackage 即可。
-                                activity.startActivity(Intent(activity, SettingsActivity::class.java))
-                                WeLogger.i(TAG, "MODULE_SETTINGS: 启动模块设置 Activity")
+                                WeLogger.i(TAG, "FAB 动作：${item.type}/${item.name}")
+                                if (!WeChatQuickActions.openModuleSettings(activity)) {
+                                    showToast("打开模块设置失败，详见日志")
+                                }
                             } catch (e: Throwable) {
+                                showToast("打开模块设置失败：" + (e.message ?: e.javaClass.simpleName))
                                 WeLogger.e(TAG, "MODULE_SETTINGS 启动失败", e)
                             }
                         }

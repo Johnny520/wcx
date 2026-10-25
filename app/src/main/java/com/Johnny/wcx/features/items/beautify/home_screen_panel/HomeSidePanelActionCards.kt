@@ -25,6 +25,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import com.Johnny.wcx.ui.utils.ListItem
+import com.Johnny.wcx.utils.WeLogger
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -404,10 +405,20 @@ private fun HomeSidePanelActionItem(
     onDeleteAction: ((cardId: String, actionId: String) -> Unit)?,
 ) {
     val spec = homeSidePanelActionSpec(action.kind)
-    val clickModifier = if (
+    val runnable =
         interactive && !editMode && content == HomeSidePanelActionCardContent.Runtime
-    ) {
+    // 之前这条链断裂时完全没有痕迹，用户只能反馈「点了没反应」。现在两态都留一条日志。
+    LaunchedEffect(action.kind, runnable) {
+        if (!runnable) {
+            WeLogger.w(
+                "HomeSidePanelAction",
+                "动作不可点：${action.kind} interactive=$interactive editMode=$editMode content=$content"
+            )
+        }
+    }
+    val clickModifier = if (runnable) {
         Modifier.clickable {
+            WeLogger.i("HomeSidePanelAction", "动作按钮点击：${action.kind}")
             onRunAction(cardId, action.id, action.kind)
         }
     } else {
