@@ -145,7 +145,7 @@ object QuickBackToBottom : SwitchFeature(), IResolveDex {
      *   - 8.0.79：`[locationByMsgId] position:%s mode:%s msgId:%s` / `[setShowHistoryMsgTipId] pos:%s msgId:%s`
      *   - 8.0.71~8.0.78：`[locationByMsgId] position:%s mode:%s` / `[setShowHistoryMsgTipId] pos:%s`
      */
-    override fun resolveDex(dexKit: com.luckypray.dexkit.DexKitBridge) {
+    override fun resolveDex(dexKit: org.luckypray.dexkit.DexKitBridge) {
         if (methodLocationByMsgId.isPlaceholder) {
             methodLocationByMsgId.find(dexKit, allowFailure = true) {
                 searchPackages("com.tencent.mm.ui.chatting.component")
