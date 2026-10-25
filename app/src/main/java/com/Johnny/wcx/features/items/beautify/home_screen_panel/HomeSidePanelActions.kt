@@ -21,6 +21,7 @@ import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.items.beautify.BeautifyText
 import com.Johnny.wcx.features.items.beautify.beautifyText
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.killHost
 import com.Johnny.wcx.utils.restartHost
 import kotlinx.coroutines.CoroutineScope
@@ -106,8 +107,10 @@ internal class HomeSidePanelActionExecutor(
         // 关闭面板后立即执行动作，不依赖关闭动画的回调：
         // HomeSidePanel.animateTo 在动画被 cancel 时 onAnimationEnd 会直接 return，
         // afterClosed 将永不触发，导致动作丢失（表现为“点击无反应”）。
+        WeLogger.i(TAG, "侧边栏动作触发：$kind")
         closePanel(null)
-        executeAfterPanelClosed(kind)
+        runCatching { executeAfterPanelClosed(kind) }
+            .onFailure { WeLogger.e(TAG, "侧边栏动作执行异常：$kind", it) }
     }
 
     fun openPaymentCode() {
@@ -159,8 +162,24 @@ internal class HomeSidePanelActionExecutor(
             HomeSidePanelActionKind.RESTART_WECHAT -> restartHost()
             HomeSidePanelActionKind.FORCE_STOP_WECHAT -> killHost()
             HomeSidePanelActionKind.MARK_ALL_READ -> scope.launch(Dispatchers.IO) {
-                WeConversationApi.markAllAsRead()
-                publishMessage(beautifyText("已将全部未读消息标为已读"))
+                // 只改数据库时聊天列表上的角标不会立刻消失，用户会以为「点了没反应」，
+                // 所以标完已读必须再刷新一次会话列表。
+                val updated = runCatching { WeConversationApi.markAllAsRead() }
+                    .onFailure { WeLogger.w(TAG, "标全部已读失败：" + (it.message ?: it.javaClass.simpleName)) }
+                    .isSuccess
+                val refreshed = runCatching { WeConversationApi.reloadConversations() }
+                    .onFailure { WeLogger.w(TAG, "刷新会话列表失败：" + (it.message ?: it.javaClass.simpleName)) }
+                    .isSuccess
+                WeLogger.i(TAG, "标全部已读：更新=$updated，刷新=$refreshed")
+                publishMessage(
+                    beautifyText(
+                        when {
+                            !updated -> "标为已读失败，详见日志"
+                            !refreshed -> "已标为已读，刷新列表失败"
+                            else -> "已将全部未读消息标为已读"
+                        }
+                    )
+                )
             }
         }
     }
@@ -179,15 +198,23 @@ internal class HomeSidePanelActionExecutor(
     }
 
     private fun tryStartActivity(intent: Intent): Boolean {
-        try {
+        val target = intent.component?.className ?: intent.action ?: "?"
+        return try {
             activity.startActivity(intent)
-            return true
-        } catch (_: ActivityNotFoundException) {
-            return false
+            true
+        } catch (e: ActivityNotFoundException) {
+            WeLogger.w(TAG, "启动失败（ActivityNotFound）：$target")
+            false
+        } catch (e: Throwable) {
+            // 除 ActivityNotFound 外还可能是 SecurityException / 目标 Activity 需要额外参数等，
+            // 这些以前全部被吞掉，表现就是「点了没反应」。
+            WeLogger.e(TAG, "启动失败（${e.javaClass.simpleName}）：$target", e)
+            false
         }
     }
 
     private companion object {
+        const val TAG = "HomeSidePanelAction"
         const val PAYMENT_CODE_CLASS =
             "com.tencent.mm.plugin.offline.ui.WalletOfflineCoinPurseUI"
         const val PAYMENT_CODE_FALLBACK_CLASS =
