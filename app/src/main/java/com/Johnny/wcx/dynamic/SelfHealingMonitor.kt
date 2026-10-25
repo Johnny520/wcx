@@ -28,7 +28,11 @@ object SelfHealingMonitor {
     private const val TAG = "SelfHealingMonitor"
 
     // 监控配置
-    private const val POLL_INTERVAL_MS = 3000L
+    // 3 秒一次会在主线程持续遍历 View 树（hasVisibleChild 递归 + Tab 检查），
+    // 是微信卡顿的常驻开销来源；15 秒足够发现「页面空白」这类问题。
+    private const val POLL_INTERVAL_MS = 15_000L
+    private const val MAX_SCAN_DEPTH = 10
+    private const val MAX_SCAN_NODES = 400
     private const val BLANK_PAGE_THRESHOLD_MS = 10_000L
     private const val MAX_RETRY_COUNT = 3
 
@@ -146,12 +150,24 @@ object SelfHealingMonitor {
     /**
      * 递归检查 ViewGroup 是否有可见子 View。
      */
-    private fun hasVisibleChild(parent: ViewGroup): Boolean {
+    /**
+     * 递归检查是否有可见子 View。
+     *
+     * 限制深度与节点总数：微信首页之外可能存在极深的 View 树，无上限递归会在主线程
+     * 占用大量时间（每次轮询都跑一遍）。超出预算时按「未找到」返回，下一次轮询会再试。
+     */
+    private fun hasVisibleChild(
+        parent: ViewGroup,
+        depth: Int = 0,
+        budget: IntArray = intArrayOf(MAX_SCAN_NODES),
+    ): Boolean {
+        if (depth > MAX_SCAN_DEPTH || budget[0] <= 0) return false
         for (i in 0 until parent.childCount) {
+            if (budget[0]-- <= 0) return false
             val child = parent.getChildAt(i) ?: continue
             if (child.visibility != View.VISIBLE) continue
             if (child.width > 0 && child.height > 0) return true
-            if (child is ViewGroup && hasVisibleChild(child)) return true
+            if (child is ViewGroup && hasVisibleChild(child, depth + 1, budget)) return true
         }
         return false
     }

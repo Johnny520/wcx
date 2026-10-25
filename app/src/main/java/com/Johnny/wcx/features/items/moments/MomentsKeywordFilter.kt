@@ -325,7 +325,7 @@ object MomentsKeywordFilter : ClickableFeature() {
                 }
                 descField?.isAccessible = true
                 descField?.get(snsInfo)?.toString()?.let { sb.append(it).append(" ") }
-            } catch (_: Throwable) {}
+            } catch (e: Throwable) { WeLogger.w(TAG, "hook 回调异常已忽略: " + e.message) }
 
             // 尝试获取昵称
             try {
@@ -334,7 +334,7 @@ object MomentsKeywordFilter : ClickableFeature() {
                 }
                 nickField?.isAccessible = true
                 nickField?.get(snsInfo)?.toString()?.let { sb.append(it).append(" ") }
-            } catch (_: Throwable) {}
+            } catch (e: Throwable) { WeLogger.w(TAG, "hook 回调异常已忽略: " + e.message) }
 
             sb.toString().trim()
         } catch (e: Throwable) {

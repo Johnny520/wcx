@@ -12,9 +12,12 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.hookBeforeDirectly
+import com.Johnny.wcx.utils.WeLogger
 
 @Feature(name = "移除个性签名限制", categories = ["个人资料"], description = "允许大于 30 字与包含特殊字符的个性签名")
 object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
+
+    private const val TAG = "RemoveSignatureLimits"
 
     private lateinit var stringMatchesMethodUnhook: XC_MethodHook.Unhook
 
@@ -41,7 +44,7 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
                                     // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                                 }
                             }
-                    } catch (e: Throwable) {}
+                    } catch (e: Throwable) { WeLogger.w(TAG, "hook 回调异常已忽略: " + e.message) }
                 }
 
                 hookAfter {
@@ -51,7 +54,7 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
                         (activity.reflekt()
                             .firstField { type = TextView::class }
                             .get()!! as TextView).visibility = View.GONE
-                    } catch (e: Throwable) {}
+                    } catch (e: Throwable) { WeLogger.w(TAG, "hook 回调异常已忽略: " + e.message) }
                 }
             }
 
@@ -87,13 +90,13 @@ object RemoveSignatureLimits : SwitchFeature(), IResolveDex {
                                 // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                             }
                         }
-                } catch (e: Throwable) {}
+                } catch (e: Throwable) { WeLogger.w(TAG, "hook 回调异常已忽略: " + e.message) }
             }
             hookAfter {
                 try {
                     stringMatchesMethodUnhook.unhook()
                     setFiltersUnhook.unhook()
-                } catch (e: Throwable) {}
+                } catch (e: Throwable) { WeLogger.w(TAG, "hook 回调异常已忽略: " + e.message) }
             }
         }
     }
