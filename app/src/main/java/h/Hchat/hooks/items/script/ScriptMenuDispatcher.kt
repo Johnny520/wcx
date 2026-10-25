@@ -18,6 +18,7 @@ import h.Hchat.hooks.api.core.WeChatApis
 import h.Hchat.hooks.api.message.SingleMessageMenuLocator
 import h.Hchat.hooks.core.FeatureContext
 import h.Hchat.hooks.core.HookRegistry
+import h.Hchat.utils.HLog
 import h.Hchat.utils.KavaReflector
 import java.io.File
 import java.lang.ref.WeakReference
@@ -39,6 +40,8 @@ import java.util.concurrent.atomic.AtomicLong
  * plugin id, so reloading one plugin cannot leave another plugin's callback or
  * menu item behind.
  */
+private const val TAG = "[WCX:ScriptMenu]"
+
 object ScriptMenuDispatcher {
     private const val PLUS_ITEM_ID_START = 0x48485000
     private const val MESSAGE_ITEM_ID_START = 0x48486000
@@ -128,11 +131,23 @@ object ScriptMenuDispatcher {
         logger = log
         val plusInstalled = installPlusMenuHooks(finder)
         val messageInstalled = installMessageMenuHooks(context, log)
-        if (!plusInstalled && plusEntries.isNotEmpty()) {
-            log("脚本右上角加号菜单Hook未安装", null)
+        // 安装结果必须无条件落日志：否则用户只会看到「菜单加载失败」，
+        // 开发者既不知道是加号菜单还是长按消息菜单失败，也看不到是哪个锚点没解析出来。
+        HLog.i(
+            "$TAG 菜单 Hook 安装结果：加号菜单=${plusInstalled}，长按消息菜单=${messageInstalled}；" +
+                "PlusSubMenuHelper=${finder.plusSubMenuHelperClass?.name ?: "未找到"}，" +
+                "plusAdapter=${finder.plusSubMenuAdapterMethod?.let { it.declaringClass.name + "#" + it.name } ?: "未找到"}，" +
+                "plusOnItemClick=${finder.plusSubMenuOnItemClickMethod?.name ?: "未找到"}"
+        )
+        if (!plusInstalled) {
+            val reason = "脚本右上角加号菜单Hook未安装（PlusSubMenuHelper=${
+                finder.plusSubMenuHelperClass?.name ?: "未找到"
+            }，plusAdapter=${finder.plusSubMenuAdapterMethod?.name ?: "未找到"}）"
+            if (plusEntries.isNotEmpty()) log(reason, null) else HLog.i("$TAG $reason")
         }
-        if (!messageInstalled && messageEntries.isNotEmpty()) {
-            log("脚本长按消息菜单Hook未安装", null)
+        if (!messageInstalled) {
+            val reason = "脚本长按消息菜单Hook未安装"
+            if (messageEntries.isNotEmpty()) log(reason, null) else HLog.i("$TAG $reason")
         }
         refreshPlusMenus()
         return plusInstalled && messageInstalled

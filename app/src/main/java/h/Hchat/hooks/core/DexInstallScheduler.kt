@@ -134,13 +134,20 @@ object DexInstallScheduler {
         val running: Boolean,
         val retryIndex: Int,
         val paused: Boolean,
+        /** 最近一次安装失败的原因（未失败为 null）。自检 / 诊断页直接展示，开发者不必再翻日志。 */
+        val lastError: String? = null,
+        /** 最近一次安装失败的时间戳（毫秒），0 表示从未失败。 */
+        val lastErrorAt: Long = 0L,
     ) {
         val summary: String
-            get() = when {
-                installed -> "✅ 已安装"
-                running -> "⏳ 安装中"
-                paused -> "❌ 失败·已暂停（可一键修复）"
-                else -> "⚠ 待重试（第 " + retryIndex + " 次）"
+            get() {
+                val base = when {
+                    installed -> "✅ 已安装"
+                    running -> "⏳ 安装中"
+                    paused -> "❌ 失败·已暂停（可一键修复）"
+                    else -> "⚠ 待重试（第 " + retryIndex + " 次）"
+                }
+                return if (!installed && !lastError.isNullOrBlank()) "$base｜上次失败：$lastError" else base
             }
     }
 
@@ -167,6 +174,8 @@ object DexInstallScheduler {
                     retryIndex = s.retryIndex.get(),
                     paused = !s.installed.get() && s.installer != null &&
                             s.retryIndex.get() >= MAX_RETRY_ATTEMPTS,
+                    lastError = s.lastError,
+                    lastErrorAt = s.lastErrorAt,
                 )
             }
             .sortedWith(compareBy({ it.installed }, { it.stage }, { it.key }))
@@ -251,6 +260,7 @@ object DexInstallScheduler {
 
     private fun runInstaller(key: String, state: State) {
         var ok = false
+        val attemptStartedAt = System.currentTimeMillis()
         try {
             synchronized(dexKitExecutionLock) {
                 val installer = synchronized(stateLock) {
@@ -261,6 +271,7 @@ object DexInstallScheduler {
         } catch (_: CancellationException) {
             // 卸载与正在执行的定位竞争时，旧租约失效属于正常取消。
         } catch (error: Throwable) {
+            recordFailure(state, "异常：" + (error.message ?: error.javaClass.simpleName))
             HLog.e("$TAG ${state.label} 安装异常: ${error.message}", error)
         } finally {
             synchronized(stateLock) {
@@ -273,10 +284,18 @@ object DexInstallScheduler {
                     } else if (ok || state.installed.get()) {
                         state.installed.set(true)
                         state.installer = null
+                        state.lastError = null
                         state.retryTask?.let(mainHandler::removeCallbacks)
                         state.retryTask = null
                         state.retryScheduled.set(false)
-                    } else scheduleRetry(key, state)
+                    } else {
+                        // installer 返回 false（未抛异常）是最常见、也最缺信息的一类失败：
+                        // 以前这里完全静默，日志里只留一句「重试 N 次仍未成功」。
+                        if (state.lastErrorAt < attemptStartedAt) {
+                            recordFailure(state, "返回 false（目标未命中或依赖未就绪）")
+                        }
+                        scheduleRetry(key, state)
+                    }
                 }
             }
         }
@@ -289,6 +308,13 @@ object DexInstallScheduler {
         ).forEach { (key, state) -> runNow(key, state) }
     }
 
+    /** 记录一次失败：既写运行日志（日志页可见），也留在 TaskStatus 里给自检页展示。 */
+    private fun recordFailure(state: State, reason: String) {
+        state.lastError = reason
+        state.lastErrorAt = System.currentTimeMillis()
+        HLog.i("$TAG ${state.label} 安装未成功（第 ${state.retryIndex.get()} 次）：$reason")
+    }
+
     private fun scheduleRetry(key: String, state: State) {
         if (!isCurrent(key, state) || state.installed.get()) return
         if (!state.retryScheduled.compareAndSet(false, true)) return
@@ -297,7 +323,10 @@ object DexInstallScheduler {
             // 不永久放弃：保留 installer，仅暂停本轮；阶段推进 / retryPending() 会重置计数后再试，
             // 避免「一次性失败后永久卡死」（微信启动早期 DexKit 尚未就绪时尤其明显）。
             state.retryScheduled.set(false)
-            HLog.e("$TAG ${state.label} 重试 $index 次仍未成功，暂停本轮重试（阶段推进 / 一键修复可再恢复）")
+            HLog.e(
+                "$TAG ${state.label} 重试 $index 次仍未成功，暂停本轮重试" +
+                    "（阶段推进 / 一键修复可再恢复）；最近失败：${state.lastError ?: "未知"}"
+            )
             return
         }
         val retry = Runnable {
@@ -330,5 +359,7 @@ object DexInstallScheduler {
         val running = AtomicBoolean(false)
         val retryScheduled = AtomicBoolean(false)
         val retryIndex = AtomicInteger(0)
+        @Volatile var lastError: String? = null
+        @Volatile var lastErrorAt: Long = 0L
     }
 }

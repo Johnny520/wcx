@@ -29,4 +29,21 @@ public final class HLog {
         XposedBridge.log(new RuntimeException(message, throwable));
         WeLogger.INSTANCE.e(TAG, message, throwable);
     }
+
+    /**
+     * 诊断流水：只写 WCX 运行日志（I 级，会落盘，可在「日志」页查看 / 导出），
+     * 不进 LSPosed 日志、不构造异常对象，因此可以放心用于定位过程记录。
+     */
+    public static void i(String message) {
+        WeLogger.INSTANCE.i(TAG, message);
+    }
+
+    public static void i(String message, Throwable throwable) {
+        WeLogger.INSTANCE.i(TAG, message, throwable);
+    }
+
+    /** 需要提醒但不属于失败的情形（例如「已回落到兜底路径」）。 */
+    public static void w(String message) {
+        WeLogger.INSTANCE.w(TAG, message);
+    }
 }
