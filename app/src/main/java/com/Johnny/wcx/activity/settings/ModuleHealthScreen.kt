@@ -71,7 +71,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 模块自检（最外层 / 全量）：把整个模块的公共依赖逐项扫描出来，并支持手动「一键自检」与「一键修复」。
+ * 模块自检（最外层 / 全量）：把整个模块的公共依赖逐项扫描出来；「一键修复」= 体检 → 修复 → 复检 → 前后对比。
  *
  * 覆盖：各功能分类启用概况 / 微信公共 API 层（含完整性自检）/ 脚本运行时全链路 /
  * Hook 安装任务逐项 / 关键类锚点 / 隐藏联系人状态。
@@ -279,14 +279,10 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                     }
                 }
 
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "一键自检与修复") }
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "一键修复") }
                 item {
                     SettingsCard {
-                        ActionRow("一键自检", "逐项扫描全部公共依赖（微信 API / 脚本 / Hook 任务 / 锚点 / 隐藏联系人），带进度条") {
-                            launchRun("一键自检", { moduleHealthSteps(context) }, showOverlay = true, reportTitle = "模块自检结果", replaceItems = true)
-                        }
-                        InsetDivider()
-                        ActionRow("一键修复", "补脚本目录 / 开总开关 / 重建引导链路 / 推进阶段 / 重排 Hook / 重载插件 / 隐藏联系人刷新；修复后自动重新自检刷新列表") {
+                        ActionRow("一键修复", "修复前体检 → 补目录 / 开总开关 / 重建引导 / 推进阶段 / 重排 Hook / 重载插件 / 刷新隐藏联系人 → 复检 → 给出前后对比") {
                             launchRun("一键修复", { moduleRepairSteps(context) }, showOverlay = true, reportTitle = "一键修复结果", replaceItems = false, afterRun = { rescan() })
                         }
                         InsetDivider()
@@ -1012,7 +1008,17 @@ private fun hiddenContactsSection(): List<HealthItem> {
 //  修复步骤（全量）
 // ---------------------------------------------------------------------------
 
-private fun moduleRepairSteps(context: Context): List<HealthStep> = listOf(
+/**
+ * 一键修复（模块自检）：修复前体检 → 对症修复 → 复检 → 前后对比。
+ *
+ * 与脚本页保持一致：不输出一份「永远全绿」的修复记录，而是给出真实结论——
+ * 修复前几项异常、修复后几项异常、哪些已解决、哪些仍然需要处理。
+ */
+private fun moduleRepairSteps(context: Context): List<HealthStep> {
+    val before = mutableListOf<HealthItem>()
+    val afterFix = mutableListOf<HealthItem>()
+
+    val checklist = listOf(
     HealthStep("补建脚本目录") {
         val dir = runCatching { ScriptPluginRuntime.scriptDir(context) }.getOrNull()
         val ok = when {
@@ -1083,6 +1089,61 @@ private fun moduleRepairSteps(context: Context): List<HealthStep> = listOf(
         )
     },
 )
+
+    return listOf(
+        HealthStep("修复前体检") {
+            before.clear()
+            before += moduleHealthSteps(context)
+                .flatMap { step -> runCatching { step.run() }.getOrDefault(emptyList()) }
+            val bad = before.count { !it.ok && !it.inactive }
+            listOf(
+                HealthItem(
+                    label = "修复前异常",
+                    section = "修复前体检",
+                    value = "$bad 项",
+                    ok = true,
+                    detail = "共 ${before.size} 项检测，异常 $bad 项",
+                )
+            )
+        },
+    ) + checklist + listOf(
+        HealthStep("修复后复检") {
+            afterFix.clear()
+            afterFix += moduleHealthSteps(context)
+                .flatMap { step -> runCatching { step.run() }.getOrDefault(emptyList()) }
+            val bad = afterFix.count { !it.ok && !it.inactive }
+            listOf(
+                HealthItem(
+                    label = "修复后异常",
+                    section = "修复后复检",
+                    value = "$bad 项",
+                    ok = bad == 0,
+                    detail = "共 ${afterFix.size} 项检测，异常 $bad 项",
+                )
+            )
+        },
+        HealthStep("前后对比") {
+            val beforeBad = before.filter { !it.ok && !it.inactive }.map { it.label }.toSet()
+            val afterBad = afterFix.filter { !it.ok && !it.inactive }.map { it.label }.toSet()
+            val fixed = beforeBad - afterBad
+            val remain = afterBad
+            listOf(
+                HealthItem(
+                    label = "修复结果",
+                    section = "前后对比",
+                    value = if (remain.isEmpty()) "全部通过" else "仍有 ${remain.size} 项异常",
+                    ok = remain.isEmpty(),
+                    detail = buildString {
+                        append("修复前异常 ").append(beforeBad.size).append(" 项，修复后 ")
+                            .append(remain.size).append(" 项")
+                        if (fixed.isNotEmpty()) append("\n已解决：").append(fixed.joinToString("、"))
+                        if (remain.isNotEmpty()) append("\n仍存在：").append(remain.joinToString("、"))
+                    },
+                )
+            )
+        },
+    )
+}
 
 /** 采集各插件最近一次加载失败原因（读插件目录 log.txt 尾部）。 */
 private fun collectPluginLoadErrors(context: Context): List<String> {
