@@ -68,10 +68,11 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactHeaderApi.Provider {
         }
 
         val (addedAt, source) = resolveAddedTime(username)
+        // 查不到的三种情况都只给一个短结论：长句在资料页里既挤又像报错，
+        // 用户实际只想知道「有没有、是多少」。
         val value = when (source) {
-            Source.NOT_FRIEND -> "该好友未添加，无法查看添加时间"
-            Source.UNSUPPORTED -> "当前微信版本不支持查询"
-            Source.NOT_RECORDED -> "该好友添加于微信记录此时间之前，无法查询"
+            Source.NOT_FRIEND -> "非好友无法查询"
+            Source.UNSUPPORTED, Source.NOT_RECORDED -> "未知"
             else -> {
                 val date = runCatching {
                     Instant.ofEpochSecond(addedAt).atZone(ZoneId.systemDefault()).toLocalDate()
