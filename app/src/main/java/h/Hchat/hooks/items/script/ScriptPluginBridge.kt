@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import com.Johnny.wcx.utils.WeLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -38,6 +39,8 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
 import java.util.function.Function
 
+private const val LOG_TAG = "脚本插件"
+
 class ScriptPluginBridge internal constructor(
     val hostContext: Context,
     val classLoader: ClassLoader,
@@ -68,12 +71,16 @@ class ScriptPluginBridge internal constructor(
     }
 
     fun log(message: Any?) {
-        XposedBridge.log("[WCX:Script] ${message ?: "null"}")
+        val text = message?.toString() ?: "null"
+        XposedBridge.log("[WCX:Script] $text")
+        // 镜像进总日志：否则插件日志只在 LSPosed 日志里，用户在「日志」页看不到。
+        WeLogger.i(LOG_TAG, text)
     }
 
     fun log(pluginName: String?, pluginDir: File?, message: Any?) {
         val text = message?.toString() ?: "null"
         XposedBridge.log("[WCX:Script] [${pluginName.orEmpty()}] $text")
+        WeLogger.i(LOG_TAG, "[${pluginName.orEmpty()}] $text")
         val dir = pluginDir ?: return
         runCatching {
             if (!dir.isDirectory) dir.mkdirs()

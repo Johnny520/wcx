@@ -34,7 +34,6 @@ import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.hchat.HchatScriptBootstrap
 import com.Johnny.wcx.utils.HostInfo
-import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.android.showToast
 import h.Hchat.hooks.api.core.WeChatApis
@@ -109,9 +108,6 @@ private data class ScriptSelfCheckItem(
     val detail: String,
     val fixable: Boolean,
 )
-
-/** 自检 / 修复结果同时镜像进总日志（日志页可见、可导出），而不只是弹窗展示。 */
-private const val SELF_CHECK_TAG = "脚本自检"
 
 /** 一个可执行的诊断 / 修复步骤：label 描述；run 返回 (是否通过, 说明)。 */
 private class ScriptRunStep(val label: String, val run: () -> Pair<Boolean, String>)
@@ -404,7 +400,7 @@ fun ScriptDiagnosticsScreen(onBack: () -> Unit) {
         runLog = emptyList()
         scope.launch {
             val steps = runCatching { stepsProvider() }.getOrElse { emptyList() }
-            WeLogger.i(SELF_CHECK_TAG, "开始：$title（共 ${steps.size} 项）")
+            SelfCheckLog.start(title, steps.size)
             val results = mutableListOf<ScriptSelfCheckItem>()
             steps.forEachIndexed { index, step ->
                 runSubtitle = "正在执行：${step.label}"
@@ -413,10 +409,7 @@ fun ScriptDiagnosticsScreen(onBack: () -> Unit) {
                         .getOrElse { false to ("执行异常：" + (it.message ?: it.javaClass.simpleName)) }
                 }
                 results += ScriptSelfCheckItem(step.label, outcome.first, outcome.second, !outcome.first)
-                WeLogger.i(
-                    SELF_CHECK_TAG,
-                    (if (outcome.first) "✅ " else "❌ ") + step.label + "：" + outcome.second
-                )
+                SelfCheckLog.step(outcome.first, step.label, outcome.second)
                 runLog = runLog + (step.label to outcome.first)
                 runProgress = (index + 1).toFloat() / steps.size.toFloat()
                 delay(160)
@@ -429,7 +422,7 @@ fun ScriptDiagnosticsScreen(onBack: () -> Unit) {
             results.forEach { item ->
                 sb.append(if (item.ok) "✅ " else "❌ ").append(item.name).append("：").append(item.detail).append('\n')
             }
-            WeLogger.i(SELF_CHECK_TAG, "结束：$title，通过 $okCount / ${results.size} 项")
+            SelfCheckLog.end(title, okCount, results.size)
             refreshVersion++
             lastRefresh = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
                 .format(java.util.Date())

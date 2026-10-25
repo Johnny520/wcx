@@ -113,6 +113,8 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
         scope.launch {
             val startedAt = System.currentTimeMillis()
             val steps = runCatching { stepsProvider() }.getOrElse { emptyList() }
+            val verbose = showOverlay || reportTitle != null
+            if (verbose) SelfCheckLog.start(title, steps.size)
             val collected = mutableListOf<HealthItem>()
             steps.forEachIndexed { index, step ->
                 if (showOverlay) runSubtitle = "正在执行：${step.title}"
@@ -130,6 +132,9 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                     }
                 }
                 collected += outcome
+                if (verbose) {
+                    outcome.forEach { item -> SelfCheckLog.step(item.ok, item.label, item.value) }
+                }
                 if (showOverlay) {
                     runLog = runLog + (step.title to outcome.all { it.ok })
                     runProgress = (index + 1).toFloat() / steps.size.toFloat().coerceAtLeast(1f)
@@ -137,6 +142,7 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                 }
             }
             if (replaceItems) items = collected
+            SelfCheckLog.end(title, collected.count { it.ok }, collected.size)
             running = false
             lastScan = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             if (replaceItems) scanDurationMs = System.currentTimeMillis() - startedAt

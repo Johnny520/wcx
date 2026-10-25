@@ -29,7 +29,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
-import de.robv.android.xposed.XposedBridge;
 
 /**
  * DexFinder - 使用 DexKit 定位微信混淆后的类和方法
@@ -52,7 +51,6 @@ public class DexFinder {
     private static final String RED_PACKET_UNION_LOCATOR_VERSION = "1";
     private static final String NETWORK_QUEUE_LOCATOR_VERSION_KEY = "network.queue.locator.version";
     private static final String NETWORK_QUEUE_LOCATOR_VERSION = "2";
-    private static final boolean VERBOSE = false;
     private final DexKitBridge dexKit;
     private final ClassLoader classLoader;
     private final SharedPreferences cachePrefs;
@@ -6171,10 +6169,14 @@ public class DexFinder {
         return clazz != null ? clazz.getName() : "null";
     }
 
+    /**
+     * DexKit 定位锚点日志。
+     *
+     * 原来被 VERBOSE=false 短路，正式版里「微信 API 解析失败」完全无迹可查。
+     * 现在统一写 WCX 运行日志（I 级落盘，日志页可见 / 可导出）；单次 resolveAll 约几十行，量可控。
+     */
     private void logDetail(String message) {
-        if (VERBOSE) {
-            XposedBridge.log(TAG + " " + message);
-        }
+        h.Hchat.utils.HLog.i(TAG + " " + message);
     }
 
     private void collectKnownNetworkQueueClasses() {

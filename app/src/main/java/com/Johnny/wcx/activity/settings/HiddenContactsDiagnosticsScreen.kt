@@ -108,6 +108,8 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
             runProgress = 0f
             runTitle = title
             runSubtitle = ""
+            val verbose = showOverlay || reportTitle != null
+            if (verbose) SelfCheckLog.start(title, steps.size)
             val collected = mutableListOf<DiagRow>()
             steps.forEachIndexed { index, step ->
                 if (showOverlay) runSubtitle = step.title
@@ -125,6 +127,9 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
                     }
                 }
                 collected += outcome
+                if (verbose) {
+                    outcome.forEach { row -> SelfCheckLog.step(row.ok, row.label, row.value) }
+                }
                 if (showOverlay) {
                     runLog = runLog + (step.title to outcome.all { it.ok })
                     runProgress = (index + 1).toFloat() / steps.size.toFloat().coerceAtLeast(1f)
@@ -132,6 +137,7 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
                 }
             }
             if (replaceRows) rows = collected
+            SelfCheckLog.end(title, collected.count { it.ok }, collected.size)
             running = false
             lastScan = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             if (reportTitle != null) showDiagReport(context, reportTitle, collected)
