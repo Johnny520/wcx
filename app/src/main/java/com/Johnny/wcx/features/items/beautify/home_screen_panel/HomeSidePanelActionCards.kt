@@ -416,11 +416,16 @@ private fun HomeSidePanelActionItem(
             )
         }
     }
-    val clickModifier = if (runnable) {
-        Modifier.clickable {
+    val onActionClick: (() -> Unit)? = if (runnable) {
+        {
             WeLogger.i("HomeSidePanelAction", "动作按钮点击：${action.kind}")
             onRunAction(cardId, action.id, action.kind)
         }
+    } else {
+        null
+    }
+    val clickModifier = if (onActionClick != null) {
+        Modifier.clickable(onClick = onActionClick)
     } else {
         Modifier
     }
@@ -449,6 +454,8 @@ private fun HomeSidePanelActionItem(
                 }
             }
 
+            // ListItem 内部自带 clickable(onClick = onClick ?: {})，它比 modifier 上的更靠内，
+            // 会把点击全部吃掉。所以点击必须走 onClick 参数，不能再靠 modifier 上的 clickable。
             HomeSidePanelActionPlacement.LIST_ITEM -> ListItem(
                 leadingContent = {
                     Icon(spec.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -460,9 +467,8 @@ private fun HomeSidePanelActionItem(
                         Icon(MaterialSymbols.Outlined.Chevron_right, contentDescription = null)
                     }
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(clickModifier),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onActionClick,
             ) {
                 Text(spec.labelRes)
             }
