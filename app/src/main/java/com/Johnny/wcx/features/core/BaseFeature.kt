@@ -27,6 +27,15 @@ abstract class BaseFeature {
 
     var description: String = ""
 
+    /**
+     * 当前微信版本是否支持本功能；返回非空字符串表示不支持（开关会拒绝开启并提示该文案）。
+     *
+     * 用于「微信把某个模块整体删掉」这类情况（例如 8.0.77 起多人通话 MultiTalk 被移除），
+     * 避免用户开了开关却毫无反应、误以为模块坏了。
+     */
+    open val unavailableReason: String?
+        get() = null
+
     /** WeKit 兼容: 功能稳定标识 (FeaturesLoader 注入, 本模块保留以兼容连带代码)。 */
     var technicalId: String = ""
 

@@ -91,6 +91,7 @@ import com.Johnny.wcx.ui.content.liquid.vibrancy
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
@@ -487,6 +488,13 @@ fun FeatureRow(
 
     fun toggle(requested: Boolean) {
         item as SwitchFeature
+        // 当前微信版本已不支持该功能时直接拒绝开启并说明原因，而不是让用户开了发现没反应。
+        val unavailable = if (requested) item.unavailableReason else null
+        if (unavailable != null) {
+            WeLogger.w("SettingsActivity", "拒绝开启 ${item.displayName}：$unavailable")
+            showToast(unavailable)
+            return
+        }
         if (item.onBeforeToggle(requested, context)) {
             WePrefs.putBool(configKey, requested)
             item.isEnabled = requested
