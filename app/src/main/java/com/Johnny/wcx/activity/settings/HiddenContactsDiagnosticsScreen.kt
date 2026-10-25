@@ -231,7 +231,14 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
                     }
                 }
 
-                item { DiagnosticLogCard(context) }
+                item {
+                    Text(
+                        text = "定位过程与失败原因已写入运行日志（日志 → 运行日志），反馈问题时导出该日志发给开发者即可。",
+                        fontSize = 12.sp,
+                        color = BasicComponentDefaults.summaryColor().color,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
                 item {
                     Text(
                         text = "说明：密友的会话/通讯录/标签/搜索/朋友圈/通知/通话等隐藏面已统一由「隐藏联系人」实现，" +

@@ -305,7 +305,14 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                     }
                 }
 
-                item { DiagnosticLogCard(context) }
+                item {
+                    Text(
+                        text = "定位过程与失败原因已写入运行日志（日志 → 运行日志），反馈问题时导出该日志发给开发者即可。",
+                        fontSize = 12.sp,
+                        color = BasicComponentDefaults.summaryColor().color,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
                 item {
                     Text(
                         text = "说明：本页是「全量自检」——覆盖微信公共 API、脚本运行时、Hook 安装任务、关键类锚点、隐藏联系人状态与各分类启用情况。" +
