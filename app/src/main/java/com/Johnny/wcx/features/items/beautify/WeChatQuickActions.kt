@@ -38,22 +38,32 @@ object WeChatQuickActions {
      * 侧边栏会先关闭浮层再执行动作，传进来的引用可能已经 finishing / destroyed；
      * 这里回落到 ActivityThread 里当前存活的 Activity，避免「拿着废引用启动，静默失败」。
      */
+    /** 反射句柄只解析一次：每次点击都 Class.forName 是白白多出来的主线程开销。 */
+    private val activityThreadClass by lazy { Class.forName("android.app.ActivityThread") }
+    private val currentActivityThreadMethod by lazy {
+        activityThreadClass.getDeclaredMethod("currentActivityThread")
+    }
+    private val activitiesField by lazy {
+        activityThreadClass.getDeclaredField("mActivities").apply { isAccessible = true }
+    }
+    private val recordActivityFieldCache = HashMap<Class<*>, java.lang.reflect.Field?>()
+
     fun resolveHost(host: Activity?): Activity? {
         if (host != null && !host.isFinishing && !host.isDestroyed) return host
         return runCatching {
-            val activityThreadClass = Class.forName("android.app.ActivityThread")
-            val thread = activityThreadClass.getDeclaredMethod("currentActivityThread")
-                .invoke(null) ?: return@runCatching null
-            val recordsField = activityThreadClass.getDeclaredField("mActivities")
-                .apply { isAccessible = true }
+            val thread = currentActivityThreadMethod.invoke(null) ?: return@runCatching null
             @Suppress("UNCHECKED_CAST")
-            val records = recordsField.get(thread) as? Map<Any, Any?> ?: return@runCatching null
+            val records = activitiesField.get(thread) as? Map<Any, Any?> ?: return@runCatching null
             records.values.asSequence().mapNotNull { record ->
                 record ?: return@mapNotNull null
                 runCatching {
-                    record.javaClass.getDeclaredField("activity")
-                        .apply { isAccessible = true }
-                        .get(record) as? Activity
+                    val field = recordActivityFieldCache.getOrPut(record.javaClass) {
+                        runCatching {
+                            record.javaClass.getDeclaredField("activity")
+                                .apply { isAccessible = true }
+                        }.getOrNull()
+                    } ?: return@runCatching null
+                    field.get(record) as? Activity
                 }.getOrNull()
             }.firstOrNull { !it.isFinishing && !it.isDestroyed }
         }.getOrNull()

@@ -103,11 +103,18 @@ internal class HomeSidePanelActionExecutor(
         // HomeSidePanel.animateTo 在动画被 cancel 时 onAnimationEnd 会直接 return，
         // afterClosed 将永不触发，导致动作丢失（表现为“点击无反应”）。
         WeLogger.i(TAG, "侧边栏动作触发：$kind")
-        // 关闭浮层失败（动画/手势状态异常）绝不能连累动作执行，否则就是「点了没反应」。
-        runCatching { closePanel(null) }
-            .onFailure { WeLogger.w(TAG, "关闭面板失败，继续执行动作：$kind", it) }
+        // 先提交目标页面启动，再收起浮层：目标 Activity 会立刻盖上来，用户感觉是「秒跳」，
+        // 也不用为根本看不到的关闭动画逐帧付掉帧的代价。
         runCatching { executeAfterPanelClosed(kind) }
             .onFailure { WeLogger.e(TAG, "侧边栏动作执行异常：$kind", it) }
+        // 收起浮层挪到下一帧：这一帧已经被 startActivity 的 Binder 调用占满，
+        // 再叠加面板收起动画就会明显掉帧（用户感知就是「卡一下才跳」）。
+        val deferredClose = Runnable {
+            runCatching { closePanel(null) }
+                .onFailure { WeLogger.w(TAG, "关闭面板失败（动作已执行）：$kind", it) }
+        }
+        val decor = activity.window?.decorView
+        if (decor != null) decor.post(deferredClose) else deferredClose.run()
     }
 
     fun openPaymentCode() {

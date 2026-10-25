@@ -58,6 +58,7 @@ import okhttp3.OkHttpClient
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import android.graphics.Color as AndroidColor
@@ -1331,8 +1332,12 @@ object HomeSidePanel : SwitchFeature() {
             contentWrapper.scaleY = transform.scale
             contentWrapper.translationX = transform.translationXPx
             contentWrapper.translationY = transform.translationYPx
-            outlineProvider.radiusPx = 28.dpToPx(activity).toFloat() * transform.easedProgress
-            contentWrapper.invalidateOutline()
+            // invalidateOutline 每帧调用会重算轮廓阴影，半径变化不到半个像素就别刷。
+            val radiusPx = 28.dpToPx(activity).toFloat() * transform.easedProgress
+            if (abs(outlineProvider.radiusPx - radiusPx) > 0.5f) {
+                outlineProvider.radiusPx = radiusPx
+                contentWrapper.invalidateOutline()
+            }
 
             if (p > CLOSED_EPSILON) {
                 fabHostView?.let { moveFabHostIntoContentWrapper(it) }
@@ -1345,7 +1350,9 @@ object HomeSidePanel : SwitchFeature() {
             panelView.translationX = -drawerWidthPx * (1f - p)
             overlayRoot.isClickable = p > CLOSED_EPSILON || dragging
             overlayRoot.visibility = if (p > CLOSED_EPSILON || dragging) View.VISIBLE else View.GONE
-            overlayRoot.bringToFront()
+            // bringToFront() 每次都会在父容器里摘掉再插回去并触发 requestLayout，
+            // 放进逐帧动画里就是持续掉帧。只在刚变可见时抬一次。
+            if (becameVisible) overlayRoot.bringToFront()
         }
 
         private fun updateDrawerWidth(): Boolean {
