@@ -557,13 +557,9 @@ fun ScriptDiagnosticsScreen(onBack: () -> Unit) {
                 }
                 item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "市场服务器") }
                 item { MarketServerSettingCard(context) }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "一键诊断与修复") }
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "一键修复") }
                 item {
                     SettingsCard {
-                        ActionRow("一键自检", "逐项检查脚本运行全链路，列出真实问题（带进度）") {
-                            startRun("一键自检", { scriptSelfCheckSteps(context) }, "脚本自检结果")
-                        }
-                        InsetDivider()
                         ActionRow("一键修复", "自动处理可自愈的问题（目录 / 开关 / 就绪阶段 / 重试 / 插件），修完自动复检并给出前后对比；需要适配的项会单独标出") {
                             startRun("一键修复", { scriptRepairSteps(context) }, "脚本修复结果")
                         }
