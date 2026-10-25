@@ -9,19 +9,25 @@ import com.Johnny.wcx.features.api.net.models.protobuf.NearbyFriendProto
 import com.Johnny.wcx.features.api.net.models.protobuf.WeProto
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.int
 import java.util.LinkedList
 
 @Feature(name = "自动添加附近的人", categories = ["联系人与群组"], description = "在附近的人菜单中添加菜单项, 可全自动向附近的人按模板发送消息 (没写完)")
 object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
 
-    private val methodCreateMenu by dexMethod {
+    private const val TAG = "AutoAddNearbyFriends"
+
+    // 锚点允许失败：微信 8.0.79 起「附近的人」页面改版，
+    // NearbyPersonUIC / NearbySayHiListUI 两个特征串已不存在（实测 8.0.71~8.0.78 才有）。
+    // 允许失败后走占位降级，避免整个功能加载抛异常。
+    private val methodCreateMenu by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("NearbyPersonUIC", "showLiveBottomSheet create menu.")
         }
     }
 
-    private val methodMenuOnClick by dexMethod {
+    private val methodMenuOnClick by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("com.tencent.mm.plugin.nearby.ui.NearbySayHiListUI")
             name = "onMMMenuItemSelected"
@@ -29,6 +35,14 @@ object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
     }
 
     override fun onEnable() {
+        if (methodCreateMenu.isPlaceholder || methodMenuOnClick.isPlaceholder) {
+            WeLogger.w(
+                TAG,
+                "当前微信版本未找到「附近的人」菜单锚点（8.0.79 起页面改版），功能自动跳过"
+            )
+            return
+        }
+
         methodCreateMenu.hookBefore {
             args[0].reflekt().firstMethod {
                 parameters(int, CharSequence::class)

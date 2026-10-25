@@ -1461,19 +1461,31 @@ object Themes : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         loadCurrentTheme()
-        registerEjImageHooks()
-        hookB() // BackgroundBanHook
-        hookC() // BounceViewHook
-        hookD() // ChatHook
-        hookE() // ConversationUIHook
-        hookF() // HomeUIHook
-        hookG() // MMActivityHook
-        hookH() // MMSwitchBtnHook
-        hookI() // PopupWindowHook
-        hookJ() // SettingActivityHook
-        hookK() // SplashHook
-        hookL() // TextColorBanHook
-        hookPreference() // C0465dy PreferenceHook
+        // 每个美化组独立隔离：某个锚点在当前微信版本被改名/删除时（例如 8.0.78 起
+        // 表情面板的 "setSelection: %s" 消失），只跳过该组，不再让后面所有美化项一起失效。
+        val groups = listOf<Pair<String, () -> Unit>>(
+            "表情图片" to ::registerEjImageHooks,
+            "背景拦截" to ::hookB,
+            "回弹视图" to ::hookC,
+            "聊天页" to ::hookD,
+            "会话列表" to ::hookE,
+            "首页" to ::hookF,
+            "Activity" to ::hookG,
+            "开关按钮" to ::hookH,
+            "弹窗" to ::hookI,
+            "设置页" to ::hookJ,
+            "启动页" to ::hookK,
+            "文字颜色" to ::hookL,
+            "Preference" to ::hookPreference,
+        )
+        groups.forEach { (label, block) ->
+            runCatching { block() }.onFailure { error ->
+                WeLogger.w(
+                    TAG,
+                    "美化项「$label」在当前微信版本未生效：" + (error.message ?: error.javaClass.simpleName)
+                )
+            }
+        }
     }
 
     /** P5.b —— View.setBackgroundDrawable 拦截（C0838j 17） */
@@ -1944,7 +1956,10 @@ object Themes : ClickableFeature(), IResolveDex {
         }
 
         // C0838j 28 —— 表情面板 tab
-        classSmileyTabAdapter.clazz.reflekt()
+        // 8.0.78 起微信删掉了 "setSelection: %s"，该锚点解析不到时直接跳过本组。
+        if (classSmileyTabAdapter.isPlaceholder) {
+            WeLogger.w(TAG, "表情面板 tab 锚点缺失（8.0.78+ 已改版），跳过该美化项")
+        } else classSmileyTabAdapter.clazz.reflekt()
             .firstMethod { name = "onBindViewHolder" }.hookAfter {
                 val holder = args.getOrNull(0) ?: return@hookAfter
                 val position = args.getOrNull(1) as? Int ?: return@hookAfter
