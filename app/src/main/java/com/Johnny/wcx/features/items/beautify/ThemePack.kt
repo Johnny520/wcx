@@ -208,7 +208,8 @@ object ThemePack {
         val zips = root.listFiles { f -> f.isFile && f.name.endsWith(".zip", ignoreCase = true) }
             ?: return emptyList()
         return zips.mapNotNull { zip ->
-            runCatching { importZip(zip) }
+            // importZip 本身已返回 Result，不能再套一层 runCatching（会变成 Result<Result<Pack>>）
+            importZip(zip)
                 .onSuccess { zip.delete() }
                 .onFailure { WeLogger.w(TAG, "自动导入失败：${zip.name} / ${it.message}") }
                 .getOrNull()
