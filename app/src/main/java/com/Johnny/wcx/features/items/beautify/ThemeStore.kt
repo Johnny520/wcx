@@ -369,7 +369,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             theme.bubbleSelfAsset to builtinBubbleFile(theme, RIGHT_BUBBLE_FILE)
         )
         for ((asset, dest) in entries) {
-            if (!force && dest.exists() && dest.size() > 0) continue
+            // Path 没有 size()，要用 Files.size；0 字节也算「没提取成功」
+            if (!force && dest.exists() && Files.size(dest) > 0L) continue
             val bytes = readBuiltinAsset(asset)
             if (bytes == null) {
                 WeLogger.e(TAG, "内置素材提取失败：${theme.id} / $asset（主题将缺少这一项）")
