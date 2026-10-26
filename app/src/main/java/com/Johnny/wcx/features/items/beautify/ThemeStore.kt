@@ -909,16 +909,6 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }.onFailure { WeLogger.w(TAG, "切换背景层可见性失败：${it.message}") }
     }
 
-    /** 切 Tab：只显示当前 Tab 那张。 */
-    private fun updateTabVisibility(activity: Activity, position: Int) {
-        val decor = activity.window?.decorView as? ViewGroup ?: return
-        val container = decor.findViewWithTag<FrameLayout>(TAB_ROOT_TAG) ?: return
-        for (i in 0..3) {
-            container.findViewWithTag<ImageView>("${TAB_ROOT_TAG}_$i")?.visibility =
-                if (i == position) View.VISIBLE else View.GONE
-        }
-    }
-
     /** 移除 4 页背景容器。 */
     private fun removeTabWallpapers(activity: Activity) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
