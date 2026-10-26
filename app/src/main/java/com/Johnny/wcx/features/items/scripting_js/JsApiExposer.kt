@@ -229,8 +229,15 @@ object JsApiExposer {
         val worker = thread(name = "JsHttpThread") {
             result = runCatching(block)
         }
-        worker.join()
-        return result!!.getOrThrow()
+        try {
+            worker.join()
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw IllegalStateException("HTTP 请求被中断", interrupted)
+        }
+        // worker 被中断/异常退出时 result 仍为 null，直接用 !! 会 NPE 掩盖真实原因
+        val done = result ?: throw IllegalStateException("HTTP 请求线程未返回结果（可能被中断）")
+        return done.getOrThrow()
     }
 
     /** Plain holder for response data read off the main thread; converted to JS on the JS thread. */

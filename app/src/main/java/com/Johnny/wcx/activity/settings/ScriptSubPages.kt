@@ -3,6 +3,7 @@ package com.Johnny.wcx.activity.settings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,6 +61,9 @@ import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.preferences.WePrefs
 import h.Hchat.hooks.core.HookRegistry
 import h.Hchat.hooks.items.script.market.PluginMarketSettings
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import com.Johnny.wcx.utils.fs.KnownPaths
 import h.Hchat.hooks.core.DexInstallScheduler
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -283,8 +287,28 @@ private fun scriptSelfCheckSteps(context: Context): List<ScriptRunStep> {
     }
 
     steps += ScriptRunStep("市场服务器地址") {
-        val server = runCatching { PluginMarketSettings.serviceUrl(context) }.getOrNull().orEmpty()
-        server.isNotBlank() to server.ifBlank { "为空：在线插件市场不可用" }
+        val configured = runCatching { PluginMarketSettings.serviceUrl(context) }.getOrNull().orEmpty()
+        if (configured.isBlank()) {
+            false to "为空：在线插件市场不可用"
+        } else {
+            val failure = probeMarketServer(configured)
+            when {
+                failure == null -> true to "$configured（/health 正常）"
+                failure == MARKET_PROBE_SKIPPED -> true to "$configured（主线程，未检测连通性）"
+                // 自定义地址不回落，只报告
+                !PluginMarketSettings.isPreset(configured) -> false to "$configured 不可用：$failure（自定义地址，不会自动切换）"
+                else -> {
+                    val alternate = PluginMarketSettings.presetServiceUrls()
+                        .firstOrNull { !it.equals(configured, ignoreCase = true) }
+                    val alternateText = when {
+                        alternate == null -> ""
+                        probeMarketServer(alternate) == null -> "；请求已自动切换到 $alternate（该服务器可用）"
+                        else -> "；备用 $alternate 同样不可用"
+                    }
+                    false to "$configured 不可用：$failure$alternateText"
+                }
+            }
+        }
     }
     steps += ScriptRunStep("宿主进程") {
         val p = runCatching { TargetProcesses.currentName }.getOrDefault("未知")
@@ -298,6 +322,47 @@ private fun scriptSelfCheckSteps(context: Context): List<ScriptRunStep> {
         (d != null) to (d ?: "未知")
     }
     return steps
+}
+
+// —— 在线插件市场服务器：真实连通性探测（3s 超时，结果缓存 60s 避免修复流程重复探测）——
+
+private const val MARKET_PROBE_TTL_MS = 60_000L
+private const val MARKET_PROBE_SKIPPED = "跳过检测（主线程）"
+
+private val marketProbeCache = HashMap<String, Pair<Long, String?>>()
+private val marketProbeLock = Any()
+
+/** 请求 /health；返回 null 表示可用，否则返回失败原因。 */
+private fun probeMarketServer(base: String): String? = synchronized(marketProbeLock) {
+    val now = System.currentTimeMillis()
+    marketProbeCache[base]?.let { (at, failure) ->
+        if (now - at < MARKET_PROBE_TTL_MS) return failure
+    }
+    val failure = if (Looper.myLooper() == Looper.getMainLooper()) {
+        MARKET_PROBE_SKIPPED
+    } else {
+        runCatching {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
+                .callTimeout(5, TimeUnit.SECONDS)
+                .build()
+            val url = base.trim().trimEnd('/') + "/health"
+            val request = Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) error("HTTP ${response.code}")
+                val compact = body.filterNot { it.isWhitespace() }
+                if (!compact.contains("\"ok\":true")) error("响应缺少 ok:true")
+            }
+        }.fold({ null }, { it.message?.takeIf { m -> m.isNotBlank() } ?: it.javaClass.simpleName })
+    }
+    marketProbeCache[base] = now to failure
+    failure
 }
 
 /**
@@ -365,6 +430,32 @@ private fun scriptRepairSteps(context: Context): List<ScriptRunStep> {
             failures.isEmpty() to buildString {
                 append("已重载 ").append(okCount).append(" / ").append(enabled.size).append(" 个")
                 if (failures.isNotEmpty()) append("，失败：").append(failures.joinToString("、"))
+            }
+        }
+    }
+    steps += ScriptRunStep("检测市场服务器") {
+        val configured = runCatching { PluginMarketSettings.serviceUrl(context) }.getOrNull().orEmpty()
+        if (configured.isBlank()) {
+            PluginMarketSettings.saveServiceUrl(context, PluginMarketSettings.DEFAULT_SERVICE_URL)
+            true to "地址为空，已恢复为官方地址 ${PluginMarketSettings.DEFAULT_SERVICE_URL}"
+        } else {
+            val failure = probeMarketServer(configured)
+            when {
+                failure == null || failure == MARKET_PROBE_SKIPPED -> true to "$configured 可用，无需切换"
+                // 自定义地址只报告，不擅自改（避免把数据发到别人服务器）
+                !PluginMarketSettings.isPreset(configured) ->
+                    false to "$configured 不可用：$failure；自定义地址不做自动切换，请手动修改"
+                else -> {
+                    val usable = PluginMarketSettings.presetServiceUrls()
+                        .filter { !it.equals(configured, ignoreCase = true) }
+                        .firstOrNull { probeMarketServer(it) == null }
+                    if (usable == null) {
+                        false to "内置服务器都不可用（网络或服务端故障）：$failure"
+                    } else {
+                        PluginMarketSettings.saveServiceUrl(context, usable)
+                        true to "已从不可用的 $configured 切换到 $usable"
+                    }
+                }
             }
         }
     }
