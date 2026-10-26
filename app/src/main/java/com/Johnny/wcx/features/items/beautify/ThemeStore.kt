@@ -801,7 +801,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                     }
                 }
                 iv.alpha = alpha
-                iv.visibility = if (i == lastTabIndex) View.VISIBLE else View.GONE
+                // lastTabIndex 在首次挂载时可能还是 -1，这时按当前实际 Tab 兜底，
+                // 否则四张图全是 GONE，用户会看到「没有背景」。
+                val current = if (lastTabIndex in 0..3) lastTabIndex else currentTabIndex(activity)
+                iv.visibility = if (i == current) View.VISIBLE else View.GONE
             }
             wallpaperFailCount = 0
             val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
