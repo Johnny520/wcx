@@ -769,30 +769,25 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 if (child === wallpaper) continue
                 clearOne(child)
                 if (child !is ViewGroup) continue
-                val depth = if (child.id == android.R.id.content) 2 else 1
+                val depth = if (child.id == android.R.id.content) 3 else 2
                 clearContainersUntil(child, depth)
             }
         }.onFailure { WeLogger.w(TAG, "清理容器背景异常：${it.message}") }
     }
 
-    /** depth<=0 时停手，避免把页面内部（列表、气泡）的背景也清掉。 */
+    /**
+     * depth<=0 时停手，避免把页面内部（列表 item、气泡）的背景也清掉。
+     * android.R.id.content 这一层额外给 2 层额度，因为页面真正的根布局在它下面。
+     */
     private fun clearContainersUntil(parent: ViewGroup, depth: Int) {
         if (depth <= 0) return
         for (i in 0 until parent.childCount) {
             val v = parent.getChildAt(i)
-            if (v is ViewGroup && isSurfaceContainer(v)) {
-                clearOne(v)
-                clearContainersUntil(v, depth - 1)
-            }
+            if (v !is ViewGroup) continue
+            clearOne(v)
+            val nextDepth = if (v.id == android.R.id.content) maxOf(depth - 1, 2) else depth - 1
+            clearContainersUntil(v, nextDepth)
         }
-    }
-
-    private fun isSurfaceContainer(v: View): Boolean {
-        if (v is ImageView) return false
-        val n = v.javaClass.name
-        return n.contains("FrameLayout") || n.contains("LinearLayout") ||
-            n.contains("RelativeLayout") || n == "android.view.View" ||
-            n.contains("ActionBarOverlayLayout")
     }
 
     private fun clearOne(v: View) {
