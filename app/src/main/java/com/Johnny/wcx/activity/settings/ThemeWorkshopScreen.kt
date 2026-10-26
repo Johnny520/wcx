@@ -371,6 +371,12 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         onClick = { showPicker = true },
                     )
                     RowDivider()
+                    // 当前真正生效的主题（点「应用」并划掉微信重开后才会变）
+                    InfoRow(
+                        label = "当前主题",
+                        value = if (active.isBlank()) "未应用（微信原生）" else themeName(active),
+                    )
+                    RowDivider()
                     OpacityRow(tick)
                 }
             }
@@ -1025,6 +1031,24 @@ private fun NavRow(title: String, summary: String, onClick: () -> Unit) {
             }
         }
         Text("›", fontSize = 20.sp, color = summaryColor())
+    }
+}
+
+/** 只读信息行（右侧不显示箭头，表示不可点）。 */
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 15.sp, color = titleColor(), modifier = Modifier.weight(1f))
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            color = MiuixTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
