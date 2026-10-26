@@ -106,6 +106,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var builtinLongPress by remember { mutableStateOf("") }
     var longPressTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
+    var confirmClearCache by remember { mutableStateOf(false) }
     var appliedDialog by remember { mutableStateOf(false) }
     var enableConfirm by remember { mutableStateOf(false) }
     var showRandomPool by remember { mutableStateOf(false) }
@@ -321,6 +322,13 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             onClick = {
                                 menuOpen = false
                                 confirmReset = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("清除主题缓存") },
+                            onClick = {
+                                menuOpen = false
+                                confirmClearCache = true
                             },
                         )
                         DropdownMenuItem(
@@ -731,6 +739,35 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = { TextButton(onClick = { showPicker = false }) { Text("关闭") } },
+        )
+    }
+
+    if (confirmClearCache) {
+        AlertDialog(
+            onDismissRequest = { confirmClearCache = false },
+            title = { Text("清除主题缓存") },
+            text = {
+                Text(
+                    "会清掉：已应用的气泡文件、内置主题素材缓存、已挂的背景层。\n" +
+                        "不会删除你的主题包，也不会动备份。\n\n" +
+                        "用于「换了主题但旧气泡还在」或「没在用主题却还有残留气泡」的情况。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClearCache = false
+                    runCatching { ThemeStore.clearThemeCache() }
+                        .onSuccess {
+                            refreshAll()
+                            showToast(context, "已清除主题缓存，气泡恢复微信原生")
+                        }
+                        .onFailure {
+                            WeLogger.w("ThemeWorkshop", "清除缓存失败：${it.message}")
+                            showToast(context, "清除失败：${it.message}")
+                        }
+                }) { Text("清除") }
+            },
+            dismissButton = { TextButton(onClick = { confirmClearCache = false }) { Text("取消") } },
         )
     }
 

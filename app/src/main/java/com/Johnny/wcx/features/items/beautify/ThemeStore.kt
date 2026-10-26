@@ -1173,6 +1173,31 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     fun restoreDefaultTheme() = restoreDefault()
 
     /**
+     * 清除主题相关缓存（应急用）。
+     *
+     * 场景：换主题后旧气泡没被替换、或没在用主题却还留着残留气泡时，
+     * 一键把「模块目录里的气泡文件 + 内置素材提取缓存 + 已挂的背景层」全部清掉，
+     * 让微信回到原生样式。不会删用户的主题包本身，也不会动气泡备份。
+     */
+    fun clearThemeCache() {
+        runCatching {
+            clearCurrentBubbles()
+            // 内置素材提取缓存：下次应用主题会重新从 APK 提取
+            runCatching {
+                builtinDir.toFile().deleteRecursively()
+                builtinDir.createDirsSafe()
+            }
+            tabLoadedPaths.clear()
+            lastLoggedWallpaper = null
+            // 撤掉已经挂在页面上的背景
+            liveActivities().forEach { removeWallpaper(it) }
+            // 关掉气泡接管，避免它继续生效
+            WePrefs.putBool(CUSTOM_BUBBLES_PREF_KEY, false)
+            WeLogger.i(TAG, "已清除主题相关缓存（气泡 / 内置素材 / 背景层）")
+        }.onFailure { WeLogger.w(TAG, "清除主题缓存失败：${it.message}") }
+    }
+
+    /**
      * 关掉「随机聊天背景」时，立刻把已经挂在聊天页上的壁纸撤掉，
      * 不用等用户退出再进一次聊天界面。
      */
