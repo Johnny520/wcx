@@ -752,6 +752,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
+    /** 日志去重：同一个壁纸路径只打一次。 */
+    @Volatile
+    private var lastLoggedWallpaper: String? = null
+
     // 每个 Activity 原始的窗口背景，撤销主题时原样放回去
     private val savedWindowBackgrounds =
         java.util.WeakHashMap<Activity, android.graphics.drawable.Drawable?>()
