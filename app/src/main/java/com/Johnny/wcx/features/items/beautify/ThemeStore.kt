@@ -55,6 +55,8 @@ import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
+import com.Johnny.wcx.activity.settings.SettingsActivity
+import com.Johnny.wcx.activity.settings.SettingsNavigation
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent
@@ -747,6 +749,29 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // 设置 UI：主题商城（入口：wcx 设置 → 设置 → 微信主题）
     // ══════════════════════════════════════════════════════════
     override fun onClick(context: ComponentActivity) {
+        // 主题改为独立子页面（主题工坊）；非设置页触发时回退旧对话框。
+        if (context is SettingsActivity) {
+            SettingsNavigation.requestThemeWorkshop()
+        } else {
+            showThemeStoreDialog(context)
+        }
+    }
+
+    // ── 供「主题工坊」页面调用的公开入口 ─────────────────────────────────
+    /** 内置主题（id to 名称）。 */
+    fun builtinThemeItems(): List<Pair<String, String>> = builtinThemes.map { it.id to it.name }
+
+    fun activeThemeIdOrEmpty(): String = activeThemeId
+
+    /** 应用主题（内置或主题包），并同步一次壁纸透明度。 */
+    fun applyThemeById(id: String) {
+        applyThemeInternal(id)
+        updateAlphaOnLive(overlayOpacityPct.coerceIn(5, 100) / 100f)
+    }
+
+    fun restoreDefaultTheme() = restoreDefault()
+
+    private fun showThemeStoreDialog(context: ComponentActivity) {
         try {
             ensureAllBuiltinExtracted()
             showComposeDialog(context) {

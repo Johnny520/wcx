@@ -32,6 +32,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -175,7 +177,7 @@ val FEATURE_CATEGORIES = listOf(
 // ---------------------------------------------------------------------------
 
 /** Navigation targets for the Settings activity's stack. */
-private sealed interface SettingsNavTarget {
+internal sealed interface SettingsNavTarget {
     data object Main : SettingsNavTarget
     data class Category(val name: String) : SettingsNavTarget
     data object License : SettingsNavTarget
@@ -186,11 +188,33 @@ private sealed interface SettingsNavTarget {
     data object ScriptFaq : SettingsNavTarget
     data object HiddenContactsDiagnostics : SettingsNavTarget
     data object ModuleHealth : SettingsNavTarget
+    data object ThemeWorkshop : SettingsNavTarget
+}
+
+/**
+ * 功能对象（在 Compose 之外）点击后要进子页面时的投递口。
+ * 例如「界面美化 → 主题」：ThemeStore.onClick 只能拿到 Activity，拿不到导航栈。
+ */
+internal object SettingsNavigation {
+    val pending = mutableStateOf<SettingsNavTarget?>(null)
+
+    fun requestThemeWorkshop() {
+        pending.value = SettingsNavTarget.ThemeWorkshop
+    }
 }
 
 @Composable
 private fun SettingsRoot(onFinish: () -> Unit) {
     val stack = remember { mutableStateListOf<SettingsNavTarget>(SettingsNavTarget.Main) }
+
+    // 接住功能对象的导航请求，避免「点了主题只弹对话框」这种割裂体验。
+    val navRequest = SettingsNavigation.pending.value
+    LaunchedEffect(navRequest) {
+        if (navRequest != null) {
+            stack.add(navRequest)
+            SettingsNavigation.pending.value = null
+        }
+    }
 
     MiuixStackNavigator(stack = stack, onExitRoot = onFinish) { screen, push, pop ->
         when (screen) {
@@ -226,6 +250,8 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             SettingsNavTarget.ScriptDiagnostics -> ScriptDiagnosticsScreen(onBack = pop)
 
             SettingsNavTarget.ScriptFaq -> ScriptFaqScreen(onBack = pop)
+
+            SettingsNavTarget.ThemeWorkshop -> ThemeWorkshopScreen(onBack = pop)
 
             SettingsNavTarget.HiddenContactsDiagnostics -> HiddenContactsDiagnosticsScreen(onBack = pop)
 
