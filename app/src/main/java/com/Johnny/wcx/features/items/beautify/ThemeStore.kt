@@ -827,10 +827,32 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private fun fileForTab(files: List<File?>, tab: Int): File? =
         files.getOrNull(tab) ?: files.firstOrNull { it != null }
 
+    /** 从它当前的父容器摘掉自己（壁纸层可能挂在内容容器的父级，不一定是 DecorView）。 */
+    private fun detach(v: View?) {
+        val parent = v?.parent as? ViewGroup ?: return
+        runCatching { parent.removeView(v) }
+    }
+
+    /**
+     * 壁纸层的宿主 = `android.R.id.content`（FrameLayout），插在它的 index 0，位于页面根之下。
+     *
+     * 为什么不用 DecorView：
+     * - DecorView 的 index 0 是窗口内容容器，微信 LauncherUI 空闲时预加载聊天页
+     *   （Log tag `MicroMsg.LauncherUI.NewChattingTabUI` / 方法 `queueIdle`）会按既有
+     *   子节点序列找容器，多插一层就会被当成容器，findViewById 返回 null 后
+     *   `setVisibility` 直接 NPE 崩主线程（2026-10-27 02:24 那次崩溃）。
+     * - 挂在 content 里是纯叠层（FrameLayout），既不改变 DecorView/screen_simple 的
+     *   子序列，也不会像 LinearLayout 那样把页面挤出去。
+     */
+    private fun wallpaperHost(decor: ViewGroup): Pair<ViewGroup, Int>? {
+        val content = runCatching { decor.findViewById<ViewGroup>(android.R.id.content) }.getOrNull() ?: return null
+        return content to 0
+    }
+
     /**
      * 挂 / 更新 4 个页面的背景。
      *
-     * 只用**一个自绘 View**（没有子 View），插在 DecorView index 0：
+     * 只用**一个自绘 View**（没有子 View），插在 android.R.id.content 的最底层：
      * 子 View 越少、类型越简单，微信无障碍的视图遍历越不容易出问题
      * （之前用 FrameLayout + 4 个 ImageView，多出了 5 个陌生节点）。
      */
@@ -846,24 +868,34 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         val existing = decor.findViewWithTag<View>(TAB_ROOT_TAG)
         if (files.all { it == null }) {
             WeLogger.w(TAG, "applyTabWallpapers 跳过：当前主题没有可用壁纸文件（active=$activeThemeId）")
-            if (existing != null) decor.removeView(existing)
+            detach(existing)
             tabBitmapPath = null
             return
         }
+        // 不能插在 DecorView 的 index 0：微信 LauncherUI 空闲时会预加载聊天页
+        // （Log tag MicroMsg.LauncherUI.NewChattingTabUI / 方法 queueIdle），那里按 DecorView
+        // 既有子节点找窗口内容容器。多插一层会被它当成容器，findViewById 返回 null 后
+        // setVisibility 直接 NPE 崩主线程（2026-10-27 02:24 那次崩溃）。
+        val hostInfo = wallpaperHost(decor)
+        if (hostInfo == null) {
+            WeLogger.w(TAG, "applyTabWallpapers 跳过：找不到 android.R.id.content 的父容器（${activity.javaClass.name}）")
+            return
+        }
+        val (host, slot) = hostInfo
         try {
             val view: ThemeWallpaperView = if (existing is ThemeWallpaperView) {
                 existing
             } else {
-                if (existing != null) decor.removeView(existing)
+                detach(existing)
                 ThemeWallpaperView(activity).also {
                     it.tag = TAB_ROOT_TAG
-                    decor.addView(it, 0)
+                    host.addView(it, slot, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                 }
             }
-            if (decor.indexOfChild(view) != 0) {
-                val lp = view.layoutParams
-                decor.removeView(view)
-                decor.addView(view, 0, lp)
+            if (view.parent !== host || host.indexOfChild(view) != slot) {
+                val lp = view.layoutParams ?: ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                detach(view)
+                host.addView(view, slot, lp)
             }
             view.visibility = View.VISIBLE
             // 以当前真实页码为准：LauncherUI 重建后 lastTabIndex 是上一次的残值，会挂错图
@@ -919,6 +951,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 if (child !is ViewGroup) continue
                 for (j in 0 until child.childCount) {
                     val inner = child.getChildAt(j) ?: continue
+                    if (inner.tag == TAB_ROOT_TAG) continue
                     if (isStructuralBar(inner)) continue
                     if (inner.id == android.R.id.content && inner is ViewGroup) {
                         for (k in 0 until inner.childCount) {
@@ -993,7 +1026,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private fun removeTabWallpapers(activity: Activity) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
         runCatching {
-            decor.findViewWithTag<View>(TAB_ROOT_TAG)?.let { decor.removeView(it) }
+            detach(decor.findViewWithTag<View>(TAB_ROOT_TAG))
             tabBitmapPath = null
             restoreClearedBackgrounds(activity)
         }
@@ -1047,7 +1080,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         runCatching {
             val decor = activity.window?.decorView as? ViewGroup ?: return@runCatching
             // 兼容历史版本留下的一次性壁纸层
-            decor.findViewWithTag<View>(WALLPAPER_TAG)?.let { decor.removeView(it) }
+            detach(decor.findViewWithTag<View>(WALLPAPER_TAG))
         }
         restoreWindowBackground(activity)
         wallpaperAttached.remove(activity)
