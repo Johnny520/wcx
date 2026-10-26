@@ -1130,7 +1130,7 @@ private fun OpacityRow(tick: Int) {
                 .clickable {
                     overlayMode = !overlayMode
                     runCatching { ThemeStore.setRenderMode(overlayMode) }
-                    showToast(context, if (overlayMode) "已切到覆盖模式，回微信看看" else "已切回背景模式，回微信看看")
+                    showToast(context, if (overlayMode) "已切到覆盖模式，回微信看看" else "已切到背景模式，回微信看看")
                 }
                 .padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1139,9 +1139,9 @@ private fun OpacityRow(tick: Int) {
                 Text("壁纸渲染方式", fontSize = 15.sp, color = titleColor())
                 Text(
                     text = if (overlayMode) {
-                        "覆盖：贴在内容最上层，一定看得见，但会整体压在界面上"
+                        "覆盖：贴在内容最上层，任何版本都看得见（推荐；浓淡用上面的透明度调）"
                     } else {
-                        "背景：写 DecorView 背景，和旧「四 Tab 主题背景」效果一样（推荐）"
+                        "背景：垫在所有内容下面。8.0.79 上常被不透明底板挡住，需要配合清背景"
                     },
                     fontSize = 11.sp,
                     color = summaryColor(),

@@ -174,12 +174,15 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 垫在底层（旧 TabTheme 的做法）会被完全盖住 —— 用户看到的就是「点了应用没反应」。
      * 覆盖式是纯叠层，不依赖页面透明，任何版本都一定能看见；不透明度靠「壁纸透明度」控制。
      */
-    private var renderModePref by prefOption("theme_store_render_mode_v2", RENDER_BACKGROUND)
+    // 默认用「覆盖」：微信 8.0.79 的主界面有多层不透明底板（会话列表外壳 + 每行 item），
+    // 底层方案必须逐层清背景 + 定时重清才能透出来（同类模块 OKK 为此写了近千行清理逻辑）。
+    // 覆盖式是纯叠层，装上就能看见，用户再用「壁纸透明度」调浓淡。
+    private var renderModePref by prefOption("theme_store_render_mode_v3", RENDER_OVERLAY)
 
     private fun isOverlayMode(): Boolean = renderModePref == RENDER_OVERLAY
 
     /** 渲染方式的展示名。 */
-    fun renderModeName(): String = if (isOverlayMode()) "覆盖（最上层）" else "背景（旧效果，推荐）"
+    fun renderModeName(): String = if (isOverlayMode()) "覆盖（推荐）" else "背景（垫底层）"
 
     /** 切换渲染方式：立刻撤掉旧层并在新位置重挂。 */
     fun setRenderMode(overlay: Boolean) {
