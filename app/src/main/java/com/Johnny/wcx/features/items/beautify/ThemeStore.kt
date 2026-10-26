@@ -301,6 +301,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // 应用主题
     // ══════════════════════════════════════════════════════════
     private fun applyThemeInternal(id: String) {
+        // 外部主题包优先：壁纸与左右气泡取自包内素材，缺哪项就跳过，不影响其它维度。
+        ThemePack.find(id)?.let {
+            applyPackInternal(it)
+            return
+        }
         val theme = builtinTheme(id) ?: run { WeLogger.w(TAG, "未知主题：$id"); return }
         try {
             ensureBuiltinExtracted(theme)
@@ -317,6 +322,28 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
+    /** 应用外部主题包（ThemePack）：壁纸 + 左右气泡。 */
+    private fun applyPackInternal(pack: ThemePack.Pack) {
+        try {
+            val left = pack.bubbleOther()
+            val right = pack.bubbleSelf()
+            if (left != null || right != null) {
+                backupExistingBubbles()
+                left?.let { copySafely(it.toPath(), KnownPaths.moduleAssets / LEFT_BUBBLE_FILE) }
+                right?.let { copySafely(it.toPath(), KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE) }
+                WePrefs.putBool(CUSTOM_BUBBLES_PREF_KEY, true)
+            }
+            activeThemeId = pack.id
+            applyThemeToAllLive()
+            WeLogger.i(
+                TAG,
+                "已应用主题包：${pack.name}（壁纸=${pack.wallpaper() != null}，气泡=${left != null}/${right != null}）"
+            )
+        } catch (e: Throwable) {
+            WeLogger.e(TAG, "applyPackInternal 异常", e)
+        }
+    }
+
     private fun copySafely(src: java.nio.file.Path, dst: java.nio.file.Path) {
         if (!src.exists()) { WeLogger.w(TAG, "复制源不存在：${src.absolutePathString()}"); return }
         try {
@@ -326,8 +353,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     /** 壁纸文件（内置主题提取文件）。 */
-    private fun wallpaperSource(): java.nio.file.Path? =
-        builtinTheme(activeThemeId)?.let { builtinWallpaperFile(it) }?.takeIf { it.exists() }
+    private fun wallpaperSource(): java.nio.file.Path? {
+        // 外部主题包优先
+        ThemePack.active()?.wallpaper()?.let { return it.toPath() }
+        return builtinTheme(activeThemeId)?.let { builtinWallpaperFile(it) }?.takeIf { it.exists() }
+    }
 
     // ══════════════════════════════════════════════════════════
     // 全局应用：对所有存活 Activity 挂载沉浸式 + 壁纸悬浮层
@@ -719,6 +749,49 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                                     }
                                 )
                                 Spacer(Modifier.height(4.dp))
+                            }
+                            // ── 外部主题包（ThemePack）──────────────────────────────
+                            var packs by remember { mutableStateOf(ThemePack.list()) }
+                            Spacer(Modifier.height(10.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "外部主题包",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Button(onClick = {
+                                    ThemePack.importPendingZips()
+                                    packs = ThemePack.list()
+                                    showToast(context, "已扫描到 ${packs.size} 个主题包")
+                                }) { Text("刷新") }
+                            }
+                            if (packs.isEmpty()) {
+                                Text(
+                                    "把主题包 zip 放进这个目录后点「刷新」：\n${ThemePack.themesDir().absolutePath}",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                packs.forEach { pack ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            pack.name + (if (currentId == pack.id) "（使用中）" else ""),
+                                            fontSize = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                        )
+                                        Button(onClick = {
+                                            applyThemeInternal(pack.id)
+                                            currentId = pack.id
+                                            updateAlphaOnLive(opacity / 100f)
+                                        }) { Text(if (currentId == pack.id) "已应用" else "应用") }
+                                    }
+                                }
                             }
                             Spacer(Modifier.height(6.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
