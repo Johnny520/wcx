@@ -199,8 +199,8 @@ object VoiceForwardMiuixDialog {
                                 text = "确定",
                                 onClick = {
                                     if (resolved.compareAndSet(false, true)) {
+                                        runCatching { onResult(true) }
                                         close()
-                                        postAfterDialogClose(activity) { onResult(true) }
                                     }
                                 },
                                 modifier = Modifier.weight(1f),
@@ -275,8 +275,8 @@ object VoiceForwardMiuixDialog {
                                         val index = indexed.index
                                         val choice = indexed.value
                                         ModeRow(choice.first, choice.second) {
+                                            runCatching { onSelected(index) }
                                             close()
-                                            postAfterDialogClose(activity) { onSelected(index) }
                                         }
                                     }
                                 }
@@ -327,8 +327,8 @@ object VoiceForwardMiuixDialog {
                         ) {
                             choices.forEachIndexed { index, choice ->
                                 ModeRow(choice.first, choice.second) {
+                                    runCatching { onSelected(index) }
                                     close()
-                                    postAfterDialogClose(activity) { onSelected(index) }
                                 }
                             }
                         }
@@ -406,8 +406,8 @@ object VoiceForwardMiuixDialog {
                                 onClick = confirm@ {
                                     if (selected.isEmpty() && !allowEmpty) return@confirm
                                     val result = selected
+                                    runCatching { onConfirm(result) }
                                     close()
-                                    postAfterDialogClose(activity) { onConfirm(result) }
                                 },
                                 modifier = Modifier.weight(1f),
                                 primary = selected.isNotEmpty() || allowEmpty
@@ -523,8 +523,8 @@ object VoiceForwardMiuixDialog {
                                         error = "内容不能为空"
                                         return@confirm
                                     }
+                                    runCatching { onConfirm(text) }
                                     close()
-                                    postAfterDialogClose(activity) { onConfirm(text) }
                                 },
                                 modifier = Modifier.weight(1f),
                                 primary = value.text.isNotBlank() || allowEmpty
@@ -813,6 +813,13 @@ object VoiceForwardMiuixDialog {
         }
     }
 
+    /**
+     * 弹窗关闭后再执行（旧的时序工具，保留给需要"等窗口消失"的场景）。
+     *
+     * 注意：确认类按钮**不能**用这个 —— `close()` 会回调 onDismiss，插件侧的
+     * DialogCallbackGate 会被清掉，之后再回调插件就永远收不到结果
+     * （表现：插件设置菜单点一下毫无反应）。确认类走「先回调再 close」。
+     */
     private fun postAfterDialogClose(activity: Activity, action: () -> Unit) {
         val decor = activity.window?.decorView ?: return
         decor.postOnAnimation {
