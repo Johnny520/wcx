@@ -397,6 +397,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             copySafely(builtinBubbleFile(theme, RIGHT_BUBBLE_FILE), KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE)
             WePrefs.putBool(CUSTOM_BUBBLES_PREF_KEY, true)
             activeThemeId = id
+            // 切到内置主题时清掉主题包游标，避免上一套主题包继续生效
+            ThemePack.currentId = ""
             applyThemeToAllLive()
             WeLogger.i(TAG, "已应用主题：${theme.name}")
         } catch (e: Throwable) {
@@ -440,6 +442,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 WePrefs.putBool(CUSTOM_BUBBLES_PREF_KEY, true)
             }
             activeThemeId = pack.id
+            // 关键：壁纸读取走 ThemePack.active()（读 currentId）。
+            // 只写 activeThemeId 不写 currentId，重启微信后 wallpaperSource 永远是 null，
+            // 表现就是「应用了、也划掉微信重进了，但还是没背景」。
+            ThemePack.currentId = pack.id
             applyThemeToAllLive()
             WeLogger.i(
                 TAG,
@@ -820,6 +826,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         try {
             restoreBubbleBackup()
             activeThemeId = ""
+            ThemePack.currentId = ""
             liveActivities().forEach { act ->
                 runCatching { removeWallpaper(act) }
                 runCatching { restoreWindow(act) }

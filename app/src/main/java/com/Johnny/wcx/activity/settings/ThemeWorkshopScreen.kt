@@ -1280,7 +1280,7 @@ private fun BuiltinGridCard(
             }
             val badge = when {
                 selected && active -> "使用中"
-                selected -> "待应用"
+                selected -> "当前选择"
                 active -> "使用中"
                 else -> ""
             }
@@ -1349,7 +1349,7 @@ private fun ThemeGridCard(
             )
             val badge = when {
                 selected && active -> "使用中"
-                selected -> "待应用"
+                selected -> "当前选择"
                 active -> "使用中"
                 else -> ""
             }
