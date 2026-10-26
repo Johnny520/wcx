@@ -460,19 +460,18 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
 
     /** 壁纸文件（内置主题提取文件）。 */
     private fun wallpaperSource(activity: Activity? = null): java.nio.file.Path? {
-        // 豁免页（聊天会话、扫一扫、看图）直接不挂壁纸。
-        // 注意：这里必须提前 return null，不能让后面的「全局壁纸」兜底接住，
-        // 否则聊天页依旧会被铺上全局背景 —— 之前聊天页还有主题背景就是这么来的。
-        if (activity != null &&
-            (isChattingPage(activity) || isScannerPage(activity) || isPhotoViewerPage(activity))
-        ) {
-            return null
-        }
-        // 「随机聊天背景」开关：从图池里随机取一张（每次进页面都可能不同）
-        if (WePrefs.getBoolOrFalse(com.Johnny.wcx.features.items.beautify.ThemeExtras.KEY_RANDOM_WALLPAPER)) {
+        // 聊天会话页：只用微信自带聊天背景（用户可在微信里设置）；
+        // 只有打开「随机聊天背景」时才由本模块接管，且只吃图池里的随机图，绝不吃主题壁纸。
+        if (activity != null && isChattingPage(activity)) {
+            if (!WePrefs.getBoolOrFalse(ThemeExtras.KEY_RANDOM_WALLPAPER)) return null
             val pool = ThemePack.randomPoolFiles()
-            if (pool.isNotEmpty()) return pool.random().toPath()
+            return pool.takeIf { it.isNotEmpty() }?.random()?.toPath()
         }
+        // 扫一扫 / 看图页不挂任何壁纸
+        if (activity != null && (isScannerPage(activity) || isPhotoViewerPage(activity))) return null
+
+        // 其余页面（主页 / 通讯录 / 发现 / 我 等）：走主题壁纸。
+        // 这里不再使用随机图池 —— 随机图只属于聊天页。
         // 外部主题包优先，且支持分页面壁纸（某页单独设了就用它，没设退回全局）
         val key = activity?.let { pageWallpaperKey(it) }
         ThemePack.active()?.let { pack ->
@@ -581,11 +580,13 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         // 查看页被壁纸盖住会与照片重叠。查看页多为半透明 Activity / 同窗口浮层 / 独立窗口，
         // 不一定有 Activity resume 信号——因此聊天页（ChattingUI）本身也不挂壁纸，
         // 从源头消除「照片透出聊天页壁纸蒙版」的可能；返回时其他页面 onResume 自动恢复。
-        if (isScannerPage(activity) || isPhotoViewerPage(activity) || isChattingPage(activity)) {
+        if (isScannerPage(activity) || isPhotoViewerPage(activity)) {
             liveActivities().forEach { act ->
                 try { removeWallpaper(act) } catch (e: Throwable) { WeLogger.w(TAG, "豁免页移除壁纸异常", e) }
             }
         } else {
+            // 聊天页也走这里：wallpaperSource 会判断「随机聊天背景」是否开启，
+            // 关着就返回 null → applyWallpaper 内部自动移除，等于用微信自带背景。
             applyWallpaper(activity)
         }
     }

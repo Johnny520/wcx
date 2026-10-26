@@ -328,7 +328,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             Text("随机聊天背景", fontSize = 15.sp, color = titleColor())
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = "从下面图池里随机取一张（已选 ${poolFiles.size}/${ThemePack.RANDOM_POOL_MAX} 张）",
+                                text = "每次进聊天界面从图池随机换一张，只作用于聊天页" +
+                                    "（已选 ${poolFiles.size}/${ThemePack.RANDOM_POOL_MAX} 张）",
                                 fontSize = 12.sp,
                                 color = summaryColor(),
                             )
@@ -583,7 +584,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     if (poolFiles.isEmpty()) {
                         Text(
-                            text = "还没有图片。点下面「添加图片」选一张（最多 5 张，进主页时随机取一张）。",
+                            text = "还没有图片。点下面「添加图片」选一张（最多 5 张，每次进聊天页随机取一张）。",
                             fontSize = 12.sp,
                             color = summaryColor(),
                         )
@@ -632,6 +633,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     GuideLine("3", "应用后要划掉微信", "应用后请从最近任务里把微信划掉，再重新打开微信，才会完全生效。")
                     GuideLine("4", "内置主题", "内置主题只能调透明度，不能改素材；长按卡片可以重命名、改描述；内置主题不能分享。")
                     GuideLine("5", "自己做/分享", "新建主题 → 选图片 → 保存 → 右上角应用；分享按钮只分享自己的主题。")
+                    GuideLine("6", "聊天页规则", "主题只作用于主页/通讯录/发现/我 4 个界面，永远不影响聊天页；聊天页背景由微信自带，或用「随机聊天背景」图池。")
                 }
             },
             confirmButton = { TextButton(onClick = { showGuide = false }) { Text("知道了") } },
