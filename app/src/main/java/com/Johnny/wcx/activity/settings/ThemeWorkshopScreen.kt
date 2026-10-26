@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,8 +63,10 @@ import java.io.File
 /**
  * 主题设置（独立子页面）。
  *
+ * 一套主题 = 4 张界面背景（主页 / 通讯录 / 发现 / 我）+ 2 个点九气泡（左·对方 / 右·自己）。
+ *
  * 布局参照 MDWechat 的分组逻辑：每组一个独立圆角卡片 + 卡片外左上角小标题，
- * 圆角 22dp、柔和阴影、行间 0.6dp 细分割线，整体与 WCX 现有页面同一套配色。
+ * 圆角 22dp、柔和阴影、行间细分割线，与 WCX 现有页面同一套配色。
  *
  * 交互硬约束：
  * 1. 改素材 / 改名称 / 改描述只在「保存主题」时落盘，切换主题会丢弃未保存改动
@@ -75,6 +76,8 @@ import java.io.File
 fun ThemeWorkshopScreen(onBack: () -> Unit) {
     val context = LocalContext.current
 
+    // 默认主题（内置 6 款）与「我的主题」严格分开，不混在一个网格里
+    val builtinThemes = remember { ThemeStore.builtinThemeItems() }
     var packs by remember { mutableStateOf(ThemePack.list()) }
     var active by remember { mutableStateOf(ThemeStore.activeThemeIdOrEmpty()) }
     var editing by remember { mutableStateOf<ThemePack.Pack?>(null) }
@@ -90,14 +93,13 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var descText by remember { mutableStateOf("") }
     var confirmApply by remember { mutableStateOf(false) }
     var longPressTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
-    var colorTarget by remember { mutableStateOf(false) }
 
     // 编辑区草稿：未点保存前只存在内存里
     var draftName by remember { mutableStateOf("") }
     var draftDesc by remember { mutableStateOf("") }
     var descVisible by remember { mutableStateOf(false) }
 
-    // 开关刷新令牌：切换主题 / 应用快照后自增，驱动所有行重新读值
+    // 开关刷新令牌：切换主题 / 应用快照后自增，驱动开关行重新读值
     var tick by remember { mutableStateOf(0) }
 
     fun refreshAll() {
@@ -120,6 +122,15 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         runCatching { ThemeExtras.applySwitches(switches) }
             .onFailure { WeLogger.w("ThemeWorkshop", "同步开关失败：${it.message}") }
         tick++
+    }
+
+    fun saveCurrent(): Boolean {
+        val pack = editing ?: return false
+        ThemePack.updateMeta(pack, draftName, draftDesc.trim())
+        ThemePack.saveSwitches(pack, ThemeExtras.currentSwitches())
+        refreshAll()
+        ThemePack.find(pack.id)?.let { loadDraft(it) }
+        return true
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -149,7 +160,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         val ninePatch = pendingRole.startsWith("bubble_")
         ThemePack.writeImage(pack, context, uri, pendingRole, ninePatch)?.let { updated ->
             loadDraft(updated)
-            showToast(context, "已选择：${roleLabel(pendingRole)}，记得点「保存主题」")
+            showToast(context, "已选择：${roleLabel(pendingRole)}，记得点「保存」")
         }
     }
 
@@ -173,7 +184,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         text = { Text("导入主题") },
                         onClick = {
                             menuOpen = false
-                            importLauncher.launch("application/zip")
+                            importLauncher.launch("*/*")
                         },
                     )
                     DropdownMenuItem(
@@ -237,14 +248,14 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     PrefSwitchRow(
                         key = ThemeExtras.KEY_RANDOM_WALLPAPER,
                         title = "随机聊天背景",
-                        summary = "每次进入主页从主题的多张背景中随机选一张",
+                        summary = "每次进入主页从已有的几张背景里随机挑一张",
                         tick = tick,
                     )
                     RowDivider()
                     FeatureSwitchRow(
                         featureName = "主题商城",
                         title = "主题",
-                        summary = "总开关：关闭后立即还原壁纸与气泡",
+                        summary = "总开关：关闭后立即还原背景与气泡",
                         tick = tick,
                         onChanged = { refreshAll() },
                     )
@@ -266,106 +277,26 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ── 卡片2 快捷功能 ───────────────────────────────
+            // ── 卡片2 快捷功能：保存 / 应用 ──────────────────
             item {
                 GroupCard(title = "快捷功能") {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        PillButton("悬浮按钮", Modifier.weight(1f)) {
-                            toggleFeature("主屏幕添加 FAB", "悬浮按钮", context) { tick++ }
+                        PillButton("保存", Modifier.weight(1f)) {
+                            if (saveCurrent()) showToast(context, "已保存：$draftName")
+                            else showToast(context, "先新建或选择一个主题")
                         }
-                        PillButton("导航抽屉", Modifier.weight(1f)) {
-                            toggleFeature("微信主页侧边栏", "导航抽屉", context) { tick++ }
-                        }
-                    }
-                }
-            }
-
-            // ── 卡片3 聊天美化 ───────────────────────────────
-            item {
-                GroupCard(title = "聊天美化") {
-                    PrefSwitchRow(
-                        key = ThemeExtras.KEY_ROUND_AVATAR,
-                        title = "圆形头像",
-                        summary = "聊天界面头像裁成圆形（重新进入聊天生效）",
-                        tick = tick,
-                    )
-                    RowDivider()
-                    FeatureSwitchRow(
-                        featureName = "自定义消息气泡",
-                        title = "修改聊天气泡",
-                        summary = "替换气泡图片与聊天文字颜色",
-                        tick = tick,
-                        onChanged = { refreshAll() },
-                    )
-                    RowDivider()
-                    FeatureSwitchRow(
-                        featureName = "隐藏主页下滑「最近」页",
-                        title = "隐藏下拉小程序",
-                        summary = "禁止主页下滑进入「最近」页",
-                        tick = tick,
-                        onChanged = { refreshAll() },
-                    )
-                }
-            }
-
-            // ── 卡片4 Tab 栏美化 ─────────────────────────────
-            item {
-                GroupCard(title = "Tab 栏美化") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        PillButton("替换底栏 Tab", Modifier.weight(1f)) {
-                            toggleFeature("美化首页底部导航栏", "替换底栏 Tab", context) { tick++ }
+                        PillButton("应用", Modifier.weight(1f), primary = true) {
+                            if (editing == null) showToast(context, "先新建或选择一个主题")
+                            else confirmApply = true
                         }
                     }
                 }
             }
 
-            // ── 卡片5 标题栏美化 ─────────────────────────────
-            item {
-                GroupCard(title = "标题栏 ActionBar 美化") {
-                    PrefSwitchRow(
-                        key = ThemeExtras.KEY_HIDE_ACTIONBAR,
-                        title = "隐藏标题栏",
-                        summary = "隐藏微信主界面顶部标题栏",
-                        tick = tick,
-                    )
-                    RowDivider()
-                    PrefSwitchRow(
-                        key = ThemeExtras.KEY_HIDE_ACTIONBAR_SEARCH,
-                        title = "隐藏搜索",
-                        summary = "隐藏标题栏右侧搜索按钮",
-                        tick = tick,
-                    )
-                    RowDivider()
-                    PrefSwitchRow(
-                        key = ThemeExtras.KEY_HIDE_ACTIONBAR_MENU,
-                        title = "隐藏菜单",
-                        summary = "隐藏标题栏右侧「+」按钮",
-                        tick = tick,
-                    )
-                    RowDivider()
-                    PrefSwitchRow(
-                        key = ThemeExtras.KEY_ACTIONBAR_COLOR_ENABLED,
-                        title = "标题栏改色",
-                        summary = "使用自定义颜色作为标题栏背景",
-                        tick = tick,
-                    )
-                    RowDivider()
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        PillButton("设置标题栏颜色", Modifier.weight(1f)) { colorTarget = true }
-                    }
-                }
-            }
-
-            // ── 卡片6 主题编辑区 ─────────────────────────────
+            // ── 卡片3 主题编辑 ───────────────────────────────
             item {
                 GroupCard(title = "主题编辑") {
                     Row(
@@ -411,45 +342,73 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         RowDivider()
                         ThemePreview(pack)
                         RowDivider()
-                        MaterialRow("消息气泡素材", "bubble_left", pack, pendingRole,
+                        MaterialRow("主页背景", "wallpaper_chats", pack, pendingRole,
                             { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
                             { updated -> loadDraft(updated) },
                         )
-                        MaterialRow("聊天背景素材", "wallpaper_chats", pack, pendingRole,
+                        MaterialRow("通讯录背景", "wallpaper_contacts", pack, pendingRole,
                             { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
                             { updated -> loadDraft(updated) },
                         )
-                        MaterialRow("顶部标题栏素材", "wallpaper_panel", pack, pendingRole,
+                        MaterialRow("发现页背景", "wallpaper_discover", pack, pendingRole,
                             { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
                             { updated -> loadDraft(updated) },
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            PillButton("保存主题", Modifier.weight(1f)) {
-                                ThemePack.updateMeta(pack, draftName, draftDesc.trim())
-                                ThemePack.saveSwitches(pack, ThemeExtras.currentSwitches())
-                                refreshAll()
-                                ThemePack.find(pack.id)?.let { loadDraft(it) }
-                                showToast(context, "已保存：$draftName")
-                            }
-                            PillButton("应用主题", Modifier.weight(1f), primary = true) {
-                                confirmApply = true
-                            }
+                        MaterialRow("我的背景", "wallpaper_me", pack, pendingRole,
+                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                            { updated -> loadDraft(updated) },
+                        )
+                        MaterialRow("消息气泡 · 左（对方）", "bubble_left", pack, pendingRole,
+                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                            { updated -> loadDraft(updated) },
+                        )
+                        MaterialRow("消息气泡 · 右（自己）", "bubble_right", pack, pendingRole,
+                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                            { updated -> loadDraft(updated) },
+                        )
+                    }
+                }
+            }
+
+            // ── 卡片4 默认主题（内置 6 款，全局壁纸）───────────
+            item {
+                GroupTitleRow("默认主题", "全局")
+            }
+            items((builtinThemes.size + 1) / 2) { rowIndex ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    for (col in 0..1) {
+                        val index = rowIndex * 2 + col
+                        if (index < builtinThemes.size) {
+                            val (id, name) = builtinThemes[index]
+                            BuiltinGridCard(
+                                id = id,
+                                name = name,
+                                active = active == id,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    ThemeStore.applyThemeById(id)
+                                    refreshAll()
+                                    showToast(context, "已应用：$name（进主页生效）")
+                                },
+                            )
+                        } else {
+                            Spacer(Modifier.weight(1f))
                         }
                     }
                 }
             }
 
-            // ── 卡片7 主题预览网格 ───────────────────────────
+            // ── 卡片5 我的主题（自己新建/导入的主题包）──────────
             item {
-                GroupTitleRow("已保存主题", if (packs.isEmpty()) "" else "${packs.size} 个")
+                GroupTitleRow("我的主题", if (packs.isEmpty()) "" else "${packs.size} 个")
             }
             if (packs.isEmpty()) {
                 item {
                     GroupCard(title = null) {
-                        HintRow("还没有主题包。用右上角「⋮ → 导入主题」导入 zip，或直接新建。")
+                        HintRow("还没有自己的主题。点上面「新建主题」，或右上角「⋮ → 导入主题」。")
                     }
                 }
             } else {
@@ -490,11 +449,11 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             title = { Text("使用说明") },
             text = {
                 Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    GuideLine("1", "选主题", "「主题基础 → 点主题那行」从已保存主题里挑一个，立即生效。")
-                    GuideLine("2", "导入", "右上角 ⋮ → 导入主题，选一个 zip 包。")
-                    GuideLine("3", "自己做", "新建主题 → 选素材 → 保存主题 → 应用主题。")
+                    GuideLine("1", "一套主题", "4 张界面背景（主页/通讯录/发现/我）+ 左右两个点九气泡。")
+                    GuideLine("2", "自己做", "新建主题 → 逐项选图片 → 点「保存」→ 点「应用」。")
+                    GuideLine("3", "导入", "右上角 ⋮ → 导入主题，选一个 zip 包。")
                     GuideLine("4", "分享", "⋮ → 导出主题 / 分享主题，把 zip 发给别人导入。")
-                    GuideLine("5", "重要", "改素材、改名字不会生效，必须「保存主题」；只有「应用主题」会重启微信。")
+                    GuideLine("5", "重要", "只选图不保存不生效；只有「应用」会重启微信。")
                 }
             },
             confirmButton = { TextButton(onClick = { showGuide = false }) { Text("知道了") } },
@@ -536,14 +495,23 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             title = { Text("选择主题") },
             text = {
                 Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    ThemeStore.builtinThemeItems().forEach { (id, name) ->
-                        PickerRow(name, active == id) {
+                    PickerSectionTitle("默认主题（全局）")
+                    builtinThemes.forEach { (id, name) ->
+                        PickerRow("$name · 全局", active == id) {
                             showPicker = false
                             ThemeStore.applyThemeById(id)
-                            ThemePack.find(id)?.let { loadDraft(it) }
                             refreshAll()
                             showToast(context, "已应用：$name")
                         }
+                    }
+                    PickerSectionTitle("我的主题")
+                    if (packs.isEmpty()) {
+                        Text(
+                            text = "还没有自己的主题",
+                            fontSize = 12.sp,
+                            color = summaryColor(),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                        )
                     }
                     packs.forEach { pack ->
                         PickerRow(pack.name, active == pack.id) {
@@ -557,56 +525,6 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = { TextButton(onClick = { showPicker = false }) { Text("关闭") } },
-        )
-    }
-
-    if (colorTarget) {
-        AlertDialog(
-            onDismissRequest = { colorTarget = false },
-            title = { Text("标题栏颜色") },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    val presets = listOf(
-                        "深灰" to 0xFF1E1E1E.toInt(),
-                        "纯黑" to 0xFF000000.toInt(),
-                        "微信绿" to 0xFF07C160.toInt(),
-                        "品牌蓝" to 0xFF2E7DFF.toInt(),
-                        "米白" to 0xFFF7F7F7.toInt(),
-                        "淡紫" to 0xFF6F5BD6.toInt(),
-                    )
-                    presets.chunked(3).forEach { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            rowItems.forEach { (name, value) ->
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(value))
-                                        .clickable {
-                                            WePrefs.putInt(ThemeExtras.KEY_ACTIONBAR_COLOR, value)
-                                            WePrefs.putBool(ThemeExtras.KEY_ACTIONBAR_COLOR_ENABLED, true)
-                                            colorTarget = false
-                                            tick++
-                                            showToast(context, "已设为$name，重进主页生效")
-                                        }
-                                        .padding(vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                ) {
-                                    Text(
-                                        text = name,
-                                        fontSize = 12.sp,
-                                        color = if (value == 0xFFF7F7F7.toInt()) Color.Black else Color.White,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { colorTarget = false }) { Text("关闭") } },
         )
     }
 
@@ -696,10 +614,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     confirmApply = false
-                    editing?.let { pack ->
-                        ThemePack.saveSwitches(pack, ThemeExtras.currentSwitches())
-                        ThemeStore.applyThemeById(pack.id)
-                    }
+                    saveCurrent()
+                    editing?.let { ThemeStore.applyThemeById(it.id) }
                     showToast(context, "正在重启微信…")
                     runCatching { restartHost() }
                         .onFailure { showToast(context, "重启失败：${it.message}") }
@@ -779,10 +695,7 @@ private fun PrefSwitchRow(key: String, title: String, summary: String, tick: Int
         checked = on
         ThemeExtras.onPrefChanged(key, on)
         if (key == ThemeExtras.KEY_AUTO_BY_TIME && on) {
-            val day = ThemePrefsConfig.dayTheme
-            val night = ThemePrefsConfig.nightTheme
-            if (day.isBlank() || night.isBlank()) {
-                // 未配置就默认用当前主题，避免开关开了却什么都不发生
+            if (ThemeExtras.autoThemeForNow() == null) {
                 val cur = ThemeStore.activeThemeIdOrEmpty()
                 if (cur.isNotBlank()) ThemeExtras.setAutoThemes(cur, cur)
             }
@@ -807,11 +720,7 @@ private fun FeatureSwitchRow(
     }
     var checked by remember(feature, tick) { mutableStateOf(feature.isEnabled) }
     val reason = feature.unavailableReason
-    SwitchRow(
-        title = title,
-        summary = reason ?: summary,
-        checked = checked,
-    ) { on ->
+    SwitchRow(title = title, summary = reason ?: summary, checked = checked) { on ->
         if (reason != null) {
             showToast(context, reason)
             return@SwitchRow
@@ -841,7 +750,7 @@ private fun SwitchRow(title: String, summary: String, checked: Boolean, onChange
                 Text(summary, fontSize = 12.sp, color = summaryColor())
             }
         }
-        Spacer(Modifier.size(10.dp))
+        Spacer(Modifier.padding(start = 10.dp))
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }
@@ -899,10 +808,10 @@ private fun PillButton(
     }
 }
 
-/** 主题预览缩略图（用主题自己的聊天背景图，没有就显示占位）。 */
+/** 主题预览缩略图：优先主页背景，退回全局壁纸。 */
 @Composable
 private fun ThemePreview(pack: ThemePack.Pack) {
-    val file = pack.wallpaperFor("wallpaper_chats") ?: pack.wallpaper()
+    val file = pack.wallpaperFor("chats")
     val bitmap = remember(pack.id, file?.absolutePath) {
         file?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
     }
@@ -923,7 +832,7 @@ private fun ThemePreview(pack: ThemePack.Pack) {
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            Text("预览图（选一张聊天背景素材后显示）", fontSize = 12.sp, color = summaryColor())
+            Text("预览图（选一张主页背景后显示）", fontSize = 12.sp, color = summaryColor())
         }
     }
 }
@@ -961,14 +870,69 @@ private fun MaterialRow(
                 if (pack == null) {
                     showToast(context, "先新建或选择一个主题")
                 } else {
-                    val updated = ThemePack.resetRole(pack, role)
-                    if (updated != null) onReset(updated)
+                    ThemePack.resetRole(pack, role)?.let(onReset)
                     showToast(context, "已恢复默认：$title")
                 }
             }
         }
     }
     RowDivider()
+}
+
+/** 默认（内置）主题卡片：只有预览 + 名称 + 「全局」标注，不可重命名/删除。 */
+@Composable
+private fun BuiltinGridCard(
+    id: String,
+    name: String,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val thumb = remember(id) { ThemeStore.builtinThumbnail(id) }
+    val bitmap = remember(id, thumb?.absolutePath) {
+        thumb?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+    }
+    val fallback = remember(id) { Color(ThemeStore.builtinColor(id).toInt()) }
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier = modifier
+            .shadow(elevation = 1.dp, shape = shape, ambientColor = Color.Black.copy(alpha = 0.06f))
+            .clip(shape)
+            .background(MiuixTheme.colorScheme.surface)
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().height(84.dp).background(fallback),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = name,
+                fontSize = 13.sp,
+                color = titleColor(),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Text(" 全局", fontSize = 10.sp, color = summaryColor())
+            Spacer(Modifier.weight(1f))
+            if (active) {
+                Text("使用中", fontSize = 10.sp, color = MiuixTheme.colorScheme.primary)
+            }
+        }
+    }
 }
 
 @Composable
@@ -979,7 +943,7 @@ private fun ThemeGridCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
-    val thumb = pack.wallpaperFor("wallpaper_chats") ?: pack.wallpaper()
+    val thumb = pack.wallpaperFor("chats")
     val bitmap = remember(pack.id, thumb?.absolutePath) {
         thumb?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
     }
@@ -1034,6 +998,17 @@ private fun ThemeGridCard(
 }
 
 @Composable
+private fun PickerSectionTitle(text: String) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = summaryColor(),
+        modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 2.dp),
+    )
+}
+
+@Composable
 private fun PickerRow(name: String, active: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
@@ -1066,53 +1041,14 @@ private fun GuideLine(index: String, title: String, detail: String) {
 // ══════════════════════════════════════════════════════════
 
 private fun roleLabel(role: String): String = when (role) {
-    "wallpaper" -> "全局壁纸"
-    "wallpaper_chats" -> "聊天背景"
-    "wallpaper_panel" -> "顶部标题栏"
-    "bubble_left" -> "消息气泡"
-    "bubble_right" -> "自己的气泡"
+    "wallpaper_chats" -> "主页背景"
+    "wallpaper_contacts" -> "通讯录背景"
+    "wallpaper_discover" -> "发现页背景"
+    "wallpaper_me" -> "我的背景"
+    "bubble_left" -> "消息气泡·左"
+    "bubble_right" -> "消息气泡·右"
     else -> role
 }
 
 private fun findFeature(name: String): SwitchFeature? =
     FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<SwitchFeature>().firstOrNull { it.name == name }
-
-private fun toggleFeature(
-    featureName: String,
-    label: String,
-    context: android.content.Context,
-    onChanged: () -> Unit,
-) {
-    val feature = findFeature(featureName)
-    if (feature == null) {
-        showToast(context, "当前版本没有「$label」功能")
-        return
-    }
-    val reason = feature.unavailableReason
-    if (reason != null && !feature.isEnabled) {
-        showToast(context, reason)
-        return
-    }
-    val target = !feature.isEnabled
-    runCatching {
-        WePrefs.putBool(feature.name, target)
-        feature.isEnabled = target
-    }.onFailure {
-        WeLogger.w("ThemeWorkshop", "切换 $label 失败：${it.message}")
-        showToast(context, "切换失败：${it.message}")
-        return
-    }
-    onChanged()
-    showToast(context, "$label：${if (target) "已开启" else "已关闭"}")
-}
-
-/** 按时间切换主题用的读写（默认取当前主题，避免空配置）。 */
-private object ThemePrefsConfig {
-    var dayTheme: String
-        get() = WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, "")
-        set(value) = WePrefs.putString(ThemeExtras.KEY_AUTO_DAY_THEME, value)
-
-    var nightTheme: String
-        get() = WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, "")
-        set(value) = WePrefs.putString(ThemeExtras.KEY_AUTO_NIGHT_THEME, value)
-}

@@ -305,7 +305,32 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // ══════════════════════════════════════════════════════════
     // 应用主题
     // ══════════════════════════════════════════════════════════
+    /**
+     * 应用主题前确保相关 Feature 已启用。
+     *
+     * 之前「点了内置主题没效果」的根因就在这里：applyThemeById 只写了 activeThemeId，
+     * 但「主题商城」这个 Feature 从未被开启过 → hook 没装 → 页面上根本没人去画壁纸。
+     * 气泡同理依赖「自定义消息气泡」。
+     */
+    private fun ensureThemeFeaturesEnabled() {
+        runCatching {
+            if (!isEnabled) {
+                WeLogger.i(TAG, "主题商城未启用，随「应用主题」自动开启")
+                isEnabled = true
+            }
+            com.Johnny.wcx.features.core.FeaturesProvider.ALL_HOOK_ITEMS
+                .filterIsInstance<com.Johnny.wcx.features.core.SwitchFeature>()
+                .firstOrNull { it.name == CUSTOM_BUBBLES_PREF_KEY }
+                ?.takeIf { !it.isEnabled }
+                ?.let {
+                    WeLogger.i(TAG, "自定义消息气泡未启用，随「应用主题」自动开启")
+                    it.isEnabled = true
+                }
+        }.onFailure { WeLogger.w(TAG, "自动启用主题相关功能失败：${it.message}") }
+    }
+
     private fun applyThemeInternal(id: String) {
+        ensureThemeFeaturesEnabled()
         // 外部主题包优先：壁纸与左右气泡取自包内素材，缺哪项就跳过，不影响其它维度。
         ThemePack.find(id)?.let {
             applyPackInternal(it)
@@ -837,6 +862,16 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // ── 供「主题工坊」页面调用的公开入口 ─────────────────────────────────
     /** 内置主题（id to 名称）。 */
     fun builtinThemeItems(): List<Pair<String, String>> = builtinThemes.map { it.id to it.name }
+
+    /** 默认（内置）主题的缩略图文件；首次调用会把素材从 APK 提取到模块数据目录。 */
+    fun builtinThumbnail(id: String): File? = runCatching {
+        val theme = builtinTheme(id) ?: return@runCatching null
+        ensureBuiltinExtracted(theme)
+        builtinWallpaperFile(theme).takeIf { it.exists() }?.toFile()
+    }.getOrNull()
+
+    /** 默认主题的主题色，壁纸缺失时用来兜底显示。 */
+    fun builtinColor(id: String): Long = builtinTheme(id)?.previewColor ?: 0xFFF0F0F0
 
     fun activeThemeIdOrEmpty(): String = activeThemeId
 
