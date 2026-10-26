@@ -189,7 +189,7 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
             MiuixSmallTitle(text = "微信主题", modifier = Modifier.padding(top = 12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
                 PrefArrow(
-                    title = "主题商城",
+                    title = "主题工坊",
                     summary = "六款卡通主题一键应用：全局沉浸壁纸（主页/设置/朋友圈等全部页面）+ 对应主题气泡，支持透明度调节与备份/恢复",
                     icon = MaterialSymbols.Outlined.Palette,
                     onClick = { com.Johnny.wcx.features.items.beautify.ThemeStore.onClick(context) },

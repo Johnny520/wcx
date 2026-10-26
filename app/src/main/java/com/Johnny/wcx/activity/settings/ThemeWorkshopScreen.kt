@@ -94,6 +94,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var descTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
     var descText by remember { mutableStateOf("") }
     var confirmApply by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
     var longPressTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
 
     // 编辑区草稿：未点保存前只存在内存里
@@ -224,6 +225,13 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                                 if (file != null) "已导出到 ${file.parent}，把这个 zip 发给别人即可"
                                 else "先选一个主题再分享",
                             )
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("恢复默认") },
+                        onClick = {
+                            menuOpen = false
+                            confirmReset = true
                         },
                     )
                     DropdownMenuItem(
@@ -610,11 +618,44 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         )
     }
 
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("恢复默认") },
+            text = {
+                Text(
+                    "将移除所有自定义背景，气泡也恢复成微信原生样式。" +
+                        "背景会立即恢复；气泡要重新进入聊天界面才生效。是否继续？"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    runCatching { ThemeStore.restoreDefaultTheme() }
+                        .onSuccess {
+                            refreshAll()
+                            showToast(context, "已恢复微信原生背景与气泡")
+                        }
+                        .onFailure {
+                            WeLogger.w("ThemeWorkshop", "恢复默认失败：${it.message}")
+                            showToast(context, "恢复失败：${it.message}")
+                        }
+                }) { Text("恢复") }
+            },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("取消") } },
+        )
+    }
+
     if (confirmApply) {
         AlertDialog(
             onDismissRequest = { confirmApply = false },
             title = { Text("应用主题") },
-            text = { Text("应用主题后需要重启微信才能完全生效，是否继续？") },
+            text = {
+                Text(
+                    "会先保存当前主题，再重启微信。\n" +
+                        "重启后自动加载这套主题的背景与气泡，确认重启吗？"
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmApply = false

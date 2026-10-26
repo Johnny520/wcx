@@ -87,7 +87,7 @@ import kotlin.io.path.name
 
 /**
  * 主题商店（v245 全新编写）：
- * - 入口：wcx 设置 → 设置 → 微信主题 → 主题商城
+ * - 入口：wcx 设置 → 设置 → 微信主题 → 主题工坊
  * - 六款内置主题：Hello Kitty（花朵气泡）/ 小熊（miko 小狗边框气泡）/ 线条小狗（加油鸭鸭气泡）/
  *   吉伊卡哇（花朵气泡）/ 美食小狗（面包🍞气泡）/ 小兔子（猫咪气泡）
  * - 使用主题后全局沉浸式：状态栏/导航栏透明，壁纸悬浮层铺满全屏（含状态栏/导航栏区域），
@@ -363,7 +363,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private fun ensureThemeFeaturesEnabled() {
         runCatching {
             if (!isEnabled) {
-                WeLogger.i(TAG, "主题商城未启用，随「应用主题」自动开启")
+                WeLogger.i(TAG, "主题工坊未启用，随「应用主题」自动开启")
+                // 必须同步写 WePrefs：Feature.startup() 是从 pref 读开关的，
+                // 只改内存里的 isEnabled 的话，重启微信后开关又是关的 → 主题整片失效。
+                WePrefs.putBool(NEW_FEATURE_NAME, true)
                 isEnabled = true
             }
             com.Johnny.wcx.features.core.FeaturesProvider.ALL_HOOK_ITEMS
@@ -372,6 +375,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 ?.takeIf { !it.isEnabled }
                 ?.let {
                     WeLogger.i(TAG, "自定义消息气泡未启用，随「应用主题」自动开启")
+                    WePrefs.putBool(CUSTOM_BUBBLES_PREF_KEY, true)
                     it.isEnabled = true
                 }
         }.onFailure { WeLogger.w(TAG, "自动启用主题相关功能失败：${it.message}") }
@@ -466,7 +470,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             }.distinctBy { it.absolutePath }
             ThemeExtras.pickRandom(candidates)?.let { return it.toPath() }
         }
-        return builtinTheme(activeThemeId)?.let { builtinWallpaperFile(it) }?.takeIf { it.exists() }
+        // 内置主题：素材文件可能被清理掉（清缓存/换设备），这里顺手补一次提取，
+        // 否则重启后只剩一个纯色块，用户会以为「应用了没生效」。
+        val builtin = builtinTheme(activeThemeId) ?: return null
+        runCatching { ensureBuiltinExtracted(builtin) }
+            .onFailure { WeLogger.w(TAG, "补提取内置素材失败：${it.message}") }
+        return builtinWallpaperFile(builtin).takeIf { it.exists() }
     }
 
     @Volatile
