@@ -401,6 +401,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         try {
             ensureBuiltinExtracted(theme)
             backupExistingBubbles()
+            clearCurrentBubbles()
             // 气泡写入模块 assets（left=对方 / right=自己），并开启「自定义消息气泡」开关
             copySafely(builtinBubbleFile(theme, LEFT_BUBBLE_FILE), KnownPaths.moduleAssets / LEFT_BUBBLE_FILE)
             copySafely(builtinBubbleFile(theme, RIGHT_BUBBLE_FILE), KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE)
@@ -440,12 +441,22 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     /** 应用外部主题包（ThemePack）：壁纸 + 左右气泡。 */
+    /** 清掉模块目录里当前生效的气泡文件（应用新主题前调用，避免新旧气泡叠加）。 */
+    private fun clearCurrentBubbles() {
+        runCatching {
+            java.nio.file.Files.deleteIfExists(KnownPaths.moduleAssets / LEFT_BUBBLE_FILE)
+            java.nio.file.Files.deleteIfExists(KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE)
+        }.onFailure { WeLogger.w(TAG, "清理旧气泡失败：${it.message}") }
+    }
+
     private fun applyPackInternal(pack: ThemePack.Pack) {
         try {
             val left = pack.bubbleOther()
             val right = pack.bubbleSelf()
             if (left != null || right != null) {
                 backupExistingBubbles()
+                // 先把上一套气泡删掉，只有新主题真正提供了的那一侧才会被重新写入
+                clearCurrentBubbles()
                 left?.let { copySafely(it.toPath(), KnownPaths.moduleAssets / LEFT_BUBBLE_FILE) }
                 right?.let { copySafely(it.toPath(), KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE) }
                 WePrefs.putBool(CUSTOM_BUBBLES_PREF_KEY, true)
@@ -525,6 +536,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         runCatching {
             WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
                 val activity = thisObject as? Activity ?: return@hookAfter
+                // 每次主界面创建/重建都重新挂一遍 4 页背景
+                runCatching { applyTabWallpapers(activity) }
                 val tabsAdapter = runCatching {
                     thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
                 }.getOrNull() ?: return@hookAfter
@@ -535,7 +548,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                         val offset = args.getOrNull(1) as? Float ?: return@hookBefore
                         if (offset == 0f && position != lastTabIndex) {
                             lastTabIndex = position
-                            if (activeThemeId.isNotEmpty()) applyWallpaper(activity)
+                            // 切 Tab 只切显示哪张图，不重新解码
+                            updateTabVisibility(activity, position)
                         }
                     }
                 }.onFailure { WeLogger.w(TAG, "hook onPageScrolled 失败", it) }
@@ -596,14 +610,18 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         // 查看页被壁纸盖住会与照片重叠。查看页多为半透明 Activity / 同窗口浮层 / 独立窗口，
         // 不一定有 Activity resume 信号——因此聊天页（ChattingUI）本身也不挂壁纸，
         // 从源头消除「照片透出聊天页壁纸蒙版」的可能；返回时其他页面 onResume 自动恢复。
-        if (isScannerPage(activity) || isPhotoViewerPage(activity)) {
-            liveActivities().forEach { act ->
-                try { removeWallpaper(act) } catch (e: Throwable) { WeLogger.w(TAG, "豁免页移除壁纸异常", e) }
+        when {
+            // 扫一扫 / 看图页：任何背景都不挂
+            isScannerPage(activity) || isPhotoViewerPage(activity) -> removeWallpaper(activity)
+            // 聊天页：只允许「随机聊天背景」图池，主题壁纸一律不进来
+            isChattingPage(activity) -> {
+                removeTabWallpapers(activity)
+                applyChattingWallpaper(activity)
             }
-        } else {
-            // 聊天页也走这里：wallpaperSource 会判断「随机聊天背景」是否开启，
-            // 关着就返回 null → applyWallpaper 内部自动移除，等于用微信自带背景。
-            applyWallpaper(activity)
+            // 微信主界面：4 个 Tab 的分页背景
+            activity.javaClass.name.orEmpty().endsWith("LauncherUI") -> applyTabWallpapers(activity)
+            // 其它页面（设置页等）：不挂
+            else -> removeWallpaper(activity)
         }
     }
 
@@ -692,142 +710,188 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 注：曾尝试「内容底衬」（挂在窗体容器 index 0）——微信各页根布局不透明会完全盖住底衬
      * （看不到壁纸），且影响微信自绘窗口（wcx 设置入口卡启动图），故回退为顶层悬浮。
      */
-    /**
-     * 挂壁纸。
-     *
-     * 实现方式：直接设置 **窗口背景**（window.setBackgroundDrawable），
-     * 不往 DecorView 里插任何 View。
-     *
-     * 为什么不用「插一个 ImageView」：那样会改变宿主 View 树结构，
-     * 微信的无障碍模块（MMBaseAccessibilityConfig.mockInflateCore）遍历视图时
-     * 遇到未知容器可能自递归导致 StackOverflowError。改窗口背景后：
-     * - View 树零侵入，宿主结构不变
-     * - 壁纸天然在所有内容之下，文字永远在最上层，透明度拉满也不会挡字
-     */
-    private fun applyWallpaper(activity: Activity) {
+    // ══════════════════════════════════════════════════════════
+    // 4 个 Tab 的分页背景（沿用原「四 Tab 主题背景」那套已验证可用的实现）
+    //
+    // 做法：在 DecorView 最底层放一个容器，里面每个 Tab 一个 ImageView，
+    // 切 Tab 时只把对应当前 Tab 的那张设为可见。
+    // 直接把图设成窗口背景是看不见的（会被微信页面自身底色盖住），
+    // 而放在 DecorView index 0 且页面本身透明时就能透出来 —— 这也是旧版能生效的原因。
+    // ══════════════════════════════════════════════════════════
+
+    private const val TAB_ROOT_TAG = "wcx_theme_tab_root"
+
+    private val TAB_NAMES = listOf("主页", "通讯录", "发现", "我")
+
+    /** 已经给某个 Tab 加载过的图片路径，避免每次切页都重新 decode。 */
+    private val tabLoadedPaths = HashMap<Int, String>()
+
+    /** 4 个页面各自的背景文件；内置主题没有分页面素材时用同一张全局图。 */
+    private fun tabWallpaperFiles(): List<java.nio.file.Path?> {
+        val pack = ThemePack.active()
+        val builtin = builtinTheme(activeThemeId)?.let { theme ->
+            runCatching { ensureBuiltinExtracted(theme) }
+            builtinWallpaperFile(theme).takeIf { it.exists() }
+        }
+        return listOf("chats", "contacts", "discover", "me").map { key ->
+            pack?.wallpaperFor(key) ?: builtin
+        }
+    }
+
+    /** 挂 / 更新 4 个页面的背景。 */
+    private fun applyTabWallpapers(activity: Activity) {
         if (wallpaperFailCount >= 3) return
-        val window = activity.window ?: return
-        val decor = window.decorView as? ViewGroup ?: return
-        val src = wallpaperSource(activity)
-        if (src == null) {
-            removeWallpaper(activity)
+        val decor = activity.window?.decorView as? ViewGroup ?: return
+        val files = tabWallpaperFiles()
+        val existing = decor.findViewWithTag<FrameLayout>(TAB_ROOT_TAG)
+        if (files.all { it == null }) {
+            if (existing != null) decor.removeView(existing)
+            tabLoadedPaths.clear()
             return
         }
         try {
-            val bmp = runCatching { BitmapFactory.decodeFile(src.absolutePathString()) }.getOrNull()
-            if (bmp == null) {
-                // 壁纸缺失兜底：主题色
-                val color = currentTheme()?.previewColor?.toInt() ?: 0xFFF0F0F0.toInt()
-                setWindowBackground(activity, ColorDrawable(color))
+            val container: FrameLayout = if (existing == null) {
+                FrameLayout(activity).apply {
+                    tag = TAB_ROOT_TAG
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    isClickable = false
+                    isFocusable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    setBackgroundColor(AndroidColor.TRANSPARENT)
+                }.also { decor.addView(it, 0) }
             } else {
-                val pct = overlayOpacityPct.coerceIn(5, 100)
-                val drawable = android.graphics.drawable.BitmapDrawable(activity.resources, bmp).apply {
-                    setAlpha(pct * 255 / 100)
-                    gravity = android.view.Gravity.FILL
+                if (decor.indexOfChild(existing) != 0) {
+                    val lp = existing.layoutParams
+                    decor.removeView(existing)
+                    decor.addView(existing, 0, lp)
                 }
-                setWindowBackground(activity, drawable)
+                existing
             }
-            // 把内容容器底色清透明，让壁纸透上来（只清容器，不碰文字/气泡）
-            clearSurfaceBackgrounds(decor)
+            val alpha = overlayOpacityPct.coerceIn(5, 100) / 100f
+            for (i in 0..3) {
+                val tag = "${TAB_ROOT_TAG}_$i"
+                var iv = container.findViewWithTag<ImageView>(tag)
+                if (iv == null) {
+                    iv = ImageView(activity).apply {
+                        this.tag = tag
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        layoutParams = FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                        )
+                        visibility = View.GONE
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    }
+                    container.addView(iv)
+                }
+                val file = files[i]
+                if (file == null) {
+                    iv.visibility = View.GONE
+                    continue
+                }
+                val path = file.absolutePathString()
+                if (tabLoadedPaths[i] != path) {
+                    val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
+                    if (bmp != null) {
+                        iv.setImageBitmap(bmp)
+                        tabLoadedPaths[i] = path
+                    }
+                }
+                iv.alpha = alpha
+                iv.visibility = if (i == lastTabIndex) View.VISIBLE else View.GONE
+            }
             wallpaperFailCount = 0
-            val key = src.absolutePathString()
-            if (key != lastLoggedWallpaper) {
-                lastLoggedWallpaper = key
-                WeLogger.i(
-                    TAG,
-                    "壁纸已挂载（窗口背景）：${activity.javaClass.simpleName} ← $key（alpha=$overlayOpacityPct%）"
-                )
+            val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
+            if (info != lastLoggedWallpaper) {
+                lastLoggedWallpaper = info
+                WeLogger.i(TAG, "4 页背景已挂载（$info），当前 Tab=$lastTabIndex")
             }
         } catch (e: Throwable) {
-            WeLogger.w(TAG, "applyWallpaper 异常", e)
+            WeLogger.w(TAG, "applyTabWallpapers 异常", e)
             wallpaperFailCount = wallpaperFailCount + 1
             if (wallpaperFailCount >= 3) {
                 runCatching {
                     activeThemeId = ""
                     ThemePack.currentId = ""
-                    removeWallpaper(activity)
+                    decor.findViewWithTag<View>(TAB_ROOT_TAG)?.let { decor.removeView(it) }
                 }
-                WeLogger.w(TAG, "壁纸连续失败 3 次，已自动关闭主题（恢复微信原生）")
+                WeLogger.w(TAG, "背景连续失败 3 次，已自动关闭主题（恢复微信原生）")
             }
         }
     }
 
-    /** 日志去重：同一个壁纸路径只打一次。 */
-    @Volatile
-    private var lastLoggedWallpaper: String? = null
+    /** 切 Tab：只显示当前 Tab 那张。 */
+    private fun updateTabVisibility(activity: Activity, position: Int) {
+        val decor = activity.window?.decorView as? ViewGroup ?: return
+        val container = decor.findViewWithTag<FrameLayout>(TAB_ROOT_TAG) ?: return
+        for (i in 0..3) {
+            container.findViewWithTag<ImageView>("${TAB_ROOT_TAG}_$i")?.visibility =
+                if (i == position) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** 移除 4 页背景容器。 */
+    private fun removeTabWallpapers(activity: Activity) {
+        val decor = activity.window?.decorView as? ViewGroup ?: return
+        runCatching {
+            decor.findViewWithTag<View>(TAB_ROOT_TAG)?.let { decor.removeView(it) }
+            tabLoadedPaths.clear()
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // 聊天页随机背景（只吃图池，绝不吃主题壁纸）
+    // ══════════════════════════════════════════════════════════
+
+    private fun applyChattingWallpaper(activity: Activity) {
+        val src = wallpaperSource(activity)
+        if (src == null) {
+            restoreWindowBackground(activity)
+            return
+        }
+        runCatching {
+            val bmp = BitmapFactory.decodeFile(src.absolutePathString())
+            if (bmp == null) {
+                restoreWindowBackground(activity)
+                return
+            }
+            val pct = overlayOpacityPct.coerceIn(5, 100)
+            val drawable = android.graphics.drawable.BitmapDrawable(activity.resources, bmp).apply {
+                setAlpha(pct * 255 / 100)
+                gravity = android.view.Gravity.FILL
+            }
+            val window = activity.window ?: return
+            if (!savedWindowBackgrounds.containsKey(activity)) {
+                savedWindowBackgrounds[activity] = window.decorView?.background
+            }
+            window.setBackgroundDrawable(drawable)
+            WeLogger.i(TAG, "聊天页随机背景已挂载：$src")
+        }.onFailure { WeLogger.w(TAG, "聊天页随机背景失败：${it.message}") }
+    }
+
+    private fun restoreWindowBackground(activity: Activity) {
+        if (!savedWindowBackgrounds.containsKey(activity)) return
+        runCatching {
+            activity.window?.setBackgroundDrawable(savedWindowBackgrounds.remove(activity))
+        }
+    }
 
     // 每个 Activity 原始的窗口背景，撤销主题时原样放回去
     private val savedWindowBackgrounds =
         java.util.WeakHashMap<Activity, android.graphics.drawable.Drawable?>()
 
-    private fun setWindowBackground(activity: Activity, drawable: android.graphics.drawable.Drawable?) {
-        val window = activity.window ?: return
-        if (!savedWindowBackgrounds.containsKey(activity)) {
-            savedWindowBackgrounds[activity] = window.decorView?.background
-        }
-        window.setBackgroundDrawable(drawable)
-    }
-
     // 被清掉的原背景，撤销主题时原样放回去
-    private val savedBackgrounds =
-        java.util.WeakHashMap<View, android.graphics.drawable.Drawable?>()
-
-    /**
-     * 把「装饰层 / 内容容器」的底色清空，让贴在底部的壁纸透上来。
-     * 只处理容器级 View，页面内部的列表/气泡/文字一概不碰。
-     */
-    private fun clearSurfaceBackgrounds(decor: ViewGroup) {
-        runCatching {
-            // 注意：decorView 自身的背景就是我们刚设的壁纸，不能清
-            for (i in 0 until decor.childCount) {
-                val child = decor.getChildAt(i)
-                clearOne(child)
-                if (child !is ViewGroup) continue
-                val depth = if (child.id == android.R.id.content) 3 else 2
-                clearContainersUntil(child, depth)
-            }
-        }.onFailure { WeLogger.w(TAG, "清理容器背景异常：${it.message}") }
-    }
-
-    /**
-     * depth<=0 时停手，避免把页面内部（列表 item、气泡）的背景也清掉。
-     * android.R.id.content 这一层额外给 2 层额度，因为页面真正的根布局在它下面。
-     */
-    private fun clearContainersUntil(parent: ViewGroup, depth: Int) {
-        if (depth <= 0) return
-        for (i in 0 until parent.childCount) {
-            val v = parent.getChildAt(i)
-            if (v !is ViewGroup) continue
-            clearOne(v)
-            val nextDepth = if (v.id == android.R.id.content) maxOf(depth - 1, 2) else depth - 1
-            clearContainersUntil(v, nextDepth)
-        }
-    }
-
-    private fun clearOne(v: View) {
-        val bg = v.background ?: return
-        if (!savedBackgrounds.containsKey(v)) savedBackgrounds[v] = bg
-        v.background = null
-    }
-
-    private fun restoreSurfaceBackgrounds() {
-        savedBackgrounds.forEach { (v, bg) -> runCatching { v.background = bg } }
-        savedBackgrounds.clear()
-    }
-
     private fun removeWallpaper(activity: Activity) {
-        val decor = activity.window?.decorView as? ViewGroup ?: return
-        try {
-            // 兼容老版本留下的插入层（如果有）
+        removeTabWallpapers(activity)
+        runCatching {
+            val decor = activity.window?.decorView as? ViewGroup ?: return@runCatching
+            // 兼容历史版本留下的一次性壁纸层
             decor.findViewWithTag<View>(WALLPAPER_TAG)?.let { decor.removeView(it) }
-            // 恢复窗口原始背景 + 被清掉的容器底色
-            activity.window?.let { w ->
-                if (savedWindowBackgrounds.containsKey(activity)) {
-                    w.setBackgroundDrawable(savedWindowBackgrounds.remove(activity))
-                }
-            }
-            restoreSurfaceBackgrounds()
-        } catch (e: Throwable) { WeLogger.w(TAG, "removeWallpaper 异常", e) }
+        }
+        restoreWindowBackground(activity)
     }
 
     private fun restoreWindow(activity: Activity) {
@@ -884,18 +948,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     /**
-     * 透明度滑杆即时生效。
-     *
-     * 壁纸现在挂在窗口背景上（不再是独立的 ImageView 层），
-     * 所以直接对当前活着的页面重挂一次，让它按新的 alpha 重新设置背景。
+     * 透明度滑杆即时生效：对活着的页面重挂一次背景，让新的 alpha 立刻生效。
      */
     private fun updateAlphaOnLive(@Suppress("UNUSED_PARAMETER") alpha: Float) {
         liveActivities().forEach { act ->
-            try {
-                applyWallpaper(act)
-            } catch (e: Throwable) {
-                WeLogger.d(TAG, "更新透明度失败：${e.message}")
-            }
+            runCatching { applyThemeTo(act) }
+                .onFailure { WeLogger.d(TAG, "更新透明度失败：${it.message}") }
         }
     }
 

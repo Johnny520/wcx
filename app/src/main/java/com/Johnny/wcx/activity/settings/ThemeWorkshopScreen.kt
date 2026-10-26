@@ -62,6 +62,7 @@ import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.restartHost
 import h.Hchat.ui.miuix.PageScaffold
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Switch
@@ -176,7 +177,13 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 return
             }
         refreshAll()
-        appliedDialog = true
+        // 应用后直接热重启微信（用微信自己的 KillProcessHelperActivity，等同用户手动重开）
+        showToast(context, "已应用，正在重启微信…")
+        runCatching { restartHost() }
+            .onFailure {
+                WeLogger.w("ThemeWorkshop", "热重启失败：${it.message}")
+                appliedDialog = true
+            }
     }
 
     /**
@@ -603,10 +610,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             onDismissRequest = { appliedDialog = false },
             title = { Text("已应用") },
             text = {
-                Text(
-                    "主题已写入。请从最近任务（多任务界面）把微信**划掉**，再重新打开微信，" +
-                        "背景与气泡才会完全生效。"
-                )
+                Text("自动重启没有成功。请从最近任务把微信划掉，再重新打开，主题才会完全生效。")
             },
             confirmButton = { TextButton(onClick = { appliedDialog = false }) { Text("知道了") } },
         )
