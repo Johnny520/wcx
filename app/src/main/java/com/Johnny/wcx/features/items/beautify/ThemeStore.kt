@@ -251,7 +251,15 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 try { applyThemeTo(activity) } catch (e: Throwable) { WeLogger.w(TAG, "onActivityResumed 应用主题异常", e) }
             }
         }
-        override fun onActivityPaused(activity: Activity) {}
+        override fun onActivityPaused(activity: Activity) {
+            // 退到后台先把自己那层藏起来：聊天页若是半透明窗口、或正处于转场那几百毫秒，
+            // 底下主界面的壁纸就会透出来，跟微信自带聊天背景叠在一起。
+            runCatching {
+                if (!activity.javaClass.name.orEmpty().endsWith("LauncherUI")) return@runCatching
+                activity.window?.decorView?.findViewWithTag<View>(TAB_ROOT_TAG)
+                    ?.visibility = View.INVISIBLE
+            }.onFailure { WeLogger.d(TAG, "onActivityPaused 隐藏壁纸失败：${it.message}") }
+        }
         override fun onActivityStopped(activity: Activity) {}
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
         override fun onActivityDestroyed(activity: Activity) {
@@ -348,7 +356,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         )
         for ((asset, dest) in entries) {
             if (!force && dest.exists()) continue
-            val bytes = readBuiltinAsset(asset) ?: continue
+            val bytes = readBuiltinAsset(asset)
+            if (bytes == null) {
+                WeLogger.e(TAG, "内置素材提取失败：${theme.id} / $asset（主题将缺少这一项）")
+                continue
+            }
             try {
                 dir.createDirsSafe()
                 Files.write(dest, bytes)
@@ -798,7 +810,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             view.visibility = View.VISIBLE
             val tab = if (lastTabIndex in 0..3) lastTabIndex else currentTabIndex(activity)
             val file = fileForTab(files, tab)
-            val path = file?.absolutePath
+            // 复合 key：路径 + 修改时间。只按路径判断的话，同一路径换了图不会刷新。
+            val path = file?.let { "${it.absolutePath}|${it.lastModified()}" }
             if (path != null && path != tabBitmapPath) {
                 val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
                 if (bmp != null) {
@@ -812,10 +825,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             clearSurfaceLite(decor)
             wallpaperFailCount = 0
             val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
-            val logKey = "$info|tab=$tab"
+            val logKey = "$info|tab=$tab|$path"
             if (logKey != lastLoggedWallpaper) {
                 lastLoggedWallpaper = logKey
-                WeLogger.i(TAG, "4 页背景已挂载（$info），当前 Tab=$tab，文件=$path")
+                WeLogger.i(TAG, "4 页背景已挂载（$info），当前 Tab=$tab，文件=${file?.absolutePath ?: "null"}")
             }
         } catch (e: Throwable) {
             WeLogger.w(TAG, "applyTabWallpapers 异常", e)
@@ -872,7 +885,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         val view = decor.findViewWithTag<View>(TAB_ROOT_TAG) as? ThemeWallpaperView ?: return
         runCatching {
             val file = fileForTab(tabWallpaperFiles(), position)
-            val path = file?.absolutePath
+            val path = file?.let { "${it.absolutePath}|${it.lastModified()}" }
             if (path != null && path != tabBitmapPath) {
                 val bmp = BitmapFactory.decodeFile(path)
                 if (bmp != null) {

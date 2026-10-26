@@ -179,12 +179,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             }
         refreshAll()
         // 应用后直接热重启微信（用微信自己的 KillProcessHelperActivity，等同用户手动重开）
-        showToast(context, "已应用，正在重启微信…")
-        runCatching { restartHost() }
-            .onFailure {
-                WeLogger.w("ThemeWorkshop", "热重启失败：${it.message}")
-                appliedDialog = true
-            }
+        // 热重启；失败才走「请手动划掉微信」的兜底提示
+        if (!restartHost()) appliedDialog = true
     }
 
     /**
