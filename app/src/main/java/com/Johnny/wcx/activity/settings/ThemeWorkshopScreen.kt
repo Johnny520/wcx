@@ -328,8 +328,12 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             "对话框窗口级背景模糊",
                         )
                     }
+                    // ALL_HOOK_ITEMS 的元素类型不是 BaseFeature，先按 SwitchFeature 过滤，
+                    // 否则访问 isEnabled 会编译不过。
                     val features = remember(names) {
-                        FeaturesProvider.ALL_HOOK_ITEMS.filter { it.name in names }
+                        FeaturesProvider.ALL_HOOK_ITEMS
+                            .filterIsInstance<com.Johnny.wcx.features.core.SwitchFeature>()
+                            .filter { it.name in names }
                     }
                     if (features.isEmpty()) {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
