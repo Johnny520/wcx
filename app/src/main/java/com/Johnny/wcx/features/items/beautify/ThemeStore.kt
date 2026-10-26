@@ -613,9 +613,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         when {
             // 扫一扫 / 看图页：任何背景都不挂
             isScannerPage(activity) || isPhotoViewerPage(activity) -> removeWallpaper(activity)
-            // 聊天页：只允许「随机聊天背景」图池，主题壁纸一律不进来
+            // 聊天页：只允许「随机聊天背景」图池，主题壁纸一律不进来。
+            // 同时把 LauncherUI 上的背景层藏起来 —— 微信聊天页是独立窗口，
+            // 但某些机型/版本下半透明转场时会透出后面的主界面背景，
+            // 造成「聊天页里还能看到主页那四张背景」，与微信自带聊天背景叠在一起。
             isChattingPage(activity) -> {
-                removeTabWallpapers(activity)
+                setTabWallpapersVisible(false)
                 applyChattingWallpaper(activity)
             }
             // 微信主界面：4 个 Tab 的分页背景
@@ -784,6 +787,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 }
                 existing
             }
+            container.visibility = View.VISIBLE
             val alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
             for (i in 0..3) {
                 val tag = "${TAB_ROOT_TAG}_$i"
@@ -838,6 +842,18 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 WeLogger.w(TAG, "背景连续失败 3 次，已自动关闭主题（恢复微信原生）")
             }
         }
+    }
+
+    /** 统一显示/隐藏所有主界面的背景层（进聊天页时隐藏，回来再显示）。 */
+    private fun setTabWallpapersVisible(visible: Boolean) {
+        runCatching {
+            liveActivities().forEach { act ->
+                if (!act.javaClass.name.orEmpty().endsWith("LauncherUI")) return@forEach
+                val container = act.window?.decorView
+                    ?.findViewWithTag<View>(TAB_ROOT_TAG) as? ViewGroup ?: return@forEach
+                container.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+            }
+        }.onFailure { WeLogger.w(TAG, "切换背景层可见性失败：${it.message}") }
     }
 
     /** 切 Tab：只显示当前 Tab 那张。 */
