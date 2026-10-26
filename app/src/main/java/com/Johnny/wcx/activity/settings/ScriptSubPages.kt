@@ -60,10 +60,8 @@ import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.preferences.WePrefs
 import h.Hchat.hooks.core.HookRegistry
+import h.Hchat.hooks.items.script.market.PluginMarketClient
 import h.Hchat.hooks.items.script.market.PluginMarketSettings
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import com.Johnny.wcx.utils.fs.KnownPaths
 import h.Hchat.hooks.core.DexInstallScheduler
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -291,7 +289,7 @@ private fun scriptSelfCheckSteps(context: Context): List<ScriptRunStep> {
         if (configured.isBlank()) {
             false to "为空：在线插件市场不可用"
         } else {
-            val failure = probeMarketServer(configured)
+            val failure = probeMarketServer(context, configured)
             when {
                 failure == null -> true to "$configured（/health 正常）"
                 failure == MARKET_PROBE_SKIPPED -> true to "$configured（主线程，未检测连通性）"
@@ -302,7 +300,7 @@ private fun scriptSelfCheckSteps(context: Context): List<ScriptRunStep> {
                         .firstOrNull { !it.equals(configured, ignoreCase = true) }
                     val alternateText = when {
                         alternate == null -> ""
-                        probeMarketServer(alternate) == null -> "；请求已自动切换到 $alternate（该服务器可用）"
+                        probeMarketServer(context, alternate) == null -> "；请求已自动切换到 $alternate（该服务器可用）"
                         else -> "；备用 $alternate 同样不可用"
                     }
                     false to "$configured 不可用：$failure$alternateText"
@@ -340,8 +338,8 @@ private fun isPresetMarketServer(url: String): Boolean {
     }.getOrDefault(false)
 }
 
-/** 请求 /health；返回 null 表示可用，否则返回失败原因。 */
-private fun probeMarketServer(base: String): String? = synchronized(marketProbeLock) {
+/** 请求 /health；返回 null 表示可用，否则返回失败原因。结果缓存 60s，避免修复流程重复探测。 */
+private fun probeMarketServer(context: Context, base: String): String? = synchronized(marketProbeLock) {
     val now = System.currentTimeMillis()
     marketProbeCache[base]?.let { (at, failure) ->
         if (now - at < MARKET_PROBE_TTL_MS) return failure
@@ -349,25 +347,10 @@ private fun probeMarketServer(base: String): String? = synchronized(marketProbeL
     val failure = if (Looper.myLooper() == Looper.getMainLooper()) {
         MARKET_PROBE_SKIPPED
     } else {
-        runCatching {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(3, TimeUnit.SECONDS)
-                .readTimeout(3, TimeUnit.SECONDS)
-                .callTimeout(5, TimeUnit.SECONDS)
-                .build()
-            val url = base.trim().trimEnd('/') + "/health"
-            val request = Request.Builder()
-                .url(url)
-                .header("Accept", "application/json")
-                .get()
-                .build()
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) error("HTTP ${response.code}")
-                val compact = body.filterNot { it.isWhitespace() }
-                if (!compact.contains("\"ok\":true")) error("响应缺少 ok:true")
-            }
-        }.fold({ null }, { it.message?.takeIf { m -> m.isNotBlank() } ?: it.javaClass.simpleName })
+        PluginMarketClient.probeHealth(context, base, 3_000L).fold(
+            { null },
+            { it.message?.takeIf { m -> m.isNotBlank() } ?: it.javaClass.simpleName }
+        )
     }
     marketProbeCache[base] = now to failure
     failure
@@ -447,7 +430,7 @@ private fun scriptRepairSteps(context: Context): List<ScriptRunStep> {
             PluginMarketSettings.saveServiceUrl(context, PluginMarketSettings.DEFAULT_SERVICE_URL)
             true to "地址为空，已恢复为官方地址 ${PluginMarketSettings.DEFAULT_SERVICE_URL}"
         } else {
-            val failure = probeMarketServer(configured)
+            val failure = probeMarketServer(context, configured)
             when {
                 failure == null || failure == MARKET_PROBE_SKIPPED -> true to "$configured 可用，无需切换"
                 // 自定义地址只报告，不擅自改（避免把数据发到别人服务器）
@@ -456,7 +439,7 @@ private fun scriptRepairSteps(context: Context): List<ScriptRunStep> {
                 else -> {
                     val usable = PluginMarketSettings.presetServiceUrls()
                         .filter { !it.equals(configured, ignoreCase = true) }
-                        .firstOrNull { probeMarketServer(it) == null }
+                        .firstOrNull { probeMarketServer(context, it) == null }
                     if (usable == null) {
                         false to "内置服务器都不可用（网络或服务端故障）：$failure"
                     } else {

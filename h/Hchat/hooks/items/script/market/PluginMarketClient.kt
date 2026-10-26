@@ -418,6 +418,62 @@ context: Context,
     }
 
     /**
+     * 健康探测：只打一次 /health，短超时，用于诊断页与服务器切换前确认可用性。
+     * 不复用主客户端，避免 120s 的读写超时把诊断页拖死。
+     */
+    fun probeHealth(
+        context: Context,
+        baseUrl: String,
+        timeoutMs: Long = 3_000L
+    ): Result<PluginMarketHealth> = runCatching {
+        val base = baseUrl.trim().trimEnd('/').toHttpUrlOrNull()
+            ?: throw PluginMarketException("插件仓库地址无效，请先配置完整的 HTTP/HTTPS 地址")
+        val client = OkHttpClient.Builder()
+            .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .build()
+        val request = Request.Builder()
+            .url(base.newBuilder().addPathSegment("health").build())
+            .header("Accept", "application/json")
+            .header("X-Hchat-Install-Id", PluginMarketSettings.installId(context))
+            .get()
+            .build()
+        try {
+            client.newCall(request).execute().use { response ->
+                val raw = response.body?.string().orEmpty()
+                val root = runCatching { JSONObject(raw.ifBlank { "{}" }) }.getOrElse {
+                    throw PluginMarketException("HTTP ${response.code}：返回内容不是有效 JSON", response.code, it)
+                }
+                if (!response.isSuccessful || !root.optBoolean("ok", false)) {
+                    throw PluginMarketException(
+                        errorMessage(root, response.code),
+                        response.code,
+                        errorCode = errorCode(root)
+                    )
+                }
+                val data = root.opt("data")
+                PluginMarketHealth(
+                    status = if (data is JSONObject) data.optString("status") else "",
+                    database = if (data is JSONObject) data.optString("database") else "",
+                    message = if (data is JSONObject) data.optString("message", "服务正常") else "服务正常"
+                )
+            }
+        } catch (error: PluginMarketException) {
+            throw error
+        } catch (error: IOException) {
+            throw PluginMarketException(
+                if (error is SocketTimeoutException) {
+                    "连接超时（${timeoutMs}ms）"
+                } else {
+                    "网络不可达：${error.message ?: "网络不可用"}"
+                },
+                cause = error
+            )
+        }
+    }
+
+    /**
      * 按候选地址依次尝试。
      *
      * 回落的边界（不能越过）：
