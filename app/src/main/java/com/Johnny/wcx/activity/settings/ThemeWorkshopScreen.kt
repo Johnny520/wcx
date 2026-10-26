@@ -1049,15 +1049,15 @@ private fun OpacityRow(tick: Int) {
             Text("$pct%", fontSize = 13.sp, color = summaryColor())
         }
         Text(
-            text = "拉满也只是壁纸本身不透明，文字永远在最上层，不会被挡住",
+            text = "最高 70%，保证文字、分割线始终看得清",
             fontSize = 11.sp,
             color = summaryColor(),
         )
         Slider(
             value = pct.toFloat(),
-            onValueChange = { pct = it.toInt().coerceIn(5, 100) },
+            onValueChange = { pct = it.toInt().coerceIn(5, 70) },
             onValueChangeFinished = { ThemeStore.setOverlayOpacity(pct) },
-            valueRange = 5f..100f,
+            valueRange = 5f..70f,
             colors = SliderDefaults.colors(
                 thumbColor = MiuixTheme.colorScheme.primary,
                 activeTrackColor = MiuixTheme.colorScheme.primary,

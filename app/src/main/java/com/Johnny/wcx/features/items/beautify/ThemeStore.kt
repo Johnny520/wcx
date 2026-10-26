@@ -719,6 +719,15 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // 而放在 DecorView index 0 且页面本身透明时就能透出来 —— 这也是旧版能生效的原因。
     // ══════════════════════════════════════════════════════════
 
+    /**
+     * 壁纸透明度上下限。
+     *
+     * 上限刻意压到 70%：就算背景层因为机型差异跑到内容之上，
+     * 也保证文字、分割线、头像这些始终看得清。100% 只留给自己看的极客场景没有意义。
+     */
+    private const val MIN_OPACITY = 5
+    private const val MAX_OPACITY = 70
+
     private const val TAB_ROOT_TAG = "wcx_theme_tab_root"
 
     private val TAB_NAMES = listOf("主页", "通讯录", "发现", "我")
@@ -775,7 +784,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 }
                 existing
             }
-            val alpha = overlayOpacityPct.coerceIn(5, 100) / 100f
+            val alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
             for (i in 0..3) {
                 val tag = "${TAB_ROOT_TAG}_$i"
                 var iv = container.findViewWithTag<ImageView>(tag)
@@ -866,7 +875,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 restoreWindowBackground(activity)
                 return
             }
-            val pct = overlayOpacityPct.coerceIn(5, 100)
+            val pct = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY)
             val drawable = android.graphics.drawable.BitmapDrawable(activity.resources, bmp).apply {
                 setAlpha(pct * 255 / 100)
                 gravity = android.view.Gravity.FILL
@@ -1158,7 +1167,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     /** 应用主题（内置或主题包），并同步一次壁纸透明度。 */
     fun applyThemeById(id: String) {
         applyThemeInternal(id)
-        updateAlphaOnLive(overlayOpacityPct.coerceIn(5, 100) / 100f)
+        updateAlphaOnLive(overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f)
     }
 
     fun restoreDefaultTheme() = restoreDefault()
@@ -1174,10 +1183,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     /** 壁纸透明度（5~100）。 */
-    fun overlayOpacity(): Int = overlayOpacityPct.coerceIn(5, 100)
+    fun overlayOpacity(): Int = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY)
 
     fun setOverlayOpacity(pct: Int) {
-        overlayOpacityPct = pct.coerceIn(5, 100)
+        overlayOpacityPct = pct.coerceIn(MIN_OPACITY, MAX_OPACITY)
         updateAlphaOnLive(overlayOpacityPct / 100f)
     }
 
