@@ -192,9 +192,6 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
 //  Category detail (replaces CategorySettingsScreen)
 // ---------------------------------------------------------------------------
 
-/** 分类列表里不展示的功能（各自有独立入口）。 */
-private val CATEGORY_HIDDEN_ITEMS = setOf("主题工坊", "美化首页底部导航栏")
-
 @Composable
 fun CategoryDetailScreen(
     categoryName: String,
@@ -202,11 +199,7 @@ fun CategoryDetailScreen(
     onOpenHiddenContactsDiagnostics: () -> Unit,
 ) {
     val items = remember(categoryName) {
-        FeaturesProvider.ALL_HOOK_ITEMS
-            .filter { categoryName in it.categories }
-            // 这两个已各自有独立入口（主题工坊在「微信主题」卡、底栏美化并入主题页），
-            // 不再在「界面美化」分类里重复出现。
-            .filterNot { it.name in CATEGORY_HIDDEN_ITEMS }
+        FeaturesProvider.ALL_HOOK_ITEMS.filter { categoryName in it.categories }
     }
     val switchStates = remember(categoryName) {
         mutableStateMapOf<String, Boolean>().apply {
