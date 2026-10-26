@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.graphics.Outline
 import android.os.Bundle
 import android.view.MotionEvent
@@ -15,6 +16,7 @@ import android.view.ViewOutlineProvider
 import android.view.Window
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import android.widget.TextView
@@ -34,6 +36,7 @@ import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 
 import com.Johnny.wcx.features.core.SwitchFeature
 import java.lang.reflect.Method
+import com.Johnny.wcx.features.items.beautify.ThemePack
 import com.Johnny.wcx.features.items.beautify.AddMainScreenFab
 import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
 import com.Johnny.wcx.ui.utils.dpToPx
@@ -362,6 +365,13 @@ object HomeSidePanel : SwitchFeature() {
         private val overlayRoot = HomeSidePanelOverlayLayout(activity).also { it.session = this }
         private val dimView = View(activity)
         private val panelView = ComposeView(activity)
+        private val panelBgView = ImageView(activity).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            alpha = 0f
+        }
         private val stateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         private val layoutStore = HomeSidePanelLayoutStore
         private val cityIndex = HomeSidePanelCityIndex(activity)
@@ -491,6 +501,14 @@ object HomeSidePanel : SwitchFeature() {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                 )
             )
+            // 侧滑栏背景图：放在 panelView 下面，面板内容本身没有不透明底色，能透出来。
+            overlayRoot.addView(
+                panelBgView,
+                FrameLayout.LayoutParams(
+                    drawerWidthPx,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                )
+            )
             overlayRoot.addView(
                 panelView,
                 FrameLayout.LayoutParams(
@@ -498,6 +516,7 @@ object HomeSidePanel : SwitchFeature() {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                 )
             )
+            applyPanelBackground()
 
             parent.addView(
                 contentWrapper,
@@ -1355,6 +1374,27 @@ object HomeSidePanel : SwitchFeature() {
             if (becameVisible) overlayRoot.bringToFront()
         }
 
+        /** 侧滑栏背景图（主题包里的 wallpaper_panel.png），透明度由 theme_panel_alpha 控制。 */
+        private fun applyPanelBackground() {
+            runCatching {
+                val pack = ThemePack.active()
+                val file = pack?.asset(pack.manifest.optString("wallpaper_panel"))
+                if (file == null || !file.isFile) {
+                    panelBgView.setImageDrawable(null)
+                    panelBgView.alpha = 0f
+                    return
+                }
+                val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+                if (bitmap == null) {
+                    panelBgView.alpha = 0f
+                    return
+                }
+                panelBgView.setImageBitmap(bitmap)
+                val pct = com.Johnny.wcx.preferences.WePrefs.getIntOrDef("theme_panel_alpha", 100)
+                panelBgView.alpha = pct.coerceIn(0, 100) / 100f
+            }.onFailure { com.Johnny.wcx.utils.WeLogger.w("HomeSidePanel", "加载侧滑栏背景失败：${it.message}") }
+        }
+
         private fun updateDrawerWidth(): Boolean {
             val width = parent.width
             if (width <= 0) return false
@@ -1366,6 +1406,10 @@ object HomeSidePanel : SwitchFeature() {
             params.width = drawerWidthPx
             params.height = FrameLayout.LayoutParams.MATCH_PARENT
             panelView.layoutParams = params
+            (panelBgView.layoutParams as? FrameLayout.LayoutParams)?.let { bgParams ->
+                bgParams.width = drawerWidthPx
+                panelBgView.layoutParams = bgParams
+            }
             return true
         }
 

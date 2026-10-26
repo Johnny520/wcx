@@ -314,6 +314,7 @@ object ThemePack {
             "wallpaper_discover" -> "wallpaper_discover.png"
             "wallpaper_me" -> "wallpaper_me.png"
             "wallpaper_chatting" -> "wallpaper_chatting.png"
+            "wallpaper_panel" -> "wallpaper_panel.png"
             "bubble_left" -> if (ninePatch) "bubble_left.9.png" else "bubble_left.png"
             "bubble_right" -> if (ninePatch) "bubble_right.9.png" else "bubble_right.png"
             else -> return null

@@ -17,8 +17,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.features.items.beautify.ThemePack
 import com.Johnny.wcx.features.items.beautify.ThemeStore
+import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.android.showToast
 import h.Hchat.ui.miuix.ActionRow
 import h.Hchat.ui.miuix.InsetDivider
@@ -26,6 +28,7 @@ import h.Hchat.ui.miuix.PageScaffold
 import h.Hchat.ui.miuix.SettingsCard
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 
 /**
  * 主题工坊（独立子页面）。
@@ -40,6 +43,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var packs by remember { mutableStateOf(ThemePack.list()) }
     var active by remember { mutableStateOf(ThemeStore.activeThemeIdOrEmpty()) }
     var opacity by remember { mutableStateOf(ThemeStore.overlayOpacity()) }
+    var panelAlpha by remember { mutableStateOf(WePrefs.getIntOrDef("theme_panel_alpha", 100)) }
     // 正在编辑的主题包（新建后逐个换图，最后再保存/应用）
     var editing by remember { mutableStateOf<ThemePack.Pack?>(null) }
 
@@ -235,6 +239,10 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         pendingRole = role
                         pickPageImage.launch("image/*")
                     }
+                    PageWallpaperRow("侧滑栏背景", "wallpaper_panel", editing, pendingRole) { role ->
+                        pendingRole = role
+                        pickPageImage.launch("image/*")
+                    }
                     InsetDivider()
                     ActionRow(
                         title = "② 选「对方」气泡",
@@ -303,6 +311,74 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 }
             }
 
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "侧滑栏背景透明度") }
+            item {
+                SettingsCard {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text(
+                            text = "当前 ${panelAlpha}%（0 = 不显示背景图）",
+                            fontSize = 13.sp,
+                            color = top.yukonga.miuix.kmp.basic.BasicComponentDefaults.titleColor().color,
+                        )
+                        androidx.compose.material3.Slider(
+                            value = panelAlpha.toFloat(),
+                            onValueChange = {
+                                val value = it.toInt().coerceIn(0, 100)
+                                panelAlpha = value
+                                WePrefs.putInt("theme_panel_alpha", value)
+                            },
+                            valueRange = 0f..100f,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+
+            // ── 其它美化（并入主题工坊，不用再翻设置里的分类）─────────
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "其它美化") }
+            item {
+                SettingsCard {
+                    val names = remember {
+                        listOf(
+                            "主屏美化",
+                            "美化首页底部导航栏",
+                            "美化对话列表",
+                            "自定义消息气泡",
+                            "美化活动过渡动画",
+                            "美化组件按下效果",
+                            "对话框窗口级背景模糊",
+                        )
+                    }
+                    val features = remember(names) {
+                        FeaturesProvider.ALL_HOOK_ITEMS.filter { it.name in names }
+                    }
+                    if (features.isEmpty()) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Text(text = "当前版本没有可用的美化开关", fontSize = 12.sp)
+                        }
+                    } else {
+                        features.forEachIndexed { index, feature ->
+                            if (index > 0) InsetDivider()
+                            var checked by remember(feature) { mutableStateOf(feature.isEnabled) }
+                            SwitchPreference(
+                                title = feature.name,
+                                summary = feature.description,
+                                checked = checked,
+                                onCheckedChange = { on ->
+                                    runCatching {
+                                        WePrefs.putBool(feature.name, on)
+                                        feature.isEnabled = on
+                                    }.onFailure {
+                                        showToast(context, "切换失败：${it.message}")
+                                    }
+                                    checked = on
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── 分享 / 维护 ─────────────────────────────────────────
             item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "分享与维护") }
             item {
@@ -356,6 +432,7 @@ private fun pageRoleLabel(role: String): String = when (role) {
     "wallpaper_discover" -> "发现页背景"
     "wallpaper_me" -> "「我」页背景"
     "wallpaper_chatting" -> "聊天页背景"
+    "wallpaper_panel" -> "侧滑栏背景"
     "bubble_left" -> "对方气泡"
     "bubble_right" -> "自己气泡"
     else -> role
