@@ -682,6 +682,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     GuideLine("4", "内置主题", "内置主题只能调透明度，不能改素材；长按卡片可以重命名、改描述；内置主题不能分享。")
                     GuideLine("5", "自己做/分享", "新建主题 → 选图片 → 保存 → 右上角应用；分享按钮只分享自己的主题。")
                     GuideLine("6", "聊天页规则", "主题只作用于主页/通讯录/发现/我 4 个界面，永远不影响聊天页；聊天页背景由微信自带，或用「随机聊天背景」图池。")
+                    GuideLine("7", "透明度为什么封顶 70%", "背景越不透明越容易盖住文字、时间和分割线。70% 是「背景够明显、文字还看得清」的平衡点，默认 40%。")
+                    GuideLine("8", "旧气泡没换掉怎么办", "右上角 ⋮ →「清除主题缓存」，一键清掉已应用的气泡和背景，回到微信原生。")
                 }
             },
             confirmButton = { TextButton(onClick = { showGuide = false }) { Text("知道了") } },
@@ -1086,7 +1088,8 @@ private fun OpacityRow(tick: Int) {
             Text("$pct%", fontSize = 13.sp, color = summaryColor())
         }
         Text(
-            text = "最高 70%，保证文字、分割线始终看得清",
+            text = "默认 40%，最高 70%。再往上背景会压住文字、时间、分割线，" +
+                "聊天列表和消息就看不清了，所以封在 70%。",
             fontSize = 11.sp,
             color = summaryColor(),
         )
