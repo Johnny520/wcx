@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.items.beautify
 
 import com.Johnny.wcx.utils.WeLogger
-import com.Johnny.wcx.utils.WePrefs
+import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.fs.KnownPaths
 import org.json.JSONObject
 import java.io.File
