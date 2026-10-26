@@ -43,10 +43,12 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     // 正在编辑的主题包（新建后逐个换图，最后再保存/应用）
     var editing by remember { mutableStateOf<ThemePack.Pack?>(null) }
 
+    // 注意：Kotlin 局部函数必须先声明后使用，这里直接刷新状态，不调用后面的 refresh()。
     fun applyEditing() {
         val pack = editing ?: return
         ThemeStore.applyThemeById(pack.id)
-        refresh()
+        packs = ThemePack.list()
+        active = ThemeStore.activeThemeIdOrEmpty()
     }
 
     var pendingRole by remember { mutableStateOf("") }
