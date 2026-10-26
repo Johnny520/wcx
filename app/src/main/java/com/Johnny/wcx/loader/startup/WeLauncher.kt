@@ -10,6 +10,7 @@ import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.dexkit.cache.DexCacheManager
 import com.Johnny.wcx.features.core.FeaturesLoader
+import com.Johnny.wcx.features.items.beautify.ThemeExtras
 import com.Johnny.wcx.features.hchat.HchatScriptBootstrap
 import com.Johnny.wcx.dynamic.LocalAdaptationEngine
 import com.Johnny.wcx.dynamic.SelfHealingMonitor
@@ -92,6 +93,9 @@ object WeLauncher {
                 runCatching {
                     HchatScriptBootstrap.install()
                 }.onFailure { WeLogger.e(TAG, "failed to install Hchat script subsystem", it) }
+                // 主题扩展（圆形头像 / ActionBar 美化 / 按时间切主题）：只是挂 hook，开销可忽略
+                runCatching { ThemeExtras.install() }
+                    .onFailure { WeLogger.e(TAG, "failed to install theme extras", it) }
             }, "Hchat-Bootstrap").apply { isDaemon = true }.start()
         }
     }

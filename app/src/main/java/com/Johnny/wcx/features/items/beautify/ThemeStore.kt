@@ -386,8 +386,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         // 外部主题包优先，且支持分页面壁纸（某页单独设了就用它，没设退回全局）
         val key = activity?.let { pageWallpaperKey(it) }
         ThemePack.active()?.let { pack ->
-            val file = if (key != null) pack.wallpaperFor(key) else pack.wallpaper()
-            file?.let { return it.toPath() }
+            // 开了「随机聊天背景」时，在「本页壁纸 + 全局壁纸」里随机挑一张，每次进页面都可能不同
+            val candidates = buildList {
+                if (key != null) pack.wallpaperFor(key)?.let(::add)
+                pack.wallpaper()?.let(::add)
+            }.distinctBy { it.absolutePath }
+            ThemeExtras.pickRandom(candidates)?.let { return it.toPath() }
         }
         return builtinTheme(activeThemeId)?.let { builtinWallpaperFile(it) }?.takeIf { it.exists() }
     }

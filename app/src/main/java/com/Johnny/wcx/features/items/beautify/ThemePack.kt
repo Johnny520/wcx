@@ -335,6 +335,65 @@ object ThemePack {
         return load(pack.dir)
     }
 
+    /**
+     * 把某个素材位恢复成微信原生（删掉文件并清掉清单里的键）。
+     * 返回更新后的主题包；该位本来就没素材时原样返回。
+     */
+    fun resetRole(pack: Pack, role: String): Pack? = runCatching {
+        val manifestFile = File(pack.dir, MANIFEST)
+        val manifest = JSONObject(manifestFile.readText())
+        val fileName = manifest.optString(role).takeIf { it.isNotBlank() }
+            ?: return@runCatching pack
+        File(pack.dir, fileName).takeIf { it.exists() }?.delete()
+        manifest.remove(role)
+        manifestFile.writeText(manifest.toString(2))
+        WeLogger.i(TAG, "主题包 ${pack.name} 已重置 $role（恢复微信原生）")
+        load(pack.dir)
+    }.getOrNull()
+
+    /** 修改主题名称 / 描述（只改清单，不动素材目录）。 */
+    fun updateMeta(pack: Pack, name: String?, description: String?): Pack? = runCatching {
+        val manifestFile = File(pack.dir, MANIFEST)
+        val manifest = JSONObject(manifestFile.readText())
+        name?.takeIf { it.isNotBlank() }?.let { manifest.put("name", it) }
+        description?.let { manifest.put("description", it) }
+        manifestFile.writeText(manifest.toString(2))
+        load(pack.dir)
+    }.getOrNull()
+
+    /** 保存这套主题对应的美化开关快照（切换主题时用来同步页面开关）。 */
+    fun saveSwitches(pack: Pack, switches: Map<String, Boolean>): Pack? = runCatching {
+        val manifestFile = File(pack.dir, MANIFEST)
+        val manifest = JSONObject(manifestFile.readText())
+        val obj = JSONObject()
+        switches.forEach { (key, value) -> obj.put(key, value) }
+        manifest.put("switches", obj)
+        manifestFile.writeText(manifest.toString(2))
+        load(pack.dir)
+    }.getOrNull()
+
+    /** 读取开关快照；没有记录时返回空表（调用方保持当前状态）。 */
+    fun switches(pack: Pack): Map<String, Boolean> {
+        val obj = pack.manifest.optJSONObject("switches") ?: return emptyMap()
+        val result = LinkedHashMap<String, Boolean>()
+        obj.keys().forEach { key ->
+            result[key] = obj.optBoolean(key, false)
+        }
+        return result
+    }
+
+    /** 备份目录（导出/备份的 zip 都放这里）。 */
+    fun backupDir(): File = File(root, "backup").apply { mkdirs() }
+
+    /** 把主题包备份成带时间戳的 zip。 */
+    fun backup(pack: Pack): Result<File> = runCatching {
+        val out = File(backupDir(), "${pack.name}_${System.currentTimeMillis()}.zip")
+        val exported = exportZip(pack).getOrThrow()
+        exported.copyTo(out, overwrite = true)
+        WeLogger.i(TAG, "主题包已备份：${out.absolutePath}")
+        out
+    }
+
     /** 导出目录，分享时从这里取 zip。 */
     fun exportDir(): File = File(root, "exported").apply { mkdirs() }
 
