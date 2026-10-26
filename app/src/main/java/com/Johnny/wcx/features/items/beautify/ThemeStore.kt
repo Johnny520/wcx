@@ -413,6 +413,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         runCatching {
             WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
                 val activity = thisObject as? Activity ?: return@hookAfter
+                // 主题扩展：ActionBar 美化 + 按时间切换主题（同一挂点，避免重复解析 doOnCreate）
+                runCatching { ThemeExtras.onMainActivityCreated(activity) }
                 val tabsAdapter = runCatching {
                     thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
                 }.getOrNull() ?: return@hookAfter

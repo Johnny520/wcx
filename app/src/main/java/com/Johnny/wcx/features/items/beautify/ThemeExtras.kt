@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
-import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.reflection.ClassLoaders
 import com.Johnny.wcx.utils.WeLogger
@@ -131,7 +130,15 @@ object ThemeExtras {
         if (installed) return
         installed = true
         installRoundAvatar()
-        installActionBarHook()
+    }
+
+    /**
+     * 主界面创建完成后调用（挂点复用 ThemeStore 里的 MainTabUI#doOnCreate，不额外依赖混淆名）：
+     * 应用 ActionBar 美化 + 按时间切换主题。
+     */
+    fun onMainActivityCreated(activity: Activity) {
+        activity.window?.decorView?.post { applyActionBar(activity) }
+        activity.window?.decorView?.post { applyAutoThemeIfNeeded() }
     }
 
     /** 微信头像控件本身就是 RoundedCornerImageView，把半径设成一半即圆形。 */
@@ -154,22 +161,6 @@ object ThemeExtras {
             })
             WeLogger.i(TAG, "圆形头像 hook 已安装")
         }.onFailure { WeLogger.w(TAG, "圆形头像 hook 失败：${it.message}") }
-    }
-
-    /**
-     * ActionBar 美化与「按时间切换主题」都挂在主界面 onCreate 之后：
-     * 这是 ThemeStore 已在用的可靠入口（DexKit 定位到 com.tencent.mm.ui.MainTabUI#doOnCreate），
-     * 不额外依赖混淆后的方法名。
-     */
-    private fun installActionBarHook() {
-        runCatching {
-            WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
-                val activity = thisObject as? Activity ?: return@hookAfter
-                activity.window?.decorView?.post { applyActionBar(activity) }
-                activity.window?.decorView?.post { applyAutoThemeIfNeeded() }
-            }
-            WeLogger.i(TAG, "ActionBar / 定时主题 hook 已安装")
-        }.onFailure { WeLogger.w(TAG, "ActionBar hook 失败：${it.message}") }
     }
 
     @Volatile

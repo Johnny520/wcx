@@ -378,7 +378,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         }
                     }
                     RowDivider()
-                    if (editing == null) {
+                    val pack = editing
+                    if (pack == null) {
                         HintRow("还没有正在编辑的主题：点「新建主题」，或在下方网格点一张卡片加载。")
                     } else {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
@@ -408,17 +409,17 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             }
                         }
                         RowDivider()
-                        ThemePreview(editing)
+                        ThemePreview(pack)
                         RowDivider()
-                        MaterialRow("消息气泡素材", "bubble_left", editing, pendingRole,
+                        MaterialRow("消息气泡素材", "bubble_left", pack, pendingRole,
                             { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
                             { updated -> loadDraft(updated) },
                         )
-                        MaterialRow("聊天背景素材", "wallpaper_chats", editing, pendingRole,
+                        MaterialRow("聊天背景素材", "wallpaper_chats", pack, pendingRole,
                             { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
                             { updated -> loadDraft(updated) },
                         )
-                        MaterialRow("顶部标题栏素材", "wallpaper_panel", editing, pendingRole,
+                        MaterialRow("顶部标题栏素材", "wallpaper_panel", pack, pendingRole,
                             { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
                             { updated -> loadDraft(updated) },
                         )
@@ -427,20 +428,14 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             PillButton("保存主题", Modifier.weight(1f)) {
-                                val pack = editing
-                                if (pack == null) {
-                                    showToast(context, "没有正在编辑的主题")
-                                } else {
-                                    ThemePack.updateMeta(pack, draftName, draftDesc.trim())
-                                    ThemePack.saveSwitches(pack, ThemeExtras.currentSwitches())
-                                    refreshAll()
-                                    ThemePack.find(pack.id)?.let { loadDraft(it) }
-                                    showToast(context, "已保存：$draftName")
-                                }
+                                ThemePack.updateMeta(pack, draftName, draftDesc.trim())
+                                ThemePack.saveSwitches(pack, ThemeExtras.currentSwitches())
+                                refreshAll()
+                                ThemePack.find(pack.id)?.let { loadDraft(it) }
+                                showToast(context, "已保存：$draftName")
                             }
                             PillButton("应用主题", Modifier.weight(1f), primary = true) {
-                                if (editing == null) showToast(context, "没有正在编辑的主题")
-                                else confirmApply = true
+                                confirmApply = true
                             }
                         }
                     }
@@ -719,7 +714,10 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
 // 通用组件
 // ══════════════════════════════════════════════════════════
 
+@Composable
 private fun summaryColor(): Color = BasicComponentDefaults.summaryColor().color
+
+@Composable
 private fun titleColor(): Color = BasicComponentDefaults.titleColor().color
 
 /** 分组卡片：外层左上角小标题 + 圆角 22dp 柔和阴影卡片。 */
