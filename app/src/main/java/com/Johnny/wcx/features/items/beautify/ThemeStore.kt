@@ -866,6 +866,15 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private fun fileForTab(files: List<File?>, tab: Int): File? =
         files.getOrNull(tab) ?: files.firstOrNull { it != null }
 
+    private fun describeDrawable(d: android.graphics.drawable.Drawable?): String = when (d) {
+        null -> "null"
+        is android.graphics.drawable.BitmapDrawable ->
+            "BitmapDrawable(${d.bitmap?.width}x${d.bitmap?.height}, alpha=${d.alpha})"
+        is android.graphics.drawable.ColorDrawable ->
+            "ColorDrawable(#${Integer.toHexString(d.color)})"
+        else -> d.javaClass.simpleName
+    }
+
     /** 记录各 DecorView 原来自己的 background，撤销主题时原样放回。 */
     private val savedDecorBackground = java.util.WeakHashMap<ViewGroup, android.graphics.drawable.Drawable?>()
 
@@ -958,6 +967,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 if (tab in 0..3) lastTabIndex = tab
                 val file = fileForTab(files, tab)
                 attachAsDecorBackground(activity, decor, file)
+                // 光设 DecorView 背景不够：微信主界面的页面底板（content 里的根容器、Fragment 容器）
+                // 常常自带不透明底色，会把这一层彻底盖住 —— 这就是「设置了但看不见」的原因。
+                // 只清「装饰层 / 内容容器」这两层，不动列表、气泡、文字本身。
+                clearSurfaceLite(activity, decor)
                 wallpaperAttached[activity] = true
                 wallpaperFailStreak = 0
                 val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
@@ -1509,6 +1522,16 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                         " alpha=${layer.alpha}" +
                         " 有图=${(layer as? ThemeWallpaperView)?.bitmap != null}"
                 )
+            }
+            appendLine("  decor.background=" + describeDrawable(decor.background))
+            content?.let { c ->
+                val items = buildList {
+                    for (i in 0 until c.childCount) {
+                        val child = c.getChildAt(i) ?: continue
+                        add("${child.javaClass.simpleName}[bg=" + (child.background?.javaClass?.simpleName ?: "无") + "]")
+                    }
+                }
+                appendLine("  content 子级=" + items.joinToString("、"))
             }
             appendLine("  已清背景层数=" + (clearedBackgrounds[act]?.size ?: 0))
             appendLine("  wallpaperAttached=" + (wallpaperAttached[act] == true))
