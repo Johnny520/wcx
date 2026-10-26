@@ -100,9 +100,9 @@ import kotlin.io.path.name
  * - 素材内置在模块 APK assets/theme_store/（壁纸 + 每主题 left/right 气泡）
  */
 @Feature(
-    name = "主题商城",
+    name = "主题工坊",
     categories = ["界面美化"],
-    description = "六款卡通主题一键应用：全局沉浸壁纸（主页/设置/朋友圈等全部页面，扫一扫除外）+ 对应主题气泡，支持透明度调节与恢复默认主题"
+    description = "内置 6 款全局主题，全局沉浸壁纸（主页/通讯录/发现/我的 等 4 个界面，或全部界面）+ 对应气泡，支持透明度调节与备份恢复"
 )
 object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
 
@@ -111,6 +111,25 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private const val LEFT_BUBBLE_FILE = "left_bubble.9.png"   // 对方
     private const val RIGHT_BUBBLE_FILE = "right_bubble.9.png" // 自己
     private const val CUSTOM_BUBBLES_PREF_KEY = "自定义消息气泡"
+
+    /** 当前功能名（与 @Feature.name 保持一致，初始化期 name 还没注入）。 */
+    private const val NEW_FEATURE_NAME = "主题工坊"
+
+    /** 改名前的老开关 key，用于把用户的旧状态迁过来。 */
+    private const val LEGACY_FEATURE_NAME = "主题商城"
+
+    init {
+        // 功能从「主题商城」改名「主题工坊」，开关在 WePrefs 里以 name 为 key，
+        // 不迁移的话老用户会莫名其妙掉回默认状态。
+        // 注意：name 由 FeaturesLoader 注入，初始化期还是空串，这里只能用字面量。
+        runCatching {
+            if (!WePrefs.containsKey(NEW_FEATURE_NAME) && WePrefs.containsKey(LEGACY_FEATURE_NAME)) {
+                WePrefs.putBool(NEW_FEATURE_NAME, WePrefs.getBoolOrFalse(LEGACY_FEATURE_NAME))
+                WePrefs.remove(LEGACY_FEATURE_NAME)
+                WeLogger.i(TAG, "已迁移旧开关「$LEGACY_FEATURE_NAME」→「$NEW_FEATURE_NAME」")
+            }
+        }.onFailure { WeLogger.w(TAG, "迁移旧主题开关失败：${it.message}") }
+    }
 
     // ══════════════════════════════════════════════════════════
     // 持久化

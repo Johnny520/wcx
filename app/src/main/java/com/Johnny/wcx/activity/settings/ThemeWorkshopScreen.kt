@@ -25,6 +25,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -253,9 +255,9 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     )
                     RowDivider()
                     FeatureSwitchRow(
-                        featureName = "主题商城",
+                        featureName = "主题工坊",
                         title = "主题",
-                        summary = "总开关：关闭后立即还原背景与气泡",
+                        summary = "总开关：内置 6 款全局主题，关闭后立即还原背景与气泡",
                         tick = tick,
                         onChanged = { refreshAll() },
                     )
@@ -274,6 +276,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         summary = "进入主页时白天/夜间自动切到对应主题",
                         tick = tick,
                     )
+                    RowDivider()
+                    OpacityRow(tick)
                 }
             }
 
@@ -752,6 +756,28 @@ private fun SwitchRow(title: String, summary: String, checked: Boolean, onChange
         }
         Spacer(Modifier.padding(start = 10.dp))
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** 壁纸透明度：拖动结束才落盘，避免拖的过程反复重绘所有页面。 */
+@Composable
+private fun OpacityRow(tick: Int) {
+    var pct by remember(tick) { mutableStateOf(ThemeStore.overlayOpacity()) }
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("壁纸透明度", fontSize = 15.sp, color = titleColor(), modifier = Modifier.weight(1f))
+            Text("$pct%", fontSize = 13.sp, color = summaryColor())
+        }
+        Slider(
+            value = pct.toFloat(),
+            onValueChange = { pct = it.toInt().coerceIn(5, 100) },
+            onValueChangeFinished = { ThemeStore.setOverlayOpacity(pct) },
+            valueRange = 5f..100f,
+            colors = SliderDefaults.colors(
+                thumbColor = MiuixTheme.colorScheme.primary,
+                activeTrackColor = MiuixTheme.colorScheme.primary,
+            ),
+        )
     }
 }
 
