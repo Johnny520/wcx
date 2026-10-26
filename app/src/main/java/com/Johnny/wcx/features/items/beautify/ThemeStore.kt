@@ -695,86 +695,74 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     /**
      * 挂壁纸。
      *
-     * 关键点：壁纸层必须插在 decorView 的**最底层**（index 0），并把 DecorView / 内容容器的
-     * 底色清成透明。这样壁纸永远在文字下面 —— 用户把透明度拉满也只是壁纸本身不透明，
-     * 绝不会盖住任何文字（之前挂在最上层，拉满就整屏糊掉）。
+     * 实现方式：直接设置 **窗口背景**（window.setBackgroundDrawable），
+     * 不往 DecorView 里插任何 View。
+     *
+     * 为什么不用「插一个 ImageView」：那样会改变宿主 View 树结构，
+     * 微信的无障碍模块（MMBaseAccessibilityConfig.mockInflateCore）遍历视图时
+     * 遇到未知容器可能自递归导致 StackOverflowError。改窗口背景后：
+     * - View 树零侵入，宿主结构不变
+     * - 壁纸天然在所有内容之下，文字永远在最上层，透明度拉满也不会挡字
      */
     private fun applyWallpaper(activity: Activity) {
         if (wallpaperFailCount >= 3) return
-        val decor = activity.window?.decorView as? ViewGroup ?: return
+        val window = activity.window ?: return
+        val decor = window.decorView as? ViewGroup ?: return
         val src = wallpaperSource(activity)
         if (src == null) {
             removeWallpaper(activity)
             return
         }
-        val alpha = overlayOpacityPct.coerceIn(5, 100) / 100f
-        val theme = currentTheme()
         try {
-            var container = decor.findViewWithTag<FrameLayout>(WALLPAPER_TAG)
-            if (container == null) {
-                container = FrameLayout(activity).apply {
-                    tag = WALLPAPER_TAG
-                    isClickable = false
-                    isFocusable = false
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                }
-                decor.addView(container, 0)
-            }
-            // 永远压在最底层
-            if (decor.indexOfChild(container) != 0) {
-                decor.removeView(container)
-                decor.addView(container, 0)
-            }
-            clearSurfaceBackgrounds(decor, container)
-
-            val iv = container.getChildAt(0) as? ImageView ?: ImageView(activity).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            }.also { container.addView(it) }
-            val path = src.absolutePathString()
-            val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
-            if (bmp != null && iv.tag != path) {
-                iv.setImageBitmap(bmp)
-                iv.tag = path
-            }
+            val bmp = runCatching { BitmapFactory.decodeFile(src.absolutePathString()) }.getOrNull()
             if (bmp == null) {
                 // 壁纸缺失兜底：主题色
-                iv.setImageDrawable(ColorDrawable(theme?.previewColor?.toInt() ?: 0xFFF0F0F0.toInt()))
+                val color = currentTheme()?.previewColor?.toInt() ?: 0xFFF0F0F0.toInt()
+                setWindowBackground(activity, ColorDrawable(color))
+            } else {
+                val pct = overlayOpacityPct.coerceIn(5, 100)
+                val drawable = android.graphics.drawable.BitmapDrawable(activity.resources, bmp).apply {
+                    setAlpha(pct * 255 / 100)
+                    gravity = android.view.Gravity.FILL
+                }
+                setWindowBackground(activity, drawable)
             }
-            iv.alpha = alpha
-            container.setBackgroundColor(AndroidColor.TRANSPARENT)
-            if (iv.tag != lastLoggedWallpaper) {
-                lastLoggedWallpaper = iv.tag as? String
-                WeLogger.i(TAG, "壁纸已挂载：${activity.javaClass.simpleName} ← ${src.absolutePathString()}（alpha=$alpha）")
+            // 把内容容器底色清透明，让壁纸透上来（只清容器，不碰文字/气泡）
+            clearSurfaceBackgrounds(decor)
+            wallpaperFailCount = 0
+            val key = src.absolutePathString()
+            if (key != lastLoggedWallpaper) {
+                lastLoggedWallpaper = key
+                WeLogger.i(
+                    TAG,
+                    "壁纸已挂载（窗口背景）：${activity.javaClass.simpleName} ← $key（alpha=$overlayOpacityPct%）"
+                )
             }
-            // 挂载成功，清零失败计数
-            if (wallpaperFailCount != 0) wallpaperFailCount = 0
         } catch (e: Throwable) {
             WeLogger.w(TAG, "applyWallpaper 异常", e)
             wallpaperFailCount = wallpaperFailCount + 1
             if (wallpaperFailCount >= 3) {
-                // 连续 3 次失败：自动关掉主题，恢复微信原生，避免一直抛异常
                 runCatching {
                     activeThemeId = ""
                     ThemePack.currentId = ""
-                    decor.findViewWithTag<View>(WALLPAPER_TAG)?.let { decor.removeView(it) }
-                    restoreSurfaceBackgrounds()
+                    removeWallpaper(activity)
                 }
                 WeLogger.w(TAG, "壁纸连续失败 3 次，已自动关闭主题（恢复微信原生）")
             }
         }
     }
 
-    /** 只为日志去重，避免每次 resume 都刷一条。 */
-    @Volatile
-    private var lastLoggedWallpaper: String? = null
+    // 每个 Activity 原始的窗口背景，撤销主题时原样放回去
+    private val savedWindowBackgrounds =
+        java.util.WeakHashMap<Activity, android.graphics.drawable.Drawable?>()
+
+    private fun setWindowBackground(activity: Activity, drawable: android.graphics.drawable.Drawable?) {
+        val window = activity.window ?: return
+        if (!savedWindowBackgrounds.containsKey(activity)) {
+            savedWindowBackgrounds[activity] = window.decorView?.background
+        }
+        window.setBackgroundDrawable(drawable)
+    }
 
     // 被清掉的原背景，撤销主题时原样放回去
     private val savedBackgrounds =
@@ -784,12 +772,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 把「装饰层 / 内容容器」的底色清空，让贴在底部的壁纸透上来。
      * 只处理容器级 View，页面内部的列表/气泡/文字一概不碰。
      */
-    private fun clearSurfaceBackgrounds(decor: ViewGroup, wallpaper: View) {
+    private fun clearSurfaceBackgrounds(decor: ViewGroup) {
         runCatching {
-            clearOne(decor)
+            // 注意：decorView 自身的背景就是我们刚设的壁纸，不能清
             for (i in 0 until decor.childCount) {
                 val child = decor.getChildAt(i)
-                if (child === wallpaper) continue
                 clearOne(child)
                 if (child !is ViewGroup) continue
                 val depth = if (child.id == android.R.id.content) 3 else 2
@@ -827,8 +814,14 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private fun removeWallpaper(activity: Activity) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
         try {
+            // 兼容老版本留下的插入层（如果有）
             decor.findViewWithTag<View>(WALLPAPER_TAG)?.let { decor.removeView(it) }
-            // 主题撤销后把被清掉的容器底色放回去，恢复微信原样
+            // 恢复窗口原始背景 + 被清掉的容器底色
+            activity.window?.let { w ->
+                if (savedWindowBackgrounds.containsKey(activity)) {
+                    w.setBackgroundDrawable(savedWindowBackgrounds.remove(activity))
+                }
+            }
             restoreSurfaceBackgrounds()
         } catch (e: Throwable) { WeLogger.w(TAG, "removeWallpaper 异常", e) }
     }
@@ -886,13 +879,19 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         emptyList()
     }
 
-    /** 更新所有存活页面已挂载壁纸层的透明度（滑杆即时生效）。 */
-    private fun updateAlphaOnLive(alpha: Float) {
+    /**
+     * 透明度滑杆即时生效。
+     *
+     * 壁纸现在挂在窗口背景上（不再是独立的 ImageView 层），
+     * 所以直接对当前活着的页面重挂一次，让它按新的 alpha 重新设置背景。
+     */
+    private fun updateAlphaOnLive(@Suppress("UNUSED_PARAMETER") alpha: Float) {
         liveActivities().forEach { act ->
             try {
-                val decor = act.window?.decorView as? ViewGroup ?: return@forEach
-                (decor.findViewWithTag<FrameLayout>(WALLPAPER_TAG)?.getChildAt(0) as? ImageView)?.alpha = alpha
-            } catch (e: Throwable) { WeLogger.d(TAG, "更新透明度失败：${e.message}") }
+                applyWallpaper(act)
+            } catch (e: Throwable) {
+                WeLogger.d(TAG, "更新透明度失败：${e.message}")
+            }
         }
     }
 
