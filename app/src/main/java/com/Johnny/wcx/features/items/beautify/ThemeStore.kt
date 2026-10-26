@@ -270,14 +270,43 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // 素材读取（模块 APK 内置 assets → 一次性提取到模块数据目录）
     // ══════════════════════════════════════════════════════════
     /** 从模块 APK assets 读取内置素材；失败返回 null。 */
-    private fun readBuiltinAsset(assetPath: String): ByteArray? = try {
-        val pkgCtx = HostApplication?.createPackageContext(BuildConfig.APPLICATION_ID, 0)
-            ?: return null
-        pkgCtx.assets.open(assetPath).use { it.readBytes() }
-    } catch (e: Throwable) {
-        WeLogger.w(TAG, "读取内置素材失败：$assetPath（$e）")
-        null
+    /**
+     * 读模块 APK 里的内置素材（背景图 / 点九气泡）。
+     *
+     * 原来只有 createPackageContext 一条路，在微信进程里一旦被拒，
+     * 所有内置主题就只剩一个纯色块 —— 用户感知就是「点了默认主题没效果」。
+     * 这里补两条兜底：模块 ClassLoader 直接命中 APK 条目、直接开模块 APK 读 zip。
+     */
+    private fun readBuiltinAsset(assetPath: String): ByteArray? {
+        runCatching {
+            val pkgCtx = HostApplication?.createPackageContext(BuildConfig.APPLICATION_ID, 0)
+            pkgCtx?.assets?.open(assetPath)?.use { return it.readBytes() }
+        }.onFailure { WeLogger.w(TAG, "createPackageContext 读素材失败：$assetPath（${it.message}）") }
+
+        runCatching {
+            ThemeStore::class.java.classLoader?.getResourceAsStream("assets/$assetPath")
+                ?.use { return it.readBytes() }
+        }.onFailure { WeLogger.w(TAG, "ClassLoader 读素材失败：$assetPath（${it.message}）") }
+
+        runCatching {
+            val apk = moduleApkPath() ?: return@runCatching
+            java.util.zip.ZipFile(apk).use { zip ->
+                zip.getEntry("assets/$assetPath")?.let { entry ->
+                    zip.getInputStream(entry).use { return it.readBytes() }
+                }
+            }
+        }.onFailure { WeLogger.w(TAG, "ZipFile 读素材失败：$assetPath（${it.message}）") }
+
+        WeLogger.w(TAG, "内置素材三种方式都读不到：$assetPath")
+        return null
     }
+
+    /** 模块自身 APK 路径（用于直接从 zip 读 assets）。 */
+    private fun moduleApkPath(): String? = runCatching {
+        HostApplication?.packageManager
+            ?.getApplicationInfo(BuildConfig.APPLICATION_ID, 0)
+            ?.sourceDir
+    }.getOrNull()
 
     /** 确保某个主题的素材已提取到模块数据目录（壁纸 + 两个气泡）。 */
     private fun ensureBuiltinExtracted(theme: ThemeInfo, force: Boolean = false) {
