@@ -296,7 +296,7 @@ private fun scriptSelfCheckSteps(context: Context): List<ScriptRunStep> {
                 failure == null -> true to "$configured（/health 正常）"
                 failure == MARKET_PROBE_SKIPPED -> true to "$configured（主线程，未检测连通性）"
                 // 自定义地址不回落，只报告
-                !PluginMarketSettings.isPreset(configured) -> false to "$configured 不可用：$failure（自定义地址，不会自动切换）"
+                !isPresetMarketServer(configured) -> false to "$configured 不可用：$failure（自定义地址，不会自动切换）"
                 else -> {
                     val alternate = PluginMarketSettings.presetServiceUrls()
                         .firstOrNull { !it.equals(configured, ignoreCase = true) }
@@ -331,6 +331,14 @@ private const val MARKET_PROBE_SKIPPED = "跳过检测（主线程）"
 
 private val marketProbeCache = HashMap<String, Pair<Long, String?>>()
 private val marketProbeLock = Any()
+
+/** 当前地址是否为内置预设（本地判定，避免跨文件解析差异）。 */
+private fun isPresetMarketServer(url: String): Boolean {
+    val normalized = url.trim().trimEnd('/')
+    return runCatching {
+        PluginMarketSettings.presetServiceUrls().any { it.equals(normalized, ignoreCase = true) }
+    }.getOrDefault(false)
+}
 
 /** 请求 /health；返回 null 表示可用，否则返回失败原因。 */
 private fun probeMarketServer(base: String): String? = synchronized(marketProbeLock) {
@@ -443,7 +451,7 @@ private fun scriptRepairSteps(context: Context): List<ScriptRunStep> {
             when {
                 failure == null || failure == MARKET_PROBE_SKIPPED -> true to "$configured 可用，无需切换"
                 // 自定义地址只报告，不擅自改（避免把数据发到别人服务器）
-                !PluginMarketSettings.isPreset(configured) ->
+                !isPresetMarketServer(configured) ->
                     false to "$configured 不可用：$failure；自定义地址不做自动切换，请手动修改"
                 else -> {
                     val usable = PluginMarketSettings.presetServiceUrls()

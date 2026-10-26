@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 
 object PluginMarketClient {
     private const val TAG = "[WCX:PluginMarket]"
+    private const val LAST_GOOD_TTL_MS = 10 * 60 * 1000L
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -441,7 +442,8 @@ context: Context,
         bases.forEachIndexed { index, base ->
             try {
                 val root = execute(context, base, method, path, body, ownerToken, query)
-                PluginMarketSettings.rememberGoodServiceUrl(context, base.toString())
+                lastGoodBase = base.toString()
+                lastGoodAt = System.currentTimeMillis()
                 return root
             } catch (error: Throwable) {
                 lastError = error
@@ -526,12 +528,32 @@ context: Context,
         }
     }
 
+    /** 最近一次连通的预设地址（进程内 10 分钟），下次优先命中，避免每次都先撞一次已挂的地址。 */
+    @Volatile
+    private var lastGoodBase: String? = null
+
+    @Volatile
+    private var lastGoodAt: Long = 0L
+
+    private fun lastGoodPreset(): String? {
+        val url = lastGoodBase?.trim()?.trimEnd('/') ?: return null
+        if (System.currentTimeMillis() - lastGoodAt > LAST_GOOD_TTL_MS) return null
+        return url.takeIf { isPresetBase(it) }
+    }
+
+    private fun isPresetBase(url: String): Boolean {
+        val normalized = url.trim().trimEnd('/')
+        return runCatching {
+            PluginMarketSettings.presetServiceUrls().any { it.equals(normalized, ignoreCase = true) }
+        }.getOrDefault(false)
+    }
+
     /** 候选服务器：当前配置优先；预设之间允许回落，自定义地址只有它自己。 */
     private fun candidateBases(context: Context): List<HttpUrl> {
         val configured = PluginMarketSettings.serviceUrl(context).trim().trimEnd('/')
-        val raw = if (PluginMarketSettings.isPreset(configured)) {
+        val raw = if (isPresetBase(configured)) {
             buildList {
-                PluginMarketSettings.lastGoodServiceUrl(context)?.let { add(it) }
+                lastGoodPreset()?.let { add(it) }
                 add(configured)
                 PluginMarketSettings.presetServiceUrls().forEach { if (it !in this) add(it) }
             }.distinct()

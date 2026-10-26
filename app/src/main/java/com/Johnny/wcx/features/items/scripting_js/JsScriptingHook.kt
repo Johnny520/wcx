@@ -13,7 +13,9 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.utils.fs.createDirsSafe
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.createDirectories
 import kotlin.io.path.div
+import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.io.path.readText
@@ -110,7 +112,8 @@ object JsScriptingHook : SwitchFeature(),
         watchHandler = handler
         val watcher = object : FileObserver(
             SCRIPTS_DIR.toAbsolutePath().toString(),
-            CREATE or DELETE or CLOSE_WRITE or MOVED
+            // 0x000000c0 = MOVED_FROM|MOVED_TO（这两个常量是 API 29 才加的，这里直接用字面量，避免低版本 runtime 与 NewApi 告警）
+            CREATE or DELETE or CLOSE_WRITE or 0x000000c0
         ) {
             override fun onEvent(event: Int, path: String?) {
                 if (path == null || !path.endsWith(".js", ignoreCase = true)) return

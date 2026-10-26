@@ -13,9 +13,6 @@ object PluginMarketSettings {
     private const val KEY_SERVICE_URL = "service_url"
     private const val KEY_INSTALL_ID = "install_id"
     private const val KEY_OWNERSHIPS = "ownerships"
-    private const val KEY_LAST_GOOD_URL = "last_good_service_url"
-    private const val KEY_LAST_GOOD_AT = "last_good_service_at"
-    private const val GOOD_TTL_MS = 10 * 60 * 1000L
 
     private val lock = Any()
 
@@ -27,31 +24,6 @@ object PluginMarketSettings {
         DEFAULT_SERVICE_URL -> "官方服务器（默认）"
         BACKUP_SERVICE_URL -> "备用服务器"
         else -> url
-    }
-
-    /** 当前地址是否为内置预设。只有预设才允许自动回落，自定义地址绝不改投别处。 */
-    fun isPreset(url: String): Boolean {
-        val normalized = url.trim().trimEnd('/')
-        return presetServiceUrls().any { it.equals(normalized, ignoreCase = true) }
-    }
-
-    /** 最近一次实际连通的预设地址（10 分钟内有效），用于下次优先命中，避免先撞一次已挂的服务器。 */
-    fun lastGoodServiceUrl(context: Context): String? {
-        val prefs = preferences(context)
-        val url = prefs.getString(KEY_LAST_GOOD_URL, null)?.trim()?.trimEnd('/').orEmpty()
-        if (url.isBlank() || !isPreset(url)) return null
-        val at = prefs.getLong(KEY_LAST_GOOD_AT, 0L)
-        if (System.currentTimeMillis() - at > GOOD_TTL_MS) return null
-        return url
-    }
-
-    fun rememberGoodServiceUrl(context: Context, url: String) {
-        val normalized = url.trim().trimEnd('/')
-        if (!isPreset(normalized)) return
-        preferences(context).edit()
-            .putString(KEY_LAST_GOOD_URL, normalized)
-            .putLong(KEY_LAST_GOOD_AT, System.currentTimeMillis())
-            .apply()
     }
 
     fun serviceUrl(context: Context): String {

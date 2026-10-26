@@ -276,7 +276,7 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
             val chatFooter = runCatching {
                 thisObject.reflekt().firstFieldOrNull {
                     type = ChatFooter::class
-                }.get() as? ChatFooter
+                }?.get() as? ChatFooter
             }.getOrNull()
             if (chatFooter == null) {
                 WeLogger.w(TAG, "发送按钮脚本回调跳过：当前微信版本取不到 ChatFooter")
