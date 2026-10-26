@@ -4,6 +4,8 @@ import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.fs.KnownPaths
 import org.json.JSONObject
+import android.content.Context
+import android.net.Uri
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -268,6 +270,53 @@ object ThemePack {
         }
         File(dir, MANIFEST).writeText(manifest.toString(2))
         load(dir) ?: error("生成主题包清单失败")
+    }
+
+    /**
+     * 新建一个空主题包：只写清单，图片留空。
+     *
+     * 自由度最高的用法——有人只想换两个气泡、不想换壁纸，那就只补气泡那两张图，
+     * 其余项留空即保持微信原样，不会因为缺图整套失效。
+     */
+    fun createEmptyPack(name: String, author: String = "我"): Result<Pack> = runCatching {
+        val id = "pack_" + System.currentTimeMillis().toString(36)
+        val dir = File(root, id).apply { mkdirs() }
+        val manifest = JSONObject().apply {
+            put("name", name)
+            put("author", author)
+            put("version", "1.0")
+        }
+        File(dir, MANIFEST).writeText(manifest.toString(2))
+        load(dir) ?: error("新建主题包失败")
+    }
+
+    /**
+     * 给主题包写入一张图片。
+     *
+     * @param role wallpaper / bubble_left / bubble_right
+     * @param ninePatch 气泡必须是 9-patch（.9.png），由调用方决定文件后缀
+     */
+    fun writeImage(pack: Pack, context: Context, uri: Uri, role: String, ninePatch: Boolean = false): Pack? {
+        val fileName = when (role) {
+            "wallpaper" -> "wallpaper.png"
+            "bubble_left" -> if (ninePatch) "bubble_left.9.png" else "bubble_left.png"
+            "bubble_right" -> if (ninePatch) "bubble_right.9.png" else "bubble_right.png"
+            else -> return null
+        }
+        val ok = runCatching {
+            val dest = File(pack.dir, fileName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            } != null
+        }.onFailure { WeLogger.w(TAG, "写入图片失败：$role / ${it.message}") }.getOrDefault(false)
+        if (!ok) return null
+
+        val manifestFile = File(pack.dir, MANIFEST)
+        val manifest = runCatching { JSONObject(manifestFile.readText()) }.getOrElse { JSONObject() }
+        manifest.put(role, fileName)
+        manifestFile.writeText(manifest.toString(2))
+        WeLogger.i(TAG, "主题包 ${pack.name} 已更新 $role -> $fileName")
+        return load(pack.dir)
     }
 
     /** 导出目录，分享时从这里取 zip。 */

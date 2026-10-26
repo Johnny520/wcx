@@ -1,5 +1,7 @@
 package com.Johnny.wcx.activity.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,6 +40,36 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var packs by remember { mutableStateOf(ThemePack.list()) }
     var active by remember { mutableStateOf(ThemeStore.activeThemeIdOrEmpty()) }
     var opacity by remember { mutableStateOf(ThemeStore.overlayOpacity()) }
+    // 正在编辑的主题包（新建后逐个换图，最后再保存/应用）
+    var editing by remember { mutableStateOf<ThemePack.Pack?>(null) }
+
+    fun applyEditing() {
+        val pack = editing ?: return
+        ThemeStore.applyThemeById(pack.id)
+        refresh()
+    }
+
+    val pickWallpaper = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val pack = editing
+        if (uri != null && pack != null) {
+            ThemePack.writeImage(pack, context, uri, "wallpaper")?.let { editing = it }
+            showToast(context, "壁纸已写入，点「应用这个主题」生效")
+        }
+    }
+    val pickBubbleOther = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val pack = editing
+        if (uri != null && pack != null) {
+            ThemePack.writeImage(pack, context, uri, "bubble_left")?.let { editing = it }
+            showToast(context, "对方气泡已写入")
+        }
+    }
+    val pickBubbleSelf = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val pack = editing
+        if (uri != null && pack != null) {
+            ThemePack.writeImage(pack, context, uri, "bubble_right")?.let { editing = it }
+            showToast(context, "自己气泡已写入")
+        }
+    }
 
     fun refresh() {
         packs = ThemePack.list()
@@ -141,6 +173,76 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                                 if (added.isEmpty()) "没发现新的 zip（现有 ${packs.size} 个）"
                                 else "已导入 ${added.size} 个主题包",
                             )
+                        },
+                    )
+                }
+            }
+
+            // ── 新建 / 编辑主题 ─────────────────────────────────────
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "新建主题（自由度最高）") }
+            item {
+                SettingsCard {
+                    ActionRow(
+                        title = if (editing == null) "新建一个空主题" else "当前编辑：${editing?.name ?: ""}",
+                        summary = "只想换两个气泡也可以，其它项留空就保持微信原样",
+                        onClick = {
+                            ThemePack.createEmptyPack("我的主题").onSuccess {
+                                editing = it
+                                packs = ThemePack.list()
+                                showToast(context, "已新建：${it.name}，接着选图吧")
+                            }.onFailure {
+                                showToast(context, "新建失败：${it.message}")
+                            }
+                        },
+                    )
+                    InsetDivider()
+                    ActionRow(
+                        title = "① 选壁纸",
+                        summary = editing?.wallpaper()?.name ?: "未选择（点这里从相册选）",
+                        onClick = {
+                            if (editing == null) showToast(context, "先点上面「新建一个空主题」")
+                            else pickWallpaper.launch("image/*")
+                        },
+                    )
+                    InsetDivider()
+                    ActionRow(
+                        title = "② 选「对方」气泡",
+                        summary = editing?.bubbleOther()?.name ?: "未选择",
+                        onClick = {
+                            if (editing == null) showToast(context, "先点上面「新建一个空主题」")
+                            else pickBubbleOther.launch("image/*")
+                        },
+                    )
+                    InsetDivider()
+                    ActionRow(
+                        title = "③ 选「自己」气泡",
+                        summary = editing?.bubbleSelf()?.name ?: "未选择",
+                        onClick = {
+                            if (editing == null) showToast(context, "先点上面「新建一个空主题」")
+                            else pickBubbleSelf.launch("image/*")
+                        },
+                    )
+                    InsetDivider()
+                    ActionRow(
+                        title = "保存（只保存，不应用）",
+                        summary = "图已经写进主题里了，点这里刷新列表",
+                        onClick = {
+                            packs = ThemePack.list()
+                            refresh()
+                            showToast(context, "已保存 ${packs.size} 个主题")
+                        },
+                    )
+                    InsetDivider()
+                    ActionRow(
+                        title = "应用这个主题",
+                        summary = "立即生效；气泡类改动可能要重启微信才完全刷新",
+                        onClick = {
+                            if (editing == null) {
+                                showToast(context, "还没有正在编辑的主题")
+                            } else {
+                                applyEditing()
+                                showToast(context, "已应用：${editing?.name}")
+                            }
                         },
                     )
                 }
