@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 
 object PluginMarketClient {
     private const val TAG = "[WCX:PluginMarket]"
+    private const val LAST_GOOD_TTL_MS = 10 * 60 * 1000L
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -416,6 +417,70 @@ context: Context,
         Unit
     }
 
+    /**
+     * 健康探测：只打一次 /health，短超时，用于诊断页与服务器切换前确认可用性。
+     * 不复用主客户端，避免 120s 的读写超时把诊断页拖死。
+     */
+    fun probeHealth(
+        context: Context,
+        baseUrl: String,
+        timeoutMs: Long = 3_000L
+    ): Result<PluginMarketHealth> = runCatching {
+        val base = baseUrl.trim().trimEnd('/').toHttpUrlOrNull()
+            ?: throw PluginMarketException("插件仓库地址无效，请先配置完整的 HTTP/HTTPS 地址")
+        val client = OkHttpClient.Builder()
+            .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .build()
+        val request = Request.Builder()
+            .url(base.newBuilder().addPathSegment("health").build())
+            .header("Accept", "application/json")
+            .header("X-Hchat-Install-Id", PluginMarketSettings.installId(context))
+            .get()
+            .build()
+        try {
+            client.newCall(request).execute().use { response ->
+                val raw = response.body?.string().orEmpty()
+                val root = runCatching { JSONObject(raw.ifBlank { "{}" }) }.getOrElse {
+                    throw PluginMarketException("HTTP ${response.code}：返回内容不是有效 JSON", response.code, it)
+                }
+                if (!response.isSuccessful || !root.optBoolean("ok", false)) {
+                    throw PluginMarketException(
+                        errorMessage(root, response.code),
+                        response.code,
+                        errorCode = errorCode(root)
+                    )
+                }
+                val data = root.opt("data")
+                PluginMarketHealth(
+                    status = if (data is JSONObject) data.optString("status") else "",
+                    database = if (data is JSONObject) data.optString("database") else "",
+                    message = if (data is JSONObject) data.optString("message", "服务正常") else "服务正常"
+                )
+            }
+        } catch (error: PluginMarketException) {
+            throw error
+        } catch (error: IOException) {
+            throw PluginMarketException(
+                if (error is SocketTimeoutException) {
+                    "连接超时（${timeoutMs}ms）"
+                } else {
+                    "网络不可达：${error.message ?: "网络不可用"}"
+                },
+                cause = error
+            )
+        }
+    }
+
+    /**
+     * 按候选地址依次尝试。
+     *
+     * 回落的边界（不能越过）：
+     * - 只有「内置预设地址」才会回落，用户填的自定义地址永远只用它自己，绝不把请求（尤其带 ownerToken 的）发到别处；
+     * - 带 ownerToken 的请求（发布/更新/删除等归属操作）不回落；
+     * - 只有网络层失败、5xx、404/408/429 才换服务器；4xx 业务错误照原样报给用户。
+     */
     private fun request(
         context: Context,
         method: HttpMethod,
@@ -424,7 +489,43 @@ context: Context,
         ownerToken: String?,
         query: Map<String, String> = emptyMap()
     ): JSONObject {
-        val url = buildUrl(context, path, query)
+        val bases = candidateBases(context)
+        if (bases.isEmpty()) {
+            throw PluginMarketException("插件仓库地址无效，请先在插件市场设置里填写完整的 HTTP/HTTPS 地址")
+        }
+        val allowFallback = bases.size > 1 && ownerToken.isNullOrBlank()
+        var lastError: Throwable? = null
+        bases.forEachIndexed { index, base ->
+            try {
+                val root = execute(context, base, method, path, body, ownerToken, query)
+                lastGoodBase = base.toString()
+                lastGoodAt = System.currentTimeMillis()
+                return root
+            } catch (error: Throwable) {
+                lastError = error
+                val isLast = index == bases.lastIndex
+                if (!allowFallback || isLast || !isSwitchable(error)) throw error
+                HLog.e(
+                    "$TAG 服务器 ${base.host} 不可用（${error.message ?: error.javaClass.simpleName}），" +
+                        "自动切换下一台 ${bases[index + 1].host}",
+                    error
+                )
+            }
+        }
+        throw lastError ?: PluginMarketException("插件仓库请求失败：没有可用的服务器地址")
+    }
+
+    /** 单个地址的一次真实请求。 */
+    private fun execute(
+        context: Context,
+        base: HttpUrl,
+        method: HttpMethod,
+        path: List<String>,
+        body: JSONObject?,
+        ownerToken: String?,
+        query: Map<String, String>
+    ): JSONObject {
+        val url = buildUrl(base, path, query)
         val builder = Request.Builder()
             .url(url)
             .header("Accept", "application/json")
@@ -461,7 +562,11 @@ context: Context,
                 return root
             }
         } catch (error: PluginMarketException) {
-            HLog.e("$TAG 请求失败 method=${method.name} path=/${path.joinToString("/")} ${error.message}", error)
+            HLog.e(
+                "$TAG 请求失败 host=${base.host} method=${method.name} " +
+                    "path=/${path.joinToString("/")} ${error.message}",
+                error
+            )
             throw error
         } catch (error: IOException) {
             val message = if (error is SocketTimeoutException) {
@@ -470,19 +575,61 @@ context: Context,
                 "插件仓库网络请求失败: ${error.message ?: "网络不可用"}"
             }
             val wrapped = PluginMarketException(message, cause = error)
-            HLog.e("$TAG 网络请求失败 method=${method.name} path=/${path.joinToString("/")}", wrapped)
+            HLog.e("$TAG 网络请求失败 host=${base.host} method=${method.name} path=/${path.joinToString("/")}", wrapped)
             throw wrapped
         } catch (error: Throwable) {
             val wrapped = PluginMarketException("插件仓库请求失败: ${error.message ?: error.javaClass.simpleName}", cause = error)
-            HLog.e("$TAG 请求异常 method=${method.name} path=/${path.joinToString("/")}", wrapped)
+            HLog.e("$TAG 请求异常 host=${base.host} method=${method.name} path=/${path.joinToString("/")}", wrapped)
             throw wrapped
         }
     }
 
-    private fun buildUrl(context: Context, path: List<String>, query: Map<String, String>): HttpUrl {
-        val rawBase = PluginMarketSettings.serviceUrl(context).trim()
-        val base = runCatching { rawBase.toHttpUrlOrNull() }.getOrNull()
-            ?: throw PluginMarketException("插件仓库地址无效，请先配置完整的 HTTPS 地址")
+    /** 最近一次连通的预设地址（进程内 10 分钟），下次优先命中，避免每次都先撞一次已挂的地址。 */
+    @Volatile
+    private var lastGoodBase: String? = null
+
+    @Volatile
+    private var lastGoodAt: Long = 0L
+
+    private fun lastGoodPreset(): String? {
+        val url = lastGoodBase?.trim()?.trimEnd('/') ?: return null
+        if (System.currentTimeMillis() - lastGoodAt > LAST_GOOD_TTL_MS) return null
+        return url.takeIf { isPresetBase(it) }
+    }
+
+    private fun isPresetBase(url: String): Boolean {
+        val normalized = url.trim().trimEnd('/')
+        return runCatching {
+            PluginMarketSettings.presetServiceUrls().any { it.equals(normalized, ignoreCase = true) }
+        }.getOrDefault(false)
+    }
+
+    /** 候选服务器：当前配置优先；预设之间允许回落，自定义地址只有它自己。 */
+    private fun candidateBases(context: Context): List<HttpUrl> {
+        val configured = PluginMarketSettings.serviceUrl(context).trim().trimEnd('/')
+        val raw = if (isPresetBase(configured)) {
+            buildList {
+                lastGoodPreset()?.let { add(it) }
+                add(configured)
+                PluginMarketSettings.presetServiceUrls().forEach { if (it !in this) add(it) }
+            }.distinct()
+        } else {
+            listOf(configured)
+        }
+        return raw.mapNotNull { text -> runCatching { text.toHttpUrlOrNull() }.getOrNull() }
+    }
+
+    /** 换服务器只对「网络层 / 服务端不可用 / 明显异常的 4xx」生效，业务错误不换。 */
+    private fun isSwitchable(error: Throwable): Boolean {
+        if (error is PluginMarketException) {
+            error.cause?.let { if (it is IOException) return true }
+            val code = error.httpCode ?: return false
+            return code >= 500 || code == 404 || code == 408 || code == 429
+        }
+        return error is IOException
+    }
+
+    private fun buildUrl(base: HttpUrl, path: List<String>, query: Map<String, String>): HttpUrl {
         require(base.scheme == "https" || base.scheme == "http") { "插件仓库只支持 HTTP/HTTPS 地址" }
         val builder = base.newBuilder()
         path.forEach { segment ->
