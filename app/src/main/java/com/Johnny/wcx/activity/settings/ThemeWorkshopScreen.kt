@@ -328,6 +328,27 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text("主题诊断") },
+                            onClick = {
+                                menuOpen = false
+                                val info = runCatching { ThemeStore.diagnose() }
+                                    .getOrElse { "诊断失败：" + (it.message ?: it.javaClass.simpleName) }
+                                android.app.AlertDialog.Builder(context)
+                                    .setTitle("主题诊断")
+                                    .setMessage(info)
+                                    .setPositiveButton("知道了", null)
+                                    .setNeutralButton("复制") { _, _ ->
+                                        runCatching {
+                                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                                as? android.content.ClipboardManager
+                                            cm?.setPrimaryClip(android.content.ClipData.newPlainText("主题诊断", info))
+                                        }
+                                        showToast(context, "已复制，直接发给我即可")
+                                    }
+                                    .show()
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("使用说明") },
                             onClick = {
                                 menuOpen = false
@@ -1077,6 +1098,7 @@ private fun SwitchRow(title: String, summary: String, checked: Boolean, onChange
 
 @Composable
 private fun OpacityRow(tick: Int) {
+    val context = LocalContext.current
     var pct by remember(tick) { mutableStateOf(ThemeStore.overlayOpacity()) }
     Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1099,6 +1121,38 @@ private fun OpacityRow(tick: Int) {
                 activeTrackColor = MiuixTheme.colorScheme.primary,
             ),
         )
+        // 渲染方式：微信 8.0.79 的主界面容器是不透明绘制，垫底的壁纸会被整块盖住，
+        // 所以默认用「覆盖」。两种方式都保留，用户哪种看得见就用哪种。
+        var overlayMode by remember(tick) { mutableStateOf(ThemeStore.renderModeName().startsWith("覆盖")) }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    overlayMode = !overlayMode
+                    runCatching { ThemeStore.setRenderMode(overlayMode) }
+                    showToast(context, if (overlayMode) "已切到覆盖模式，回微信看看" else "已切到沉浸模式，回微信看看")
+                }
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("壁纸渲染方式", fontSize = 15.sp, color = titleColor())
+                Text(
+                    text = if (overlayMode) {
+                        "覆盖：贴在内容最上层，任何微信版本都一定看得见（推荐）"
+                    } else {
+                        "沉浸：垫在内容最底层，靠页面透明透出；8.0.79 上常被不透明容器盖住"
+                    },
+                    fontSize = 11.sp,
+                    color = summaryColor(),
+                )
+            }
+            Text(
+                text = if (overlayMode) "覆盖" else "沉浸",
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.primary,
+            )
+        }
     }
 }
 

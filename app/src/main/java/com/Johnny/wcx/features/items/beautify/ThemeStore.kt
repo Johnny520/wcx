@@ -114,6 +114,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private const val RIGHT_BUBBLE_FILE = "right_bubble.9.png" // 自己
     private const val CUSTOM_BUBBLES_PREF_KEY = "自定义消息气泡"
 
+    /** 渲染方式：覆盖 = 贴在内容最上层（一定看得见）；沉浸 = 垫在内容最底层（依赖页面透明）。 */
+    private const val RENDER_OVERLAY = "overlay"
+    private const val RENDER_IMMERSIVE = "immersive"
+
     /** 当前功能名（与 @Feature.name 保持一致，初始化期 name 还没注入）。 */
     private const val NEW_FEATURE_NAME = "主题工坊"
 
@@ -157,6 +161,36 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     /** 记录哪些 Activity 当前真的挂着背景层，避免对没挂过的页面白跑 removeWallpaper。 */
     private val wallpaperAttached = java.util.WeakHashMap<Activity, Boolean>()
     private var overlayOpacityPct by prefOption("theme_store_overlay_opacity", 40)
+
+    /**
+     * 壁纸渲染方式。
+     *
+     * 默认「覆盖」：微信 8.0.79 上主界面容器基本都是不透明绘制，
+     * 垫在底层（旧 TabTheme 的做法）会被完全盖住 —— 用户看到的就是「点了应用没反应」。
+     * 覆盖式是纯叠层，不依赖页面透明，任何版本都一定能看见；不透明度靠「壁纸透明度」控制。
+     */
+    private var renderModePref by prefOption("theme_store_render_mode", RENDER_OVERLAY)
+
+    private fun isOverlayMode(): Boolean = renderModePref != RENDER_IMMERSIVE
+
+    /** 渲染方式的展示名。 */
+    fun renderModeName(): String = if (isOverlayMode()) "覆盖（推荐）" else "沉浸（底层）"
+
+    /** 切换渲染方式：立刻撤掉旧层并在新位置重挂。 */
+    fun setRenderMode(overlay: Boolean) {
+        renderModePref = if (overlay) RENDER_OVERLAY else RENDER_IMMERSIVE
+        runCatching {
+            liveActivities().forEach { act ->
+                detach(act.window?.decorView?.findViewWithTag<View>(TAB_ROOT_TAG))
+                if (!overlay) restoreClearedBackgrounds(act)
+            }
+        }
+        tabBitmapPath = null
+        lastLoggedWallpaper = null
+        wallpaperFailStreak = 0
+        applyThemeToAllLive()
+        WeLogger.i(TAG, "渲染方式已切换：${renderModeName()}")
+    }
 
     // ══════════════════════════════════════════════════════════
     // 主题定义
@@ -892,7 +926,21 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                     host.addView(it, slot, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                 }
             }
-            if (view.parent !== host || host.indexOfChild(view) != slot) {
+            val overlayMode = isOverlayMode()
+            if (overlayMode) {
+                // 覆盖式：始终贴在内容容器最上层。不依赖页面是否透明，任何版本都看得见。
+                if (view.parent !== host) {
+                    val lp = view.layoutParams
+                        ?: ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    detach(view)
+                    host.addView(view, lp)
+                } else {
+                    host.bringChildToFront(view)
+                }
+            } else if (view.parent !== host || host.indexOfChild(view) != slot) {
                 val lp = view.layoutParams ?: ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 detach(view)
                 host.addView(view, slot, lp)
@@ -912,9 +960,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 }
             }
             view.alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
-            // 微信 8.x 的主界面容器常常自带不透明底色，会把 index 0 的壁纸整个盖住。
-            // 这里只清「装饰层 / 内容容器」这一两层，不动页面内部（列表、气泡、文字）。
-            clearSurfaceLite(activity, decor)
+            if (!overlayMode) {
+                // 只有垫底模式才需要把页面底板清透明，否则壁纸会被不透明容器整块盖住。
+                // 覆盖模式不清任何微信背景 —— 少动宿主结构，少一分崩溃/掉帧风险。
+                clearSurfaceLite(activity, decor)
+            }
             wallpaperAttached[activity] = true
             wallpaperFailStreak = 0
             val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
@@ -998,6 +1048,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         val decor = activity.window?.decorView as? ViewGroup ?: return
         val view = decor.findViewWithTag<View>(TAB_ROOT_TAG) as? ThemeWallpaperView ?: return
         runCatching {
+            // 覆盖模式下微信可能把新页面加到我们上面，切 Tab 时重新提到最上层
+            if (isOverlayMode()) (view.parent as? ViewGroup)?.bringChildToFront(view)
             val file = fileForTab(tabWallpaperFiles(), position)
             val path = file?.let { "${it.absolutePath}|${it.lastModified()}" }
             if (path != null && path != tabBitmapPath) {
@@ -1338,6 +1390,65 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     fun builtinColor(id: String): Long = builtinTheme(id)?.previewColor ?: 0xFFF0F0F0
 
     fun activeThemeIdOrEmpty(): String = activeThemeId
+
+    /**
+     * 主题全链路状态，供「主题诊断」一键复制。
+     *
+     * 逐层说明壁纸到底卡在哪：开关 → 当前主题 → 4 页素材文件 → 挂载位置/尺寸/是否有图 → 清了几个背景。
+     * 之前「不生效」只能靠猜，这里全部给实数。
+     */
+    fun diagnose(): String = buildString {
+        appendLine("== 主题工坊诊断（${BuildConfig.VERSION_NAME}）==")
+        appendLine("功能开关 = " + runCatching { WePrefs.getBoolOrFalse(NEW_FEATURE_NAME) }.getOrDefault(false) + "（key=$NEW_FEATURE_NAME）")
+        appendLine("activeThemeId = '$activeThemeId'")
+        appendLine("ThemePack.currentId = '" + runCatching { ThemePack.currentId }.getOrDefault("异常") + "'")
+        appendLine("ThemePack.active() = " + runCatching {
+            ThemePack.active()?.let { pack -> "${pack.id} / ${pack.name}" } ?: "无"
+        }.getOrDefault("异常"))
+        appendLine("渲染方式 = ${renderModeName()}")
+        appendLine("壁纸透明度 = ${overlayOpacity()}%")
+        appendLine("自定义气泡开关 = " + runCatching { WePrefs.getBoolOrFalse(CUSTOM_BUBBLES_PREF_KEY) }.getOrDefault(false))
+        appendLine("气泡文件存在 = left:" + (KnownPaths.moduleAssets / LEFT_BUBBLE_FILE).toFile().exists() +
+            " right:" + (KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE).toFile().exists())
+        val files = runCatching { tabWallpaperFiles() }.getOrDefault(emptyList())
+        appendLine("4 页素材：")
+        files.forEachIndexed { index, file ->
+            appendLine(
+                "  ${TAB_NAMES.getOrElse(index) { index.toString() }} = " + if (file == null) {
+                    "缺失"
+                } else {
+                    "${file.absolutePath} (${runCatching { file.length() }.getOrDefault(0L)} B)"
+                }
+            )
+        }
+        val acts = runCatching { liveActivities() }.getOrDefault(emptyList())
+        appendLine("存活 Activity = " + acts.joinToString("、") { it.javaClass.simpleName })
+        acts.forEach { act ->
+            val decor = act.window?.decorView as? ViewGroup ?: return@forEach
+            val content = runCatching { decor.findViewById<ViewGroup>(android.R.id.content) }.getOrNull()
+            val layer = decor.findViewWithTag<View>(TAB_ROOT_TAG)
+            appendLine("· ${act.javaClass.simpleName}")
+            appendLine("  decor=${decor.javaClass.simpleName} childCount=${decor.childCount}")
+            appendLine("  content=" + (content?.let { "${it.javaClass.simpleName} childCount=${it.childCount}" } ?: "未找到"))
+            if (layer == null) {
+                appendLine("  壁纸层=未挂载")
+            } else {
+                val parent = layer.parent as? ViewGroup
+                appendLine(
+                    "  壁纸层=已挂 parent=${parent?.javaClass?.simpleName}" +
+                        " index=${parent?.indexOfChild(layer) ?: -1}" +
+                        " 在content内=${parent === content}" +
+                        " size=${layer.width}x${layer.height}" +
+                        " vis=${layer.visibility}" +
+                        " alpha=${layer.alpha}" +
+                        " 有图=${(layer as? ThemeWallpaperView)?.bitmap != null}"
+                )
+            }
+            appendLine("  已清背景层数=" + (clearedBackgrounds[act]?.size ?: 0))
+            appendLine("  wallpaperAttached=" + (wallpaperAttached[act] == true))
+        }
+        appendLine("wallpaperFailStreak=$wallpaperFailStreak")
+    }
 
     /** 应用主题（内置或主题包），并同步一次壁纸透明度。 */
     fun applyThemeById(id: String) {
