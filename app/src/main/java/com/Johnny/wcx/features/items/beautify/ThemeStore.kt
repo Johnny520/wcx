@@ -135,6 +135,15 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // 持久化
     // ══════════════════════════════════════════════════════════
     private var activeThemeId by prefOption("theme_store_active_id", "")
+
+    /**
+     * 壁纸挂载连续失败计数。
+     *
+     * 往宿主 DecorView 插层 + 清背景属于「侵入式美化」，个别 ROM / 微信版本上
+     * 可能引起宿主自己的布局或无障碍逻辑异常。连续失败就自动回退成微信原生，
+     * 宁可没壁纸，也不让微信反复出问题。
+     */
+    private var wallpaperFailCount by prefOption("theme_store_wallpaper_fail", 0)
     private var overlayOpacityPct by prefOption("theme_store_overlay_opacity", 40)
 
     // ══════════════════════════════════════════════════════════
@@ -691,6 +700,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 绝不会盖住任何文字（之前挂在最上层，拉满就整屏糊掉）。
      */
     private fun applyWallpaper(activity: Activity) {
+        if (wallpaperFailCount >= 3) return
         val decor = activity.window?.decorView as? ViewGroup ?: return
         val src = wallpaperSource(activity)
         if (src == null) {
@@ -744,8 +754,21 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 lastLoggedWallpaper = iv.tag as? String
                 WeLogger.i(TAG, "壁纸已挂载：${activity.javaClass.simpleName} ← ${src.absolutePathString()}（alpha=$alpha）")
             }
+            // 挂载成功，清零失败计数
+            if (wallpaperFailCount != 0) wallpaperFailCount = 0
         } catch (e: Throwable) {
             WeLogger.w(TAG, "applyWallpaper 异常", e)
+            wallpaperFailCount = wallpaperFailCount + 1
+            if (wallpaperFailCount >= 3) {
+                // 连续 3 次失败：自动关掉主题，恢复微信原生，避免一直抛异常
+                runCatching {
+                    activeThemeId = ""
+                    ThemePack.currentId = ""
+                    decor.findViewWithTag<View>(WALLPAPER_TAG)?.let { decor.removeView(it) }
+                    restoreSurfaceBackgrounds()
+                }
+                WeLogger.w(TAG, "壁纸连续失败 3 次，已自动关闭主题（恢复微信原生）")
+            }
         }
     }
 
