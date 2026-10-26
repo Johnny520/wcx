@@ -366,15 +366,16 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     )
                     RowDivider()
                     NavRow(
-                        title = if (selectedId.isBlank()) "未选择" else themeName(selectedId),
+                        // 这一行只负责「自己的主题」；选中的是内置主题时这里保持未选择
+                        title = ThemePack.find(selectedId)?.name ?: "未选择",
                         summary = "只列你自己新建/导入的主题，点这里选择",
                         onClick = { showPicker = true },
                     )
                     RowDivider()
-                    // 当前真正生效的主题（点「应用」并划掉微信重开后才会变）
+                    // 当前选中的主题：跟着上面/下面的选择实时变（未选则显示微信原生）
                     InfoRow(
                         label = "当前主题",
-                        value = if (active.isBlank()) "未应用（微信原生）" else themeName(active),
+                        value = if (selectedId.isBlank()) "未选择（微信原生）" else themeName(selectedId),
                     )
                     RowDivider()
                     OpacityRow(tick)
