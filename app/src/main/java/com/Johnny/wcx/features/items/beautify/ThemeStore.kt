@@ -519,8 +519,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private fun pageWallpaperKey(activity: Activity): String? {
         val name = activity.javaClass.name ?: return null
         // 聊天页不做主题背景：微信自带聊天背景设置，重复接管只会互相打架。
-        if (name == "com.tencent.mm.ui.ChattingUI") return null
-        if (name != "com.tencent.mm.ui.LauncherUI") return null
+        if (name == "com.tencent.mm.ui.chatting.ChattingUI" ||
+            name == "com.tencent.mm.ui.ChattingUI"
+        ) {
+            return null
+        }
+        if (name != "com.tencent.mm.ui.LauncherUI" && !name.endsWith("LauncherUI")) return null
         return when (currentTabIndex(activity)) {
             0 -> "chats"
             1 -> "contacts"
@@ -573,9 +577,18 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
-    /** 聊天页：壁纸会透过照片查看浮层/半透明查看页覆盖照片，故不挂壁纸。 */
-    private fun isChattingPage(activity: Activity): Boolean =
-        activity.javaClass.name == "com.tencent.mm.ui.ChattingUI"
+    /**
+     * 聊天页：不挂壁纸（微信自带聊天背景，重复接管会互相打架）。
+     *
+     * 注意：8.0.79 实测类名是 com.tencent.mm.ui.chatting.ChattingUI（多一层 chatting）。
+     * 老代码写的是 com.tencent.mm.ui.ChattingUI（少一层），条件永远不成立，
+     * 于是全局主题的壁纸一层层盖进了聊天会话界面 —— 就是「聊天页还显示着主题背景」的原因。
+     */
+    private fun isChattingPage(activity: Activity): Boolean {
+        val name = activity.javaClass.name ?: return false
+        return name == "com.tencent.mm.ui.chatting.ChattingUI" ||
+            name == "com.tencent.mm.ui.ChattingUI"
+    }
 
     
 
