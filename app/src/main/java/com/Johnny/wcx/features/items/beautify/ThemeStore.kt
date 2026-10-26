@@ -971,6 +971,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 // 常常自带不透明底色，会把这一层彻底盖住 —— 这就是「设置了但看不见」的原因。
                 // 只清「装饰层 / 内容容器」这两层，不动列表、气泡、文字本身。
                 clearSurfaceLite(activity, decor)
+                // 再往下探一层：微信的会话列表/通讯录根容器在 ViewPager 里面，
+                // 只清 content 的直接子级还不够，底板色会把壁纸挡住。
+                runCatching {
+                    decor.findViewById<ViewGroup>(android.R.id.content)?.let { clearSurfaceDeep(activity, it) }
+                }
                 wallpaperAttached[activity] = true
                 wallpaperFailStreak = 0
                 val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
@@ -1084,6 +1089,34 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 }
             }
         }.onFailure { WeLogger.w(TAG, "清理容器背景异常：${it.message}") }
+    }
+
+    /**
+     * 递归清「铺满内容区」的容器底色（最多 4 层、最多 8 个），用来穿透到 ViewPager 里的页面根。
+     *
+     * 判定条件带尺寸：只清和 content 一样大的容器（典型底板），
+     * 列表项/卡片/气泡因为这些尺寸小，不会被误清。
+     */
+    private fun clearSurfaceDeep(activity: Activity, content: ViewGroup) {
+        val targetW = content.width
+        val targetH = content.height
+        if (targetW <= 0 || targetH <= 0) return
+        var cleared = 0
+        fun walk(v: View, depth: Int) {
+            if (depth > 4 || cleared >= 8) return
+            if (v.tag == TAB_ROOT_TAG) return
+            if (isStructuralBar(v)) return
+            val full = v.width >= targetW - 8 && v.height >= targetH - 8
+            if (full && v.background != null) {
+                clearBg(activity, v)
+                cleared++
+            }
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) v.getChildAt(i)?.let { child -> walk(child, depth + 1) }
+            }
+        }
+        walk(content, 0)
+        if (cleared > 0) WeLogger.i(TAG, "已清页面底板底色 $cleared 层（让 DecorView 背景透出来）")
     }
 
     /** Tab 栏 / 标题栏 / 底部导航这类结构条不动，否则会出现壁纸从 Tab 栏透出来。 */
