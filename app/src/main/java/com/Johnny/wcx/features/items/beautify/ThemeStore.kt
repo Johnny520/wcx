@@ -430,7 +430,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     /** 把 Activity 映射成分页面壁纸的 key：chats/contacts/discover/me/chatting。 */
     private fun pageWallpaperKey(activity: Activity): String? {
         val name = activity.javaClass.name ?: return null
-        if (name == "com.tencent.mm.ui.ChattingUI") return "chatting"
+        // 聊天页不做主题背景：微信自带聊天背景设置，重复接管只会互相打架。
+        if (name == "com.tencent.mm.ui.ChattingUI") return null
         if (name != "com.tencent.mm.ui.LauncherUI") return null
         return when (currentTabIndex(activity)) {
             0 -> "chats"

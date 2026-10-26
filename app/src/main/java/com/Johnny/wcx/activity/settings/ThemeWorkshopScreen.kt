@@ -100,7 +100,9 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val pack = editing
         if (uri != null && pack != null && pendingRole.isNotEmpty()) {
-            ThemePack.writeImage(pack, context, uri, pendingRole)?.let { editing = it }
+            // 气泡沿用原来的「点九」方案：文件名保持 .9.png，由微信按九宫格拉伸
+            val ninePatch = pendingRole.startsWith("bubble_")
+            ThemePack.writeImage(pack, context, uri, pendingRole, ninePatch)?.let { editing = it }
             showToast(context, "已写入：${pageRoleLabel(pendingRole)}")
         }
     }
@@ -225,23 +227,19 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             pendingRole = role
                             pickImageLauncher.launch("image/*")
                         }
-                        PageWallpaperRow("聊天页背景", "wallpaper_chatting", editing, pendingRole) { role ->
-                            pendingRole = role
-                            pickImageLauncher.launch("image/*")
-                        }
                         PageWallpaperRow("侧滑栏背景", "wallpaper_panel", editing, pendingRole) { role ->
                             pendingRole = role
                             pickImageLauncher.launch("image/*")
                         }
                         ActionRow(
-                            title = "② 对方气泡",
-                            summary = editing?.bubbleOther()?.name ?: "未设置",
+                            title = "② 对方气泡（点九）",
+                            summary = editing?.bubbleOther()?.name ?: "未设置 · 建议用 .9.png，普通 png 会被拉伸",
                             onClick = { pendingRole = "bubble_left"; pickImageLauncher.launch("image/*") },
                         )
                         InsetDivider()
                         ActionRow(
-                            title = "③ 自己气泡",
-                            summary = editing?.bubbleSelf()?.name ?: "未设置",
+                            title = "③ 自己气泡（点九）",
+                            summary = editing?.bubbleSelf()?.name ?: "未设置 · 建议用 .9.png，普通 png 会被拉伸",
                             onClick = { pendingRole = "bubble_right"; pickImageLauncher.launch("image/*") },
                         )
                         InsetDivider()
