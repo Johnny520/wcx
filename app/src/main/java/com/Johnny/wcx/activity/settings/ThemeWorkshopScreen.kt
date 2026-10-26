@@ -37,6 +37,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     val scrollBehavior = MiuixScrollBehavior()
     var packs by remember { mutableStateOf(ThemePack.list()) }
     var active by remember { mutableStateOf(ThemeStore.activeThemeIdOrEmpty()) }
+    var opacity by remember { mutableStateOf(ThemeStore.overlayOpacity()) }
 
     fun refresh() {
         packs = ThemePack.list()
@@ -142,6 +143,30 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             )
                         },
                     )
+                }
+            }
+
+            // ── 壁纸透明度 ──────────────────────────────────────────
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "壁纸透明度") }
+            item {
+                SettingsCard {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text(
+                            text = "当前 ${opacity}%（越低越透出微信原背景）",
+                            fontSize = 13.sp,
+                            color = top.yukonga.miuix.kmp.basic.BasicComponentDefaults.titleColor().color,
+                        )
+                        androidx.compose.material3.Slider(
+                            value = opacity.toFloat(),
+                            onValueChange = {
+                                val value = it.toInt().coerceIn(5, 100)
+                                opacity = value
+                                ThemeStore.setOverlayOpacity(value)
+                            },
+                            valueRange = 5f..100f,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
 

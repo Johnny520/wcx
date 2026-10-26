@@ -749,12 +749,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // 设置 UI：主题商城（入口：wcx 设置 → 设置 → 微信主题）
     // ══════════════════════════════════════════════════════════
     override fun onClick(context: ComponentActivity) {
-        // 主题改为独立子页面（主题工坊）；非设置页触发时回退旧对话框。
-        if (context is SettingsActivity) {
-            SettingsNavigation.requestThemeWorkshop()
-        } else {
-            showThemeStoreDialog(context)
-        }
+        // 主题相关操作已全部并入「主题工坊」子页面，这里只做导航。
+        SettingsNavigation.requestThemeWorkshop()
     }
 
     // ── 供「主题工坊」页面调用的公开入口 ─────────────────────────────────
@@ -771,140 +767,15 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
 
     fun restoreDefaultTheme() = restoreDefault()
 
-    private fun showThemeStoreDialog(context: ComponentActivity) {
-        try {
-            ensureAllBuiltinExtracted()
-            showComposeDialog(context) {
-                var currentId by remember { mutableStateOf(activeThemeId) }
-                var opacity by remember { mutableStateOf(overlayOpacityPct.coerceIn(5, 100)) }
-                AlertDialogContent(
-                    title = { Text("主题商城") },
-                    text = {
-                        DefaultColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            Text("六款卡通主题：一键应用全局沉浸壁纸与对应气泡", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(6.dp))
-                            builtinThemes.forEach { theme ->
-                                ThemeRow(
-                                    theme = theme,
-                                    active = currentId == theme.id,
-                                    onApply = {
-                                        applyThemeInternal(theme.id)
-                                        currentId = theme.id
-                                        updateAlphaOnLive(opacity / 100f)
-                                    }
-                                )
-                                Spacer(Modifier.height(4.dp))
-                            }
-                            // ── 外部主题包（ThemePack）──────────────────────────────
-                            var packs by remember { mutableStateOf(ThemePack.list()) }
-                            Spacer(Modifier.height(10.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "外部主题包",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Button(onClick = {
-                                    ThemePack.importPendingZips()
-                                    packs = ThemePack.list()
-                                    showToast(context, "已扫描到 ${packs.size} 个主题包")
-                                }) { Text("刷新") }
-                            }
-                            if (packs.isEmpty()) {
-                                Text(
-                                    "把主题包 zip 放进这个目录后点「刷新」：\n${ThemePack.themesDir().absolutePath}",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                packs.forEach { pack ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            pack.name + (if (currentId == pack.id) "（使用中）" else ""),
-                                            fontSize = 14.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f).padding(end = 8.dp)
-                                        )
-                                        Button(onClick = {
-                                            applyThemeInternal(pack.id)
-                                            currentId = pack.id
-                                            updateAlphaOnLive(opacity / 100f)
-                                        }) { Text(if (currentId == pack.id) "已应用" else "应用") }
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Button(onClick = {
-                                    val file = exportActiveTheme()
-                                    if (file != null) {
-                                        showToast(context, "已导出：${file.absolutePath}")
-                                    } else {
-                                        showToast(context, "导出失败，详见日志")
-                                    }
-                                }) { Text("导出当前主题 zip") }
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "发给别人，导入后即可使用",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "导出目录：${ThemePack.exportDir().absolutePath}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "壁纸透明度 ${opacity}%",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(end = 8.dp)
-                                )
-                                Slider(
-                                    value = opacity.toFloat(),
-                                    onValueChange = {
-                                        opacity = it.toInt().coerceIn(5, 100)
-                                        overlayOpacityPct = opacity
-                                        updateAlphaOnLive(opacity / 100f)
-                                    },
-                                    valueRange = 5f..100f,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Row {
-                                TextButton(onClick = {
-                                    restoreDefault()
-                                    currentId = ""
-                                    showToast(context, "已恢复默认主题")
-                                }) { Text("恢复默认主题") }
-                            }
-                        }
-                    },
-                    dismissButton = { TextButton(onDismiss) { Text("取消") } },
-                    confirmButton = {
-                        Button(onClick = onDismiss) { Text("关闭") }
-                    }
-                )
-            }
-        } catch (e: Throwable) {
-            WeLogger.e(TAG, "onClick 异常", e)
-            showToast(context, "主题商城打开失败")
-        }
+    /** 壁纸透明度（5~100）。 */
+    fun overlayOpacity(): Int = overlayOpacityPct.coerceIn(5, 100)
+
+    fun setOverlayOpacity(pct: Int) {
+        overlayOpacityPct = pct.coerceIn(5, 100)
+        updateAlphaOnLive(overlayOpacityPct / 100f)
     }
+
+    // 旧「主题商城」对话框已下线：壁纸/气泡/透明度/导入导出全部并入「主题工坊」页面。
 
     @Composable
     private fun ThemeRow(theme: ThemeInfo, active: Boolean, onApply: () -> Unit) {
