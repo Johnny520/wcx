@@ -525,11 +525,11 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                                 { updated -> loadDraft(updated) },
                             )
                             MaterialRow("消息气泡 · 左（对方）", "bubble_left", pack, pendingRole,
-                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { role -> pendingRole = role; pickImageLauncher.launch("*/*") },
                                 { updated -> loadDraft(updated) },
                             )
                             MaterialRow("消息气泡 · 右（自己）", "bubble_right", pack, pendingRole,
-                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { role -> pendingRole = role; pickImageLauncher.launch("*/*") },
                                 { updated -> loadDraft(updated) },
                             )
                         }
@@ -1130,7 +1130,7 @@ private fun OpacityRow(tick: Int) {
                 .clickable {
                     overlayMode = !overlayMode
                     runCatching { ThemeStore.setRenderMode(overlayMode) }
-                    showToast(context, if (overlayMode) "已切到覆盖模式，回微信看看" else "已切到沉浸模式，回微信看看")
+                    showToast(context, if (overlayMode) "已切到覆盖模式，回微信看看" else "已切回背景模式，回微信看看")
                 }
                 .padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1139,9 +1139,9 @@ private fun OpacityRow(tick: Int) {
                 Text("壁纸渲染方式", fontSize = 15.sp, color = titleColor())
                 Text(
                     text = if (overlayMode) {
-                        "覆盖：贴在内容最上层，任何微信版本都一定看得见（推荐）"
+                        "覆盖：贴在内容最上层，一定看得见，但会整体压在界面上"
                     } else {
-                        "沉浸：垫在内容最底层，靠页面透明透出；8.0.79 上常被不透明容器盖住"
+                        "背景：写 DecorView 背景，和旧「四 Tab 主题背景」效果一样（推荐）"
                     },
                     fontSize = 11.sp,
                     color = summaryColor(),

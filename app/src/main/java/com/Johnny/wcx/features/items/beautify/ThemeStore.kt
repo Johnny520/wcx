@@ -114,9 +114,14 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private const val RIGHT_BUBBLE_FILE = "right_bubble.9.png" // 自己
     private const val CUSTOM_BUBBLES_PREF_KEY = "自定义消息气泡"
 
-    /** 渲染方式：覆盖 = 贴在内容最上层（一定看得见）；沉浸 = 垫在内容最底层（依赖页面透明）。 */
+    /**
+     * 渲染方式：
+     * - background：写 DecorView 的 background。视觉上等价于旧「四 Tab 主题背景」的 DecorView 最底层，
+     *   但零子 View、不改任何节点顺序（不会再触发微信 queueIdle 的 NPE）。
+     * - overlay：贴在内容容器最上层，一定看得见，但会整体压在界面上。
+     */
+    private const val RENDER_BACKGROUND = "background"
     private const val RENDER_OVERLAY = "overlay"
-    private const val RENDER_IMMERSIVE = "immersive"
 
     /** 当前功能名（与 @Feature.name 保持一致，初始化期 name 还没注入）。 */
     private const val NEW_FEATURE_NAME = "主题工坊"
@@ -169,20 +174,20 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 垫在底层（旧 TabTheme 的做法）会被完全盖住 —— 用户看到的就是「点了应用没反应」。
      * 覆盖式是纯叠层，不依赖页面透明，任何版本都一定能看见；不透明度靠「壁纸透明度」控制。
      */
-    private var renderModePref by prefOption("theme_store_render_mode", RENDER_OVERLAY)
+    private var renderModePref by prefOption("theme_store_render_mode_v2", RENDER_BACKGROUND)
 
-    private fun isOverlayMode(): Boolean = renderModePref != RENDER_IMMERSIVE
+    private fun isOverlayMode(): Boolean = renderModePref == RENDER_OVERLAY
 
     /** 渲染方式的展示名。 */
-    fun renderModeName(): String = if (isOverlayMode()) "覆盖（推荐）" else "沉浸（底层）"
+    fun renderModeName(): String = if (isOverlayMode()) "覆盖（最上层）" else "背景（旧效果，推荐）"
 
     /** 切换渲染方式：立刻撤掉旧层并在新位置重挂。 */
     fun setRenderMode(overlay: Boolean) {
-        renderModePref = if (overlay) RENDER_OVERLAY else RENDER_IMMERSIVE
+        renderModePref = if (overlay) RENDER_OVERLAY else RENDER_BACKGROUND
         runCatching {
             liveActivities().forEach { act ->
                 detach(act.window?.decorView?.findViewWithTag<View>(TAB_ROOT_TAG))
-                if (!overlay) restoreClearedBackgrounds(act)
+                restoreClearedBackgrounds(act)
             }
         }
         tabBitmapPath = null
@@ -861,6 +866,34 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private fun fileForTab(files: List<File?>, tab: Int): File? =
         files.getOrNull(tab) ?: files.firstOrNull { it != null }
 
+    /** 记录各 DecorView 原来自己的 background，撤销主题时原样放回。 */
+    private val savedDecorBackground = java.util.WeakHashMap<ViewGroup, android.graphics.drawable.Drawable?>()
+
+    /**
+     * 用 DecorView 的 background 承载壁纸。
+     *
+     * 与旧「四 Tab 主题背景」在 DecorView index 0 插一层是同层级效果（都画在所有子 View 之下），
+     * 但不增加任何子 View —— 微信按子节点顺序找窗口容器的代码不受影响。
+     */
+    private fun attachAsDecorBackground(activity: Activity, decor: ViewGroup, file: File?) {
+        if (!savedDecorBackground.containsKey(decor)) savedDecorBackground[decor] = decor.background
+        val bmp = file?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+        if (bmp == null) {
+            WeLogger.w(TAG, "背景文件解码失败：${file?.absolutePath ?: "null"}")
+            return
+        }
+        val drawable = android.graphics.drawable.BitmapDrawable(activity.resources, bmp)
+        drawable.setGravity(android.view.Gravity.FILL)
+        drawable.alpha = (overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) * 255 / 100).coerceIn(0, 255)
+        decor.background = drawable
+    }
+
+    /** 还原 DecorView 原来的 background。 */
+    private fun restoreDecorBackground(decor: ViewGroup) {
+        val original = savedDecorBackground.remove(decor) ?: return
+        runCatching { decor.background = original }
+    }
+
     /** 从它当前的父容器摘掉自己（壁纸层可能挂在内容容器的父级，不一定是 DecorView）。 */
     private fun detach(v: View?) {
         val parent = v?.parent as? ViewGroup ?: return
@@ -916,6 +949,29 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             return
         }
         val (host, slot) = hostInfo
+        if (!isOverlayMode()) {
+            // 旧「四 Tab 主题背景」的等效实现：不插任何 View，直接写 DecorView 的 background。
+            try {
+                detach(existing)
+                // 以当前真实页码为准
+                val tab = currentTabIndex(activity).takeIf { it in 0..3 } ?: lastTabIndex
+                if (tab in 0..3) lastTabIndex = tab
+                val file = fileForTab(files, tab)
+                attachAsDecorBackground(activity, decor, file)
+                wallpaperAttached[activity] = true
+                wallpaperFailStreak = 0
+                val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
+                val logKey = "bg|$info|tab=$tab|${file?.absolutePath}"
+                if (logKey != lastLoggedWallpaper) {
+                    lastLoggedWallpaper = logKey
+                    WeLogger.i(TAG, "4 页背景已挂载（DecorView background，$info），Tab=$tab，文件=${file?.absolutePath ?: "null"}")
+                }
+            } catch (e: Throwable) {
+                wallpaperFailStreak += 1
+                WeLogger.w(TAG, "写 DecorView 背景失败（第 $wallpaperFailStreak 次）：${e.message}", e)
+            }
+            return
+        }
         try {
             val view: ThemeWallpaperView = if (existing is ThemeWallpaperView) {
                 existing
@@ -1046,6 +1102,15 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     /** 切 Tab：换一张图。 */
     private fun updateTabVisibility(activity: Activity, position: Int) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
+        if (!isOverlayMode()) {
+            // background 模式：切页直接换 DecorView 的背景图，不动任何子 View
+            runCatching {
+                if (wallpaperAttached[activity] != true) return@runCatching
+                val file = fileForTab(tabWallpaperFiles(), position)
+                attachAsDecorBackground(activity, decor, file)
+            }.onFailure { WeLogger.w(TAG, "切 Tab 换背景（background）失败：${it.message}") }
+            return
+        }
         val view = decor.findViewWithTag<View>(TAB_ROOT_TAG) as? ThemeWallpaperView ?: return
         runCatching {
             // 覆盖模式下微信可能把新页面加到我们上面，切 Tab 时重新提到最上层
@@ -1079,6 +1144,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         val decor = activity.window?.decorView as? ViewGroup ?: return
         runCatching {
             detach(decor.findViewWithTag<View>(TAB_ROOT_TAG))
+            restoreDecorBackground(decor)
             tabBitmapPath = null
             restoreClearedBackgrounds(activity)
         }
