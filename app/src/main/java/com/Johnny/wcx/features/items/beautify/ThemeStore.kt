@@ -723,6 +723,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
 
     private val TAB_NAMES = listOf("主页", "通讯录", "发现", "我")
 
+    /** 日志去重：同一组状态只打一次。 */
+    @Volatile
+    private var lastLoggedWallpaper: String? = null
+
     /** 已经给某个 Tab 加载过的图片路径，避免每次切页都重新 decode。 */
     private val tabLoadedPaths = HashMap<Int, String>()
 
