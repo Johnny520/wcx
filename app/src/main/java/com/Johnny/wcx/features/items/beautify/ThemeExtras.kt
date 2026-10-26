@@ -2,8 +2,10 @@ package com.Johnny.wcx.features.items.beautify
 
 import android.app.Activity
 import android.graphics.Color
+import android.graphics.Outline
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.ImageView
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.reflection.ClassLoaders
@@ -141,26 +143,55 @@ object ThemeExtras {
         activity.window?.decorView?.post { applyAutoThemeIfNeeded() }
     }
 
-    /** 微信头像控件本身就是 RoundedCornerImageView，把半径设成一半即圆形。 */
+    /**
+     * 圆形头像：微信 8.0.79 里聊天头像控件是
+     * com.tencent.mm.ui.chatting.view.ChattingAvatarImageView（RoundedCornerImageView 在 8.0.79 已不存在）。
+     * 做法是给实例挂 OnLayoutChangeListener，按当前开关把它裁成圆形 outline，
+     * 关掉时恢复成微信自己的绘制。
+     */
     private fun installRoundAvatar() {
-        runCatching {
-            val clazz = XposedHelpers.findClass(
-                "com.tencent.mm.ui.widget.RoundedCornerImageView",
-                ClassLoaders.HOST,
-            )
-            XposedBridge.hookAllMethods(clazz, "onMeasure", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (!WePrefs.getBoolOrFalse(KEY_ROUND_AVATAR)) return
-                    val view = param.thisObject as? ImageView ?: return
-                    val side = minOf(view.measuredWidth, view.measuredHeight)
-                    if (side <= 0) return
-                    runCatching {
-                        clazz.getMethod("setRadius", java.lang.Float.TYPE).invoke(view, side / 2f)
+        val candidates = listOf(
+            "com.tencent.mm.ui.chatting.view.ChattingAvatarImageView",
+            "com.tencent.kinda.framework.widget.base.MMKAvatarImageView",
+        )
+        var hooked = 0
+        candidates.forEach { className ->
+            runCatching {
+                val clazz = XposedHelpers.findClass(className, ClassLoaders.HOST)
+                XposedBridge.hookAllConstructors(clazz, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val view = param.thisObject as? ImageView ?: return
+                        view.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                            if (!WePrefs.getBoolOrFalse(KEY_ROUND_AVATAR)) {
+                                if (v.clipToOutline) {
+                                    v.clipToOutline = false
+                                    v.invalidateOutline()
+                                }
+                                return@addOnLayoutChangeListener
+                            }
+                            if (v.outlineProvider !== CircleOutline) v.outlineProvider = CircleOutline
+                            if (!v.clipToOutline) {
+                                v.clipToOutline = true
+                                v.invalidateOutline()
+                            }
+                        }
                     }
-                }
-            })
-            WeLogger.i(TAG, "圆形头像 hook 已安装")
-        }.onFailure { WeLogger.w(TAG, "圆形头像 hook 失败：${it.message}") }
+                })
+                hooked++
+            }.onFailure { WeLogger.w(TAG, "圆形头像 hook $className 失败：${it.message}") }
+        }
+        if (hooked == 0) {
+            WeLogger.w(TAG, "圆形头像：未找到任何头像控件，该功能在当前微信版本不可用")
+        } else {
+            WeLogger.i(TAG, "圆形头像 hook 已安装（命中 $hooked 个控件）")
+        }
+    }
+
+    /** 圆形 outline 提供者（单例，避免每个头像都 new 一个）。 */
+    private object CircleOutline : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            outline.setOval(0, 0, view.width, view.height)
+        }
     }
 
     @Volatile
