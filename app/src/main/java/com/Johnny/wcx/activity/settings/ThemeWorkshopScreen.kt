@@ -108,8 +108,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     }
 
     PageScaffold(
-        title = "主题工坊",
-        largeTitle = "主题工坊",
+        title = "主题设置",
+        largeTitle = "主题设置",
         scrollBehavior = scrollBehavior,
         onBack = onBack,
         topBarActions = {
@@ -168,19 +168,31 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 bottom = padding.calculateBottomPadding() + 84.dp,
             ),
         ) {
-            // ── 当前主题 ────────────────────────────────────────────
-            item { SmallTitle(modifier = Modifier.padding(top = 6.dp), text = "当前主题") }
+            // ── 主题（总开关 + 当前主题）─────────────────────────────
+            item { SmallTitle(modifier = Modifier.padding(top = 6.dp), text = "主题") }
             item {
                 SettingsCard {
+                    var masterOn by remember { mutableStateOf(ThemeStore.isEnabled) }
+                    SwitchPreference(
+                        title = "主题",
+                        summary = "总开关：关掉立即还原壁纸与气泡",
+                        checked = masterOn,
+                        onCheckedChange = { on ->
+                            runCatching {
+                                WePrefs.putBool("主题商城", on)
+                                ThemeStore.isEnabled = on
+                            }.onFailure { showToast(context, "切换失败：${it.message}") }
+                            masterOn = on
+                            refresh()
+                        },
+                    )
+                    InsetDivider()
                     val currentName = ThemePack.find(active)?.name
                         ?: ThemeStore.builtinThemeItems().firstOrNull { it.first == active }?.second
-                        ?: "未应用"
+                        ?: "未选择"
                     ActionRow(
-                        title = currentName,
-                        summary = when {
-                            active.isBlank() -> "还没应用任何主题，点右上角「⋮ → 切换主题」"
-                            else -> "正在生效 · 点这里切换"
-                        },
+                        title = "当前主题：$currentName",
+                        summary = if (active.isBlank()) "点这里选一个" else "点这里切换",
                         onClick = { showPicker = true },
                     )
                 }
