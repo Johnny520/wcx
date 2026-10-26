@@ -322,6 +322,30 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
+    /**
+     * 把当前生效的主题（内置或主题包）打包成 zip，可直接分享给别人导入。
+     * 内置主题会先按同样格式生成一个主题包再打包，保证两边格式一致。
+     */
+    fun exportActiveTheme(): File? {
+        val id = activeThemeId
+        if (id.isEmpty()) {
+            WeLogger.w(TAG, "没有生效中的主题，无法导出")
+            return null
+        }
+        ThemePack.find(id)?.let { return ThemePack.exportZip(it).getOrNull() }
+        val theme = builtinTheme(id) ?: run {
+            WeLogger.w(TAG, "未知主题：$id")
+            return null
+        }
+        val pack = ThemePack.createPackFromFiles(
+            name = theme.name,
+            wallpaper = builtinWallpaperFile(theme).takeIf { it.exists() }?.toFile(),
+            bubbleLeft = builtinBubbleFile(theme, LEFT_BUBBLE_FILE).takeIf { it.exists() }?.toFile(),
+            bubbleRight = builtinBubbleFile(theme, RIGHT_BUBBLE_FILE).takeIf { it.exists() }?.toFile(),
+        ).getOrNull() ?: return null
+        return ThemePack.exportZip(pack).getOrNull()
+    }
+
     /** 应用外部主题包（ThemePack）：壁纸 + 左右气泡。 */
     private fun applyPackInternal(pack: ThemePack.Pack) {
         try {
@@ -793,6 +817,29 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                                     }
                                 }
                             }
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Button(onClick = {
+                                    val file = exportActiveTheme()
+                                    if (file != null) {
+                                        showToast(context, "已导出：${file.absolutePath}")
+                                    } else {
+                                        showToast(context, "导出失败，详见日志")
+                                    }
+                                }) { Text("导出当前主题 zip") }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "发给别人，导入后即可使用",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "导出目录：${ThemePack.exportDir().absolutePath}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Spacer(Modifier.height(6.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(

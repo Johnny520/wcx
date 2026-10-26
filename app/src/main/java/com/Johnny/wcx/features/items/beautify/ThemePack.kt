@@ -5,7 +5,9 @@ import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.fs.KnownPaths
 import org.json.JSONObject
 import java.io.File
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 /**
  * 主题包（Theme Pack）。
@@ -212,6 +214,63 @@ object ThemePack {
                 .getOrNull()
         }
     }
+
+    /**
+     * 把主题包打成 zip，直接分享给别人导入即可。
+     * 输出到 `themes/exported/`，文件名取自主题名（非法字符替换掉）。
+     */
+    fun exportZip(pack: Pack): Result<File> = runCatching {
+        val outDir = File(root, "exported").apply { mkdirs() }
+        val safeName = pack.name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { pack.id }
+        val out = File(outDir, "$safeName.zip")
+        ZipOutputStream(out.outputStream().buffered()).use { zos ->
+            pack.dir.walkTopDown()
+                .filter { it.isFile && it.name != out.name }
+                .forEach { file ->
+                    val entryName = file.relativeTo(pack.dir).invariantSeparatorsPath
+                    zos.putNextEntry(ZipEntry(entryName))
+                    file.inputStream().use { input -> input.copyTo(zos) }
+                    zos.closeEntry()
+                }
+        }
+        WeLogger.i(TAG, "主题包已导出：${out.absolutePath}（${out.length() / 1024} KB）")
+        out
+    }
+
+    /**
+     * 用现成的几张图生成一个主题包（用于把内置主题也导出分享）。
+     */
+    fun createPackFromFiles(
+        name: String,
+        wallpaper: File?,
+        bubbleLeft: File?,
+        bubbleRight: File?,
+    ): Result<Pack> = runCatching {
+        val id = "pack_" + System.currentTimeMillis().toString(36)
+        val dir = File(root, id).apply { mkdirs() }
+        val manifest = JSONObject().apply {
+            put("name", name)
+            put("author", "WCX")
+            put("version", "1.0")
+        }
+        wallpaper?.takeIf { it.isFile }?.let {
+            it.copyTo(File(dir, "wallpaper.png"), overwrite = true)
+            manifest.put("wallpaper", "wallpaper.png")
+        }
+        bubbleLeft?.takeIf { it.isFile }?.let {
+            it.copyTo(File(dir, "bubble_left.9.png"), overwrite = true)
+            manifest.put("bubble_left", "bubble_left.9.png")
+        }
+        bubbleRight?.takeIf { it.isFile }?.let {
+            it.copyTo(File(dir, "bubble_right.9.png"), overwrite = true)
+            manifest.put("bubble_right", "bubble_right.9.png")
+        }
+        File(dir, MANIFEST).writeText(manifest.toString(2))
+        load(dir) ?: error("生成主题包清单失败")
+    }
+
+    /** 导出目录，分享时从这里取 zip。 */
+    fun exportDir(): File = File(root, "exported").apply { mkdirs() }
 
     /** 主题根目录，供设置页展示/引导用户放素材。 */
     fun themesDir(): File = root
