@@ -807,6 +807,9 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 }
             }
             view.alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
+            // 微信 8.x 的主界面容器常常自带不透明底色，会把 index 0 的壁纸整个盖住。
+            // 这里只清「装饰层 / 内容容器」这一两层，不动页面内部（列表、气泡、文字）。
+            clearSurfaceLite(decor)
             wallpaperFailCount = 0
             val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
             val logKey = "$info|tab=$tab"
@@ -826,6 +829,41 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 WeLogger.w(TAG, "背景连续失败 3 次，已自动关闭主题（恢复微信原生）")
             }
         }
+    }
+
+    // 被清掉的原背景，撤销主题时原样放回去
+    private val clearedBackgrounds =
+        java.util.WeakHashMap<View, android.graphics.drawable.Drawable?>()
+
+    /** 只清装饰层与内容容器这一两层，保证壁纸能透出来，又不碰页面内部。 */
+    private fun clearSurfaceLite(decor: ViewGroup) {
+        runCatching {
+            for (i in 0 until decor.childCount) {
+                val child = decor.getChildAt(i) ?: continue
+                if (child.tag == TAB_ROOT_TAG) continue
+                clearBg(child)
+                if (child !is ViewGroup) continue
+                for (j in 0 until child.childCount) {
+                    val inner = child.getChildAt(j) ?: continue
+                    if (inner.id == android.R.id.content && inner is ViewGroup) {
+                        for (k in 0 until inner.childCount) clearBg(inner.getChildAt(k))
+                    } else {
+                        clearBg(inner)
+                    }
+                }
+            }
+        }.onFailure { WeLogger.w(TAG, "清理容器背景异常：${it.message}") }
+    }
+
+    private fun clearBg(v: View) {
+        val bg = v.background ?: return
+        if (!clearedBackgrounds.containsKey(v)) clearedBackgrounds[v] = bg
+        v.background = null
+    }
+
+    private fun restoreClearedBackgrounds() {
+        clearedBackgrounds.forEach { (v, bg) -> runCatching { v.background = bg } }
+        clearedBackgrounds.clear()
     }
 
     /** 切 Tab：换一张图。 */
@@ -873,6 +911,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         runCatching {
             decor.findViewWithTag<View>(TAB_ROOT_TAG)?.let { decor.removeView(it) }
             tabBitmapPath = null
+            restoreClearedBackgrounds()
         }
     }
 
