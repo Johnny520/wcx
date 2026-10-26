@@ -475,6 +475,9 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
         // 扫一扫 / 看图页不挂任何壁纸
         if (activity != null && (isScannerPage(activity) || isPhotoViewerPage(activity))) return null
+        // 主题壁纸只挂在微信主界面（主页/通讯录/发现/我 都在 LauncherUI 的 4 个 Tab 里）。
+        // 设置页、聊天页、任何其它 Activity 都不挂，避免"主题乱铺"。
+        if (activity != null && !activity.javaClass.name.orEmpty().endsWith("LauncherUI")) return null
 
         // 其余页面（主页 / 通讯录 / 发现 / 我 等）：走主题壁纸。
         // 这里不再使用随机图池 —— 随机图只属于聊天页。
@@ -737,10 +740,18 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             }
             iv.alpha = alpha
             container.setBackgroundColor(AndroidColor.TRANSPARENT)
+            if (iv.tag != lastLoggedWallpaper) {
+                lastLoggedWallpaper = iv.tag as? String
+                WeLogger.i(TAG, "壁纸已挂载：${activity.javaClass.simpleName} ← ${src.absolutePathString()}（alpha=$alpha）")
+            }
         } catch (e: Throwable) {
             WeLogger.w(TAG, "applyWallpaper 异常", e)
         }
     }
+
+    /** 只为日志去重，避免每次 resume 都刷一条。 */
+    @Volatile
+    private var lastLoggedWallpaper: String? = null
 
     // 被清掉的原背景，撤销主题时原样放回去
     private val savedBackgrounds =
