@@ -3,8 +3,10 @@ package com.Johnny.wcx.features.items.beautify
 import android.app.Activity
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.BitmapFactory
 import android.graphics.Color as AndroidColor
+import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.NinePatchDrawable
@@ -739,8 +741,6 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     @Volatile
     private var lastLoggedWallpaper: String? = null
 
-    /** 已经给某个 Tab 加载过的图片路径，避免每次切页都重新 decode。 */
-    private val tabLoadedPaths = HashMap<Int, String>()
 
     /** 4 个页面各自的背景文件；内置主题没有分页面素材时用同一张全局图。 */
     private fun tabWallpaperFiles(): List<File?> {
@@ -755,80 +755,64 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
-    /** 挂 / 更新 4 个页面的背景。 */
+    /** 当前 tab 缓存，避免每次切页都重新 decode。 */
+    @Volatile
+    private var tabBitmapPath: String? = null
+
+    /** tabIndex 对应的图片文件；该页没设就退回第一张有图的页。 */
+    private fun fileForTab(files: List<File?>, tab: Int): File? =
+        files.getOrNull(tab) ?: files.firstOrNull { it != null }
+
+    /**
+     * 挂 / 更新 4 个页面的背景。
+     *
+     * 只用**一个自绘 View**（没有子 View），插在 DecorView index 0：
+     * 子 View 越少、类型越简单，微信无障碍的视图遍历越不容易出问题
+     * （之前用 FrameLayout + 4 个 ImageView，多出了 5 个陌生节点）。
+     */
     private fun applyTabWallpapers(activity: Activity) {
         if (wallpaperFailCount >= 3) return
         val decor = activity.window?.decorView as? ViewGroup ?: return
         val files = tabWallpaperFiles()
-        val existing = decor.findViewWithTag<FrameLayout>(TAB_ROOT_TAG)
+        val existing = decor.findViewWithTag<View>(TAB_ROOT_TAG)
         if (files.all { it == null }) {
             if (existing != null) decor.removeView(existing)
-            tabLoadedPaths.clear()
+            tabBitmapPath = null
             return
         }
         try {
-            val container: FrameLayout = if (existing == null) {
-                FrameLayout(activity).apply {
-                    tag = TAB_ROOT_TAG
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                    isClickable = false
-                    isFocusable = false
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    setBackgroundColor(AndroidColor.TRANSPARENT)
-                }.also { decor.addView(it, 0) }
-            } else {
-                if (decor.indexOfChild(existing) != 0) {
-                    val lp = existing.layoutParams
-                    decor.removeView(existing)
-                    decor.addView(existing, 0, lp)
-                }
+            val view: ThemeWallpaperView = if (existing is ThemeWallpaperView) {
                 existing
+            } else {
+                if (existing != null) decor.removeView(existing)
+                ThemeWallpaperView(activity).also {
+                    it.tag = TAB_ROOT_TAG
+                    decor.addView(it, 0)
+                }
             }
-            container.visibility = View.VISIBLE
-            val alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
-            for (i in 0..3) {
-                val tag = "${TAB_ROOT_TAG}_$i"
-                var iv = container.findViewWithTag<ImageView>(tag)
-                if (iv == null) {
-                    iv = ImageView(activity).apply {
-                        this.tag = tag
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        layoutParams = FrameLayout.LayoutParams(
-                            FrameLayout.LayoutParams.MATCH_PARENT,
-                            FrameLayout.LayoutParams.MATCH_PARENT,
-                        )
-                        visibility = View.GONE
-                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    }
-                    container.addView(iv)
-                }
-                val file = files[i]
-                if (file == null) {
-                    iv.visibility = View.GONE
-                    continue
-                }
-                val path = file.absolutePath
-                if (tabLoadedPaths[i] != path) {
-                    val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
-                    if (bmp != null) {
-                        iv.setImageBitmap(bmp)
-                        tabLoadedPaths[i] = path
-                    }
-                }
-                iv.alpha = alpha
-                // lastTabIndex 在首次挂载时可能还是 -1，这时按当前实际 Tab 兜底，
-                // 否则四张图全是 GONE，用户会看到「没有背景」。
-                val current = if (lastTabIndex in 0..3) lastTabIndex else currentTabIndex(activity)
-                iv.visibility = if (i == current) View.VISIBLE else View.GONE
+            if (decor.indexOfChild(view) != 0) {
+                val lp = view.layoutParams
+                decor.removeView(view)
+                decor.addView(view, 0, lp)
             }
+            view.visibility = View.VISIBLE
+            val tab = if (lastTabIndex in 0..3) lastTabIndex else currentTabIndex(activity)
+            val file = fileForTab(files, tab)
+            val path = file?.absolutePath
+            if (path != null && path != tabBitmapPath) {
+                val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
+                if (bmp != null) {
+                    view.bitmap = bmp
+                    tabBitmapPath = path
+                }
+            }
+            view.alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
             wallpaperFailCount = 0
             val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
-            if (info != lastLoggedWallpaper) {
-                lastLoggedWallpaper = info
-                WeLogger.i(TAG, "4 页背景已挂载（$info），当前 Tab=$lastTabIndex")
+            val logKey = "$info|tab=$tab"
+            if (logKey != lastLoggedWallpaper) {
+                lastLoggedWallpaper = logKey
+                WeLogger.i(TAG, "4 页背景已挂载（$info），当前 Tab=$tab，文件=$path")
             }
         } catch (e: Throwable) {
             WeLogger.w(TAG, "applyTabWallpapers 异常", e)
@@ -844,14 +828,31 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
+    /** 切 Tab：换一张图。 */
+    private fun updateTabVisibility(activity: Activity, position: Int) {
+        val decor = activity.window?.decorView as? ViewGroup ?: return
+        val view = decor.findViewWithTag<View>(TAB_ROOT_TAG) as? ThemeWallpaperView ?: return
+        runCatching {
+            val file = fileForTab(tabWallpaperFiles(), position)
+            val path = file?.absolutePath
+            if (path != null && path != tabBitmapPath) {
+                val bmp = BitmapFactory.decodeFile(path)
+                if (bmp != null) {
+                    view.bitmap = bmp
+                    tabBitmapPath = path
+                }
+            }
+        }.onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
+    }
+
     /** 统一显示/隐藏所有主界面的背景层（进聊天页时隐藏，回来再显示）。 */
     private fun setTabWallpapersVisible(visible: Boolean) {
         runCatching {
             liveActivities().forEach { act ->
                 if (!act.javaClass.name.orEmpty().endsWith("LauncherUI")) return@forEach
-                val container = act.window?.decorView
-                    ?.findViewWithTag<View>(TAB_ROOT_TAG) as? ViewGroup ?: return@forEach
-                container.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+                val layer = act.window?.decorView
+                    ?.findViewWithTag<View>(TAB_ROOT_TAG) ?: return@forEach
+                layer.visibility = if (visible) View.VISIBLE else View.INVISIBLE
             }
         }.onFailure { WeLogger.w(TAG, "切换背景层可见性失败：${it.message}") }
     }
@@ -871,7 +872,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         val decor = activity.window?.decorView as? ViewGroup ?: return
         runCatching {
             decor.findViewWithTag<View>(TAB_ROOT_TAG)?.let { decor.removeView(it) }
-            tabLoadedPaths.clear()
+            tabBitmapPath = null
         }
     }
 
@@ -1203,7 +1204,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 builtinDir.toFile().deleteRecursively()
                 builtinDir.createDirsSafe()
             }
-            tabLoadedPaths.clear()
+            tabBitmapPath = null
             lastLoggedWallpaper = null
             // 撤掉已经挂在页面上的背景
             liveActivities().forEach { removeWallpaper(it) }
@@ -1262,5 +1263,43 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             )
             Button(onClick = onApply) { Text(if (active) "已应用" else "应用") }
         }
+    }
+}
+
+/**
+ * 主题背景层：单个自绘 View，不持有任何子 View。
+ *
+ * 之所以不用 FrameLayout + ImageView 的组合，是因为往微信 DecorView 里塞的节点越少、
+ * 类型越普通，宿主无障碍遍历（MMBaseAccessibilityConfig.mockInflateCore）就越不容易被扰动。
+ */
+private class ThemeWallpaperView(context: android.content.Context) : View(context) {
+
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+
+    var bitmap: Bitmap? = null
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    init {
+        isClickable = false
+        isFocusable = false
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        setWillNotDraw(false)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val bmp = bitmap ?: return
+        if (bmp.width <= 0 || bmp.height <= 0 || width <= 0 || height <= 0) return
+        // CENTER_CROP：等比放大铺满
+        val scale = maxOf(width.toFloat() / bmp.width, height.toFloat() / bmp.height)
+        val dx = (width - bmp.width * scale) / 2f
+        val dy = (height - bmp.height * scale) / 2f
+        canvas.save()
+        canvas.translate(dx, dy)
+        canvas.scale(scale, scale)
+        canvas.drawBitmap(bmp, 0f, 0f, paint)
+        canvas.restore()
     }
 }
