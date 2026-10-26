@@ -1,5 +1,7 @@
 package com.Johnny.wcx.activity.settings
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,12 +49,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.features.items.beautify.ThemeExtras
 import com.Johnny.wcx.features.items.beautify.ThemePack
 import com.Johnny.wcx.features.items.beautify.ThemeStore
 import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.restartHost
@@ -216,18 +220,6 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("分享主题") },
-                        onClick = {
-                            menuOpen = false
-                            val file = ThemeStore.exportActiveTheme()
-                            showToast(
-                                context,
-                                if (file != null) "已导出到 ${file.parent}，把这个 zip 发给别人即可"
-                                else "先选一个主题再分享",
-                            )
-                        },
-                    )
-                    DropdownMenuItem(
                         text = { Text("恢复默认") },
                         onClick = {
                             menuOpen = false
@@ -292,17 +284,21 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             // ── 卡片2 快捷功能：保存 / 应用 ──────────────────
             item {
                 GroupCard(title = "快捷功能") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        PillButton("保存", Modifier.weight(1f)) {
-                            if (saveCurrent()) showToast(context, "已保存：$draftName")
-                            else showToast(context, "先新建或选择一个主题")
+                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            PillButton("保存", Modifier.weight(1f)) {
+                                if (saveCurrent()) showToast(context, "已保存：$draftName")
+                                else showToast(context, "先新建或选择一个主题")
+                            }
+                            PillButton("应用", Modifier.weight(1f), primary = true) {
+                                if (editing == null) showToast(context, "先新建或选择一个主题")
+                                else confirmApply = true
+                            }
                         }
-                        PillButton("应用", Modifier.weight(1f), primary = true) {
-                            if (editing == null) showToast(context, "先新建或选择一个主题")
-                            else confirmApply = true
+                        Spacer(Modifier.height(10.dp))
+                        // 分享=调系统分享面板，把「当前主题」导出的 zip 直接发出去
+                        PillButton("分享", Modifier.fillMaxWidth()) {
+                            shareActiveTheme(context)
                         }
                     }
                 }
@@ -1115,6 +1111,39 @@ private fun roleLabel(role: String): String = when (role) {
     "bubble_left" -> "消息气泡·左"
     "bubble_right" -> "消息气泡·右"
     else -> role
+}
+
+/**
+ * 分享当前主题：导出 zip → FileProvider 取 uri → 系统分享面板。
+ * 主题目录在模块数据目录下，与日志同树，所以能复用微信自带的 external.fileprovider。
+ */
+private fun shareActiveTheme(context: Context) {
+    val file = ThemeStore.exportActiveTheme()
+    if (file == null) {
+        showToast(context, "当前没有可分享的主题，先选一个")
+        return
+    }
+    val authority = "${HostInfo.packageName}.external.fileprovider"
+    val uri = runCatching { FileProvider.getUriForFile(context, authority, file) }.getOrNull()
+    if (uri == null) {
+        WeLogger.w("ThemeWorkshop", "FileProvider 取不到 uri：${file.absolutePath}")
+        showToast(context, "分享失败：无法读取该文件（已导出到 ${file.absolutePath}）")
+        return
+    }
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "application/zip"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, file.name)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val chooser = Intent.createChooser(send, "分享主题").apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(chooser) }
+        .onFailure {
+            WeLogger.w("ThemeWorkshop", "拉起分享面板失败：${it.message}")
+            showToast(context, "打开分享面板失败：${it.message}")
+        }
 }
 
 private fun findFeature(name: String): SwitchFeature? =
