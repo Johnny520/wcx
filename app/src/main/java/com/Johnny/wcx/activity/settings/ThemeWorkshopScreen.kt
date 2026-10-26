@@ -106,6 +106,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var longPressTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
     var appliedDialog by remember { mutableStateOf(false) }
+    var enableConfirm by remember { mutableStateOf(false) }
     var showRandomPool by remember { mutableStateOf(false) }
     var poolFiles by remember { mutableStateOf(ThemePack.randomPoolFiles()) }
 
@@ -151,8 +152,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         return true
     }
 
-    /** 右上角「应用」：写配置 → 提示划掉微信重开。 */
-    fun applySelected() {
+    /** 真正执行应用（写配置 → 提示划掉微信重开）。 */
+    fun doApply() {
         val id = selectedId
         if (id.isBlank()) {
             showToast(context, "先选一个主题")
@@ -176,6 +177,26 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             }
         refreshAll()
         appliedDialog = true
+    }
+
+    /**
+     * 右上角「应用」。
+     *
+     * 主题总开关默认是关闭的（和其它功能一致，需要用户手动开启）。
+     * 这里如果发现它还没开，先弹确认，由用户点「打开并应用」才真正打开，
+     * 不做静默自动开启。
+     */
+    fun applySelected() {
+        if (selectedId.isBlank()) {
+            showToast(context, "先选一个主题")
+            return
+        }
+        val feature = findFeature("主题工坊")
+        if (feature != null && !feature.isEnabled) {
+            enableConfirm = true
+            return
+        }
+        doApply()
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -550,6 +571,32 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     }
 
     // ── 弹窗区 ──────────────────────────────────────────────
+
+    if (enableConfirm) {
+        AlertDialog(
+            onDismissRequest = { enableConfirm = false },
+            title = { Text("主题总开关未开启") },
+            text = { Text("主题功能默认关闭。现在打开「主题」总开关并应用这套主题吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    enableConfirm = false
+                    val feature = findFeature("主题工坊")
+                    if (feature != null) {
+                        runCatching {
+                            WePrefs.putBool(feature.name, true)
+                            feature.isEnabled = true
+                        }.onFailure {
+                            WeLogger.w("ThemeWorkshop", "打开主题总开关失败：${it.message}")
+                            showToast(context, "打开失败：${it.message}")
+                            return@TextButton
+                        }
+                    }
+                    doApply()
+                }) { Text("打开并应用") }
+            },
+            dismissButton = { TextButton(onClick = { enableConfirm = false }) { Text("取消") } },
+        )
+    }
 
     if (appliedDialog) {
         AlertDialog(
