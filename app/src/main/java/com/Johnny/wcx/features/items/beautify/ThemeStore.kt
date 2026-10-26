@@ -651,8 +651,9 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      */
     private fun isChattingPage(activity: Activity): Boolean {
         val name = activity.javaClass.name ?: return false
-        return name == "com.tencent.mm.ui.chatting.ChattingUI" ||
-            name == "com.tencent.mm.ui.ChattingUI"
+        // 前缀匹配 + 后缀兜底：微信历史上类名有 com.tencent.mm.ui.ChattingUI
+        // 与 com.tencent.mm.ui.chatting.ChattingUI 两种写法，用 == 容易再踩一次。
+        return name.startsWith("com.tencent.mm.ui.chatting.") || name.endsWith(".ChattingUI")
     }
 
     
@@ -941,6 +942,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         runCatching {
             val bmp = BitmapFactory.decodeFile(src.absolutePathString())
             if (bmp == null) {
+                WeLogger.e(TAG, "聊天页壁纸解码失败：${src.absolutePathString()}")
                 restoreWindowBackground(activity)
                 return
             }
