@@ -119,16 +119,16 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private const val LEGACY_FEATURE_NAME = "主题商城"
 
     init {
-        // 功能从「主题商城」改名「主题工坊」，开关在 WePrefs 里以 name 为 key，
-        // 不迁移的话老用户会莫名其妙掉回默认状态。
+        // 功能从「主题商城」改名「主题工坊」。开关在 WePrefs 里以 name 为 key，
+        // 这里只清掉旧 key，**不继承旧值** —— 主题总开关必须默认关闭，
+        // 要开只能靠用户主动点「应用」（那时才写 true，否则应用完不生效）。
         // 注意：name 由 FeaturesLoader 注入，初始化期还是空串，这里只能用字面量。
         runCatching {
-            if (!WePrefs.containsKey(NEW_FEATURE_NAME) && WePrefs.containsKey(LEGACY_FEATURE_NAME)) {
-                WePrefs.putBool(NEW_FEATURE_NAME, WePrefs.getBoolOrFalse(LEGACY_FEATURE_NAME))
+            if (WePrefs.containsKey(LEGACY_FEATURE_NAME)) {
                 WePrefs.remove(LEGACY_FEATURE_NAME)
-                WeLogger.i(TAG, "已迁移旧开关「$LEGACY_FEATURE_NAME」→「$NEW_FEATURE_NAME」")
+                WeLogger.i(TAG, "已清理旧开关「$LEGACY_FEATURE_NAME」（主题工坊默认关闭）")
             }
-        }.onFailure { WeLogger.w(TAG, "迁移旧主题开关失败：${it.message}") }
+        }.onFailure { WeLogger.w(TAG, "清理旧主题开关失败：${it.message}") }
     }
 
     // ══════════════════════════════════════════════════════════
