@@ -731,11 +731,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private val tabLoadedPaths = HashMap<Int, String>()
 
     /** 4 个页面各自的背景文件；内置主题没有分页面素材时用同一张全局图。 */
-    private fun tabWallpaperFiles(): List<java.nio.file.Path?> {
+    private fun tabWallpaperFiles(): List<File?> {
         val pack = ThemePack.active()
-        val builtin = builtinTheme(activeThemeId)?.let { theme ->
+        // 统一用 java.io.File：ThemePack 返回 File，内置素材是 Path，混用会推断成 Comparable
+        val builtin: File? = builtinTheme(activeThemeId)?.let { theme ->
             runCatching { ensureBuiltinExtracted(theme) }
-            builtinWallpaperFile(theme).takeIf { it.exists() }
+            builtinWallpaperFile(theme).takeIf { it.exists() }?.toFile()
         }
         return listOf("chats", "contacts", "discover", "me").map { key ->
             pack?.wallpaperFor(key) ?: builtin
@@ -796,7 +797,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                     iv.visibility = View.GONE
                     continue
                 }
-                val path = file.absolutePathString()
+                val path = file.absolutePath
                 if (tabLoadedPaths[i] != path) {
                     val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
                     if (bmp != null) {
