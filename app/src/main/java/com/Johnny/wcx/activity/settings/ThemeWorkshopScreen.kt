@@ -106,8 +106,6 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var longPressTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
     var appliedDialog by remember { mutableStateOf(false) }
-    var autoSlotMenu by remember { mutableStateOf(false) }
-    var autoPickerSlot by remember { mutableStateOf("") }
     var showRandomPool by remember { mutableStateOf(false) }
     var poolFiles by remember { mutableStateOf(ThemePack.randomPoolFiles()) }
 
@@ -372,22 +370,6 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         summary = "只列你自己新建/导入的主题，点这里选择",
                         onClick = { showPicker = true },
                     )
-                    RowDivider()
-                    PrefSwitchRow(
-                        key = ThemeExtras.KEY_AUTO_BY_TIME,
-                        title = "按时间切换主题",
-                        summary = "进入主页时白天/夜间自动切到对应主题",
-                        tick = tick,
-                    )
-                    if (WePrefs.getBoolOrFalse(ThemeExtras.KEY_AUTO_BY_TIME)) {
-                        RowDivider()
-                        val autoDesc = remember(tick) { autoSummary() }
-                        NavRow(
-                            title = "白天 / 夜间主题",
-                            summary = autoDesc,
-                            onClick = { autoSlotMenu = true },
-                        )
-                    }
                     RowDivider()
                     OpacityRow(tick)
                 }
@@ -694,59 +676,6 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         )
     }
 
-    if (autoSlotMenu) {
-        AlertDialog(
-            onDismissRequest = { autoSlotMenu = false },
-            title = { Text("按时间切换") },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    PickerSectionTitle("白天 6:00–18:00：${themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, ""))}")
-                    PickerRow("设置白天主题", false, false) {
-                        autoSlotMenu = false
-                        autoPickerSlot = "day"
-                    }
-                    PickerSectionTitle("夜间 18:00–6:00：${themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, ""))}")
-                    PickerRow("设置夜间主题", false, false) {
-                        autoSlotMenu = false
-                        autoPickerSlot = "night"
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { autoSlotMenu = false }) { Text("关闭") } },
-        )
-    }
-
-    if (autoPickerSlot.isNotEmpty()) {
-        val isDay = autoPickerSlot == "day"
-        AlertDialog(
-            onDismissRequest = { autoPickerSlot = "" },
-            title = { Text(if (isDay) "白天主题" else "夜间主题") },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    PickerSectionTitle("默认主题")
-                    builtinThemes.forEach { (id, name) ->
-                        PickerRow(ThemeStore.builtinDisplayName(id, name), false, false) {
-                            saveAutoSlot(isDay, id)
-                            autoPickerSlot = ""
-                            tick++
-                            showToast(context, "已设置${if (isDay) "白天" else "夜间"}：$name")
-                        }
-                    }
-                    PickerSectionTitle("我的主题")
-                    packs.forEach { pack ->
-                        PickerRow(pack.name, false, false) {
-                            saveAutoSlot(isDay, pack.id)
-                            autoPickerSlot = ""
-                            tick++
-                            showToast(context, "已设置${if (isDay) "白天" else "夜间"}：${pack.name}")
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { autoPickerSlot = "" }) { Text("关闭") } },
-        )
-    }
-
     if (confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
@@ -999,12 +928,6 @@ private fun PrefSwitchRow(key: String, title: String, summary: String, tick: Int
         WePrefs.putBool(key, on)
         checked = on
         ThemeExtras.onPrefChanged(key, on)
-        if (key == ThemeExtras.KEY_AUTO_BY_TIME && on) {
-            if (ThemeExtras.autoThemeForNow() == null) {
-                val cur = ThemeStore.activeThemeIdOrEmpty()
-                if (cur.isNotBlank()) ThemeExtras.setAutoThemes(cur, cur)
-            }
-        }
     }
 }
 
@@ -1464,12 +1387,6 @@ private fun GuideLine(index: String, title: String, detail: String) {
 // 小工具
 // ══════════════════════════════════════════════════════════
 
-private fun autoSummary(): String {
-    val day = themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, ""))
-    val night = themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, ""))
-    return "白天：$day ・ 夜间：$night（点这里设置）"
-}
-
 private fun themeName(id: String): String {
     if (id.isBlank()) return "未设置"
     ThemeStore.builtinThemeItems().firstOrNull { it.first == id }?.let {
@@ -1477,14 +1394,6 @@ private fun themeName(id: String): String {
     }
     ThemePack.find(id)?.let { return it.name }
     return id
-}
-
-private fun saveAutoSlot(isDay: Boolean, id: String) {
-    val day = WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, "")
-    val night = WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, "")
-    if (isDay) ThemeExtras.setAutoThemes(id, night.ifBlank { id })
-    else ThemeExtras.setAutoThemes(day.ifBlank { id }, id)
-    ThemeExtras.applyAutoThemeIfNeeded(force = true)
 }
 
 private fun roleLabel(role: String): String = when (role) {

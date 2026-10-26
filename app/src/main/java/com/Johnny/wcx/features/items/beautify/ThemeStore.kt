@@ -475,12 +475,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         // 外部主题包优先，且支持分页面壁纸（某页单独设了就用它，没设退回全局）
         val key = activity?.let { pageWallpaperKey(it) }
         ThemePack.active()?.let { pack ->
-            // 开了「随机聊天背景」时，在「本页壁纸 + 全局壁纸」里随机挑一张，每次进页面都可能不同
+            // 本页壁纸优先，没设就退回全局壁纸
             val candidates = buildList {
                 if (key != null) pack.wallpaperFor(key)?.let(::add)
                 pack.wallpaper()?.let(::add)
             }.distinctBy { it.absolutePath }
-            ThemeExtras.pickRandom(candidates)?.let { return it.toPath() }
+            candidates.firstOrNull()?.let { return it.toPath() }
         }
         // 内置主题：素材文件可能被清理掉（清缓存/换设备），这里顺手补一次提取，
         // 否则重启后只剩一个纯色块，用户会以为「应用了没生效」。
@@ -507,8 +507,6 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         runCatching {
             WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
                 val activity = thisObject as? Activity ?: return@hookAfter
-                // 主题扩展：ActionBar 美化 + 按时间切换主题（同一挂点，避免重复解析 doOnCreate）
-                runCatching { ThemeExtras.onMainActivityCreated(activity) }
                 val tabsAdapter = runCatching {
                     thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
                 }.getOrNull() ?: return@hookAfter
@@ -1059,6 +1057,16 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     fun restoreDefaultTheme() = restoreDefault()
+
+    /**
+     * 关掉「随机聊天背景」时，立刻把已经挂在聊天页上的壁纸撤掉，
+     * 不用等用户退出再进一次聊天界面。
+     */
+    fun clearWallpaperOnChattingPages() {
+        runCatching {
+            liveActivities().filter { isChattingPage(it) }.forEach { removeWallpaper(it) }
+        }.onFailure { WeLogger.w(TAG, "清除聊天页壁纸失败：${it.message}") }
+    }
 
     /** 壁纸透明度（5~100）。 */
     fun overlayOpacity(): Int = overlayOpacityPct.coerceIn(5, 100)
