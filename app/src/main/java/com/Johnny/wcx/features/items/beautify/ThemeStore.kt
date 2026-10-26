@@ -58,6 +58,7 @@ import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.activity.settings.SettingsActivity
 import com.Johnny.wcx.activity.settings.SettingsNavigation
+import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.ui.content.AlertDialogContent

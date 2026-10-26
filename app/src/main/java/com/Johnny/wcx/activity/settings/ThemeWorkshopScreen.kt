@@ -377,7 +377,7 @@ private fun PageWallpaperRow(
         summary = when {
             set != null -> "已设置：$set"
             pendingRole == role -> "正在选择…"
-            else -> "未设置（跟随全局壁纸）",
+            else -> "未设置（跟随全局壁纸）"
         },
         onClick = {
             if (editing == null) {
