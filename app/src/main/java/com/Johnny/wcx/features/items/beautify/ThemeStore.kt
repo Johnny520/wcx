@@ -53,6 +53,7 @@ import coil3.compose.AsyncImage
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
+import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.activity.settings.SettingsActivity
@@ -228,6 +229,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     override fun onEnable() {
+        hookTabSwitch()
         registerCallbacks(true)
         WeChatMessageViewApi.addListener(this)
         if (activeThemeId.isNotEmpty()) {
@@ -379,10 +381,81 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     /** 壁纸文件（内置主题提取文件）。 */
-    private fun wallpaperSource(): java.nio.file.Path? {
-        // 外部主题包优先
-        ThemePack.active()?.wallpaper()?.let { return it.toPath() }
+    private fun wallpaperSource(activity: Activity? = null): java.nio.file.Path? {
+        // 外部主题包优先，且支持分页面壁纸（某页单独设了就用它，没设退回全局）
+        val key = activity?.let { pageWallpaperKey(it) }
+        ThemePack.active()?.let { pack ->
+            val file = if (key != null) pack.wallpaperFor(key) else pack.wallpaper()
+            file?.let { return it.toPath() }
+        }
         return builtinTheme(activeThemeId)?.let { builtinWallpaperFile(it) }?.takeIf { it.exists() }
+    }
+
+    @Volatile
+    private var lastTabIndex = -1
+
+    /** 已挂过切页监听的 adapter，避免每次进主页重复 hook。 */
+    private val hookedTabsAdapters: MutableSet<Any> =
+        java.util.Collections.newSetFromMap(java.util.WeakHashMap<Any, Boolean>())
+
+    /**
+     * 主界面切 Tab 时立即换壁纸。
+     *
+     * 分页面壁纸（消息/通讯录/发现/我）只有在这里重挂才能「切过去就变」，
+     * 否则要退出重进主界面才生效。
+     */
+    private fun hookTabSwitch() {
+        runCatching {
+            WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
+                val activity = thisObject as? Activity ?: return@hookAfter
+                val tabsAdapter = runCatching {
+                    thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
+                }.getOrNull() ?: return@hookAfter
+                if (!hookedTabsAdapters.add(tabsAdapter)) return@hookAfter
+                runCatching {
+                    tabsAdapter.reflekt().firstMethod { name = "onPageScrolled" }.hookBefore {
+                        val position = args.getOrNull(0) as? Int ?: return@hookBefore
+                        val offset = args.getOrNull(1) as? Float ?: return@hookBefore
+                        if (offset == 0f && position != lastTabIndex) {
+                            lastTabIndex = position
+                            if (activeThemeId.isNotEmpty()) applyWallpaper(activity)
+                        }
+                    }
+                }.onFailure { WeLogger.w(TAG, "hook onPageScrolled 失败", it) }
+            }
+        }.onFailure { WeLogger.w(TAG, "hookTabSwitch 失败", it) }
+    }
+
+    /** 把 Activity 映射成分页面壁纸的 key：chats/contacts/discover/me/chatting。 */
+    private fun pageWallpaperKey(activity: Activity): String? {
+        val name = activity.javaClass.name ?: return null
+        if (name == "com.tencent.mm.ui.ChattingUI") return "chatting"
+        if (name != "com.tencent.mm.ui.LauncherUI") return null
+        return when (currentTabIndex(activity)) {
+            0 -> "chats"
+            1 -> "contacts"
+            2 -> "discover"
+            3 -> "me"
+            else -> null
+        }
+    }
+
+    /** 主界面当前 Tab：直接读 ViewPager 的 mCurItem，避免依赖混淆后的 adapter 方法名。 */
+    private fun currentTabIndex(activity: Activity): Int = runCatching {
+        val content = activity.window?.decorView?.findViewById<ViewGroup>(android.R.id.content)
+            ?: return@runCatching 0
+        val pager = findViewByClass(content, "androidx.viewpager.widget.ViewPager")
+            ?: return@runCatching 0
+        pager.reflekt().firstField { name = "mCurItem" }.get() as? Int ?: 0
+    }.getOrDefault(0)
+
+    private fun findViewByClass(root: ViewGroup, className: String): View? {
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (child.javaClass.name == className) return child
+            if (child is ViewGroup) findViewByClass(child, className)?.let { return it }
+        }
+        return null
     }
 
     // ══════════════════════════════════════════════════════════
@@ -490,7 +563,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         val decor = activity.window?.decorView as? ViewGroup ?: return
         val alpha = overlayOpacityPct.coerceIn(5, 100) / 100f
         val theme = currentTheme()
-        val src = wallpaperSource()
+        val src = wallpaperSource(activity)
         try {
             var container = decor.findViewWithTag<FrameLayout>(WALLPAPER_TAG)
             if (container == null) {

@@ -68,6 +68,16 @@ object ThemePack {
 
         fun wallpaper(): File? = asset(manifest.optString("wallpaper"))
 
+        /**
+         * 分页面壁纸：某个页面单独设了就用它，没设就退回全局壁纸。
+         *
+         * @param key chats / contacts / discover / me / chatting
+         */
+        fun wallpaperFor(key: String): File? {
+            val specific = asset(manifest.optString("wallpaper_$key"))
+            return specific ?: wallpaper()
+        }
+
         fun bubbleOther(): File? = asset(manifest.optString("bubble_left"))
 
         fun bubbleSelf(): File? = asset(manifest.optString("bubble_right"))
@@ -299,6 +309,11 @@ object ThemePack {
     fun writeImage(pack: Pack, context: Context, uri: Uri, role: String, ninePatch: Boolean = false): Pack? {
         val fileName = when (role) {
             "wallpaper" -> "wallpaper.png"
+            "wallpaper_chats" -> "wallpaper_chats.png"
+            "wallpaper_contacts" -> "wallpaper_contacts.png"
+            "wallpaper_discover" -> "wallpaper_discover.png"
+            "wallpaper_me" -> "wallpaper_me.png"
+            "wallpaper_chatting" -> "wallpaper_chatting.png"
             "bubble_left" -> if (ninePatch) "bubble_left.9.png" else "bubble_left.png"
             "bubble_right" -> if (ninePatch) "bubble_right.9.png" else "bubble_right.png"
             else -> return null

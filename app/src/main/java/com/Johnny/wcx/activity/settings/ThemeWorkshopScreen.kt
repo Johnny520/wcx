@@ -49,6 +49,14 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         refresh()
     }
 
+    var pendingRole by remember { mutableStateOf("") }
+    val pickPageImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val pack = editing
+        if (uri != null && pack != null && pendingRole.isNotEmpty()) {
+            ThemePack.writeImage(pack, context, uri, pendingRole)?.let { editing = it }
+            showToast(context, "已写入：${pageRoleLabel(pendingRole)}")
+        }
+    }
     val pickWallpaper = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val pack = editing
         if (uri != null && pack != null) {
@@ -205,6 +213,27 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                         },
                     )
                     InsetDivider()
+                    PageWallpaperRow("消息页背景", "wallpaper_chats", editing, pendingRole) { role ->
+                        pendingRole = role
+                        pickPageImage.launch("image/*")
+                    }
+                    PageWallpaperRow("通讯录背景", "wallpaper_contacts", editing, pendingRole) { role ->
+                        pendingRole = role
+                        pickPageImage.launch("image/*")
+                    }
+                    PageWallpaperRow("发现页背景", "wallpaper_discover", editing, pendingRole) { role ->
+                        pendingRole = role
+                        pickPageImage.launch("image/*")
+                    }
+                    PageWallpaperRow("「我」页背景", "wallpaper_me", editing, pendingRole) { role ->
+                        pendingRole = role
+                        pickPageImage.launch("image/*")
+                    }
+                    PageWallpaperRow("聊天页背景", "wallpaper_chatting", editing, pendingRole) { role ->
+                        pendingRole = role
+                        pickPageImage.launch("image/*")
+                    }
+                    InsetDivider()
                     ActionRow(
                         title = "② 选「对方」气泡",
                         summary = editing?.bubbleOther()?.name ?: "未选择",
@@ -316,6 +345,47 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             }
         }
     }
+}
+
+private fun pageRoleLabel(role: String): String = when (role) {
+    "wallpaper" -> "全局壁纸"
+    "wallpaper_chats" -> "消息页背景"
+    "wallpaper_contacts" -> "通讯录背景"
+    "wallpaper_discover" -> "发现页背景"
+    "wallpaper_me" -> "「我」页背景"
+    "wallpaper_chatting" -> "聊天页背景"
+    "bubble_left" -> "对方气泡"
+    "bubble_right" -> "自己气泡"
+    else -> role
+}
+
+/** 分页面壁纸一行：已设置显示文件名，未设置提示「跟随全局壁纸」。 */
+@Composable
+private fun PageWallpaperRow(
+    title: String,
+    role: String,
+    editing: ThemePack.Pack?,
+    pendingRole: String,
+    onPick: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val set = editing?.manifest?.optString(role)?.takeIf { it.isNotBlank() }
+    ActionRow(
+        title = title,
+        summary = when {
+            set != null -> "已设置：$set"
+            pendingRole == role -> "正在选择…"
+            else -> "未设置（跟随全局壁纸）",
+        },
+        onClick = {
+            if (editing == null) {
+                showToast(context, "先点上面「新建一个空主题」")
+            } else {
+                onPick(role)
+            }
+        },
+    )
+    InsetDivider()
 }
 
 @Composable
