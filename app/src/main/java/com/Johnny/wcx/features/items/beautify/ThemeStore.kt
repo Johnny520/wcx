@@ -460,6 +460,19 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
 
     /** 壁纸文件（内置主题提取文件）。 */
     private fun wallpaperSource(activity: Activity? = null): java.nio.file.Path? {
+        // 豁免页（聊天会话、扫一扫、看图）直接不挂壁纸。
+        // 注意：这里必须提前 return null，不能让后面的「全局壁纸」兜底接住，
+        // 否则聊天页依旧会被铺上全局背景 —— 之前聊天页还有主题背景就是这么来的。
+        if (activity != null &&
+            (isChattingPage(activity) || isScannerPage(activity) || isPhotoViewerPage(activity))
+        ) {
+            return null
+        }
+        // 「随机聊天背景」开关：从图池里随机取一张（每次进页面都可能不同）
+        if (WePrefs.getBoolOrFalse(com.Johnny.wcx.features.items.beautify.ThemeExtras.KEY_RANDOM_WALLPAPER)) {
+            val pool = ThemePack.randomPoolFiles()
+            if (pool.isNotEmpty()) return pool.random().toPath()
+        }
         // 外部主题包优先，且支持分页面壁纸（某页单独设了就用它，没设退回全局）
         val key = activity?.let { pageWallpaperKey(it) }
         ThemePack.active()?.let { pack ->
@@ -662,11 +675,22 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 注：曾尝试「内容底衬」（挂在窗体容器 index 0）——微信各页根布局不透明会完全盖住底衬
      * （看不到壁纸），且影响微信自绘窗口（wcx 设置入口卡启动图），故回退为顶层悬浮。
      */
+    /**
+     * 挂壁纸。
+     *
+     * 关键点：壁纸层必须插在 decorView 的**最底层**（index 0），并把 DecorView / 内容容器的
+     * 底色清成透明。这样壁纸永远在文字下面 —— 用户把透明度拉满也只是壁纸本身不透明，
+     * 绝不会盖住任何文字（之前挂在最上层，拉满就整屏糊掉）。
+     */
     private fun applyWallpaper(activity: Activity) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
+        val src = wallpaperSource(activity)
+        if (src == null) {
+            removeWallpaper(activity)
+            return
+        }
         val alpha = overlayOpacityPct.coerceIn(5, 100) / 100f
         val theme = currentTheme()
-        val src = wallpaperSource(activity)
         try {
             var container = decor.findViewWithTag<FrameLayout>(WALLPAPER_TAG)
             if (container == null) {
@@ -675,23 +699,32 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                     isClickable = false
                     isFocusable = false
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
                 }
-                // 保持在最上层，但不盖住之后挂载的侧边栏面板/触发按钮
-                decor.addView(container)
+                decor.addView(container, 0)
             }
-            if (decor.indexOfChild(container) != decor.childCount - 1) {
+            // 永远压在最底层
+            if (decor.indexOfChild(container) != 0) {
                 decor.removeView(container)
-                decor.addView(container)
+                decor.addView(container, 0)
             }
+            clearSurfaceBackgrounds(decor, container)
+
             val iv = container.getChildAt(0) as? ImageView ?: ImageView(activity).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
             }.also { container.addView(it) }
-            val bmp = src?.let { runCatching { BitmapFactory.decodeFile(it.absolutePathString()) }.getOrNull() }
-            if (bmp != null && iv.tag != src.absolutePathString()) {
+            val path = src.absolutePathString()
+            val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
+            if (bmp != null && iv.tag != path) {
                 iv.setImageBitmap(bmp)
-                iv.tag = src.absolutePathString()
+                iv.tag = path
             }
             if (bmp == null) {
                 // 壁纸缺失兜底：主题色
@@ -704,10 +737,65 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
+    // 被清掉的原背景，撤销主题时原样放回去
+    private val savedBackgrounds =
+        java.util.WeakHashMap<View, android.graphics.drawable.Drawable?>()
+
+    /**
+     * 把「装饰层 / 内容容器」的底色清空，让贴在底部的壁纸透上来。
+     * 只处理容器级 View，页面内部的列表/气泡/文字一概不碰。
+     */
+    private fun clearSurfaceBackgrounds(decor: ViewGroup, wallpaper: View) {
+        runCatching {
+            clearOne(decor)
+            for (i in 0 until decor.childCount) {
+                val child = decor.getChildAt(i)
+                if (child === wallpaper) continue
+                clearOne(child)
+                if (child !is ViewGroup) continue
+                val depth = if (child.id == android.R.id.content) 2 else 1
+                clearContainersUntil(child, depth)
+            }
+        }.onFailure { WeLogger.w(TAG, "清理容器背景异常：${it.message}") }
+    }
+
+    /** depth<=0 时停手，避免把页面内部（列表、气泡）的背景也清掉。 */
+    private fun clearContainersUntil(parent: ViewGroup, depth: Int) {
+        if (depth <= 0) return
+        for (i in 0 until parent.childCount) {
+            val v = parent.getChildAt(i)
+            if (v is ViewGroup && isSurfaceContainer(v)) {
+                clearOne(v)
+                clearContainersUntil(v, depth - 1)
+            }
+        }
+    }
+
+    private fun isSurfaceContainer(v: View): Boolean {
+        if (v is ImageView) return false
+        val n = v.javaClass.name
+        return n.contains("FrameLayout") || n.contains("LinearLayout") ||
+            n.contains("RelativeLayout") || n == "android.view.View" ||
+            n.contains("ActionBarOverlayLayout")
+    }
+
+    private fun clearOne(v: View) {
+        val bg = v.background ?: return
+        if (!savedBackgrounds.containsKey(v)) savedBackgrounds[v] = bg
+        v.background = null
+    }
+
+    private fun restoreSurfaceBackgrounds() {
+        savedBackgrounds.forEach { (v, bg) -> runCatching { v.background = bg } }
+        savedBackgrounds.clear()
+    }
+
     private fun removeWallpaper(activity: Activity) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
         try {
             decor.findViewWithTag<View>(WALLPAPER_TAG)?.let { decor.removeView(it) }
+            // 主题撤销后把被清掉的容器底色放回去，恢复微信原样
+            restoreSurfaceBackgrounds()
         } catch (e: Throwable) { WeLogger.w(TAG, "removeWallpaper 异常", e) }
     }
 
@@ -932,6 +1020,24 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // ── 供「主题工坊」页面调用的公开入口 ─────────────────────────────────
     /** 内置主题（id to 名称）。 */
     fun builtinThemeItems(): List<Pair<String, String>> = builtinThemes.map { it.id to it.name }
+
+    /** 内置主题的自定义名称（长按重命名后存这里，为空则用内置原名）。 */
+    fun builtinAlias(id: String): String = WePrefs.getStringOrDef("theme_alias_$id", "")
+
+    fun setBuiltinAlias(id: String, name: String) {
+        WePrefs.putString("theme_alias_$id", name.trim())
+    }
+
+    /** 内置主题的自定义描述（可选）。 */
+    fun builtinDesc(id: String): String = WePrefs.getStringOrDef("theme_desc_$id", "")
+
+    fun setBuiltinDesc(id: String, desc: String) {
+        WePrefs.putString("theme_desc_$id", desc.trim())
+    }
+
+    /** 内置主题展示名 = 自定义别名优先。 */
+    fun builtinDisplayName(id: String, fallback: String): String =
+        builtinAlias(id).ifBlank { fallback }
 
     /** 默认（内置）主题的缩略图文件；首次调用会把素材从 APK 提取到模块数据目录。 */
     fun builtinThumbnail(id: String): File? = runCatching {

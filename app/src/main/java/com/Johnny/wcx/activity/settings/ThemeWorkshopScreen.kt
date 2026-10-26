@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,7 +62,6 @@ import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
-import com.Johnny.wcx.utils.restartHost
 import h.Hchat.ui.miuix.PageScaffold
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Switch
@@ -71,21 +73,20 @@ import java.io.File
  *
  * 一套主题 = 4 张界面背景（主页 / 通讯录 / 发现 / 我）+ 2 个点九气泡（左·对方 / 右·自己）。
  *
- * 布局参照 MDWechat 的分组逻辑：每组一个独立圆角卡片 + 卡片外左上角小标题，
- * 圆角 22dp、柔和阴影、行间细分割线，与 WCX 现有页面同一套配色。
- *
- * 交互硬约束：
- * 1. 改素材 / 改名称 / 改描述只在「保存主题」时落盘，切换主题会丢弃未保存改动
- * 2. 只有「应用主题」才重启微信
+ * 交互约定（用户明确要求）：
+ * - 点卡片/下拉只是「选中」，不生效；必须点右上角「应用」才算应用，且要划掉微信重开
+ * - 内置主题只能调透明度，不能改名称/素材；长按可重命名/改描述，但不能分享
+ * - 壁纸永远在最底层，文字永远在上层，透明度拉满也不会挡字
  */
 @Composable
 fun ThemeWorkshopScreen(onBack: () -> Unit) {
     val context = LocalContext.current
 
-    // 默认主题（内置 6 款）与「我的主题」严格分开，不混在一个网格里
     val builtinThemes = remember { ThemeStore.builtinThemeItems() }
     var packs by remember { mutableStateOf(ThemePack.list()) }
     var active by remember { mutableStateOf(ThemeStore.activeThemeIdOrEmpty()) }
+    // 待应用的主题（内置 id 或主题包 id）；点「应用」才写进 ThemeStore
+    var selectedId by remember { mutableStateOf(ThemeStore.activeThemeIdOrEmpty()) }
     var editing by remember { mutableStateOf<ThemePack.Pack?>(null) }
     var pendingRole by remember { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
@@ -97,23 +98,28 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     var renameText by remember { mutableStateOf("") }
     var descTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
     var descText by remember { mutableStateOf("") }
-    var confirmApply by remember { mutableStateOf(false) }
+    var builtinRenameId by remember { mutableStateOf("") }
+    var builtinRenameText by remember { mutableStateOf("") }
+    var builtinDescId by remember { mutableStateOf("") }
+    var builtinDescText by remember { mutableStateOf("") }
+    var builtinLongPress by remember { mutableStateOf("") }
+    var longPressTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
+    var appliedDialog by remember { mutableStateOf(false) }
     var autoSlotMenu by remember { mutableStateOf(false) }
     var autoPickerSlot by remember { mutableStateOf("") }
-    var longPressTarget by remember { mutableStateOf<ThemePack.Pack?>(null) }
+    var showRandomPool by remember { mutableStateOf(false) }
+    var poolFiles by remember { mutableStateOf(ThemePack.randomPoolFiles()) }
 
-    // 编辑区草稿：未点保存前只存在内存里
     var draftName by remember { mutableStateOf("") }
     var draftDesc by remember { mutableStateOf("") }
     var descVisible by remember { mutableStateOf(false) }
-
-    // 开关刷新令牌：切换主题 / 应用快照后自增，驱动开关行重新读值
     var tick by remember { mutableStateOf(0) }
 
     fun refreshAll() {
         packs = ThemePack.list()
         active = ThemeStore.activeThemeIdOrEmpty()
+        poolFiles = ThemePack.randomPoolFiles()
         tick++
     }
 
@@ -124,12 +130,17 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         descVisible = draftDesc.isNotBlank()
     }
 
-    fun applySwitchesOf(pack: ThemePack.Pack?) {
-        if (pack == null) return
-        val switches = ThemePack.switches(pack)
-        if (switches.isEmpty()) return
-        runCatching { ThemeExtras.applySwitches(switches) }
-            .onFailure { WeLogger.w("ThemeWorkshop", "同步开关失败：${it.message}") }
+    /** 选中主题（不应用）。 */
+    fun select(id: String) {
+        selectedId = id
+        val pack = ThemePack.find(id)
+        loadDraft(pack)
+        if (pack == null) {
+            val name = builtinThemes.firstOrNull { it.first == id }?.second
+            showToast(context, "已选中：${name?.let { ThemeStore.builtinDisplayName(id, it) } ?: id}，点右上角「应用」生效")
+        } else {
+            showToast(context, "已选中：${pack.name}，点右上角「应用」生效")
+        }
         tick++
     }
 
@@ -140,6 +151,33 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         refreshAll()
         ThemePack.find(pack.id)?.let { loadDraft(it) }
         return true
+    }
+
+    /** 右上角「应用」：写配置 → 提示划掉微信重开。 */
+    fun applySelected() {
+        val id = selectedId
+        if (id.isBlank()) {
+            showToast(context, "先选一个主题")
+            return
+        }
+        val pack = ThemePack.find(id)
+        if (pack != null) {
+            if (!saveCurrent()) {
+                showToast(context, "保存失败")
+                return
+            }
+            // 主题包里存的开关快照，应用时一起同步
+            runCatching { ThemeExtras.applySwitches(ThemePack.switches(pack)) }
+                .onFailure { WeLogger.w("ThemeWorkshop", "同步开关失败：${it.message}") }
+        }
+        runCatching { ThemeStore.applyThemeById(id) }
+            .onFailure {
+                WeLogger.w("ThemeWorkshop", "应用主题失败：${it.message}")
+                showToast(context, "应用失败：${it.message}")
+                return
+            }
+        refreshAll()
+        appliedDialog = true
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -153,8 +191,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         }.onSuccess { pack ->
             File(context.cacheDir, "theme_import.zip").delete()
             refreshAll()
-            loadDraft(pack)
-            applySwitchesOf(pack)
+            select(pack.id)
             showToast(context, "已导入：${pack.name}")
         }.onFailure {
             WeLogger.w("ThemeWorkshop", "导入失败：${it.message}")
@@ -173,68 +210,101 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         }
     }
 
+    val pickPoolImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        ThemePack.addRandomPoolImage(context, uri)
+            .onSuccess {
+                refreshAll()
+                showToast(context, "已添加（共 ${ThemePack.randomPoolFiles().size} 张）")
+            }
+            .onFailure { showToast(context, "添加失败：${it.message}") }
+    }
+
     PageScaffold(
         title = "主题设置",
         largeTitle = "主题设置",
         onBack = onBack,
         topBarActions = {
-            Box {
-                Text(
-                    text = "⋮",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BasicComponentDefaults.titleColor().color,
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 应用：右上角、⋮ 左边。只有点它才真正生效（并提示划掉微信重开）
+                Box(
                     modifier = Modifier
-                        .clickable { menuOpen = true }
-                        .padding(horizontal = 14.dp, vertical = 2.dp),
-                )
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("导入主题") },
-                        onClick = {
-                            menuOpen = false
-                            importLauncher.launch("*/*")
-                        },
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.14f))
+                        .clickable { applySelected() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = "应用",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MiuixTheme.colorScheme.primary,
                     )
-                    DropdownMenuItem(
-                        text = { Text("导出主题") },
-                        onClick = {
-                            menuOpen = false
-                            val file = ThemeStore.exportActiveTheme()
-                            showToast(
-                                context,
-                                if (file != null) "已导出：${file.absolutePath}" else "先选一个主题再导出",
-                            )
-                        },
+                }
+                Spacer(Modifier.width(6.dp))
+                Box {
+                    Text(
+                        text = "⋮",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = BasicComponentDefaults.titleColor().color,
+                        modifier = Modifier
+                            .clickable { menuOpen = true }
+                            .padding(horizontal = 10.dp, vertical = 2.dp),
                     )
-                    DropdownMenuItem(
-                        text = { Text("备份主题") },
-                        onClick = {
-                            menuOpen = false
-                            val pack = ThemePack.find(ThemeStore.activeThemeIdOrEmpty())
-                            if (pack == null) {
-                                showToast(context, "当前主题不是可备份的主题包")
-                            } else {
-                                ThemePack.backup(pack)
-                                    .onSuccess { showToast(context, "已备份：${it.absolutePath}") }
-                                    .onFailure { showToast(context, "备份失败：${it.message}") }
-                            }
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("恢复默认") },
-                        onClick = {
-                            menuOpen = false
-                            confirmReset = true
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("使用说明") },
-                        onClick = {
-                            menuOpen = false
-                            showGuide = true
-                        },
-                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("导入主题") },
+                            onClick = {
+                                menuOpen = false
+                                importLauncher.launch("*/*")
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("导出主题") },
+                            onClick = {
+                                menuOpen = false
+                                val pack = ThemePack.find(selectedId)
+                                if (pack == null) {
+                                    showToast(context, "内置主题不能导出/分享，请先选一个自己的主题")
+                                } else {
+                                    val file = ThemePack.exportZip(pack).getOrNull()
+                                    showToast(
+                                        context,
+                                        if (file != null) "已导出：${file.absolutePath}" else "导出失败",
+                                    )
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("备份主题") },
+                            onClick = {
+                                menuOpen = false
+                                val pack = ThemePack.find(selectedId)
+                                if (pack == null) {
+                                    showToast(context, "内置主题不需要备份，请选自己的主题")
+                                } else {
+                                    ThemePack.backup(pack)
+                                        .onSuccess { showToast(context, "已备份：${it.absolutePath}") }
+                                        .onFailure { showToast(context, "备份失败：${it.message}") }
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("恢复默认") },
+                            onClick = {
+                                menuOpen = false
+                                confirmReset = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("使用说明") },
+                            onClick = {
+                                menuOpen = false
+                                showGuide = true
+                            },
+                        )
+                    }
                 }
             }
         },
@@ -249,12 +319,44 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             // ── 卡片1 主题基础 ───────────────────────────────
             item {
                 GroupCard(title = "主题基础") {
-                    PrefSwitchRow(
-                        key = ThemeExtras.KEY_RANDOM_WALLPAPER,
-                        title = "随机聊天背景",
-                        summary = "每次进入主页从已有的几张背景里随机挑一张",
-                        tick = tick,
-                    )
+                    // 随机聊天背景：开关 + 齿轮（管理图池，最多 5 张）
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("随机聊天背景", fontSize = 15.sp, color = titleColor())
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "从下面图池里随机取一张（已选 ${poolFiles.size}/${ThemePack.RANDOM_POOL_MAX} 张）",
+                                fontSize = 12.sp,
+                                color = summaryColor(),
+                            )
+                        }
+                        var randomOn by remember(tick) {
+                            mutableStateOf(WePrefs.getBoolOrFalse(ThemeExtras.KEY_RANDOM_WALLPAPER))
+                        }
+                        Switch(
+                            checked = randomOn,
+                            onCheckedChange = { on ->
+                                WePrefs.putBool(ThemeExtras.KEY_RANDOM_WALLPAPER, on)
+                                randomOn = on
+                                ThemeExtras.onPrefChanged(ThemeExtras.KEY_RANDOM_WALLPAPER, on)
+                            },
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            text = "⚙",
+                            fontSize = 18.sp,
+                            color = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clickable {
+                                    poolFiles = ThemePack.randomPoolFiles()
+                                    showRandomPool = true
+                                }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
                     RowDivider()
                     FeatureSwitchRow(
                         featureName = "主题工坊",
@@ -265,10 +367,8 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     )
                     RowDivider()
                     NavRow(
-                        title = ThemePack.find(active)?.name
-                            ?: ThemeStore.builtinThemeItems().firstOrNull { it.first == active }?.second
-                            ?: "未选择",
-                        summary = "点这里从已保存的主题里挑一个",
+                        title = if (selectedId.isBlank()) "未选择" else themeName(selectedId),
+                        summary = "只列你自己新建/导入的主题，点这里选择",
                         onClick = { showPicker = true },
                     )
                     RowDivider()
@@ -292,25 +392,21 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ── 卡片2 快捷功能：保存 / 应用 ──────────────────
+            // ── 卡片2 快捷功能 ───────────────────────────────
             item {
                 GroupCard(title = "快捷功能") {
                     Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             PillButton("保存", Modifier.weight(1f)) {
-                                if (saveCurrent()) showToast(context, "已保存：$draftName")
-                                else showToast(context, "先新建或选择一个主题")
+                                if (editing == null) showToast(context, "内置主题不可编辑，只能调透明度")
+                                else if (saveCurrent()) showToast(context, "已保存：$draftName")
                             }
-                            PillButton("应用", Modifier.weight(1f), primary = true) {
-                                if (editing == null) showToast(context, "先新建或选择一个主题")
-                                else confirmApply = true
+                            PillButton("分享", Modifier.weight(1f)) {
+                                shareSelectedTheme(context, selectedId)
                             }
                         }
                         Spacer(Modifier.height(10.dp))
-                        // 分享=调系统分享面板，把「当前主题」导出的 zip 直接发出去
-                        PillButton("分享", Modifier.fillMaxWidth()) {
-                            shareActiveTheme(context)
-                        }
+                        PillButton("恢复默认", Modifier.fillMaxWidth()) { confirmReset = true }
                     }
                 }
             }
@@ -329,70 +425,77 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     }
                     RowDivider()
                     val pack = editing
-                    if (pack == null) {
-                        HintRow("还没有正在编辑的主题：点「新建主题」，或在下方网格点一张卡片加载。")
-                    } else {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-                            OutlinedTextField(
-                                value = draftName,
-                                onValueChange = { draftName = it },
-                                label = { Text("主题名称") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
+                    when {
+                        selectedId.isBlank() -> HintRow("先在下面「默认主题」或「我的主题」里点一张卡片选中它。")
+                        // 内置主题：只能调透明度，其余只读
+                        pack == null -> {
+                            HintRow(
+                                "这是内置主题（全局）。内置主题只能调「壁纸透明度」，" +
+                                    "不能改名称/素材；长按卡片可重命名或改描述。"
                             )
-                            if (descVisible) {
-                                Spacer(Modifier.height(8.dp))
+                            BuiltinPreviewStrip(selectedId)
+                        }
+                        else -> {
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
                                 OutlinedTextField(
-                                    value = draftDesc,
-                                    onValueChange = { draftDesc = it },
-                                    label = { Text("主题描述") },
+                                    value = draftName,
+                                    onValueChange = { draftName = it },
+                                    label = { Text("主题名称") },
+                                    singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
-                            } else {
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    text = "＋ 添加描述（选填）",
-                                    fontSize = 12.sp,
-                                    color = MiuixTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable { descVisible = true },
-                                )
+                                if (descVisible) {
+                                    Spacer(Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = draftDesc,
+                                        onValueChange = { draftDesc = it },
+                                        label = { Text("主题描述") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                } else {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = "＋ 添加描述（选填）",
+                                        fontSize = 12.sp,
+                                        color = MiuixTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { descVisible = true },
+                                    )
+                                }
                             }
+                            RowDivider()
+                            ThemePreview(pack)
+                            RowDivider()
+                            MaterialRow("主页背景", "wallpaper_chats", pack, pendingRole,
+                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { updated -> loadDraft(updated) },
+                            )
+                            MaterialRow("通讯录背景", "wallpaper_contacts", pack, pendingRole,
+                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { updated -> loadDraft(updated) },
+                            )
+                            MaterialRow("发现页背景", "wallpaper_discover", pack, pendingRole,
+                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { updated -> loadDraft(updated) },
+                            )
+                            MaterialRow("我的背景", "wallpaper_me", pack, pendingRole,
+                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { updated -> loadDraft(updated) },
+                            )
+                            MaterialRow("消息气泡 · 左（对方）", "bubble_left", pack, pendingRole,
+                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { updated -> loadDraft(updated) },
+                            )
+                            MaterialRow("消息气泡 · 右（自己）", "bubble_right", pack, pendingRole,
+                                { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
+                                { updated -> loadDraft(updated) },
+                            )
                         }
-                        RowDivider()
-                        ThemePreview(pack)
-                        RowDivider()
-                        MaterialRow("主页背景", "wallpaper_chats", pack, pendingRole,
-                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
-                            { updated -> loadDraft(updated) },
-                        )
-                        MaterialRow("通讯录背景", "wallpaper_contacts", pack, pendingRole,
-                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
-                            { updated -> loadDraft(updated) },
-                        )
-                        MaterialRow("发现页背景", "wallpaper_discover", pack, pendingRole,
-                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
-                            { updated -> loadDraft(updated) },
-                        )
-                        MaterialRow("我的背景", "wallpaper_me", pack, pendingRole,
-                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
-                            { updated -> loadDraft(updated) },
-                        )
-                        MaterialRow("消息气泡 · 左（对方）", "bubble_left", pack, pendingRole,
-                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
-                            { updated -> loadDraft(updated) },
-                        )
-                        MaterialRow("消息气泡 · 右（自己）", "bubble_right", pack, pendingRole,
-                            { role -> pendingRole = role; pickImageLauncher.launch("image/*") },
-                            { updated -> loadDraft(updated) },
-                        )
                     }
                 }
             }
 
-            // ── 卡片4 默认主题（内置 6 款，全局壁纸）───────────
-            item {
-                GroupTitleRow("默认主题", "全局")
-            }
+            // ── 卡片4 默认主题（内置 6 款，全局）───────────────
+            item { GroupTitleRow("默认主题", "全局 · 不可分享") }
             items((builtinThemes.size + 1) / 2) { rowIndex ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -404,14 +507,12 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                             val (id, name) = builtinThemes[index]
                             BuiltinGridCard(
                                 id = id,
-                                name = name,
+                                name = ThemeStore.builtinDisplayName(id, name),
                                 active = active == id,
+                                selected = selectedId == id,
                                 modifier = Modifier.weight(1f),
-                                onClick = {
-                                    ThemeStore.applyThemeById(id)
-                                    refreshAll()
-                                    showToast(context, "已应用：$name（进主页生效）")
-                                },
+                                onClick = { select(id) },
+                                onLongClick = { builtinLongPress = id },
                             )
                         } else {
                             Spacer(Modifier.weight(1f))
@@ -420,7 +521,7 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ── 卡片5 我的主题（自己新建/导入的主题包）──────────
+            // ── 卡片5 我的主题（自己新建/导入）──────────────────
             item {
                 GroupTitleRow("我的主题", if (packs.isEmpty()) "" else "${packs.size} 个")
             }
@@ -443,12 +544,9 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                                 ThemeGridCard(
                                     pack = pack,
                                     active = active == pack.id,
+                                    selected = selectedId == pack.id,
                                     modifier = Modifier.weight(1f),
-                                    onClick = {
-                                        loadDraft(pack)
-                                        applySwitchesOf(pack)
-                                        showToast(context, "已加载：${pack.name}（未保存的改动已丢弃）")
-                                    },
+                                    onClick = { select(pack.id) },
                                     onLongClick = { longPressTarget = pack },
                                 )
                             } else {
@@ -462,6 +560,67 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     }
 
     // ── 弹窗区 ──────────────────────────────────────────────
+
+    if (appliedDialog) {
+        AlertDialog(
+            onDismissRequest = { appliedDialog = false },
+            title = { Text("已应用") },
+            text = {
+                Text(
+                    "主题已写入。请从最近任务（多任务界面）把微信**划掉**，再重新打开微信，" +
+                        "背景与气泡才会完全生效。"
+                )
+            },
+            confirmButton = { TextButton(onClick = { appliedDialog = false }) { Text("知道了") } },
+        )
+    }
+
+    if (showRandomPool) {
+        AlertDialog(
+            onDismissRequest = { showRandomPool = false },
+            title = { Text("随机背景图（${poolFiles.size}/${ThemePack.RANDOM_POOL_MAX}）") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    if (poolFiles.isEmpty()) {
+                        Text(
+                            text = "还没有图片。点下面「添加图片」选一张（最多 5 张，进主页时随机取一张）。",
+                            fontSize = 12.sp,
+                            color = summaryColor(),
+                        )
+                    } else {
+                        poolFiles.chunked(3).forEach { rowFiles ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                rowFiles.forEach { file ->
+                                    PoolThumb(file) {
+                                        ThemePack.removeRandomPoolImage(file)
+                                        refreshAll()
+                                    }
+                                }
+                                repeat(3 - rowFiles.size) { Spacer(Modifier.size(72.dp)) }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    PillButton(
+                        text = if (poolFiles.size >= ThemePack.RANDOM_POOL_MAX) "已满 5 张" else "＋ 添加图片",
+                        modifier = Modifier.fillMaxWidth(),
+                        primary = true,
+                    ) {
+                        if (poolFiles.size >= ThemePack.RANDOM_POOL_MAX) {
+                            showToast(context, "最多 ${ThemePack.RANDOM_POOL_MAX} 张，先删一张")
+                        } else {
+                            pickPoolImageLauncher.launch("image/*")
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showRandomPool = false }) { Text("关闭") } },
+        )
+    }
+
     if (showGuide) {
         AlertDialog(
             onDismissRequest = { showGuide = false },
@@ -469,10 +628,10 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             text = {
                 Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     GuideLine("1", "一套主题", "4 张界面背景（主页/通讯录/发现/我）+ 左右两个点九气泡。")
-                    GuideLine("2", "自己做", "新建主题 → 逐项选图片 → 点「保存」→ 点「应用」。")
-                    GuideLine("3", "导入", "右上角 ⋮ → 导入主题，选一个 zip 包。")
-                    GuideLine("4", "分享", "⋮ → 导出主题 / 分享主题，把 zip 发给别人导入。")
-                    GuideLine("5", "重要", "只选图不保存不生效；只有「应用」会重启微信。")
+                    GuideLine("2", "必须点「应用」", "无论是内置主题还是自己新建的主题，选中后都要点右上角「应用」才会生效。")
+                    GuideLine("3", "应用后要划掉微信", "应用后请从最近任务里把微信划掉，再重新打开微信，才会完全生效。")
+                    GuideLine("4", "内置主题", "内置主题只能调透明度，不能改素材；长按卡片可以重命名、改描述；内置主题不能分享。")
+                    GuideLine("5", "自己做/分享", "新建主题 → 选图片 → 保存 → 右上角应用；分享按钮只分享自己的主题。")
                 }
             },
             confirmButton = { TextButton(onClick = { showGuide = false }) { Text("知道了") } },
@@ -496,10 +655,9 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                     showCreate = false
                     ThemePack.createEmptyPack(createName.ifBlank { "我的主题" })
                         .onSuccess { pack ->
-                            ThemeStore.applyThemeById(pack.id)
-                            loadDraft(pack)
                             refreshAll()
-                            showToast(context, "已创建并切换为当前主题：${pack.name}")
+                            select(pack.id)
+                            showToast(context, "已创建：${pack.name}，选好素材后点右上角「应用」")
                         }
                         .onFailure { showToast(context, "创建失败：${it.message}") }
                 }) { Text("创建") }
@@ -508,42 +666,184 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
         )
     }
 
+    // 主题下拉：只列自己新建/导入的主题（内置主题在下面网格里选）
     if (showPicker) {
         AlertDialog(
             onDismissRequest = { showPicker = false },
-            title = { Text("选择主题") },
+            title = { Text("选择我的主题") },
             text = {
                 Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    PickerSectionTitle("默认主题（全局）")
-                    builtinThemes.forEach { (id, name) ->
-                        PickerRow("$name · 全局", active == id) {
-                            showPicker = false
-                            ThemeStore.applyThemeById(id)
-                            refreshAll()
-                            showToast(context, "已应用：$name")
-                        }
-                    }
-                    PickerSectionTitle("我的主题")
                     if (packs.isEmpty()) {
                         Text(
-                            text = "还没有自己的主题",
+                            text = "还没有自己新建的主题。点「新建主题」或从右上角导入。",
                             fontSize = 12.sp,
                             color = summaryColor(),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                         )
                     }
                     packs.forEach { pack ->
-                        PickerRow(pack.name, active == pack.id) {
+                        PickerRow(pack.name, selectedId == pack.id, active == pack.id) {
                             showPicker = false
-                            ThemeStore.applyThemeById(pack.id)
-                            loadDraft(pack)
-                            applySwitchesOf(pack)
-                            showToast(context, "已应用：${pack.name}")
+                            select(pack.id)
                         }
                     }
                 }
             },
             confirmButton = { TextButton(onClick = { showPicker = false }) { Text("关闭") } },
+        )
+    }
+
+    if (autoSlotMenu) {
+        AlertDialog(
+            onDismissRequest = { autoSlotMenu = false },
+            title = { Text("按时间切换") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    PickerSectionTitle("白天 6:00–18:00：${themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, ""))}")
+                    PickerRow("设置白天主题", false, false) {
+                        autoSlotMenu = false
+                        autoPickerSlot = "day"
+                    }
+                    PickerSectionTitle("夜间 18:00–6:00：${themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, ""))}")
+                    PickerRow("设置夜间主题", false, false) {
+                        autoSlotMenu = false
+                        autoPickerSlot = "night"
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { autoSlotMenu = false }) { Text("关闭") } },
+        )
+    }
+
+    if (autoPickerSlot.isNotEmpty()) {
+        val isDay = autoPickerSlot == "day"
+        AlertDialog(
+            onDismissRequest = { autoPickerSlot = "" },
+            title = { Text(if (isDay) "白天主题" else "夜间主题") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    PickerSectionTitle("默认主题")
+                    builtinThemes.forEach { (id, name) ->
+                        PickerRow(ThemeStore.builtinDisplayName(id, name), false, false) {
+                            saveAutoSlot(isDay, id)
+                            autoPickerSlot = ""
+                            tick++
+                            showToast(context, "已设置${if (isDay) "白天" else "夜间"}：$name")
+                        }
+                    }
+                    PickerSectionTitle("我的主题")
+                    packs.forEach { pack ->
+                        PickerRow(pack.name, false, false) {
+                            saveAutoSlot(isDay, pack.id)
+                            autoPickerSlot = ""
+                            tick++
+                            showToast(context, "已设置${if (isDay) "白天" else "夜间"}：${pack.name}")
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { autoPickerSlot = "" }) { Text("关闭") } },
+        )
+    }
+
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("恢复默认") },
+            text = { Text("移除所有自定义背景，气泡恢复微信原生样式。背景会立即恢复，气泡要重进聊天界面才生效。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    runCatching { ThemeStore.restoreDefaultTheme() }
+                        .onSuccess {
+                            selectedId = ""
+                            loadDraft(null)
+                            refreshAll()
+                            showToast(context, "已恢复微信原生背景与气泡")
+                        }
+                        .onFailure {
+                            WeLogger.w("ThemeWorkshop", "恢复默认失败：${it.message}")
+                            showToast(context, "恢复失败：${it.message}")
+                        }
+                }) { Text("恢复") }
+            },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("取消") } },
+        )
+    }
+
+    // 内置主题长按：只能重命名 / 改描述，没有分享
+    if (builtinLongPress.isNotEmpty()) {
+        val originalName = builtinThemes.firstOrNull { it.first == builtinLongPress }?.second ?: builtinLongPress
+        AlertDialog(
+            onDismissRequest = { builtinLongPress = "" },
+            title = { Text(ThemeStore.builtinDisplayName(builtinLongPress, originalName)) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    PickerRow("重命名", false, false) {
+                        builtinRenameText = ThemeStore.builtinDisplayName(builtinLongPress, originalName)
+                        builtinRenameId = builtinLongPress
+                        builtinLongPress = ""
+                    }
+                    PickerRow("修改描述", false, false) {
+                        builtinDescText = ThemeStore.builtinDesc(builtinLongPress)
+                        builtinDescId = builtinLongPress
+                        builtinLongPress = ""
+                    }
+                    Text(
+                        text = "内置主题不能分享、不能改素材，只能调壁纸透明度。",
+                        fontSize = 12.sp,
+                        color = summaryColor(),
+                        modifier = Modifier.padding(start = 8.dp, top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { builtinLongPress = "" }) { Text("关闭") } },
+        )
+    }
+
+    if (builtinRenameId.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { builtinRenameId = "" },
+            title = { Text("重命名内置主题") },
+            text = {
+                OutlinedTextField(
+                    value = builtinRenameText,
+                    onValueChange = { builtinRenameText = it },
+                    label = { Text("名称") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    ThemeStore.setBuiltinAlias(builtinRenameId, builtinRenameText)
+                    builtinRenameId = ""
+                    tick++
+                    showToast(context, "已重命名")
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { builtinRenameId = "" }) { Text("取消") } },
+        )
+    }
+
+    if (builtinDescId.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { builtinDescId = "" },
+            title = { Text("修改描述") },
+            text = {
+                OutlinedTextField(
+                    value = builtinDescText,
+                    onValueChange = { builtinDescText = it },
+                    label = { Text("描述（可留空）") },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    ThemeStore.setBuiltinDesc(builtinDescId, builtinDescText)
+                    builtinDescId = ""
+                    tick++
+                    showToast(context, "已修改描述")
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { builtinDescId = "" }) { Text("取消") } },
         )
     }
 
@@ -602,19 +902,24 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
             title = { Text(target.name) },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    PickerRow("重命名", false) {
+                    PickerRow("重命名", false, selectedId == target.id) {
                         renameText = target.name
                         renameTarget = target
                         longPressTarget = null
                     }
-                    PickerRow("修改描述", false) {
+                    PickerRow("修改描述", false, selectedId == target.id) {
                         descText = target.manifest.optString("description").orEmpty()
                         descTarget = target
                         longPressTarget = null
                     }
-                    PickerRow("删除主题", false) {
+                    PickerRow("分享主题", false, selectedId == target.id) {
+                        longPressTarget = null
+                        shareSelectedTheme(context, target.id)
+                    }
+                    PickerRow("删除主题", false, selectedId == target.id) {
                         ThemePack.delete(target.id)
                         if (editing?.id == target.id) loadDraft(null)
+                        if (selectedId == target.id) selectedId = ""
                         longPressTarget = null
                         refreshAll()
                         showToast(context, "已删除：${target.name}")
@@ -622,119 +927,6 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = { TextButton(onClick = { longPressTarget = null }) { Text("关闭") } },
-        )
-    }
-
-    if (autoSlotMenu) {
-        AlertDialog(
-            onDismissRequest = { autoSlotMenu = false },
-            title = { Text("按时间切换") },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    PickerSectionTitle("白天 6:00–18:00：${themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, ""))}")
-                    PickerRow("设置白天主题", false) {
-                        autoSlotMenu = false
-                        autoPickerSlot = "day"
-                    }
-                    PickerSectionTitle("夜间 18:00–6:00：${themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, ""))}")
-                    PickerRow("设置夜间主题", false) {
-                        autoSlotMenu = false
-                        autoPickerSlot = "night"
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { autoSlotMenu = false }) { Text("关闭") } },
-        )
-    }
-
-    if (autoPickerSlot.isNotEmpty()) {
-        val isDay = autoPickerSlot == "day"
-        AlertDialog(
-            onDismissRequest = { autoPickerSlot = "" },
-            title = { Text(if (isDay) "白天主题" else "夜间主题") },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    PickerSectionTitle("默认主题（全局）")
-                    builtinThemes.forEach { (id, name) ->
-                        PickerRow(name, false) {
-                            saveAutoSlot(isDay, id)
-                            autoPickerSlot = ""
-                            tick++
-                            showToast(context, "已设置${if (isDay) "白天" else "夜间"}：$name")
-                        }
-                    }
-                    PickerSectionTitle("我的主题")
-                    if (packs.isEmpty()) {
-                        Text(
-                            text = "还没有自己的主题",
-                            fontSize = 12.sp,
-                            color = summaryColor(),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                        )
-                    }
-                    packs.forEach { pack ->
-                        PickerRow(pack.name, false) {
-                            saveAutoSlot(isDay, pack.id)
-                            autoPickerSlot = ""
-                            tick++
-                            showToast(context, "已设置${if (isDay) "白天" else "夜间"}：${pack.name}")
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { autoPickerSlot = "" }) { Text("关闭") } },
-        )
-    }
-
-    if (confirmReset) {
-        AlertDialog(
-            onDismissRequest = { confirmReset = false },
-            title = { Text("恢复默认") },
-            text = {
-                Text(
-                    "将移除所有自定义背景，气泡也恢复成微信原生样式。" +
-                        "背景会立即恢复；气泡要重新进入聊天界面才生效。是否继续？"
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmReset = false
-                    runCatching { ThemeStore.restoreDefaultTheme() }
-                        .onSuccess {
-                            refreshAll()
-                            showToast(context, "已恢复微信原生背景与气泡")
-                        }
-                        .onFailure {
-                            WeLogger.w("ThemeWorkshop", "恢复默认失败：${it.message}")
-                            showToast(context, "恢复失败：${it.message}")
-                        }
-                }) { Text("恢复") }
-            },
-            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("取消") } },
-        )
-    }
-
-    if (confirmApply) {
-        AlertDialog(
-            onDismissRequest = { confirmApply = false },
-            title = { Text("应用主题") },
-            text = {
-                Text(
-                    "会先保存当前主题，再重启微信。\n" +
-                        "重启后自动加载这套主题的背景与气泡，确认重启吗？"
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmApply = false
-                    saveCurrent()
-                    editing?.let { ThemeStore.applyThemeById(it.id) }
-                    showToast(context, "正在重启微信…")
-                    runCatching { restartHost() }
-                        .onFailure { showToast(context, "重启失败：${it.message}") }
-                }) { Text("重启微信") }
-            },
-            dismissButton = { TextButton(onClick = { confirmApply = false }) { Text("取消") } },
         )
     }
 }
@@ -749,7 +941,6 @@ private fun summaryColor(): Color = BasicComponentDefaults.summaryColor().color
 @Composable
 private fun titleColor(): Color = BasicComponentDefaults.titleColor().color
 
-/** 分组卡片：外层左上角小标题 + 圆角 22dp 柔和阴影卡片。 */
 @Composable
 private fun GroupCard(title: String?, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
@@ -799,7 +990,6 @@ private fun RowDivider() {
     )
 }
 
-/** 走 WePrefs 的开关行（非 Feature 的美化项，由 [ThemeExtras] 消费）。 */
 @Composable
 private fun PrefSwitchRow(key: String, title: String, summary: String, tick: Int) {
     var checked by remember(key, tick) { mutableStateOf(WePrefs.getBoolOrFalse(key)) }
@@ -816,7 +1006,6 @@ private fun PrefSwitchRow(key: String, title: String, summary: String, tick: Int
     }
 }
 
-/** 映射到真实 Feature 的开关行；Feature 不存在时明确说「当前版本未提供」。 */
 @Composable
 private fun FeatureSwitchRow(
     featureName: String,
@@ -863,12 +1052,11 @@ private fun SwitchRow(title: String, summary: String, checked: Boolean, onChange
                 Text(summary, fontSize = 12.sp, color = summaryColor())
             }
         }
-        Spacer(Modifier.padding(start = 10.dp))
+        Spacer(Modifier.width(10.dp))
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
-/** 壁纸透明度：拖动结束才落盘，避免拖的过程反复重绘所有页面。 */
 @Composable
 private fun OpacityRow(tick: Int) {
     var pct by remember(tick) { mutableStateOf(ThemeStore.overlayOpacity()) }
@@ -877,6 +1065,11 @@ private fun OpacityRow(tick: Int) {
             Text("壁纸透明度", fontSize = 15.sp, color = titleColor(), modifier = Modifier.weight(1f))
             Text("$pct%", fontSize = 13.sp, color = summaryColor())
         }
+        Text(
+            text = "拉满也只是壁纸本身不透明，文字永远在最上层，不会被挡住",
+            fontSize = 11.sp,
+            color = summaryColor(),
+        )
         Slider(
             value = pct.toFloat(),
             onValueChange = { pct = it.toInt().coerceIn(5, 100) },
@@ -920,7 +1113,6 @@ private fun HintRow(text: String) {
     )
 }
 
-/** 横向圆角大按钮。 */
 @Composable
 private fun PillButton(
     text: String,
@@ -943,7 +1135,7 @@ private fun PillButton(
     }
 }
 
-/** 主题预览缩略图：优先主页背景，退回全局壁纸。 */
+/** 主题包预览（用主页背景）。 */
 @Composable
 private fun ThemePreview(pack: ThemePack.Pack) {
     val file = pack.wallpaperFor("chats")
@@ -968,6 +1160,35 @@ private fun ThemePreview(pack: ThemePack.Pack) {
             )
         } else {
             Text("预览图（选一张主页背景后显示）", fontSize = 12.sp, color = summaryColor())
+        }
+    }
+}
+
+/** 内置主题的只读预览条。 */
+@Composable
+private fun BuiltinPreviewStrip(id: String) {
+    val thumb = remember(id) { ThemeStore.builtinThumbnail(id) }
+    val bitmap = remember(id, thumb?.absolutePath) {
+        thumb?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .height(120.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(titleColor().copy(alpha = 0.06f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text("内置主题预览", fontSize = 12.sp, color = summaryColor())
         }
     }
 }
@@ -1014,14 +1235,52 @@ private fun MaterialRow(
     RowDivider()
 }
 
-/** 默认（内置）主题卡片：只有预览 + 名称 + 「全局」标注，不可重命名/删除。 */
+@Composable
+private fun PoolThumb(file: File, onRemove: () -> Unit) {
+    Box(modifier = Modifier.size(72.dp)) {
+        val bitmap = remember(file.absolutePath, file.lastModified()) {
+            runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(10.dp))
+                .background(titleColor().copy(alpha = 0.06f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Text(
+            text = "✕",
+            fontSize = 12.sp,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.Black.copy(alpha = 0.55f))
+                .clickable(onClick = onRemove)
+                .padding(horizontal = 5.dp, vertical = 1.dp),
+        )
+    }
+}
+
 @Composable
 private fun BuiltinGridCard(
     id: String,
     name: String,
     active: Boolean,
+    selected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
     val thumb = remember(id) { ThemeStore.builtinThumbnail(id) }
     val bitmap = remember(id, thumb?.absolutePath) {
@@ -1033,8 +1292,17 @@ private fun BuiltinGridCard(
         modifier = modifier
             .shadow(elevation = 1.dp, shape = shape, ambientColor = Color.Black.copy(alpha = 0.06f))
             .clip(shape)
+            .then(
+                if (selected) Modifier.border(2.dp, MiuixTheme.colorScheme.primary, shape)
+                else Modifier
+            )
             .background(MiuixTheme.colorScheme.surface)
-            .clickable(onClick = onClick),
+            .pointerInput(id) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick() },
+                )
+            },
     ) {
         Box(
             modifier = Modifier.fillMaxWidth().height(84.dp).background(fallback),
@@ -1049,22 +1317,26 @@ private fun BuiltinGridCard(
                 )
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = name,
-                fontSize = 13.sp,
-                color = titleColor(),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            Text(" 全局", fontSize = 10.sp, color = summaryColor())
-            Spacer(Modifier.weight(1f))
-            if (active) {
-                Text("使用中", fontSize = 10.sp, color = MiuixTheme.colorScheme.primary)
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = name,
+                    fontSize = 13.sp,
+                    color = titleColor(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(" 全局", fontSize = 10.sp, color = summaryColor())
+            }
+            val badge = when {
+                selected && active -> "使用中"
+                selected -> "待应用"
+                active -> "使用中"
+                else -> ""
+            }
+            if (badge.isNotEmpty()) {
+                Text(badge, fontSize = 10.sp, color = MiuixTheme.colorScheme.primary)
             }
         }
     }
@@ -1074,6 +1346,7 @@ private fun BuiltinGridCard(
 private fun ThemeGridCard(
     pack: ThemePack.Pack,
     active: Boolean,
+    selected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -1087,6 +1360,10 @@ private fun ThemeGridCard(
         modifier = modifier
             .shadow(elevation = 1.dp, shape = shape, ambientColor = Color.Black.copy(alpha = 0.06f))
             .clip(shape)
+            .then(
+                if (selected) Modifier.border(2.dp, MiuixTheme.colorScheme.primary, shape)
+                else Modifier
+            )
             .background(MiuixTheme.colorScheme.surface)
             .pointerInput(pack.id) {
                 detectTapGestures(
@@ -1113,20 +1390,22 @@ private fun ThemeGridCard(
                 Text("无预览", fontSize = 11.sp, color = summaryColor())
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
             Text(
                 text = pack.name,
                 fontSize = 13.sp,
                 color = titleColor(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
             )
-            if (active) {
-                Text("使用中", fontSize = 10.sp, color = MiuixTheme.colorScheme.primary)
+            val badge = when {
+                selected && active -> "使用中"
+                selected -> "待应用"
+                active -> "使用中"
+                else -> ""
+            }
+            if (badge.isNotEmpty()) {
+                Text(badge, fontSize = 10.sp, color = MiuixTheme.colorScheme.primary)
             }
         }
     }
@@ -1144,7 +1423,7 @@ private fun PickerSectionTitle(text: String) {
 }
 
 @Composable
-private fun PickerRow(name: String, active: Boolean, onClick: () -> Unit) {
+private fun PickerRow(name: String, selected: Boolean, active: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1159,7 +1438,15 @@ private fun PickerRow(name: String, active: Boolean, onClick: () -> Unit) {
             color = titleColor(),
             modifier = Modifier.weight(1f),
         )
-        if (active) Text("使用中", fontSize = 11.sp, color = MiuixTheme.colorScheme.primary)
+        val badge = when {
+            selected && active -> "使用中"
+            selected -> "已选"
+            active -> "使用中"
+            else -> ""
+        }
+        if (badge.isNotEmpty()) {
+            Text(badge, fontSize = 11.sp, color = MiuixTheme.colorScheme.primary)
+        }
     }
 }
 
@@ -1175,22 +1462,21 @@ private fun GuideLine(index: String, title: String, detail: String) {
 // 小工具
 // ══════════════════════════════════════════════════════════
 
-/** 「白天：X ・ 夜间：Y」摘要。 */
 private fun autoSummary(): String {
     val day = themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, ""))
     val night = themeName(WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, ""))
     return "白天：$day ・ 夜间：$night（点这里设置）"
 }
 
-/** 主题 id → 展示名（内置 id 或主题包 id）。 */
 private fun themeName(id: String): String {
     if (id.isBlank()) return "未设置"
-    ThemeStore.builtinThemeItems().firstOrNull { it.first == id }?.let { return it.second }
+    ThemeStore.builtinThemeItems().firstOrNull { it.first == id }?.let {
+        return ThemeStore.builtinDisplayName(id, it.second)
+    }
     ThemePack.find(id)?.let { return it.name }
     return id
 }
 
-/** 只改一个时段，另一个保持原值。 */
 private fun saveAutoSlot(isDay: Boolean, id: String) {
     val day = WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_DAY_THEME, "")
     val night = WePrefs.getStringOrDef(ThemeExtras.KEY_AUTO_NIGHT_THEME, "")
@@ -1210,13 +1496,17 @@ private fun roleLabel(role: String): String = when (role) {
 }
 
 /**
- * 分享当前主题：导出 zip → FileProvider 取 uri → 系统分享面板。
- * 主题目录在模块数据目录下，与日志同树，所以能复用微信自带的 external.fileprovider。
+ * 分享指定主题（只有自己的主题包能分享；内置主题明确拒绝）。
  */
-private fun shareActiveTheme(context: Context) {
-    val file = ThemeStore.exportActiveTheme()
+private fun shareSelectedTheme(context: Context, id: String) {
+    val pack = ThemePack.find(id)
+    if (pack == null) {
+        showToast(context, "内置主题不能分享")
+        return
+    }
+    val file = ThemePack.exportZip(pack).getOrNull()
     if (file == null) {
-        showToast(context, "当前没有可分享的主题，先选一个")
+        showToast(context, "导出失败，无法分享")
         return
     }
     val authority = "${HostInfo.packageName}.external.fileprovider"

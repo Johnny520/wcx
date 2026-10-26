@@ -399,4 +399,39 @@ object ThemePack {
 
     /** 主题根目录，供设置页展示/引导用户放素材。 */
     fun themesDir(): File = root
+
+    // ══════════════════════════════════════════════════════════
+    // 随机背景图池（"随机聊天背景"开关用，最多 5 张）
+    // ══════════════════════════════════════════════════════════
+
+    const val RANDOM_POOL_MAX = 5
+
+    /** 随机背景图池目录。 */
+    fun randomPoolDir(): File = File(root, "random_pool").apply { mkdirs() }
+
+    /** 图池里现有的图片，按添加顺序（文件名递增）排序。 */
+    fun randomPoolFiles(): List<File> = randomPoolDir()
+        .listFiles { f -> f.isFile && f.name.endsWith(".img") }
+        ?.sortedBy { it.name }
+        ?: emptyList()
+
+    /** 往图池里加一张（复制成 .img，避免扩展名歧义），超过 [RANDOM_POOL_MAX] 时拒绝。 */
+    fun addRandomPoolImage(context: Context, uri: Uri): Result<File> = runCatching {
+        val files = randomPoolFiles()
+        require(files.size < RANDOM_POOL_MAX) { "最多 $RANDOM_POOL_MAX 张，先删掉一张" }
+        val target = File(randomPoolDir(), String.format("%03d_%d.img", files.size + 1, System.currentTimeMillis()))
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: error("读不到这张图片")
+        require(bytes.isNotEmpty()) { "这张图片是空的" }
+        target.writeBytes(bytes)
+        WeLogger.i(TAG, "随机背景池新增一张：${target.name}（共 ${files.size + 1} 张）")
+        target
+    }
+
+    /** 从图池删除一张。 */
+    fun removeRandomPoolImage(file: File): Boolean = runCatching {
+        val ok = file.delete()
+        if (ok) WeLogger.i(TAG, "随机背景池删除：${file.name}")
+        ok
+    }.getOrDefault(false)
 }
