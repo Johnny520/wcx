@@ -176,6 +176,17 @@ internal object ThemeSurface {
     @Volatile
     private var anchorViewRef: java.lang.ref.WeakReference<View>? = null
 
+    /**
+     * 锚点 View 连续不可见的次数（防抖）。
+     *
+     * `isShown` 是**瞬态**信号：页面转场（如聊天页 → 相册 → 聊天页）期间
+     * 会短暂为 false，拿它直接翻转状态会把「还在聊天页」误判成「已离开」，
+     * 之后 Fragment 不再触发 onResume 报「出现」→ 状态永久错位 → 持续浸透。
+     * 必须连续多次（每次间隔 checkChatPage 的 400ms 节流，3 次 ≈ ≥800ms）不可见才认定离开。
+     */
+    @Volatile
+    private var anchorHiddenStreak = 0
+
     fun isChatPageVisible(): Boolean = chatPageVisible
 
     /** 诊断：聊天页识别状态。 */
@@ -215,9 +226,15 @@ internal object ThemeSurface {
         if (fragmentChatActive) {
             val anchor = anchorViewRef?.get()
             if (anchor != null && anchor.isAttachedToWindow && !anchor.isShown) {
-                noteEvent("锚点 View 已不可见 → 判离开（onPause 迟到兜底）")
-                runCatching { onChattingFragmentHidden() }
-                return
+                anchorHiddenStreak++
+                if (anchorHiddenStreak >= 3) {
+                    anchorHiddenStreak = 0
+                    noteEvent("锚点 View 持续不可见 → 判离开（onPause 迟到兜底）")
+                    runCatching { onChattingFragmentHidden() }
+                    return
+                }
+            } else {
+                anchorHiddenStreak = 0
             }
         }
         val now = android.os.SystemClock.uptimeMillis()
@@ -312,6 +329,11 @@ internal object ThemeSurface {
             if (ThemeStore.activeThemeIdOrEmpty().isEmpty()) return
             // 非主界面进前台：先把主界面遮罩藏掉（聊天页半透明时会透出后面这张壁纸）
             if (!ThemePages.isLauncher(activity)) hideLauncherWallpapers()
+            // 回主界面时若仍在聊天页（如相册 → 聊天页返回），不挂壁纸，免得闪一帧还造成浸透
+            if (chatPageVisible) {
+                noteEvent("回到前台但仍在聊天页 → 不挂壁纸")
+                return
+            }
             runCatching { applyTo(activity) }
                 .onFailure { WeLogger.w(TAG, "onActivityResumed 应用主题异常", it) }
         }
@@ -714,17 +736,11 @@ internal object ThemeSurface {
         fragmentChatActive = true
         // 记下锚点 View：微信「返回主界面」时 ChattingUIFragment.onPause 可能迟到好几秒
         // （Fragment 留在回退栈里），但它的根 View 会立刻不可见/被移除 —— 用它做即时判定。
+        // 只记录 View，不做 detach 直判：转场时 View 会被 detach→attach，
+        // 立即判离开同样会误伤（与 isShown 同类问题）。离开判定统一走 checkChatPage 防抖校验。
         if (fragmentView != null && anchorViewRef?.get() !== fragmentView) {
             anchorViewRef = java.lang.ref.WeakReference(fragmentView)
-            runCatching {
-                fragmentView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                    override fun onViewAttachedToWindow(v: View) {}
-                    override fun onViewDetachedFromWindow(v: View) {
-                        // 根 View 被移出窗口 = 聊天页已关闭
-                        runCatching { onChattingFragmentHidden() }
-                    }
-                })
-            }.onFailure { WeLogger.w(TAG, "锚点 View 监听注册失败：${it.message}") }
+            anchorHiddenStreak = 0
         }
         runCatching {
             liveActivities().forEach { act ->
@@ -739,6 +755,7 @@ internal object ThemeSurface {
         val wasActive = fragmentChatActive
         fragmentChatActive = false
         anchorViewRef = null
+        anchorHiddenStreak = 0
         // 视图特征可能残留（GlobalLayout 未回调），权威离开时一并清掉，否则 draw 被卡死
         val viewStale = viewChatActive
         viewChatActive = false

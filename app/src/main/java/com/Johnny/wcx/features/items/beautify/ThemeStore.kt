@@ -298,7 +298,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     override fun onDisable() {
-        restoreDefault()
+        // 只撤效果，**保留主题选择**：关开关不该清掉 activeThemeId，
+        // 否则每次关掉再打开都得回主题工坊重新应用一次（实测用户反复测试全被这个清空）。
+        // 重开时 onEnable 里的 applyToAllLive() 会按 activeThemeId 自动恢复。
+        runCatching { ThemeBubbleKit.restoreBackup() }
+        runCatching { ThemeSurface.removeAllLive() }
         ThemeSurface.registerCallbacks(false)
         WeChatMessageViewApi.removeListener(this)
     }
