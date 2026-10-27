@@ -152,17 +152,20 @@ internal object ThemeSurface {
     private var viewChatActive = false
 
     /**
-     * Fragment 锚点 hook 成功后由 ThemeStore 置 true：聊天页状态**只由锚点决定**。
-     * 视图特征依赖 GlobalLayout 回调，退出聊天页后视图树可能残留未更新，
-     * 若继续「锚点 || 特征」合并，特征一路卡 true 会让 draw() 永远跳过——
-     * 表现为「挂载成功但退回主界面 4 页都看不到图」。锚点可用时特征只作诊断展示。
+     * Fragment 锚点是否挂上（仅用于诊断展示）。
+     *
+     * 判定本身恒为「锚点 || 视图特征」**并集**，这是有意设计：
+     * - 聊天页刚打开、Fragment 还没回调 → 视图特征（底部输入框+气泡列表+顶部标题栏）先命中
+     * - 返回主界面、视图树还没布局 → 锚点回调先报离开
+     * 两路互为兜底，任何一路迟到或瞬态误判都被另一路顶住，方向永远偏向「不浸透」；
+     * 而主 Tab 页面没有底部输入框，不可能被误判成聊天页 → 4 张图永远在。
      */
     @Volatile
     var fragmentAnchorAvailable = false
         internal set
 
     private val chatPageVisible: Boolean
-        get() = if (fragmentAnchorAvailable) fragmentChatActive else (fragmentChatActive || viewChatActive)
+        get() = fragmentChatActive || viewChatActive
 
     @Volatile
     private var lastChatHit: ChatPageGuard.Hit? = null
@@ -219,7 +222,7 @@ internal object ThemeSurface {
     }
 
     /** 跑一次聊天页检测；状态切换时做对应动作。 */
-    fun checkChatPage(activity: Activity) {
+    fun checkChatPage(activity: Activity, force: Boolean = false) {
         // 权威锚点存活校验：微信返回主界面时 ChattingUIFragment.onPause 会迟到（实测 7 秒），
         // 期间 chatPageVisible 一直为 true → 壁纸挂着但不画，表现就是「退回主界面 4 页全空」。
         // 这里每次布局变化顺手校验：锚点 View 已 attach 却不可见，立刻判离开。
@@ -238,7 +241,7 @@ internal object ThemeSurface {
             }
         }
         val now = android.os.SystemClock.uptimeMillis()
-        if (now - lastChatCheckAt < 400L) return
+        if (!force && now - lastChatCheckAt < 400L) return
         lastChatCheckAt = now
 
         val hit = ChatPageGuard.detect(activity)
@@ -329,10 +332,16 @@ internal object ThemeSurface {
             if (ThemeStore.activeThemeIdOrEmpty().isEmpty()) return
             // 非主界面进前台：先把主界面遮罩藏掉（聊天页半透明时会透出后面这张壁纸）
             if (!ThemePages.isLauncher(activity)) hideLauncherWallpapers()
-            // 回主界面时若仍在聊天页（如相册 → 聊天页返回），不挂壁纸，免得闪一帧还造成浸透
-            if (chatPageVisible) {
-                noteEvent("回到前台但仍在聊天页 → 不挂壁纸")
-                return
+            // 回前台若判定「还在聊天页」（如相册 → 聊天页返回），不挂壁纸，免得闪一帧又浸透。
+            // 但这个判定可能是离开后的残留状态 —— 先强制跑一次实时识别刷新，再决定挂不挂：
+            // 残留误挡 = 主界面没图，绝不能发生（4 个 Tab 必须一直有图）。
+            if (chatPageVisible && ThemePages.isLauncher(activity)) {
+                runCatching { checkChatPage(activity, force = true) }
+                if (chatPageVisible) {
+                    noteEvent("回到前台但仍在聊天页 → 不挂壁纸")
+                    return
+                }
+                noteEvent("回到前台，实时识别已不在聊天页 → 挂壁纸")
             }
             runCatching { applyTo(activity) }
                 .onFailure { WeLogger.w(TAG, "onActivityResumed 应用主题异常", it) }
