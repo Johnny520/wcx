@@ -143,17 +143,26 @@ internal object ThemeSurface {
     // 聊天页守卫（纯 View 特征识别，见 [ChatPageGuard]）
     // ══════════════════════════════════════════════════════════
 
-    /** 聊天页可见性：**两个来源取并集**，任一命中就认为在聊天页。 */
-    // ① Fragment 锚点（hook BaseChattingUIFragment/ChattingUIFragment 维护）
+    /** 聊天页可见性 ①：Fragment 锚点（hook ChattingUIFragment / BaseChattingUIFragment / MMFragment 维护） */
     @Volatile
     private var fragmentChatActive = false
 
-    // ② 纯 View 特征识别（ChatPageGuard 维护）
+    /** 聊天页可见性 ②：纯 View 特征识别（ChatPageGuard 维护），仅在锚点不可用的版本上生效 */
     @Volatile
     private var viewChatActive = false
 
+    /**
+     * Fragment 锚点 hook 成功后由 ThemeStore 置 true：聊天页状态**只由锚点决定**。
+     * 视图特征依赖 GlobalLayout 回调，退出聊天页后视图树可能残留未更新，
+     * 若继续「锚点 || 特征」合并，特征一路卡 true 会让 draw() 永远跳过——
+     * 表现为「挂载成功但退回主界面 4 页都看不到图」。锚点可用时特征只作诊断展示。
+     */
+    @Volatile
+    var fragmentAnchorAvailable = false
+        internal set
+
     private val chatPageVisible: Boolean
-        get() = fragmentChatActive || viewChatActive
+        get() = if (fragmentAnchorAvailable) fragmentChatActive else (fragmentChatActive || viewChatActive)
 
     @Volatile
     private var lastChatHit: ChatPageGuard.Hit? = null
@@ -168,7 +177,8 @@ internal object ThemeSurface {
     /** 诊断：聊天页识别状态。 */
     fun chatPageStatus(): String {
         val hit = lastChatHit
-        val byFragment = if (fragmentChatActive) "Fragment锚点=命中" else "Fragment锚点=未命中"
+        val mode = if (fragmentAnchorAvailable) "权威" else "兜底"
+        val byFragment = (if (fragmentChatActive) "Fragment锚点=命中" else "Fragment锚点=未命中") + "·$mode"
         val byView = if (hit != null) {
             "特征=命中（输入框=${hit.hasInput} 列表=${hit.hasList} 标题=${hit.hasTitle} ${hit.detail}）"
         } else {
@@ -691,8 +701,12 @@ internal object ThemeSurface {
 
     /** 聊天页 Fragment 离开（onPause/onDestroyView）：回主界面时重挂。 */
     fun onChattingFragmentHidden() {
-        if (!fragmentChatActive) return
+        val wasActive = fragmentChatActive
         fragmentChatActive = false
+        // 视图特征可能残留（GlobalLayout 未回调），权威离开时一并清掉，否则 draw 被卡死
+        val viewStale = viewChatActive
+        viewChatActive = false
+        if (!wasActive && !viewStale) return
         noteEvent("离开聊天页 Fragment → 重挂壁纸")
         runCatching {
             liveActivities().firstOrNull { ThemePages.isLauncher(it) }?.let { applyTabWallpapers(it) }

@@ -241,6 +241,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
 
         chattingFragmentHookCount = hooked
         chattingFragmentHookOk = hooked > 0
+        // 锚点挂上 → 聊天页状态以锚点为权威，视图特征不再参与判定（防止残留卡死绘制）
+        ThemeSurface.fragmentAnchorAvailable = hooked > 0
         WeLogger.i(TAG, "聊天页 Fragment 锚点：已 hook $hooked 个方法（进入即撤壁纸 + 容器兜底）")
     }
 
@@ -636,7 +638,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         )
         appendLine(
             "聊天页 Fragment 锚点 = " +
-                (if (chattingFragmentHookOk) "已 hook $chattingFragmentHookCount 个方法"
+                (if (chattingFragmentHookOk) "已 hook $chattingFragmentHookCount 个方法（状态权威）"
                 else "未挂上（靠 View 特征识别兜底）")
         )
         appendLine(
