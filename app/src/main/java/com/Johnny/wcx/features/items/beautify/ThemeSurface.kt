@@ -130,6 +130,24 @@ internal object ThemeSurface {
         wallpaperFailStreak = 0
     }
 
+    /**
+     * 当前处于 resumed（能看到）的 Activity —— 绘制守卫就看它。
+     *
+     * 这是系统级回调，微信任何页面都绕不开；用它判定「壁纸该不该画」，
+     * 就不需要依赖 onPause、窗口焦点、聊天页 hook 里的任何一个。
+     */
+    @Volatile
+    private var resumedRef: java.lang.ref.WeakReference<Activity>? = null
+
+    /** 当前前台页面是不是它自己。 */
+    fun isForeground(activity: Activity): Boolean {
+        val cur = resumedRef?.get() ?: return true   // 拿不到时保守放行，避免主界面突然没壁纸
+        return cur === activity
+    }
+
+    /** 当前前台 Activity 的类名（诊断用）。 */
+    fun foregroundName(): String = resumedRef?.get()?.javaClass?.simpleName ?: "null"
+
     /** 记录哪些 Activity 真的挂过，避免对没挂过的页面白跑 removeWallpaper。 */
     private val wallpaperAttached = java.util.WeakHashMap<Activity, Boolean>()
 
@@ -178,6 +196,8 @@ internal object ThemeSurface {
         override fun onActivityStarted(activity: Activity) {}
 
         override fun onActivityResumed(activity: Activity) {
+            resumedRef = java.lang.ref.WeakReference(activity)
+            noteEvent("前台 → ${activity.javaClass.simpleName}")
             // 主题没生效（没选主题）时一个字节都不动，避免「关了主题还在改窗口」
             if (ThemeStore.activeThemeIdOrEmpty().isEmpty()) return
             // 非主界面进前台：先把主界面遮罩藏掉（聊天页半透明时会透出后面这张壁纸）
@@ -187,6 +207,7 @@ internal object ThemeSurface {
         }
 
         override fun onActivityPaused(activity: Activity) {
+            if (resumedRef?.get() === activity) resumedRef = null
             // 退到后台先把自己那层藏起来：聊天页若是半透明窗口、或正处于转场那几百毫秒，
             // 底下主界面的壁纸就会透出来，跟微信自带聊天背景叠在一起。
             runCatching {
@@ -527,7 +548,7 @@ internal object ThemeSurface {
         // 页码取不到时兜底第一张可用图，宁可显示「主页」那张，也不要一片空白
         val file = fileForTab(files, tab) ?: files.firstOrNull { it != null }
         val alphaPct = ThemeStore.overlayOpacity()
-        val result = TabWallpaperRenderer.apply(activity, file, tab, alphaPct)
+        val result = TabWallpaperRenderer.apply(activity, file, tab, alphaPct) { isForeground(activity) }
         if (result != "ok") {
             wallpaperFailStreak += 1
             WeLogger.w(TAG, "挂载 4 页背景失败（第 $wallpaperFailStreak 次）：$result")
@@ -552,7 +573,9 @@ internal object ThemeSurface {
             val files = ThemeMaterials.tabWallpaperFiles(ThemeStore.activeThemeIdOrEmpty())
             if (files.all { it == null }) return@runCatching
             val file = fileForTab(files, position) ?: files.firstOrNull { it != null }
-            val result = TabWallpaperRenderer.apply(activity, file, position, ThemeStore.overlayOpacity())
+            val result = TabWallpaperRenderer.apply(activity, file, position, ThemeStore.overlayOpacity()) {
+                isForeground(activity)
+            }
             WeLogger.i(TAG, "切页换图 → Tab=$position 文件=${file?.name ?: "null"} 结果=$result")
         }.onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
     }

@@ -95,7 +95,13 @@ internal object TabWallpaperRenderer {
      * @param alphaPct  壁纸透明度（5..70）
      * @return "ok" 或失败原因（调用方据此累计失败次数）
      */
-    fun apply(activity: Activity, file: File?, tab: Int, alphaPct: Int): String {
+    fun apply(
+        activity: Activity,
+        file: File?,
+        tab: Int,
+        alphaPct: Int,
+        shouldDraw: () -> Boolean = { true }
+    ): String {
         val decor = activity.window?.decorView as? ViewGroup ?: return fail("decorView 不可用")
         if (file == null) {
             clear(activity)
@@ -104,7 +110,7 @@ internal object TabWallpaperRenderer {
         if (!file.exists()) return fail("文件不存在：${file.absolutePath}")
         val bmp = loadBitmap(file) ?: return fail("解码失败：${file.absolutePath}")
 
-        val mask = WallpaperMaskDrawable(bmp)
+        val mask = WallpaperMaskDrawable(bmp, shouldDraw)
         mask.setAlpha(alphaPct.coerceIn(MIN_ALPHA_PCT, MAX_ALPHA_PCT) * 255 / 100)
         if (!savedForeground.containsKey(decor)) savedForeground[decor] = decor.foreground
         runCatching { decor.foreground = mask }
@@ -175,7 +181,7 @@ internal object TabWallpaperRenderer {
         val cur = when {
             fg == null -> "foreground=null（已撤掉或被宿主清掉，回主界面会重挂）"
             mask != null && fg === mask ->
-                "foreground=我们的遮罩 alpha=${mask.alphaPct}% 绘制=${mask.drawCount}次 bounds=${mask.lastDrawnBounds}"
+                "foreground=我们的遮罩 alpha=${mask.alphaPct}% 绘制=${mask.drawCount}次 跳过=${mask.skipCount}次 bounds=${mask.lastDrawnBounds}"
             else -> "foreground=被宿主替换为 ${fg.javaClass.simpleName}"
         }
         val orig = "原foreground=" +
@@ -216,11 +222,18 @@ internal object TabWallpaperRenderer {
      * drawCount == 0 就说明这一屏 foreground 根本没被绘制（宿主没重绘或被替换），
      * 诊断页能直接看出来，不用再猜。
      */
-    private class WallpaperMaskDrawable(private val bitmap: Bitmap) : Drawable() {
+    private class WallpaperMaskDrawable(
+        private val bitmap: Bitmap,
+        private val shouldDraw: () -> Boolean
+    ) : Drawable() {
 
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
 
         @Volatile var drawCount = 0
+            private set
+
+        /** 因为宿主不在前台而主动跳过的绘制次数（诊断用）。 */
+        @Volatile var skipCount = 0
             private set
 
         @Volatile var lastDrawnBounds = "0x0"
@@ -231,6 +244,12 @@ internal object TabWallpaperRenderer {
             private set
 
         override fun draw(canvas: Canvas) {
+            // 最后一道闸：宿主不是当前前台页面（比如在聊天页/朋友圈里）就根本不画。
+            // 不需要依赖 onPause / 失焦 / 聊天页 hook，任何一条失效都不会把壁纸画到别的页面上。
+            if (!shouldDraw()) {
+                skipCount++
+                return
+            }
             val b = bounds
             if (b.width() <= 0 || b.height() <= 0) return
             drawCount++
