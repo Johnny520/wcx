@@ -93,16 +93,35 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 搬到独立 object 里会 Unresolved（2026-10-27 重写时踩过）。
      */
     private fun hookTabSwitch() {
-        runCatching {
-            WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
-                val activity = thisObject as? Activity ?: return@hookAfter
-                ThemeSurface.applyNow(activity)
-                // doOnCreate 时 DecorView 往往还没完成首次布局，下一帧再挂一次兜底
-                activity.window?.decorView?.post { ThemeSurface.applyNow(activity) }
-                val tabsAdapter = runCatching {
-                    thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
-                }.getOrNull() ?: return@hookAfter
-                if (!hookedTabsAdapters.add(tabsAdapter)) return@hookAfter
+        // doOnCreate 只会被 hook 一次，重复调用不会重置状态（应用主题后会再调一次，抢时机）
+        if (!doOnCreateHooked) {
+            doOnCreateHooked = true
+            runCatching {
+                WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
+                    // hook 目标是 com.tencent.mm.ui.MainTabUI —— **不是 Activity**。
+                    // 必须从它的 MMFragmentActivity 字段里取宿主 Activity，
+                    // 写成 thisObject as? Activity 会永远是 null，整个 hook 第一行就 return
+                    // （2026-10-27 的「4 页全用主页图、adapter 0 处」就是这么来的）。
+                    val activity = runCatching {
+                        thisObject.reflekt()
+                            .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
+                            .get() as? Activity
+                    }.getOrNull() ?: (thisObject as? Activity) ?: run {
+                        WeLogger.w(TAG, "主界面 hook：取不到宿主 Activity（MainTabUI 结构变化），本次跳过")
+                        return@hookAfter
+                    }
+                    if (!ThemePages.isLauncher(activity)) return@hookAfter
+                    ThemeSurface.applyNow(activity)
+                    // doOnCreate 时 DecorView 往往还没完成首次布局，下一帧再挂一次兜底
+                    activity.window?.decorView?.post { ThemeSurface.applyNow(activity) }
+                    val tabsAdapter = runCatching {
+                        thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
+                    }.getOrNull() ?: run {
+                        WeLogger.w(TAG, "主界面 hook：未找到 mTabsAdapter，切页换图不可用（4 页会一直显示第 1 张）")
+                        return@hookAfter
+                    }
+                    if (!hookedTabsAdapters.add(tabsAdapter)) return@hookAfter
+                    WeLogger.i(TAG, "主界面 hook：已接上切页监听（${activity.javaClass.simpleName}）")
                 runCatching {
                     tabsAdapter.reflekt().firstMethod { name = "onPageScrolled" }.hookBefore {
                         val position = args.getOrNull(0) as? Int ?: return@hookBefore
@@ -119,9 +138,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                         ThemeSurface.onTabSelected(activity, position)
                     }
                     hookSelectedOk = true
-                }.onFailure { WeLogger.w(TAG, "hook onPageSelected 失败", it) }
-            }
-        }.onFailure { WeLogger.w(TAG, "hookTabSwitch 失败", it) }
+                    }.onFailure { WeLogger.w(TAG, "hook onPageSelected 失败", it) }
+                }
+            }.onFailure { WeLogger.w(TAG, "hookTabSwitch 失败", it) }
+        }
     }
 
     /**
@@ -130,6 +150,9 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * 旧版 TabTheme 之所以 4 张图各自都对，就是 onPageSelected 回调里直接按 position 切
      * —— position 是微信亲口报的，不依赖读 ViewPager 字段。
      */
+    /** doOnCreate 是否已挂过（避免重复注册 lambda）。 */
+    @Volatile private var doOnCreateHooked = false
+
     @Volatile private var hookScrolledOk = false
     @Volatile private var hookSelectedOk = false
 
@@ -200,6 +223,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     fun applyThemeById(id: String) {
         // 用户主动应用 = 重新给一次机会，清掉本进程内的连续失败计数
         ThemeSurface.resetFailStreak()
+        // 顺手确认一次切页 hook（幂等）：万一 onEnable 时还没到主界面 doOnCreate，这里补上
+        hookTabSwitch()
         applyThemeInternal(id)
         setOverlayOpacity(overlayOpacityPct)
     }
@@ -480,6 +505,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
 
         // 分页是否生效，就看这两行：页码读不到 / 切页 hook 没挂上，都会「4 页全是主页那张」
+        appendLine("doOnCreate hook = ${if (doOnCreateHooked) "已注册" else "未注册（功能没开过）"}")
         appendLine(
             "切页 hook = adapter ${hookedTabsAdapters.size} 处" +
                 "，onPageSelected=${if (hookSelectedOk) "已挂" else "未挂"}" +
