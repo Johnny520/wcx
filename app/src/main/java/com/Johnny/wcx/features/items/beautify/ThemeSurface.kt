@@ -139,6 +139,77 @@ internal object ThemeSurface {
     @Volatile
     private var resumedRef: java.lang.ref.WeakReference<Activity>? = null
 
+    // ══════════════════════════════════════════════════════════
+    // 聊天页守卫（纯 View 特征识别，见 [ChatPageGuard]）
+    // ══════════════════════════════════════════════════════════
+
+    /** 当前是否识别为聊天页（聊天页在主界面内时，主界面仍是"前台"，只能靠这个判定）。 */
+    @Volatile
+    private var chatPageVisible = false
+
+    @Volatile
+    private var lastChatHit: ChatPageGuard.Hit? = null
+
+    @Volatile
+    private var lastChatCheckAt = 0L
+
+    private val chatWatched = java.util.WeakHashMap<ViewGroup, Boolean>()
+
+    fun isChatPageVisible(): Boolean = chatPageVisible
+
+    /** 诊断：聊天页识别状态。 */
+    fun chatPageStatus(): String {
+        val hit = lastChatHit
+        return if (chatPageVisible && hit != null) {
+            "识别为聊天页（输入框=${hit.hasInput} 列表=${hit.hasList} 标题=${hit.hasTitle} ${hit.detail}）"
+        } else {
+            "不是聊天页"
+        }
+    }
+
+    /**
+     * 给主界面装一次「布局变化即检测」的监听。
+     *
+     * 聊天页若是主界面内部 Fragment（用户实机确认），切换页面不会走 Activity 生命周期，
+     * 但一定会触发一次布局 —— 所以 GlobalLayout 是最可靠的时机；再叠 400ms 节流防抖。
+     */
+    private fun ensureChatWatcher(activity: Activity, decor: ViewGroup) {
+        if (chatWatched[decor] == true) return
+        chatWatched[decor] = true
+        runCatching {
+            decor.viewTreeObserver.addOnGlobalLayoutListener {
+                runCatching { checkChatPage(activity) }
+            }
+        }.onFailure { WeLogger.w(TAG, "注册聊天页检测监听失败：${it.message}") }
+    }
+
+    /** 跑一次聊天页检测；状态切换时做对应动作。 */
+    fun checkChatPage(activity: Activity) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastChatCheckAt < 400L) return
+        lastChatCheckAt = now
+
+        val hit = ChatPageGuard.detect(activity)
+        val visible = hit != null
+        lastChatHit = hit
+
+        if (visible == chatPageVisible) {
+            // 状态没变：仍然确保容器不透明（微信可能自己重设了背景）
+            if (visible) hit?.let { runCatching { ChatPageGuard.ensureOpaque(it.container) } }
+            return
+        }
+        chatPageVisible = visible
+        if (visible) {
+            noteEvent("识别到聊天页 → 撤壁纸 + 容器兜底不透明")
+            // 撤掉主界面壁纸层（双保险之一；另一个是容器自身的挡色层）
+            TabWallpaperRenderer.clear(activity)
+            hit?.let { runCatching { ChatPageGuard.ensureOpaque(it.container) } }
+        } else {
+            noteEvent("离开聊天页 → 重挂壁纸")
+            runCatching { applyTabWallpapers(activity) }
+        }
+    }
+
     /** 当前前台页面是不是它自己。 */
     fun isForeground(activity: Activity): Boolean {
         val cur = resumedRef?.get() ?: return true   // 拿不到时保守放行，避免主界面突然没壁纸
@@ -509,6 +580,7 @@ internal object ThemeSurface {
      * 现在两条信号都接，页码取不到时还有 getCurrentItem()/ViewPager2 兜底。
      */
     fun onTabSelected(activity: Activity, position: Int) {
+        runCatching { checkChatPage(activity) }
         if (position == lastTabIndex) return
         lastTabIndex = position
         runCatching { updateTabWallpaper(activity, position) }
@@ -528,8 +600,9 @@ internal object ThemeSurface {
             WeLogger.w(TAG, "跳过挂载：decorView 不可用（${activity.javaClass.name}）")
             return
         }
-        // 装一次焦点监听；顺带：当前如果没有窗口焦点（聊天页/其它页在前台），就别挂了
+        // 装一次焦点监听 / 聊天页检测监听
         ensureWindowFocusWatcher(activity, decor)
+        ensureChatWatcher(activity, decor)
         if (!decor.hasWindowFocus()) {
             noteEvent("跳过挂载（主界面无焦点）")
             WeLogger.i(TAG, "跳过挂载：主界面当前没有窗口焦点（说明别的页面在前台）")
@@ -548,7 +621,9 @@ internal object ThemeSurface {
         // 页码取不到时兜底第一张可用图，宁可显示「主页」那张，也不要一片空白
         val file = fileForTab(files, tab) ?: files.firstOrNull { it != null }
         val alphaPct = ThemeStore.overlayOpacity()
-        val result = TabWallpaperRenderer.apply(activity, file, tab, alphaPct) { isForeground(activity) }
+        val result = TabWallpaperRenderer.apply(activity, file, tab, alphaPct) {
+            isForeground(activity) && !chatPageVisible
+        }
         if (result != "ok") {
             wallpaperFailStreak += 1
             WeLogger.w(TAG, "挂载 4 页背景失败（第 $wallpaperFailStreak 次）：$result")
@@ -574,7 +649,7 @@ internal object ThemeSurface {
             if (files.all { it == null }) return@runCatching
             val file = fileForTab(files, position) ?: files.firstOrNull { it != null }
             val result = TabWallpaperRenderer.apply(activity, file, position, ThemeStore.overlayOpacity()) {
-                isForeground(activity)
+                isForeground(activity) && !chatPageVisible
             }
             WeLogger.i(TAG, "切页换图 → Tab=$position 文件=${file?.name ?: "null"} 结果=$result")
         }.onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
