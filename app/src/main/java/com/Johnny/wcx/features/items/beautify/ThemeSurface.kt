@@ -318,14 +318,15 @@ internal object ThemeSurface {
 
         override fun onActivityPaused(activity: Activity) {
             if (resumedRef?.get() === activity) resumedRef = null
-            // 退到后台先把自己那层藏起来：聊天页若是半透明窗口、或正处于转场那几百毫秒，
-            // 底下主界面的壁纸就会透出来，跟微信自带聊天背景叠在一起。
+            // 主界面 pause **不撤壁纸**：切后台再切回来会白闪一帧（clear → 回来重挂），
+            // 而用户在这期间根本看不到主界面，撤掉毫无收益。
+            // 真正需要撤壁纸的场景只有「另一个 Activity 到前台」，由 onActivityResumed 里的
+            // hideLauncherWallpapers() 负责；聊天页是 LauncherUI 内的 Fragment，由锚点负责。
+            // 这里只重置页码（LauncherUI 退后台后可能被重建，残留页码会挂错图）。
             runCatching {
                 if (!ThemePages.isLauncher(activity)) return@runCatching
-                TabWallpaperRenderer.clear(activity)
-                // LauncherUI 退后台后重新回来可能是重建的，残留的页码会挂错图
                 resetTabIndex()
-            }.onFailure { WeLogger.d(TAG, "onActivityPaused 隐藏壁纸失败：${it.message}") }
+            }.onFailure { WeLogger.d(TAG, "onActivityPaused 处理失败：${it.message}") }
         }
 
         override fun onActivityStopped(activity: Activity) {}
