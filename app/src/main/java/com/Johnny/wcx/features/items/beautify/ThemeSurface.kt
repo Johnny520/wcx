@@ -168,6 +168,8 @@ internal object ThemeSurface {
         override fun onActivityResumed(activity: Activity) {
             // 主题没生效（没选主题）时一个字节都不动，避免「关了主题还在改窗口」
             if (ThemeStore.activeThemeIdOrEmpty().isEmpty()) return
+            // 非主界面进前台：先把主界面遮罩藏掉（聊天页半透明时会透出后面这张壁纸）
+            if (!ThemePages.isLauncher(activity)) hideLauncherWallpapers()
             runCatching { applyTo(activity) }
                 .onFailure { WeLogger.w(TAG, "onActivityResumed 应用主题异常", it) }
         }
@@ -303,11 +305,16 @@ internal object ThemeSurface {
         when {
             ThemePages.isScanner(activity) || ThemePages.isPhotoViewer(activity) -> removeWallpaper(activity)
             ThemePages.isChatting(activity) -> {
-                hideWallpapers()
+                hideLauncherWallpapers()
                 applyChattingWallpaper(activity)
             }
             ThemePages.isLauncher(activity) -> applyTabWallpapers(activity)
-            else -> if (wallpaperAttached[activity] == true) removeWallpaper(activity)
+            else -> {
+                // 任何其它页面（设置页 / 朋友圈 / 小程序 / 扫码…）在前台时，
+                // 主界面遮罩一律隐藏：主题只允许出现在主页/通讯录/发现/我 这 4 个 Tab 上。
+                hideLauncherWallpapers()
+                if (wallpaperAttached[activity] == true) removeWallpaper(activity)
+            }
         }
     }
 
@@ -325,14 +332,42 @@ internal object ThemeSurface {
         lastLoggedWallpaper = null
     }
 
-    /** 主界面当前 Tab：直接读 ViewPager 的 mCurItem，避免依赖混淆后的 adapter 方法名。 */
-    fun currentTabIndex(activity: Activity): Int = runCatching {
-        val content = activity.window?.decorView?.findViewById<ViewGroup>(android.R.id.content)
-            ?: return@runCatching 0
-        val pager = findViewByClass(content, "androidx.viewpager.widget.ViewPager")
-            ?: return@runCatching 0
-        pager.reflekt().firstField { name = "mCurItem" }.get() as? Int ?: 0
-    }.getOrDefault(0)
+    /**
+     * 主界面当前 Tab，三条路兜底（任一失败就退回上一条）：
+     * 1. androidx ViewPager 的 `mCurItem` 字段（老写法）
+     * 2. `getCurrentItem()` 方法（字段名漂移时仍可用）
+     * 3. ViewPager2 的 `mCurrentItem` 字段 / `getCurrentItem()`
+     *
+     * 取到 0~3 以外的值一律当作「读不到」，用调用方给的默认页，绝不拿脏值去选图。
+     */
+    fun currentTabIndex(activity: Activity): Int {
+        val fallback = lastTabIndex.takeIf { it in 0..3 } ?: 0
+        return runCatching {
+            val content = activity.window?.decorView?.findViewById<ViewGroup>(android.R.id.content)
+                ?: return@runCatching fallback
+            val pagers = ArrayList<View>(2)
+            findViewByClass(content, "androidx.viewpager.widget.ViewPager")?.let(pagers::add)
+            findViewByClass(content, "androidx.viewpager2.widget.ViewPager2")?.let(pagers::add)
+            if (pagers.isEmpty()) return@runCatching fallback
+            for (pager in pagers) {
+                readPagerIndex(pager)?.let { if (it in 0..3) return@runCatching it }
+            }
+            fallback
+        }.getOrDefault(fallback)
+    }
+
+    /** 读 ViewPager/ViewPager2 的当前页码：字段优先，方法兜底。 */
+    private fun readPagerIndex(pager: View): Int? {
+        runCatching {
+            pager.reflekt().firstFieldOrNull { name = "mCurItem" }?.get()
+                ?.let { (it as? Int)?.let { v -> return v } }
+        }
+        runCatching {
+            pager.reflekt().firstFieldOrNull { name = "mCurrentItem" }?.get()
+                ?.let { (it as? Int)?.let { v -> return v } }
+        }
+        return runCatching { pager.javaClass.getMethod("getCurrentItem").invoke(pager) as? Int }.getOrNull()
+    }
 
     private fun findViewByClass(root: ViewGroup, className: String): View? {
         for (i in 0 until root.childCount) {
@@ -364,6 +399,20 @@ internal object ThemeSurface {
         lastTabIndex = position
         runCatching { updateTabWallpaper(activity, position) }
             .onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
+    }
+
+    /**
+     * 主界面切 Tab（ViewPager.onPageSelected，比 onPageScrolled 更可靠的一条信号）。
+     *
+     * 2026-10-27 之前只 hook 了 onPageScrolled + 只读 mCurItem，
+     * 任一环取不到页码就会恒为 0 →「4 个页面永远显示主页那张图」。
+     * 现在两条信号都接，页码取不到时还有 getCurrentItem()/ViewPager2 兜底。
+     */
+    fun onTabSelected(activity: Activity, position: Int) {
+        if (position == lastTabIndex) return
+        lastTabIndex = position
+        runCatching { updateTabWallpaper(activity, position) }
+            .onFailure { WeLogger.w(TAG, "切 Tab 换背景（onPageSelected）失败：${it.message}") }
     }
 
     /**
@@ -423,17 +472,19 @@ internal object ThemeSurface {
         applyToAllLive()
     }
 
-    /** 统一显示/隐藏主界面遮罩（进聊天页隐藏，回来显示）。 */
-    fun setWallpapersVisible(visible: Boolean) {
+    /**
+     * 把所有主界面（LauncherUI）的遮罩藏起来。
+     *
+     * 聊天页与很多二级页面是半透明窗口，藏晚了就会「主界面壁纸透过来」。
+     * 隐藏态会写进 renderer 的 hidden 标记，定时保活不会再把它写回去。
+     */
+    fun hideLauncherWallpapers() {
         runCatching {
             liveActivities().forEach { act ->
-                if (!ThemePages.isLauncher(act)) return@forEach
-                if (visible) TabWallpaperRenderer.show(act) else TabWallpaperRenderer.hide(act)
+                if (ThemePages.isLauncher(act)) TabWallpaperRenderer.hide(act)
             }
-        }.onFailure { WeLogger.w(TAG, "切换前景遮罩可见性失败：${it.message}") }
+        }.onFailure { WeLogger.w(TAG, "隐藏主界面遮罩失败：${it.message}") }
     }
-
-    private fun hideWallpapers() = setWallpapersVisible(false)
 
     /** 移除前景遮罩并还回窗口原来的 foreground。 */
     private fun removeTabWallpapers(activity: Activity) {

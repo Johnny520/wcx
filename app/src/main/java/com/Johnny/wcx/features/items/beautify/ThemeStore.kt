@@ -109,10 +109,29 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                         val offset = args.getOrNull(1) as? Float ?: return@hookBefore
                         ThemeSurface.onTabScrolled(activity, position, offset)
                     }
+                    hookScrolledOk = true
                 }.onFailure { WeLogger.w(TAG, "hook onPageScrolled 失败", it) }
+                // 第二条切页信号：onPageSelected 是「页码最终落定」，
+                // 只 hook onPageScrolled 时一旦 offset 判断不满足就永远不换图（4 页只显示主页那张）
+                runCatching {
+                    tabsAdapter.reflekt().firstMethod { name = "onPageSelected" }.hookAfter {
+                        val position = args.getOrNull(0) as? Int ?: return@hookAfter
+                        ThemeSurface.onTabSelected(activity, position)
+                    }
+                    hookSelectedOk = true
+                }.onFailure { WeLogger.w(TAG, "hook onPageSelected 失败", it) }
             }
         }.onFailure { WeLogger.w(TAG, "hookTabSwitch 失败", it) }
     }
+
+    /**
+     * 两条切页信号是否挂上（诊断页直接看这两行，一眼定位「4 页不换图」）。
+     *
+     * 旧版 TabTheme 之所以 4 张图各自都对，就是 onPageSelected 回调里直接按 position 切
+     * —— position 是微信亲口报的，不依赖读 ViewPager 字段。
+     */
+    @Volatile private var hookScrolledOk = false
+    @Volatile private var hookSelectedOk = false
 
     /** 已挂过切页监听的 adapter，避免每次进主页重复 hook。 */
     private val hookedTabsAdapters: MutableSet<Any> =
@@ -458,6 +477,36 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                     "${file.absolutePath} (${runCatching { file.length() }.getOrDefault(0L)} B)"
                 }
             )
+        }
+
+        // 分页是否生效，就看这两行：页码读不到 / 切页 hook 没挂上，都会「4 页全是主页那张」
+        appendLine(
+            "切页 hook = adapter ${hookedTabsAdapters.size} 处" +
+                "，onPageSelected=${if (hookSelectedOk) "已挂" else "未挂"}" +
+                "，onPageScrolled=${if (hookScrolledOk) "已挂" else "未挂"}" +
+                "（只要 onPageSelected 是「已挂」，4 张图就各归各页）"
+        )
+        runCatching { ThemeSurface.liveActivities() }.getOrDefault(emptyList())
+            .firstOrNull { ThemePages.isLauncher(it) }
+            ?.let { launcher ->
+                appendLine(
+                    "当前 Tab 实测 = ${ThemeSurface.currentTabIndex(launcher)}" +
+                        "（0=主页 1=通讯录 2=发现 3=我；永远是 0 就是页码没读到）"
+                )
+            }
+
+        // 最近一次用图的那张图，同目录下 4 张分页图到底在不在
+        runCatching {
+            val lastFile = TabWallpaperRenderer.lastPath
+            val dir = lastFile?.let { java.io.File(it).parentFile }
+            if (dir != null && dir.isDirectory) {
+                appendLine(
+                    "该目录的 4 张分页图 = " + listOf("chats", "contacts", "discover", "me").joinToString("，") { key ->
+                        val f = java.io.File(dir, "wallpaper_$key.png")
+                        "$key:" + if (f.exists()) "${f.length()}B" else "无"
+                    }
+                )
+            }
         }
 
         val acts = runCatching { ThemeSurface.liveActivities() }.getOrDefault(emptyList())
