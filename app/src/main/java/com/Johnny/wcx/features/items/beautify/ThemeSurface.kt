@@ -91,6 +91,18 @@ internal object ThemeSurface {
 
     private const val TAG = "ThemeSurface"
 
+    // ── 最近事件（诊断里直接展示，不用再翻整份日志） ──
+    private val events = ArrayDeque<String>(12)
+
+    fun noteEvent(msg: String) {
+        synchronized(events) {
+            events.addLast("${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())} $msg")
+            while (events.size > 12) events.removeFirst()
+        }
+    }
+
+    fun recentEvents(): List<String> = synchronized(events) { events.toList() }
+
     /** 壁纸透明度上下限：上限压到 70%，保证文字、分割线、头像始终看得清。 */
     const val MIN_OPACITY = 5
     const val MAX_OPACITY = 70
@@ -434,10 +446,12 @@ internal object ThemeSurface {
         runCatching {
             decor.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
                 if (!hasFocus) {
+                    noteEvent("主界面失焦 → 撤遮罩")
                     WeLogger.i(TAG, "主界面失去窗口焦点（进了聊天页/其它页面）→ 撤掉壁纸遮罩")
                     TabWallpaperRenderer.clear(activity)
                     wallpaperAttached.remove(activity)
                 } else if (ThemeStore.activeThemeIdOrEmpty().isNotEmpty()) {
+                    noteEvent("主界面获得焦点 → 重挂")
                     WeLogger.i(TAG, "主界面重新获得窗口焦点 → 重挂壁纸遮罩")
                     runCatching { applyTabWallpapers(activity) }
                         .onFailure { WeLogger.w(TAG, "重新挂载失败：${it.message}") }
@@ -496,6 +510,7 @@ internal object ThemeSurface {
         // 装一次焦点监听；顺带：当前如果没有窗口焦点（聊天页/其它页在前台），就别挂了
         ensureWindowFocusWatcher(activity, decor)
         if (!decor.hasWindowFocus()) {
+            noteEvent("跳过挂载（主界面无焦点）")
             WeLogger.i(TAG, "跳过挂载：主界面当前没有窗口焦点（说明别的页面在前台）")
             return
         }
@@ -520,6 +535,7 @@ internal object ThemeSurface {
         }
         wallpaperFailStreak = 0
         wallpaperAttached[activity] = true
+        noteEvent("挂上 Tab=$tab ${file?.name ?: "null"}")
 
         val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
         val logKey = "$info|tab=$tab|${file?.absolutePath}"
@@ -553,6 +569,9 @@ internal object ThemeSurface {
      * 聊天页一出现就把主界面的壁纸遮罩**整个撤掉** —— 不存在就无从透出。
      */
     fun onChattingPageShown(activity: Activity?) {
+        noteEvent("聊天页出现(${activity?.javaClass?.simpleName ?: "?"}) → 撤遮罩")
+        // 聊天页自己窗口上也清一遍：万一历史上被误挂过，一并不留
+        if (activity != null) runCatching { TabWallpaperRenderer.clear(activity) }
         hideLauncherWallpapers()
         if (activity != null) {
             runCatching { applyChattingWallpaper(activity) }
@@ -585,6 +604,7 @@ internal object ThemeSurface {
         runCatching {
             liveActivities().forEach { act ->
                 if (!ThemePages.isLauncher(act)) return@forEach
+                noteEvent("clear 主界面遮罩")
                 WeLogger.i(TAG, "撤掉主界面壁纸遮罩（${act.javaClass.simpleName}）")
                 // 必须 clear（把 foreground 还回原值），不能只 hide：
                 // 只置 null 的话遮罩对象仍在，任何一次重挂/保活都会把它写回来，

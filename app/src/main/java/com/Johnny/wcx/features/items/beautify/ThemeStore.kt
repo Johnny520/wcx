@@ -587,6 +587,9 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             }
         }
 
+        appendLine("最近事件（时间线，从旧到新）：")
+        runCatching { ThemeSurface.recentEvents() }.getOrDefault(emptyList()).forEach { appendLine("  $it") }
+
         val acts = runCatching { ThemeSurface.liveActivities() }.getOrDefault(emptyList())
         appendLine("存活 Activity = " + acts.joinToString("、") { it.javaClass.simpleName })
         acts.forEach { act ->
