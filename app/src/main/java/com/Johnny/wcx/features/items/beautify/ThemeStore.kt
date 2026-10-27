@@ -216,6 +216,29 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 }
             }.onFailure { WeLogger.w(TAG, "加载聊天页 Fragment 失败（$clsName）：${it.message}") }
         }
+        // 泛化兜底：MMFragment 是所有微信 Fragment 的基类。
+        // 万一上面两个具体类的方法是被子类 override（父类声明 hook 不到），
+        // 这里按「类名里带 Chatting」兜住私聊 / 群聊 / 半屏聊天 / 公众号聊天等全部变体。
+        runCatching {
+            val mmFragment = ClassLoaders.HOST.loadClass("com.tencent.mm.ui.MMFragment")
+            listOf("onResume", "onCreate").forEach { methodName ->
+                runCatching {
+                    val method = mmFragment.reflekt().firstMethodOrNull { name = methodName }
+                        ?: return@runCatching
+                    method.hookAfter {
+                        val cn = thisObject.javaClass.name.orEmpty()
+                        if (cn.contains("Chatting", ignoreCase = true)) {
+                            val view = runCatching {
+                                thisObject.javaClass.getMethod("getView").invoke(thisObject) as? View
+                            }.getOrNull()
+                            ThemeSurface.onChattingFragmentShown(view)
+                        }
+                    }
+                    hooked++
+                }.onFailure { WeLogger.w(TAG, "hook MMFragment.$methodName 失败", it) }
+            }
+        }.onFailure { WeLogger.w(TAG, "加载 MMFragment 失败：${it.message}") }
+
         chattingFragmentHookCount = hooked
         chattingFragmentHookOk = hooked > 0
         WeLogger.i(TAG, "聊天页 Fragment 锚点：已 hook $hooked 个方法（进入即撤壁纸 + 容器兜底）")
