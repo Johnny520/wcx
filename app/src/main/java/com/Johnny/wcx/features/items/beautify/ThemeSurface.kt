@@ -143,9 +143,17 @@ internal object ThemeSurface {
     // 聊天页守卫（纯 View 特征识别，见 [ChatPageGuard]）
     // ══════════════════════════════════════════════════════════
 
-    /** 当前是否识别为聊天页（聊天页在主界面内时，主界面仍是"前台"，只能靠这个判定）。 */
+    /** 聊天页可见性：**两个来源取并集**，任一命中就认为在聊天页。 */
+    // ① Fragment 锚点（hook BaseChattingUIFragment/ChattingUIFragment 维护）
     @Volatile
-    private var chatPageVisible = false
+    private var fragmentChatActive = false
+
+    // ② 纯 View 特征识别（ChatPageGuard 维护）
+    @Volatile
+    private var viewChatActive = false
+
+    private val chatPageVisible: Boolean
+        get() = fragmentChatActive || viewChatActive
 
     @Volatile
     private var lastChatHit: ChatPageGuard.Hit? = null
@@ -160,11 +168,13 @@ internal object ThemeSurface {
     /** 诊断：聊天页识别状态。 */
     fun chatPageStatus(): String {
         val hit = lastChatHit
-        return if (chatPageVisible && hit != null) {
-            "识别为聊天页（输入框=${hit.hasInput} 列表=${hit.hasList} 标题=${hit.hasTitle} ${hit.detail}）"
+        val byFragment = if (fragmentChatActive) "Fragment锚点=命中" else "Fragment锚点=未命中"
+        val byView = if (hit != null) {
+            "特征=命中（输入框=${hit.hasInput} 列表=${hit.hasList} 标题=${hit.hasTitle} ${hit.detail}）"
         } else {
-            "不是聊天页"
+            "特征=未命中"
         }
+        return if (chatPageVisible) "聊天页中：$byFragment，$byView" else "不是聊天页（$byFragment，$byView）"
     }
 
     /**
@@ -193,12 +203,12 @@ internal object ThemeSurface {
         val visible = hit != null
         lastChatHit = hit
 
-        if (visible == chatPageVisible) {
+        if (visible == viewChatActive) {
             // 状态没变：仍然确保容器不透明（微信可能自己重设了背景）
             if (visible) hit?.let { runCatching { ChatPageGuard.ensureOpaque(it.container) } }
             return
         }
-        chatPageVisible = visible
+        viewChatActive = visible
         if (visible) {
             noteEvent("识别到聊天页 → 撤壁纸 + 容器兜底不透明")
             // 撤掉主界面壁纸层（双保险之一；另一个是容器自身的挡色层）
@@ -658,6 +668,35 @@ internal object ThemeSurface {
     /** 改透明度后重挂一次（前景遮罩的 alpha 每次 apply 重算）。 */
     fun refreshAlpha() {
         applyToAllLive()
+    }
+
+    /**
+     * 聊天页 Fragment 出现了（由 Feature 侧 hook ChattingUIFragment / BaseChattingUIFragment 触发）。
+     *
+     * 这是从会话列表进入聊天页的**真实路径**（8.0.79 实测：ChattingUIFragment extends MMFragment，
+     * 明文未混淆；而 ChattingUI 是外部/通知进入时才用的 Activity）。
+     */
+    fun onChattingFragmentShown(fragmentView: View?) {
+        if (!fragmentChatActive) {
+            noteEvent("聊天页 Fragment 出现 → 撤壁纸 + 容器兜底")
+        }
+        fragmentChatActive = true
+        runCatching {
+            liveActivities().forEach { act ->
+                if (ThemePages.isLauncher(act)) TabWallpaperRenderer.clear(act)
+            }
+        }
+        (fragmentView as? ViewGroup)?.let { runCatching { ChatPageGuard.ensureOpaque(it) } }
+    }
+
+    /** 聊天页 Fragment 离开（onPause/onDestroyView）：回主界面时重挂。 */
+    fun onChattingFragmentHidden() {
+        if (!fragmentChatActive) return
+        fragmentChatActive = false
+        noteEvent("离开聊天页 Fragment → 重挂壁纸")
+        runCatching {
+            liveActivities().firstOrNull { ThemePages.isLauncher(it) }?.let { applyTabWallpapers(it) }
+        }
     }
 
     /**
