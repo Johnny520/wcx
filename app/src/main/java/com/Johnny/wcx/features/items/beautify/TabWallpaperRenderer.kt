@@ -182,26 +182,24 @@ internal object TabWallpaperRenderer {
         runCatching { masked[activity.window?.decorView as? ViewGroup] == true }.getOrDefault(false)
 
     /** 诊断文本：这一屏到底有没有遮罩、画了几次、尺寸多少。 */
-    fun describe(activity: Activity): String = buildString {
-        val decor = activity.window?.decorView as? ViewGroup ?: run { append("decorView 不可用"); return }
+    fun describe(activity: Activity): String {
+        val decor = activity.window?.decorView as? ViewGroup ?: return "decorView 不可用"
         val mask = masks[decor]
         val fg = decor.foreground
-        append("前景遮罩=")
-        when {
-            masked[decor] != true -> append("未挂载")
-            mask == null -> append("已挂载（遮罩对象丢失）")
-            else -> append("已挂载 size=${decor.width}x${decor.height} 子View数=${decor.childCount}")
+        val head = when {
+            masked[decor] != true -> "前景遮罩=未挂载"
+            mask == null -> "前景遮罩=已挂载（遮罩对象丢失）"
+            else -> "前景遮罩=已挂载 size=${decor.width}x${decor.height} 子View数=${decor.childCount}"
         }
-        append(" 当前foreground=")
-        append(
-            when {
-                fg == null -> "null（被隐藏或被宿主清掉）"
-                fg === mask -> "我们的遮罩 alpha=${mask.alphaPct}% 绘制=${mask.drawCount}次 bounds=${mask.lastDrawnBounds}"
-                else -> "被宿主替换为 ${fg.javaClass.simpleName}"
-            }
-        )
-        append(" 原foreground=")
-        append(if (savedForeground.containsKey(decor)) describeDrawable(savedForeground[decor]) else "未备份")
+        val cur = when {
+            fg == null -> "foreground=null（被隐藏或被宿主清掉）"
+            mask != null && fg === mask ->
+                "foreground=我们的遮罩 alpha=${mask.alphaPct}% 绘制=${mask.drawCount}次 bounds=${mask.lastDrawnBounds}"
+            else -> "foreground=被宿主替换为 ${fg.javaClass.simpleName}"
+        }
+        val orig = "原foreground=" +
+            if (savedForeground.containsKey(decor)) describeDrawable(savedForeground[decor]) else "未备份"
+        return "$head $cur $orig"
     }
 
     private fun describeDrawable(d: Drawable?): String = when (d) {
