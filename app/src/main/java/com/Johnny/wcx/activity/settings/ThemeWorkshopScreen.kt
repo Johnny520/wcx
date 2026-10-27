@@ -1121,16 +1121,16 @@ private fun OpacityRow(tick: Int) {
                 activeTrackColor = MiuixTheme.colorScheme.primary,
             ),
         )
-        // 渲染方式：微信 8.0.79 的主界面容器是不透明绘制，垫底的壁纸会被整块盖住，
-        // 所以默认用「覆盖」。两种方式都保留，用户哪种看得见就用哪种。
-        var overlayMode by remember(tick) { mutableStateOf(ThemeStore.renderModeName().startsWith("覆盖")) }
+        // 渲染方式（2026-10-27 重写为「DecorView 前景遮罩」，只有一种实现）：
+        // 画在所有内容之上、不往视图树塞节点、不拦点击。这里固定展示实现名与实时挂载状态，
+        // 点一下 = 立即重写一次（换主题/改素材后可直接点这里验证）。
+        val maskState = remember(tick) { ThemeStore.maskBrief() }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
-                    overlayMode = !overlayMode
-                    runCatching { ThemeStore.setRenderMode(overlayMode) }
-                    showToast(context, if (overlayMode) "已切到覆盖模式，回微信看看" else "已切到背景模式，回微信看看")
+                    runCatching { ThemeStore.reapplyNow() }
+                    showToast(context, "已重写前景遮罩（${ThemeStore.maskBrief()}），回微信看看")
                 }
                 .padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1138,18 +1138,15 @@ private fun OpacityRow(tick: Int) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("壁纸渲染方式", fontSize = 15.sp, color = titleColor())
                 Text(
-                    text = if (overlayMode) {
-                        "覆盖：贴在内容最上层，任何版本都看得见（推荐；浓淡用上面的透明度调）"
-                    } else {
-                        "背景：垫在所有内容下面。8.0.79 上常被不透明底板挡住，需要配合清背景"
-                    },
+                    text = "前景遮罩：画在所有内容之上、不改页面结构、不拦点击；浓淡用上面的透明度调",
                     fontSize = 11.sp,
                     color = summaryColor(),
                 )
             }
             Text(
-                text = if (overlayMode) "覆盖" else "沉浸",
-                fontSize = 13.sp,
+                text = maskState,
+                fontSize = 11.sp,
+                maxLines = 1,
                 color = MiuixTheme.colorScheme.primary,
             )
         }
