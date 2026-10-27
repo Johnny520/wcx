@@ -138,7 +138,7 @@ internal object ThemeMaterials {
      * - 只有微信主界面（LauncherUI 的 4 个 Tab）吃主题壁纸，其它页面不挂
      * - 主题包优先，且分页面素材（某页单独设了就用它，没设退回全局）
      */
-    fun wallpaperSourceFor(activity: Activity?): java.nio.file.Path? {
+    fun wallpaperSourceFor(activity: Activity?, activeId: String): java.nio.file.Path? {
         if (activity != null && ThemePages.isChatting(activity)) {
             if (!runCatching { com.Johnny.wcx.preferences.WePrefs.getBoolOrFalse(ThemeExtras.KEY_RANDOM_WALLPAPER) }
                     .getOrDefault(false)

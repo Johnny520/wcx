@@ -1,10 +1,12 @@
 package com.Johnny.wcx.features.items.beautify
 
+import android.app.Activity
 import android.view.View
 import androidx.activity.ComponentActivity
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.activity.settings.SettingsNavigation
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
+import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.FeaturesProvider
@@ -13,6 +15,7 @@ import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.fs.createDirsSafe
+import dev.ujhhgtg.reflekt.reflekt
 import java.io.File
 import java.nio.file.Files
 import kotlin.io.path.absolutePathString
@@ -83,10 +86,42 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // Feature 生命周期
     // ══════════════════════════════════════════════════════════
 
+    /**
+     * 主界面切 Tab 时立即挂 / 换壁纸。
+     *
+     * 必须写在 Feature 子类里：`hookAfter` / `hookBefore` 是 BaseFeature 的**成员扩展**，
+     * 搬到独立 object 里会 Unresolved（2026-10-27 重写时踩过）。
+     */
+    private fun hookTabSwitch() {
+        runCatching {
+            WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
+                val activity = thisObject as? Activity ?: return@hookAfter
+                ThemeSurface.applyNow(activity)
+                // doOnCreate 时 DecorView 往往还没完成首次布局，下一帧再挂一次兜底
+                activity.window?.decorView?.post { ThemeSurface.applyNow(activity) }
+                val tabsAdapter = runCatching {
+                    thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
+                }.getOrNull() ?: return@hookAfter
+                if (!hookedTabsAdapters.add(tabsAdapter)) return@hookAfter
+                runCatching {
+                    tabsAdapter.reflekt().firstMethod { name = "onPageScrolled" }.hookBefore {
+                        val position = args.getOrNull(0) as? Int ?: return@hookBefore
+                        val offset = args.getOrNull(1) as? Float ?: return@hookBefore
+                        ThemeSurface.onTabScrolled(activity, position, offset)
+                    }
+                }.onFailure { WeLogger.w(TAG, "hook onPageScrolled 失败", it) }
+            }
+        }.onFailure { WeLogger.w(TAG, "hookTabSwitch 失败", it) }
+    }
+
+    /** 已挂过切页监听的 adapter，避免每次进主页重复 hook。 */
+    private val hookedTabsAdapters: MutableSet<Any> =
+        java.util.Collections.newSetFromMap(java.util.WeakHashMap<Any, Boolean>())
+
     override fun onEnable() {
         // 清掉历史遗留的持久化失败计数（老版本写进去的脏值会让主题被永久锁死）
         runCatching { WePrefs.remove("theme_store_wallpaper_fail") }
-        ThemeSurface.hookTabSwitch()
+        hookTabSwitch()
         ThemeSurface.registerCallbacks(true)
         WeChatMessageViewApi.addListener(this)
         if (activeThemeId.isNotEmpty()) {

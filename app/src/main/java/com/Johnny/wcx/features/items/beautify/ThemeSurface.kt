@@ -347,38 +347,23 @@ internal object ThemeSurface {
     private fun fileForTab(files: List<java.io.File?>, tab: Int): java.io.File? =
         files.getOrNull(tab) ?: files.firstOrNull { it != null }
 
+    /** 主界面 doOnCreate / 返回主界面时：挂一次 4 页背景（给 Feature 侧 hook 调用）。 */
+    fun applyNow(activity: Activity) {
+        runCatching { applyTabWallpapers(activity) }
+            .onFailure { WeLogger.w(TAG, "挂载 4 页背景异常：${it.message}") }
+    }
+
     /**
-     * 主界面切 Tab 时立即换壁纸。
+     * 主界面切 Tab（onPageScrolled 换页完成）时换一张图。
      *
      * 分页面壁纸（消息/通讯录/发现/我）只有在这里重挂才能「切过去就变」，
      * 否则要退出重进主界面才生效。
      */
-    fun hookTabSwitch() {
-        runCatching {
-            WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
-                val activity = thisObject as? Activity ?: return@hookAfter
-                runCatching { applyTabWallpapers(activity) }
-                // doOnCreate 时 DecorView 往往还没完成首次布局，下一帧再挂一次兜底
-                activity.window?.decorView?.post {
-                    runCatching { applyTabWallpapers(activity) }
-                }
-                val tabsAdapter = runCatching {
-                    thisObject.reflekt().firstField { name = "mTabsAdapter" }.get()
-                }.getOrNull() ?: return@hookAfter
-                if (!hookedTabsAdapters.add(tabsAdapter)) return@hookAfter
-                runCatching {
-                    tabsAdapter.reflekt().firstMethod { name = "onPageScrolled" }.hookBefore {
-                        val position = args.getOrNull(0) as? Int ?: return@hookBefore
-                        val offset = args.getOrNull(1) as? Float ?: return@hookBefore
-                        if (offset == 0f && position != lastTabIndex) {
-                            lastTabIndex = position
-                            // 切 Tab 只切显示哪张图，不重新解码
-                            updateTabWallpaper(activity, position)
-                        }
-                    }
-                }.onFailure { WeLogger.w(TAG, "hook onPageScrolled 失败", it) }
-            }
-        }.onFailure { WeLogger.w(TAG, "hookTabSwitch 失败", it) }
+    fun onTabScrolled(activity: Activity, position: Int, offset: Float) {
+        if (offset != 0f || position == lastTabIndex) return
+        lastTabIndex = position
+        runCatching { updateTabWallpaper(activity, position) }
+            .onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
     }
 
     /**
@@ -466,7 +451,7 @@ internal object ThemeSurface {
         java.util.WeakHashMap<Activity, android.graphics.drawable.Drawable?>()
 
     private fun applyChattingWallpaper(activity: Activity) {
-        val src = ThemeMaterials.wallpaperSourceFor(activity)
+        val src = ThemeMaterials.wallpaperSourceFor(activity, ThemeStore.activeThemeIdOrEmpty())
         if (src == null) {
             restoreWindowBackground(activity)
             return
