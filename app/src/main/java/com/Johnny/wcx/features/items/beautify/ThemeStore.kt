@@ -163,6 +163,14 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     @Volatile
     private var wallpaperFailStreak = 0
 
+    // ── 最近一次挂载的现场快照（诊断用，避免再来回猜） ──
+    @Volatile private var lastApplyAt = 0L
+    @Volatile private var lastApplyMode = "-"
+    @Volatile private var lastApplyTab = -9
+    @Volatile private var lastApplyPath = "-"
+    @Volatile private var lastApplyError = "-"
+    @Volatile private var lastClearedCount = -1
+
     /** 记录哪些 Activity 当前真的挂着背景层，避免对没挂过的页面白跑 removeWallpaper。 */
     private val wallpaperAttached = java.util.WeakHashMap<Activity, Boolean>()
     private var overlayOpacityPct by prefOption("theme_store_overlay_opacity", 40)
@@ -177,12 +185,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     // 默认用「覆盖」：微信 8.0.79 的主界面有多层不透明底板（会话列表外壳 + 每行 item），
     // 底层方案必须逐层清背景 + 定时重清才能透出来（同类模块 OKK 为此写了近千行清理逻辑）。
     // 覆盖式是纯叠层，装上就能看见，用户再用「壁纸透明度」调浓淡。
-    private var renderModePref by prefOption("theme_store_render_mode_v3", RENDER_OVERLAY)
+    private var renderModePref by prefOption("theme_store_render_mode_v4", RENDER_BACKGROUND)
 
     private fun isOverlayMode(): Boolean = renderModePref == RENDER_OVERLAY
 
     /** 渲染方式的展示名。 */
-    fun renderModeName(): String = if (isOverlayMode()) "覆盖（推荐）" else "背景（垫底层）"
+    fun renderModeName(): String = if (isOverlayMode()) "覆盖（顶层）" else "背景（清底板，推荐）"
 
     /** 切换渲染方式：立刻撤掉旧层并在新位置重挂。 */
     fun setRenderMode(overlay: Boolean) {
@@ -963,6 +971,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 val clearedCount = runCatching { clearAllContainerBackgrounds(activity, decor) }.getOrDefault(0)
                 if (clearedCount > 0) WeLogger.i(TAG, "已清容器背景 $clearedCount 层")
                 scheduleReclear(activity)
+                lastApplyAt = System.currentTimeMillis()
+                lastApplyMode = "background"
+                lastApplyTab = tab
+                lastApplyPath = file?.absolutePath ?: "null"
+                lastClearedCount = clearedCount
+                lastApplyError = "-"
                 wallpaperAttached[activity] = true
                 wallpaperFailStreak = 0
                 val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
@@ -1022,7 +1036,14 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 }
             }
             view.requestLayout()
+            // 后台 Activity 不走 layout，加完立即 requestLayout 不一定生效 —— 回到前台再补一次
+            decor.post { runCatching { view.requestLayout(); decor.requestLayout(); view.invalidate() } }
             view.alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
+            lastApplyAt = System.currentTimeMillis()
+            lastApplyMode = "overlay"
+            lastApplyTab = tab
+            lastApplyPath = file?.absolutePath ?: "null"
+            lastApplyError = if (path != null && view.bitmap == null) "decode 失败：$path" else "-"
             wallpaperAttached[activity] = true
             wallpaperFailStreak = 0
             val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
@@ -1551,7 +1572,9 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                         " size=${layer.width}x${layer.height}" +
                         " vis=${layer.visibility}" +
                         " alpha=${layer.alpha}" +
-                        " 有图=${(layer as? ThemeWallpaperView)?.bitmap != null}"
+                        " 有图=${(layer as? ThemeWallpaperView)?.bitmap != null}" +
+                        " 绘制次数=${(layer as? ThemeWallpaperView)?.drawCount ?: -1}" +
+                        " 上次尺寸=${(layer as? ThemeWallpaperView)?.lastDrawSize ?: "-"}"
                 )
             }
             appendLine("  decor.background=" + describeDrawable(decor.background))
@@ -1567,6 +1590,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
             appendLine("  已清背景层数=" + (clearedBackgrounds[act]?.size ?: 0))
             appendLine("  wallpaperAttached=" + (wallpaperAttached[act] == true))
         }
+        appendLine("最近一次挂载：mode=$lastApplyMode tab=$lastApplyTab 清背景=$lastClearedCount")
+        appendLine("  时间=" + (if (lastApplyAt == 0L) "-" else ((System.currentTimeMillis() - lastApplyAt) / 1000).toString() + " 秒前"))
+        appendLine("  文件=$lastApplyPath")
+        appendLine("  异常=$lastApplyError")
         appendLine("wallpaperFailStreak=$wallpaperFailStreak")
     }
 
@@ -1667,6 +1694,12 @@ private class ThemeWallpaperView(context: android.content.Context) : View(contex
 
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
 
+    /** 诊断用：被绘制了几次、最近一次的尺寸。0 次 = 从来没进过 onDraw（没布局/不可见）。 */
+    var drawCount = 0
+        private set
+    var lastDrawSize = "0x0"
+        private set
+
     var bitmap: Bitmap? = null
         set(value) {
             field = value
@@ -1680,7 +1713,13 @@ private class ThemeWallpaperView(context: android.content.Context) : View(contex
         setWillNotDraw(false)
     }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        lastDrawSize = "${w}x$h"
+    }
+
     override fun onDraw(canvas: Canvas) {
+        drawCount++
         val bmp = bitmap ?: return
         if (bmp.width <= 0 || bmp.height <= 0 || width <= 0 || height <= 0) return
         // CENTER_CROP：等比放大铺满
