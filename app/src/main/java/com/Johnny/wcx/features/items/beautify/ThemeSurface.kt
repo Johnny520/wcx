@@ -419,6 +419,33 @@ internal object ThemeSurface {
     private fun fileForTab(files: List<java.io.File?>, tab: Int): java.io.File? =
         files.getOrNull(tab) ?: files.firstOrNull { it != null }
 
+    /**
+     * 主界面窗口焦点监听：进聊天页 / 其它页面时**必然失焦**，这是最可靠的一道闸。
+     *
+     * 为什么不能只靠 Activity 生命周期：聊天页若是半透明窗口（微信常见），
+     * 主界面可能不 pause，`onActivityPaused` 里那次撤遮罩就不会执行 →
+     * 聊天页就会透出主界面壁纸。窗口焦点变化在两种情况下都会触发。
+     */
+    private val focusWatched = java.util.WeakHashMap<ViewGroup, Boolean>()
+
+    private fun ensureWindowFocusWatcher(activity: Activity, decor: ViewGroup) {
+        if (focusWatched[decor] == true) return
+        focusWatched[decor] = true
+        runCatching {
+            decor.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
+                if (!hasFocus) {
+                    WeLogger.i(TAG, "主界面失去窗口焦点（进了聊天页/其它页面）→ 撤掉壁纸遮罩")
+                    TabWallpaperRenderer.clear(activity)
+                    wallpaperAttached.remove(activity)
+                } else if (ThemeStore.activeThemeIdOrEmpty().isNotEmpty()) {
+                    WeLogger.i(TAG, "主界面重新获得窗口焦点 → 重挂壁纸遮罩")
+                    runCatching { applyTabWallpapers(activity) }
+                        .onFailure { WeLogger.w(TAG, "重新挂载失败：${it.message}") }
+                }
+            }
+        }.onFailure { WeLogger.w(TAG, "注册窗口焦点监听失败：${it.message}") }
+    }
+
     /** 主界面 doOnCreate / 返回主界面时：挂一次 4 页背景（给 Feature 侧 hook 调用）。 */
     fun applyNow(activity: Activity) {
         runCatching { applyTabWallpapers(activity) }
@@ -461,8 +488,15 @@ internal object ThemeSurface {
      */
     private fun applyTabWallpapers(activity: Activity) {
         if (wallpaperFailStreak >= 3) return
-        if (activity.window?.decorView == null) {
+        val decor = activity.window?.decorView as? ViewGroup
+        if (decor == null) {
             WeLogger.w(TAG, "跳过挂载：decorView 不可用（${activity.javaClass.name}）")
+            return
+        }
+        // 装一次焦点监听；顺带：当前如果没有窗口焦点（聊天页/其它页在前台），就别挂了
+        ensureWindowFocusWatcher(activity, decor)
+        if (!decor.hasWindowFocus()) {
+            WeLogger.i(TAG, "跳过挂载：主界面当前没有窗口焦点（说明别的页面在前台）")
             return
         }
         val activeId = ThemeStore.activeThemeIdOrEmpty()
@@ -523,6 +557,7 @@ internal object ThemeSurface {
         runCatching {
             liveActivities().forEach { act ->
                 if (!ThemePages.isLauncher(act)) return@forEach
+                WeLogger.i(TAG, "撤掉主界面壁纸遮罩（${act.javaClass.simpleName}）")
                 // 必须 clear（把 foreground 还回原值），不能只 hide：
                 // 只置 null 的话遮罩对象仍在，任何一次重挂/保活都会把它写回来，
                 // 聊天页（半透明窗口）就会透出主界面壁纸。
