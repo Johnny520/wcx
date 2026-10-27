@@ -146,7 +146,10 @@ fun ThemeWorkshopScreen(onBack: () -> Unit) {
     }
 
     fun saveCurrent(): Boolean {
-        val pack = editing ?: return false
+        // editing 只在「手动点选主题」时才有值。直接点右上「应用」时它是 null，
+        // 原来会直接 return false → 弹「保存失败」（用户必须重新点一下主题才能应用）。
+        // 这里用当前选中的主题兜底。
+        val pack = editing ?: ThemePack.find(selectedId) ?: return false
         ThemePack.updateMeta(pack, draftName, draftDesc.trim())
         ThemePack.saveSwitches(pack, ThemeExtras.currentSwitches())
         refreshAll()

@@ -179,7 +179,7 @@ internal object ThemeSurface {
             // 底下主界面的壁纸就会透出来，跟微信自带聊天背景叠在一起。
             runCatching {
                 if (!ThemePages.isLauncher(activity)) return@runCatching
-                TabWallpaperRenderer.hide(activity)
+                TabWallpaperRenderer.clear(activity)
                 // LauncherUI 退后台后重新回来可能是重建的，残留的页码会挂错图
                 resetTabIndex()
             }.onFailure { WeLogger.d(TAG, "onActivityPaused 隐藏壁纸失败：${it.message}") }
@@ -355,6 +355,10 @@ internal object ThemeSurface {
         findViewByClass(content, "androidx.viewpager.widget.ViewPager")?.let(pagers::add)
         findViewByClass(content, "androidx.viewpager2.widget.ViewPager2")?.let(pagers::add)
         if (pagers.isEmpty()) {
+            // 退化匹配：微信主界面的 pager 常常是 ViewPager 的子类
+            findViewByClassContains(content, "ViewPager")?.let(pagers::add)
+        }
+        if (pagers.isEmpty()) {
             warnPagerOnce("找不到 ViewPager/ViewPager2 控件")
             return@runCatching null
         }
@@ -398,6 +402,19 @@ internal object ThemeSurface {
         return null
     }
 
+    /**
+     * 按类名片段找（微信主界面的 pager 是 ViewPager 子类/自定义实现，
+     * 用 `javaClass.name == "androidx.viewpager.widget.ViewPager"` 精确匹配是找不到的 —— 日志实测）。
+     */
+    private fun findViewByClassContains(root: ViewGroup, keyword: String): View? {
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (child.javaClass.name.contains(keyword)) return child
+            if (child is ViewGroup) findViewByClassContains(child, keyword)?.let { return it }
+        }
+        return null
+    }
+
     /** tabIndex 对应的图片文件；该页没设就退回第一张有图的页。 */
     private fun fileForTab(files: List<java.io.File?>, tab: Int): java.io.File? =
         files.getOrNull(tab) ?: files.firstOrNull { it != null }
@@ -415,10 +432,11 @@ internal object ThemeSurface {
      * 否则要退出重进主界面才生效。
      */
     fun onTabScrolled(activity: Activity, position: Int, offset: Float) {
-        if (offset != 0f || position == lastTabIndex) return
-        lastTabIndex = position
-        runCatching { updateTabWallpaper(activity, position) }
-            .onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
+        // 只记录页码，**绝不在这里换图**。
+        // 滑动第一帧 onPageScrolled 带的是「旧页码 + offset=0」，
+        // 在这里换图会先把上一页的图刷回来，动画结束 onPageSelected 再切成新页 →
+        // 视觉上就是「切页时图片来回跳」。v330 也是只在 onPageScrolled 记页码。
+        if (offset == 0f && position in 0..3) lastTabIndex = position
     }
 
     /**
@@ -468,8 +486,7 @@ internal object ThemeSurface {
         }
         wallpaperFailStreak = 0
         wallpaperAttached[activity] = true
-        // 双保险：hook 接不上时靠轮询也能换页
-        startTabPolling(activity)
+
         val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
         val logKey = "$info|tab=$tab|${file?.absolutePath}"
         if (logKey != lastLoggedWallpaper) {
@@ -485,52 +502,9 @@ internal object ThemeSurface {
             val files = ThemeMaterials.tabWallpaperFiles(ThemeStore.activeThemeIdOrEmpty())
             if (files.all { it == null }) return@runCatching
             val file = fileForTab(files, position) ?: files.firstOrNull { it != null }
-            TabWallpaperRenderer.apply(activity, file, position, ThemeStore.overlayOpacity())
+            val result = TabWallpaperRenderer.apply(activity, file, position, ThemeStore.overlayOpacity())
+            WeLogger.i(TAG, "切页换图 → Tab=$position 文件=${file?.name ?: "null"} 结果=$result")
         }.onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
-    }
-
-    // ══════════════════════════════════════════════════════════
-    // 页码轮询：hook 万一没接上，也要能 4 页各归各页
-    // ══════════════════════════════════════════════════════════
-
-    private const val TAB_POLL_INTERVAL_MS = 400L
-
-    private var tabPollAction: Runnable? = null
-    private var tabPollTarget: ViewGroup? = null
-
-    /**
-     * 主界面在前台时每 400ms 对一次页码（只读一个 int + 比较，开销可忽略）。
-     *
-     * 有了它，即使 `onPageSelected` / `onPageScrolled` 一个都没 hook 上，
-     * 切 Tab 后也能在一个轮询周期内换到正确的图。
-     */
-    private fun startTabPolling(activity: Activity) {
-        val decor = activity.window?.decorView as? ViewGroup ?: return
-        if (tabPollTarget === decor && tabPollAction != null) return
-        stopTabPolling()
-        val action = object : Runnable {
-            override fun run() {
-                runCatching {
-                    val idx = readRealTabIndex(activity)
-                    if (idx != null && idx != lastTabIndex) {
-                        lastTabIndex = idx
-                        updateTabWallpaper(activity, idx)
-                    }
-                }
-                decor.postDelayed(this, TAB_POLL_INTERVAL_MS)
-            }
-        }
-        tabPollAction = action
-        tabPollTarget = decor
-        decor.postDelayed(action, TAB_POLL_INTERVAL_MS)
-    }
-
-    fun stopTabPolling() {
-        val decor = tabPollTarget
-        val action = tabPollAction
-        tabPollTarget = null
-        tabPollAction = null
-        if (decor != null && action != null) runCatching { decor.removeCallbacks(action) }
     }
 
     /** 改透明度后重挂一次（前景遮罩的 alpha 每次 apply 重算）。 */
@@ -542,15 +516,19 @@ internal object ThemeSurface {
      * 把所有主界面（LauncherUI）的遮罩藏起来。
      *
      * 聊天页与很多二级页面是半透明窗口，藏晚了就会「主界面壁纸透过来」。
-     * 隐藏态会写进 renderer 的 hidden 标记，定时保活不会再把它写回去。
+     * 用的是彻底 clear（还没到回主界面重建），只 hide 的话遮罩对象仍在，
+     * 任何一次保活都会把它写回来 —— 这就是「聊天页透出壁纸」旧根因。
      */
     fun hideLauncherWallpapers() {
-        stopTabPolling()
         runCatching {
             liveActivities().forEach { act ->
-                if (ThemePages.isLauncher(act)) TabWallpaperRenderer.hide(act)
+                if (!ThemePages.isLauncher(act)) return@forEach
+                // 必须 clear（把 foreground 还回原值），不能只 hide：
+                // 只置 null 的话遮罩对象仍在，任何一次重挂/保活都会把它写回来，
+                // 聊天页（半透明窗口）就会透出主界面壁纸。
+                TabWallpaperRenderer.clear(act)
             }
-        }.onFailure { WeLogger.w(TAG, "隐藏主界面遮罩失败：${it.message}") }
+        }.onFailure { WeLogger.w(TAG, "撤掉主界面遮罩失败：${it.message}") }
     }
 
     /** 移除前景遮罩并还回窗口原来的 foreground。 */
@@ -604,7 +582,6 @@ internal object ThemeSurface {
 
     /** 移除某个页面的全部主题痕迹。 */
     fun removeWallpaper(activity: Activity) {
-        stopTabPolling()
         removeTabWallpapers(activity)
         runCatching {
             // 兼容历史版本留下的一次性壁纸层

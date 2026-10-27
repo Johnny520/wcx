@@ -58,15 +58,6 @@ internal object TabWallpaperRenderer {
     /** 只对挂过的窗口做清理，避免白跑。 */
     private val masked = java.util.WeakHashMap<ViewGroup, Boolean>()
 
-    /**
-     * 「主动隐藏」状态（进聊天页 / 其它页面时）。
-     *
-     * 有了这个标志，定时保活才不会把刚藏起来的遮罩又写回去 ——
-     * 2026-10-27 之前正是因为没有它，reassert 在聊天页里把壁纸写了回来，
-     * 表现为「聊天页会透出主页壁纸，打字时消失、关输入法又出现」。
-     */
-    private val hidden = java.util.WeakHashMap<ViewGroup, Boolean>()
-
     // ── 诊断快照（主题诊断页直接读，不用再猜） ──
     @Volatile var lastAt = 0L
         private set
@@ -120,7 +111,6 @@ internal object TabWallpaperRenderer {
             .onFailure { return fail("setForeground 抛异常：${it.message}") }
         masks[decor] = mask
         masked[decor] = true
-        hidden[decor] = false
         lastDrawable = mask
         // 兜底：首次 apply 时 DecorView 可能还没完成布局（bounds 为 0），
         // 这里手动给一次 bounds；后续尺寸变化由 View.sizeChange 自动更新。
@@ -140,9 +130,8 @@ internal object TabWallpaperRenderer {
         listOf(300L, 1200L, 3000L).forEach { delay ->
             activity.window?.decorView?.postDelayed({
                 val decor = activity.window?.decorView as? ViewGroup ?: return@postDelayed
+                // 已被撤掉（用户在聊天页 / 其它页面）——绝不写回
                 if (masked[decor] != true) return@postDelayed
-                // 正处于「主动隐藏」（用户在聊天页 / 设置页 / 任何其它页面）——绝不写回
-                if (hidden[decor] == true) return@postDelayed
                 if (decor.foreground === mask) return@postDelayed
                 // 被微信换掉了 → 写回我们的遮罩（原 foreground 早在第一次 apply 时备份过）
                 runCatching {
@@ -156,45 +145,11 @@ internal object TabWallpaperRenderer {
         }
     }
 
-    /**
-     * 主动藏起来（进了聊天页 / 设置页 / 任何非主界面页面），保留遮罩对象，回主界面再显示。
-     * 会打上 [hidden] 标记，定时保活不会再把它写回来。
-     */
-    fun hide(activity: Activity) {
-        val decor = activity.window?.decorView as? ViewGroup ?: return
-        if (masked[decor] != true) return
-        hidden[decor] = true
-        runCatching {
-            if (decor.foreground != null) {
-                decor.foreground = null
-                decor.invalidate()
-            }
-        }
-    }
-
-    /** 从 [hide] 恢复。 */
-    fun show(activity: Activity) {
-        val decor = activity.window?.decorView as? ViewGroup ?: return
-        val mask = masks[decor] ?: return
-        hidden[decor] = false
-        if (decor.foreground === mask) return
-        runCatching {
-            mask.setBounds(0, 0, decor.width.coerceAtLeast(0), decor.height.coerceAtLeast(0))
-            decor.foreground = mask
-            decor.invalidate()
-        }
-    }
-
-    fun isHidden(activity: Activity): Boolean = runCatching {
-        hidden[activity.window?.decorView as? ViewGroup] == true
-    }.getOrDefault(false)
-
     /** 彻底撤销：还回窗口原来的 foreground。 */
     fun clear(activity: Activity) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
         if (masked.remove(decor) == null) return
         val mask = masks.remove(decor)
-        hidden.remove(decor)
         if (lastDrawable === mask) lastDrawable = null
         runCatching { decor.foreground = savedForeground.remove(decor) }
             .onFailure { WeLogger.w(TAG, "还原 foreground 失败：${it.message}") }
@@ -215,8 +170,7 @@ internal object TabWallpaperRenderer {
             else -> "前景遮罩=已挂载 size=${decor.width}x${decor.height} 子View数=${decor.childCount}"
         }
         val cur = when {
-            fg == null && hidden[decor] == true -> "foreground=null（已在其它页面主动隐藏，正常）"
-            fg == null -> "foreground=null（被宿主清掉，应回主界面时重挂）"
+            fg == null -> "foreground=null（已撤掉或被宿主清掉，回主界面会重挂）"
             mask != null && fg === mask ->
                 "foreground=我们的遮罩 alpha=${mask.alphaPct}% 绘制=${mask.drawCount}次 bounds=${mask.lastDrawnBounds}"
             else -> "foreground=被宿主替换为 ${fg.javaClass.simpleName}"
