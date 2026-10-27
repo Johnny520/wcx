@@ -13,6 +13,7 @@ import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
+import com.Johnny.wcx.utils.reflection.ClassLoaders
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.fs.createDirsSafe
 import dev.ujhhgtg.reflekt.reflekt
@@ -153,6 +154,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     /** doOnCreate 是否已挂过（避免重复注册 lambda）。 */
     @Volatile private var doOnCreateHooked = false
 
+    /** 聊天页 ChattingUI 是否已 hook。 */
+    @Volatile private var chattingPageHooked = false
+
+    @Volatile private var chattingHookOk = false
+
     @Volatile private var hookScrolledOk = false
     @Volatile private var hookSelectedOk = false
 
@@ -160,10 +166,47 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     private val hookedTabsAdapters: MutableSet<Any> =
         java.util.Collections.newSetFromMap(java.util.WeakHashMap<Any, Boolean>())
 
+    /**
+     * 聊天页锚点：`com.tencent.mm.ui.chatting.ChattingUI`（8.0.79 实测类名，多年未变）。
+     *
+     * 它一出现就把主界面壁纸遮罩整个撤掉 —— 这比在主界面侧等 onPause / 等失焦可靠得多，
+     * 因为聊天页无论是不是半透明窗口，它自己的 onCreate/onResume 一定会执行。
+     */
+    private fun hookChattingPage() {
+        if (chattingPageHooked) return
+        chattingPageHooked = true
+        runCatching {
+            val clazz = ClassLoaders.HOST.loadClass("com.tencent.mm.ui.chatting.ChattingUI")
+            var hooked = 0
+            listOf("onCreate", "onResume").forEach { methodName ->
+                runCatching {
+                    val method = clazz.reflekt().firstMethodOrNull { name = methodName }
+                    if (method == null) {
+                        WeLogger.w(TAG, "ChattingUI 里没有 $methodName 方法，跳过")
+                        return@runCatching
+                    }
+                    method.hookAfter {
+                        ThemeSurface.onChattingPageShown(thisObject as? Activity)
+                    }
+                    hooked++
+                }.onFailure { WeLogger.w(TAG, "hook ChattingUI.$methodName 失败", it) }
+            }
+            runCatching {
+                clazz.reflekt().firstMethodOrNull { name = "onDestroy" }?.let { method ->
+                    method.hookAfter { ThemeSurface.onChattingPageClosed() }
+                    hooked++
+                }
+            }.onFailure { WeLogger.w(TAG, "hook ChattingUI.onDestroy 失败", it) }
+            chattingHookOk = hooked > 0
+            WeLogger.i(TAG, "聊天页锚点：已 hook ChattingUI 的 $hooked 个方法（进入即撤掉主界面壁纸）")
+        }.onFailure { WeLogger.w(TAG, "hook 聊天页 ChattingUI 失败：${it.message}") }
+    }
+
     override fun onEnable() {
         // 清掉历史遗留的持久化失败计数（老版本写进去的脏值会让主题被永久锁死）
         runCatching { WePrefs.remove("theme_store_wallpaper_fail") }
         hookTabSwitch()
+        hookChattingPage()
         ThemeSurface.registerCallbacks(true)
         WeChatMessageViewApi.addListener(this)
         if (activeThemeId.isNotEmpty()) {
@@ -225,6 +268,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         ThemeSurface.resetFailStreak()
         // 顺手确认一次切页 hook（幂等）：万一 onEnable 时还没到主界面 doOnCreate，这里补上
         hookTabSwitch()
+        hookChattingPage()
         applyThemeInternal(id)
         setOverlayOpacity(overlayOpacityPct)
     }
@@ -506,6 +550,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
 
         // 分页是否生效，就看这两行：页码读不到 / 切页 hook 没挂上，都会「4 页全是主页那张」
         appendLine("doOnCreate hook = ${if (doOnCreateHooked) "已注册" else "未注册（功能没开过）"}")
+        appendLine(
+            "聊天页 hook = ${if (chattingHookOk) "已挂 ChattingUI（进入即撤掉主界面壁纸）"
+            else if (chattingPageHooked) "挂载失败（见日志）" else "未注册"}"
+        )
         appendLine(
             "切页 hook = adapter ${hookedTabsAdapters.size} 处" +
                 "，onPageSelected=${if (hookSelectedOk) "已挂" else "未挂"}" +

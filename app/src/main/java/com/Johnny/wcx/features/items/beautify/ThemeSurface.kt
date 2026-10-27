@@ -547,6 +547,34 @@ internal object ThemeSurface {
     }
 
     /**
+     * 聊天页出现了（由 Feature 侧 hook ChattingUI.onCreate/onResume 触发）。
+     *
+     * 用户要求：主题只允许出现在主页/通讯录/发现/我 这 4 个 Tab，
+     * 聊天页一出现就把主界面的壁纸遮罩**整个撤掉** —— 不存在就无从透出。
+     */
+    fun onChattingPageShown(activity: Activity?) {
+        hideLauncherWallpapers()
+        if (activity != null) {
+            runCatching { applyChattingWallpaper(activity) }
+                .onFailure { WeLogger.w(TAG, "聊天页背景处理失败：${it.message}") }
+        }
+    }
+
+    /**
+     * 聊天页关闭（onDestroy）：如果主界面此时已在前台并且拿到焦点，直接重挂。
+     * 拿不到焦点也没关系 —— 焦点监听和 onActivityResumed 都会补。
+     */
+    fun onChattingPageClosed() {
+        runCatching {
+            liveActivities()
+                .firstOrNull {
+                    ThemePages.isLauncher(it) && it.window?.decorView?.hasWindowFocus() == true
+                }
+                ?.let { applyTabWallpapers(it) }
+        }.onFailure { WeLogger.w(TAG, "聊天页关闭后重挂失败：${it.message}") }
+    }
+
+    /**
      * 把所有主界面（LauncherUI）的遮罩藏起来。
      *
      * 聊天页与很多二级页面是半透明窗口，藏晚了就会「主界面壁纸透过来」。
