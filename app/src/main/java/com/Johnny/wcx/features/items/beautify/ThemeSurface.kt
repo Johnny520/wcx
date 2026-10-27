@@ -340,21 +340,41 @@ internal object ThemeSurface {
      *
      * 取到 0~3 以外的值一律当作「读不到」，用调用方给的默认页，绝不拿脏值去选图。
      */
-    fun currentTabIndex(activity: Activity): Int {
-        val fallback = lastTabIndex.takeIf { it in 0..3 } ?: 0
-        return runCatching {
-            val content = activity.window?.decorView?.findViewById<ViewGroup>(android.R.id.content)
-                ?: return@runCatching fallback
-            val pagers = ArrayList<View>(2)
-            findViewByClass(content, "androidx.viewpager.widget.ViewPager")?.let(pagers::add)
-            findViewByClass(content, "androidx.viewpager2.widget.ViewPager2")?.let(pagers::add)
-            if (pagers.isEmpty()) return@runCatching fallback
-            for (pager in pagers) {
-                readPagerIndex(pager)?.let { if (it in 0..3) return@runCatching it }
-            }
-            fallback
-        }.getOrDefault(fallback)
+    fun currentTabIndex(activity: Activity): Int =
+        readRealTabIndex(activity) ?: lastTabIndex.takeIf { it in 0..3 } ?: 0
+
+    /**
+     * 真实页码；读不到返回 null（绝不返回 0 冒充）。
+     *
+     * 这条和 hook 是并行的两条路：hook 走微信回调（权威），这里走读 ViewPager 字段（兜底轮询用）。
+     */
+    fun readRealTabIndex(activity: Activity): Int? = runCatching {
+        val content = activity.window?.decorView?.findViewById<ViewGroup>(android.R.id.content)
+            ?: return@runCatching null
+        val pagers = ArrayList<View>(2)
+        findViewByClass(content, "androidx.viewpager.widget.ViewPager")?.let(pagers::add)
+        findViewByClass(content, "androidx.viewpager2.widget.ViewPager2")?.let(pagers::add)
+        if (pagers.isEmpty()) {
+            warnPagerOnce("找不到 ViewPager/ViewPager2 控件")
+            return@runCatching null
+        }
+        for (pager in pagers) {
+            readPagerIndex(pager)?.let { if (it in 0..3) return@runCatching it }
+        }
+        warnPagerOnce("ViewPager 上 mCurItem/mCurrentItem/getCurrentItem 都取不到")
+        null
+    }.getOrNull()
+
+    /** 页码读不到时只提醒一次，别刷日志。 */
+    @Volatile private var pagerWarned = false
+    private fun warnPagerOnce(reason: String) {
+        if (pagerWarned) return
+        pagerWarned = true
+        WeLogger.w(TAG, "读不到主界面页码：$reason（切页换图将依赖 onPageSelected 回调）")
     }
+
+    /** 页码读取是否成功过（诊断用）。 */
+    fun pagerReadable(activity: Activity): Boolean = readRealTabIndex(activity) != null
 
     /** 读 ViewPager/ViewPager2 的当前页码：字段优先，方法兜底。 */
     private fun readPagerIndex(pager: View): Int? {
@@ -448,6 +468,8 @@ internal object ThemeSurface {
         }
         wallpaperFailStreak = 0
         wallpaperAttached[activity] = true
+        // 双保险：hook 接不上时靠轮询也能换页
+        startTabPolling(activity)
         val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
         val logKey = "$info|tab=$tab|${file?.absolutePath}"
         if (logKey != lastLoggedWallpaper) {
@@ -467,6 +489,50 @@ internal object ThemeSurface {
         }.onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
     }
 
+    // ══════════════════════════════════════════════════════════
+    // 页码轮询：hook 万一没接上，也要能 4 页各归各页
+    // ══════════════════════════════════════════════════════════
+
+    private const val TAB_POLL_INTERVAL_MS = 400L
+
+    private var tabPollAction: Runnable? = null
+    private var tabPollTarget: ViewGroup? = null
+
+    /**
+     * 主界面在前台时每 400ms 对一次页码（只读一个 int + 比较，开销可忽略）。
+     *
+     * 有了它，即使 `onPageSelected` / `onPageScrolled` 一个都没 hook 上，
+     * 切 Tab 后也能在一个轮询周期内换到正确的图。
+     */
+    private fun startTabPolling(activity: Activity) {
+        val decor = activity.window?.decorView as? ViewGroup ?: return
+        if (tabPollTarget === decor && tabPollAction != null) return
+        stopTabPolling()
+        val action = object : Runnable {
+            override fun run() {
+                runCatching {
+                    val idx = readRealTabIndex(activity)
+                    if (idx != null && idx != lastTabIndex) {
+                        lastTabIndex = idx
+                        updateTabWallpaper(activity, idx)
+                    }
+                }
+                decor.postDelayed(this, TAB_POLL_INTERVAL_MS)
+            }
+        }
+        tabPollAction = action
+        tabPollTarget = decor
+        decor.postDelayed(action, TAB_POLL_INTERVAL_MS)
+    }
+
+    fun stopTabPolling() {
+        val decor = tabPollTarget
+        val action = tabPollAction
+        tabPollTarget = null
+        tabPollAction = null
+        if (decor != null && action != null) runCatching { decor.removeCallbacks(action) }
+    }
+
     /** 改透明度后重挂一次（前景遮罩的 alpha 每次 apply 重算）。 */
     fun refreshAlpha() {
         applyToAllLive()
@@ -479,6 +545,7 @@ internal object ThemeSurface {
      * 隐藏态会写进 renderer 的 hidden 标记，定时保活不会再把它写回去。
      */
     fun hideLauncherWallpapers() {
+        stopTabPolling()
         runCatching {
             liveActivities().forEach { act ->
                 if (ThemePages.isLauncher(act)) TabWallpaperRenderer.hide(act)
@@ -537,6 +604,7 @@ internal object ThemeSurface {
 
     /** 移除某个页面的全部主题痕迹。 */
     fun removeWallpaper(activity: Activity) {
+        stopTabPolling()
         removeTabWallpapers(activity)
         runCatching {
             // 兼容历史版本留下的一次性壁纸层

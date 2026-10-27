@@ -519,6 +519,10 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                     "当前 Tab 实测 = ${ThemeSurface.currentTabIndex(launcher)}" +
                         "（0=主页 1=通讯录 2=发现 3=我；永远是 0 就是页码没读到）"
                 )
+                appendLine(
+                    "页码可读 = " + (if (ThemeSurface.pagerReadable(launcher)) "是（轮询兜底可用）"
+                    else "否（只能靠 onPageSelected 回调换图）")
+                )
             }
 
         // 最近一次用图的那张图，同目录下 4 张分页图到底在不在
