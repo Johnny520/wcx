@@ -132,6 +132,9 @@ internal object TabWallpaperRenderer {
                 val decor = activity.window?.decorView as? ViewGroup ?: return@postDelayed
                 // 已被撤掉（用户在聊天页 / 其它页面）——绝不写回
                 if (masked[decor] != true) return@postDelayed
+                // 已经被新一张图替换（切页了）——旧图的保活必须作废，
+                // 否则切页后 300ms 旧图会被写回来，视觉上就是「切页时来回跳」
+                if (masks[decor] !== mask) return@postDelayed
                 if (decor.foreground === mask) return@postDelayed
                 // 被微信换掉了 → 写回我们的遮罩（原 foreground 早在第一次 apply 时备份过）
                 runCatching {
