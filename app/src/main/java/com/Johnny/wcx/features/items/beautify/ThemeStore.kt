@@ -913,22 +913,6 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     /**
-     * 壁纸层的宿主 = `android.R.id.content`（FrameLayout），插在它的 index 0，位于页面根之下。
-     *
-     * 为什么不用 DecorView：
-     * - DecorView 的 index 0 是窗口内容容器，微信 LauncherUI 空闲时预加载聊天页
-     *   （Log tag `MicroMsg.LauncherUI.NewChattingTabUI` / 方法 `queueIdle`）会按既有
-     *   子节点序列找容器，多插一层就会被当成容器，findViewById 返回 null 后
-     *   `setVisibility` 直接 NPE 崩主线程（2026-10-27 02:24 那次崩溃）。
-     * - 挂在 content 里是纯叠层（FrameLayout），既不改变 DecorView/screen_simple 的
-     *   子序列，也不会像 LinearLayout 那样把页面挤出去。
-     */
-    private fun wallpaperHost(decor: ViewGroup): Pair<ViewGroup, Int>? {
-        val content = runCatching { decor.findViewById<ViewGroup>(android.R.id.content) }.getOrNull() ?: return null
-        return content to 0
-    }
-
-    /**
      * 挂 / 更新 4 个页面的背景。
      *
      * 只用**一个自绘 View**（没有子 View），插在 android.R.id.content 的最底层：
@@ -955,12 +939,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         // （Log tag MicroMsg.LauncherUI.NewChattingTabUI / 方法 queueIdle），那里按 DecorView
         // 既有子节点找窗口内容容器。多插一层会被它当成容器，findViewById 返回 null 后
         // setVisibility 直接 NPE 崩主线程（2026-10-27 02:24 那次崩溃）。
-        val hostInfo = wallpaperHost(decor)
-        if (hostInfo == null) {
-            WeLogger.w(TAG, "applyTabWallpapers 跳过：找不到 android.R.id.content 的父容器（${activity.javaClass.name}）")
-            return
-        }
-        val (host, slot) = hostInfo
+        // 覆盖模式挂在 DecorView 顶层（追加到末尾）：不占 index 0，微信 getChildAt(0) 不受影响；
+        // 覆盖整屏（含系统栏），也不受 content 里 Fragment 布局/尺寸的影响（早前挂在 content 里
+        // 出现过 size=0x0 —— 后台 Activity 不 layout，那一层永远画不出来）。
+        val host = decor
+        val slot = decor.childCount
         if (!isOverlayMode()) {
             // 旧「四 Tab 主题背景」的等效实现：不插任何 View，直接写 DecorView 的 background。
             try {
@@ -974,11 +957,12 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 // 常常自带不透明底色，会把这一层彻底盖住 —— 这就是「设置了但看不见」的原因。
                 // 只清「装饰层 / 内容容器」这两层，不动列表、气泡、文字本身。
                 clearSurfaceLite(activity, decor)
-                // 再往下探一层：微信的会话列表/通讯录根容器在 ViewPager 里面，
-                // 只清 content 的直接子级还不够，底板色会把壁纸挡住。
-                runCatching {
-                    decor.findViewById<ViewGroup>(android.R.id.content)?.let { clearSurfaceDeep(activity, it) }
-                }
+                // 微信主界面是多层不透明容器叠起来的（会话列表外壳 + 每个 item 行），
+                // 只清两层透不出来。这里把所有容器类 View 的背景一起清掉，
+                // 再挂几个延迟重清（微信会把它设回去）。
+                val clearedCount = runCatching { clearAllContainerBackgrounds(activity, decor) }.getOrDefault(0)
+                if (clearedCount > 0) WeLogger.i(TAG, "已清容器背景 $clearedCount 层")
+                scheduleReclear(activity)
                 wallpaperAttached[activity] = true
                 wallpaperFailStreak = 0
                 val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
@@ -1000,48 +984,45 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
                 detach(existing)
                 ThemeWallpaperView(activity).also {
                     it.tag = TAB_ROOT_TAG
-                    host.addView(it, slot, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-                }
-            }
-            val overlayMode = isOverlayMode()
-            if (overlayMode) {
-                // 覆盖式：始终贴在内容容器最上层。不依赖页面是否透明，任何版本都看得见。
-                if (view.parent !== host) {
-                    val lp = view.layoutParams
-                        ?: ViewGroup.LayoutParams(
+                    host.addView(
+                        it,
+                        ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                    detach(view)
-                    host.addView(view, lp)
-                } else {
-                    host.bringChildToFront(view)
+                    )
                 }
-            } else if (view.parent !== host || host.indexOfChild(view) != slot) {
-                val lp = view.layoutParams ?: ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            }
+            if (view.parent !== host) {
+                val lp = view.layoutParams
+                    ?: ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                 detach(view)
-                host.addView(view, slot, lp)
+                host.addView(view, lp)
+            } else {
+                host.bringChildToFront(view)
             }
             view.visibility = View.VISIBLE
             // 以当前真实页码为准：LauncherUI 重建后 lastTabIndex 是上一次的残值，会挂错图
             val tab = currentTabIndex(activity).takeIf { it in 0..3 } ?: lastTabIndex
             if (tab in 0..3) lastTabIndex = tab
-            val file = fileForTab(files, tab)
-            // 复合 key：路径 + 修改时间。只按路径判断的话，同一路径换了图不会刷新。
+            // 页码取不到时兜底用第一张可用图，宁可显示「主页」那张，也不要一片空白
+            val file = fileForTab(files, tab) ?: files.firstOrNull { it != null }
+            // 复合 key：路径 + 修改时间。bitmap 为空时必须重解（上一次可能因为后台/未 attach 失败）
             val path = file?.let { "${it.absolutePath}|${it.lastModified()}" }
-            if (path != null && path != tabBitmapPath) {
+            if (path != null && (path != tabBitmapPath || view.bitmap == null)) {
                 val bmp = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
                 if (bmp != null) {
                     view.bitmap = bmp
                     tabBitmapPath = path
+                } else {
+                    WeLogger.w(TAG, "壁纸解码失败：$path")
                 }
             }
+            view.requestLayout()
             view.alpha = overlayOpacityPct.coerceIn(MIN_OPACITY, MAX_OPACITY) / 100f
-            if (!overlayMode) {
-                // 只有垫底模式才需要把页面底板清透明，否则壁纸会被不透明容器整块盖住。
-                // 覆盖模式不清任何微信背景 —— 少动宿主结构，少一分崩溃/掉帧风险。
-                clearSurfaceLite(activity, decor)
-            }
             wallpaperAttached[activity] = true
             wallpaperFailStreak = 0
             val info = files.mapIndexed { i, f -> "${TAB_NAMES[i]}=${f != null}" }.joinToString("，")
@@ -1095,31 +1076,45 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     }
 
     /**
-     * 递归清「铺满内容区」的容器底色（最多 4 层、最多 8 个），用来穿透到 ViewPager 里的页面根。
+     * 暴力清「容器类」背景：递归清掉所有 ViewGroup 的 background。
      *
-     * 判定条件带尺寸：只清和 content 一样大的容器（典型底板），
-     * 列表项/卡片/气泡因为这些尺寸小，不会被误清。
+     * 不动 TextView / ImageView（文字和图标自己的底不能清），跳过结构条与我们自己的层。
+     * 微信主界面有多层不透明容器，清两层根本透不出来 —— 同类模块 OKK 为此写了近千行清理逻辑，
+     * 这里用「全部容器 + 定时重清」把它压到一个函数里。
      */
-    private fun clearSurfaceDeep(activity: Activity, content: ViewGroup) {
-        val targetW = content.width
-        val targetH = content.height
-        if (targetW <= 0 || targetH <= 0) return
-        var cleared = 0
+    private fun clearAllContainerBackgrounds(activity: Activity, root: ViewGroup): Int {
+        var count = 0
+        val limit = 80
         fun walk(v: View, depth: Int) {
-            if (depth > 4 || cleared >= 8) return
+            if (depth > 8 || count >= limit) return
             if (v.tag == TAB_ROOT_TAG) return
+            if (v is TextView || v is ImageView) return
             if (isStructuralBar(v)) return
-            val full = v.width >= targetW - 8 && v.height >= targetH - 8
-            if (full && v.background != null) {
+            if (v.background != null) {
                 clearBg(activity, v)
-                cleared++
+                count++
             }
             if (v is ViewGroup) {
                 for (i in 0 until v.childCount) v.getChildAt(i)?.let { child -> walk(child, depth + 1) }
             }
         }
-        walk(content, 0)
-        if (cleared > 0) WeLogger.i(TAG, "已清页面底板底色 $cleared 层（让 DecorView 背景透出来）")
+        walk(root, 0)
+        return count
+    }
+
+    /** 微信会把自己设的背景装回去，隔几拍再清一次。 */
+    private fun scheduleReclear(activity: Activity) {
+        val decor = activity.window?.decorView as? ViewGroup ?: return
+        listOf(300L, 1200L, 3000L).forEach { delay ->
+            decor.postDelayed({
+                if (!isOverlayMode() && wallpaperAttached[activity] == true) {
+                    runCatching {
+                        val n = clearAllContainerBackgrounds(activity, decor)
+                        if (n > 0) WeLogger.i(TAG, "重清底板背景 $n 层")
+                    }
+                }
+            }, delay)
+        }
     }
 
     /** Tab 栏 / 标题栏 / 底部导航这类结构条不动，否则会出现壁纸从 Tab 栏透出来。 */
