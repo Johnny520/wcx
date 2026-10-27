@@ -159,12 +159,67 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
 
     @Volatile private var chattingHookOk = false
 
+    /** 聊天页 Fragment（真正从会话列表进入时走的路径）是否已 hook。 */
+    @Volatile private var chattingFragmentHooked = false
+
+    @Volatile private var chattingFragmentHookOk = false
+
+    @Volatile private var chattingFragmentHookCount = 0
+
     @Volatile private var hookScrolledOk = false
     @Volatile private var hookSelectedOk = false
 
     /** 已挂过切页监听的 adapter，避免每次进主页重复 hook。 */
     private val hookedTabsAdapters: MutableSet<Any> =
         java.util.Collections.newSetFromMap(java.util.WeakHashMap<Any, Boolean>())
+
+    /**
+     * 聊天页 Fragment 锚点（**从会话列表进入聊天页的真实路径**）。
+     *
+     * 8.0.79 dex 实测（明文、未被 R8 混淆）：
+     * - `com.tencent.mm.ui.chatting.ChattingUIFragment` extends `BaseChattingUIFragment` extends `MMFragment`
+     * - `com.tencent.mm.ui.chatting.ChattingUI` extends `MMSecDataFragmentActivity`（外部/通知进入时才用）
+     *
+     * 微信对这几个类一直保留明文（R8 只重命名自己的业务类），因此它们是跨版本相对稳定的锚点；
+     * 即便如此，ChatPageGuard 的纯 View 特征识别仍然保留作为兜底，任一路命中即可。
+     */
+    private fun hookChattingFragment() {
+        if (chattingFragmentHooked) return
+        chattingFragmentHooked = true
+        var hooked = 0
+        listOf(
+            "com.tencent.mm.ui.chatting.ChattingUIFragment",
+            "com.tencent.mm.ui.chatting.BaseChattingUIFragment"
+        ).forEach { clsName ->
+            runCatching {
+                val clazz = ClassLoaders.HOST.loadClass(clsName)
+                listOf("onCreate", "onResume", "onViewCreated").forEach { methodName ->
+                    runCatching {
+                        val method = clazz.reflekt().firstMethodOrNull { name = methodName }
+                            ?: return@runCatching
+                        method.hookAfter {
+                            val view = runCatching {
+                                thisObject.javaClass.getMethod("getView").invoke(thisObject) as? View
+                            }.getOrNull()
+                            ThemeSurface.onChattingFragmentShown(view)
+                        }
+                        hooked++
+                    }.onFailure { WeLogger.w(TAG, "hook $clsName.$methodName 失败", it) }
+                }
+                listOf("onPause", "onDestroyView").forEach { methodName ->
+                    runCatching {
+                        val method = clazz.reflekt().firstMethodOrNull { name = methodName }
+                            ?: return@runCatching
+                        method.hookAfter { ThemeSurface.onChattingFragmentHidden() }
+                        hooked++
+                    }.onFailure { WeLogger.w(TAG, "hook $clsName.$methodName 失败", it) }
+                }
+            }.onFailure { WeLogger.w(TAG, "加载聊天页 Fragment 失败（$clsName）：${it.message}") }
+        }
+        chattingFragmentHookCount = hooked
+        chattingFragmentHookOk = hooked > 0
+        WeLogger.i(TAG, "聊天页 Fragment 锚点：已 hook $hooked 个方法（进入即撤壁纸 + 容器兜底）")
+    }
 
     /**
      * 聊天页锚点：`com.tencent.mm.ui.chatting.ChattingUI`（8.0.79 实测类名，多年未变）。
@@ -207,6 +262,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         runCatching { WePrefs.remove("theme_store_wallpaper_fail") }
         hookTabSwitch()
         hookChattingPage()
+        hookChattingFragment()
         ThemeSurface.registerCallbacks(true)
         WeChatMessageViewApi.addListener(this)
         if (activeThemeId.isNotEmpty()) {
@@ -269,6 +325,7 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         // 顺手确认一次切页 hook（幂等）：万一 onEnable 时还没到主界面 doOnCreate，这里补上
         hookTabSwitch()
         hookChattingPage()
+        hookChattingFragment()
         applyThemeInternal(id)
         setOverlayOpacity(overlayOpacityPct)
     }
@@ -553,6 +610,11 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         appendLine(
             "聊天页 hook = ${if (chattingHookOk) "已挂 ChattingUI（进入即撤掉主界面壁纸）"
             else if (chattingPageHooked) "挂载失败（见日志）" else "未注册"}"
+        )
+        appendLine(
+            "聊天页 Fragment 锚点 = " +
+                (if (chattingFragmentHookOk) "已 hook $chattingFragmentHookCount 个方法"
+                else "未挂上（靠 View 特征识别兜底）")
         )
         appendLine(
             "切页 hook = adapter ${hookedTabsAdapters.size} 处" +
