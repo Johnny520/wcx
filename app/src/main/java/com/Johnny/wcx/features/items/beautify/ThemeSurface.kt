@@ -230,7 +230,11 @@ internal object ThemeSurface {
         }
     }
 
-    /** 当前前台页面是不是它自己。 */
+    /**
+     * 当前前台页面是不是它自己。
+     * 仅用于诊断展示 —— 已不参与绘制判定（DecorView 不可见时本来就不会绘制，
+     * 而 resumedRef 在多 Activity 切换时会误判，曾导致「挂上了却不画」）。
+     */
     fun isForeground(activity: Activity): Boolean {
         val cur = resumedRef?.get() ?: return true   // 拿不到时保守放行，避免主界面突然没壁纸
         return cur === activity
@@ -557,16 +561,19 @@ internal object ThemeSurface {
         focusWatched[decor] = true
         runCatching {
             decor.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
-                if (!hasFocus) {
-                    noteEvent("主界面失焦 → 撤遮罩")
-                    WeLogger.i(TAG, "主界面失去窗口焦点（进了聊天页/其它页面）→ 撤掉壁纸遮罩")
-                    TabWallpaperRenderer.clear(activity)
-                    wallpaperAttached.remove(activity)
-                } else if (ThemeStore.activeThemeIdOrEmpty().isNotEmpty()) {
-                    noteEvent("主界面获得焦点 → 重挂")
-                    WeLogger.i(TAG, "主界面重新获得窗口焦点 → 重挂壁纸遮罩")
-                    runCatching { applyTabWallpapers(activity) }
-                        .onFailure { WeLogger.w(TAG, "重新挂载失败：${it.message}") }
+                // 注意：**失焦一律不撤壁纸**。
+                // 微信里 window 焦点会被输入法弹出、Fragment 切换、页面转场反复触发 true/false，
+                // 且「获得焦点」回调不保证与失焦对称（实测日志：丢一次就永久没图）。
+                // 撤壁纸只由「聊天页状态」与「非 Launcher 的 Activity 到前台」决定，见 hideLauncherWallpapers()。
+                if (hasFocus) {
+                    if (ThemeStore.activeThemeIdOrEmpty().isNotEmpty() && !chatPageVisible) {
+                        noteEvent("主界面获得焦点 → 补挂")
+                        WeLogger.i(TAG, "主界面重新获得窗口焦点 → 补挂壁纸遮罩")
+                        runCatching { applyTabWallpapers(activity) }
+                            .onFailure { WeLogger.w(TAG, "补挂失败：${it.message}") }
+                    }
+                } else {
+                    WeLogger.i(TAG, "主界面失焦（不撤壁纸，交给聊天页状态/Activity 切换处理）")
                 }
             }
         }.onFailure { WeLogger.w(TAG, "注册窗口焦点监听失败：${it.message}") }
@@ -623,11 +630,9 @@ internal object ThemeSurface {
         // 装一次焦点监听 / 聊天页检测监听
         ensureWindowFocusWatcher(activity, decor)
         ensureChatWatcher(activity, decor)
-        if (!decor.hasWindowFocus()) {
-            noteEvent("跳过挂载（主界面无焦点）")
-            WeLogger.i(TAG, "跳过挂载：主界面当前没有窗口焦点（说明别的页面在前台）")
-            return
-        }
+        // 不再因「没有窗口焦点」拒绝挂载：返回主界面时焦点常晚几十~几百毫秒才到，
+        // 一旦拒绝就再没人补挂 → 表现为「退回主界面 4 页全空」。
+        // DecorView 的 foreground 只在该窗口可见时才绘制，后台挂着不会漏到别的页面。
         val activeId = ThemeStore.activeThemeIdOrEmpty()
         val files = runCatching { ThemeMaterials.tabWallpaperFiles(activeId) }.getOrDefault(emptyList())
         if (files.all { it == null }) {
@@ -642,7 +647,7 @@ internal object ThemeSurface {
         val file = fileForTab(files, tab) ?: files.firstOrNull { it != null }
         val alphaPct = ThemeStore.overlayOpacity()
         val result = TabWallpaperRenderer.apply(activity, file, tab, alphaPct) {
-            isForeground(activity) && !chatPageVisible
+            !chatPageVisible
         }
         if (result != "ok") {
             wallpaperFailStreak += 1
@@ -669,7 +674,7 @@ internal object ThemeSurface {
             if (files.all { it == null }) return@runCatching
             val file = fileForTab(files, position) ?: files.firstOrNull { it != null }
             val result = TabWallpaperRenderer.apply(activity, file, position, ThemeStore.overlayOpacity()) {
-                isForeground(activity) && !chatPageVisible
+                !chatPageVisible
             }
             WeLogger.i(TAG, "切页换图 → Tab=$position 文件=${file?.name ?: "null"} 结果=$result")
         }.onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }
@@ -738,7 +743,7 @@ internal object ThemeSurface {
         runCatching {
             liveActivities()
                 .firstOrNull {
-                    ThemePages.isLauncher(it) && it.window?.decorView?.hasWindowFocus() == true
+                    ThemePages.isLauncher(it)
                 }
                 ?.let { applyTabWallpapers(it) }
         }.onFailure { WeLogger.w(TAG, "聊天页关闭后重挂失败：${it.message}") }
