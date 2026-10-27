@@ -172,6 +172,10 @@ internal object ThemeSurface {
 
     private val chatWatched = java.util.WeakHashMap<ViewGroup, Boolean>()
 
+    /** 聊天页 Fragment 的根 View（用于「返回时 onPause 迟到」的即时离开判定）。 */
+    @Volatile
+    private var anchorViewRef: java.lang.ref.WeakReference<View>? = null
+
     fun isChatPageVisible(): Boolean = chatPageVisible
 
     /** 诊断：聊天页识别状态。 */
@@ -205,6 +209,17 @@ internal object ThemeSurface {
 
     /** 跑一次聊天页检测；状态切换时做对应动作。 */
     fun checkChatPage(activity: Activity) {
+        // 权威锚点存活校验：微信返回主界面时 ChattingUIFragment.onPause 会迟到（实测 7 秒），
+        // 期间 chatPageVisible 一直为 true → 壁纸挂着但不画，表现就是「退回主界面 4 页全空」。
+        // 这里每次布局变化顺手校验：锚点 View 已 attach 却不可见，立刻判离开。
+        if (fragmentChatActive) {
+            val anchor = anchorViewRef?.get()
+            if (anchor != null && anchor.isAttachedToWindow && !anchor.isShown) {
+                noteEvent("锚点 View 已不可见 → 判离开（onPause 迟到兜底）")
+                runCatching { onChattingFragmentHidden() }
+                return
+            }
+        }
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastChatCheckAt < 400L) return
         lastChatCheckAt = now
@@ -696,6 +711,20 @@ internal object ThemeSurface {
             noteEvent("聊天页 Fragment 出现 → 撤壁纸 + 容器兜底")
         }
         fragmentChatActive = true
+        // 记下锚点 View：微信「返回主界面」时 ChattingUIFragment.onPause 可能迟到好几秒
+        // （Fragment 留在回退栈里），但它的根 View 会立刻不可见/被移除 —— 用它做即时判定。
+        if (fragmentView != null && anchorViewRef?.get() !== fragmentView) {
+            anchorViewRef = java.lang.ref.WeakReference(fragmentView)
+            runCatching {
+                fragmentView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) {}
+                    override fun onViewDetachedFromWindow(v: View) {
+                        // 根 View 被移出窗口 = 聊天页已关闭
+                        runCatching { onChattingFragmentHidden() }
+                    }
+                })
+            }.onFailure { WeLogger.w(TAG, "锚点 View 监听注册失败：${it.message}") }
+        }
         runCatching {
             liveActivities().forEach { act ->
                 if (ThemePages.isLauncher(act)) TabWallpaperRenderer.clear(act)
@@ -708,6 +737,7 @@ internal object ThemeSurface {
     fun onChattingFragmentHidden() {
         val wasActive = fragmentChatActive
         fragmentChatActive = false
+        anchorViewRef = null
         // 视图特征可能残留（GlobalLayout 未回调），权威离开时一并清掉，否则 draw 被卡死
         val viewStale = viewChatActive
         viewChatActive = false
