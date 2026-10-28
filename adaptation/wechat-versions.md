@@ -15,6 +15,7 @@
 | 8.0.77 | `https://dldir1v6.qq.com/weixin/android/weixin8077android3160_0x28004d30_arm64.apk` | ✅ | 锚点矩阵 |
 | 8.0.78 | `https://dldir1v6.qq.com/weixin/android/weixin8078android3180_0x28004e32_arm64.apk` | ✅ | 锚点矩阵 |
 | 8.0.79 | `https://dldir1v6.qq.com/weixin/android/weixin8079android3200_0x28004f30_arm64.apk` | ✅ | **全套分析** |
+| 8.0.80 | `https://dldir1v6.qq.com/weixin/android/weixin8080android3220_0x28005030_arm64.apk` | ✅ | **全套分析 + 全量委托校验** |
 
 - 7 条直链已于 2026-10-29 逐条 `curl -I` 实测 200（不是推测）。
 - **直链索引来源**（新版本出现时先来这里取，省去猜 hash）：
@@ -79,6 +80,37 @@
 2. **「字符串存在于 dex」≠「被方法引用」** —— 版本重构后常留下孤儿串（`string_ids` 里有、但没有任何 `const-string` 指向它），只看存在性会误判锚点仍有效。判断必须扫 const-string 引用者。
 3. **日志串会被别的类复用** —— 类锚点要用「该类独有」的串组合，否则跨版本会被新类抢走（`commit sns info ret ...` 被 `BackgroundVideoFinishUploader` 复用即此例）。
 
+### 3.5 全量委托离线校验（2026-10-29，8.0.80 正式版）
+
+**方法**：不再靠跑日志碰运气，改为把源码里全部 DexKit 委托的特征（串 / 包 / 签名 / 声明类）抽出来，
+用自研 DEX 解析器在真机 dex 上**复现 DexKit 匹配语义**（方法级 AND），一次跑完 515 个委托。
+
+- 工具链（`adaptation/tools/`）：`extract_props.py`（抽取委托）→ `verify_props.py`（复现匹配）→
+  `classify_fail.py`（根因分类）→ `suggest2.py`（给出「只保留存活串」后的唯一解建议）
+- 详细报告：**`adaptation/anchor-audit-8.0.80.md`**
+
+三版本总体（OK / WARN / SIG / FAIL / SKIP，共 515）：
+
+| 版本 | OK | WARN | SIG | FAIL | SKIP |
+|---|---|---|---|---|---|
+| 8.0.76 | 214 | 40 | 47 | 138 | 76 |
+| 8.0.79 | 226 | 39 | 45 | 129 | 76 |
+| 8.0.80 | 202 | 46 | 37 | 154 | 76 |
+
+**核心结论：8.0.80 上关键链路可用** —— 发消息（`classNetSceneSendMsg`）、朋友圈
+（`classUploadPackHelper` / `methodCommit` / `classSnsMediaObj`）、多视频、强制平板、主题
+（`classEnterpriseBizViewItem`）全部 OK；回归集中在语音/视频号/浮窗等外围功能。
+
+**8.0.80 相对 8.0.79 回归 62 项**，根因分布：孤儿串 54 项、串分散 8 项 —— 绝大多数又是「日志被裁」。
+
+### ⚠ 微信日志裁剪趋势（重要）
+
+自 8.0.76 起微信持续删除日志调用但**保留 string_ids 条目**，形成「孤儿串」。
+这类串在 dex 里查得到、却没有任何 `const-string` 指向它，`TAG + 日志串` 形式的锚点必然失效。
+**每版适配第一步就是跑一遍全量校验，不要相信「串存在」这种粗筛。**
+
+锚点优先级（长期）：协议/XML 关键字 ≈ 方法名+签名 > 类 TAG 单串+结构约束 >> TAG+普通日志串。
+
 ### 3.2 notifyConversationChanged（会话变更通知）
 - 目标形状 `(int, ConversationStorage超类, Object) → void`。
 - 8.0.76：`ConversationStorage` = `com.tencent.mm.storage.l4`（classes9），超类 `s85.a1`，目标 = **`s85.a1.b(I Ls85/a1; Ljava/lang/Object;)V`** ✅ 特征描述仍然匹配。
@@ -102,12 +134,17 @@
 | `androguard 4.1.4` | 深度 dump 类成员/const-string 指令（需 pip 重装，沙箱重置后注意） |
 | `scanstr.py` | 精确串 × 方法交叉定位（找出「同时引用指定精确串」的方法，支持包过滤） |
 | `dumcls.py` | dump 指定类的全部方法签名 + 方法内 const-string |
+| `extract_props.py` | 抽取源码全部 DexKit 委托特征（串/包/签名/declaredClass）→ `dex_props.json` |
+| `verify_props.py` | 在真机 dex 上复现 DexKit 匹配语义，输出 OK/WARN/SIG/FAIL/SKIP |
+| `classify_fail.py` | FAIL 根因分类：串消失 / 孤儿串 / 串分散 |
+| `suggest2.py` | 给出「只保留存活串 + 原签名」后的唯一命中建议 |
 | `/tmp/wx*.dex` | 解压后的 dex（临时，分析完删除） |
 
 ## 五、新版本适配 SOP（8.0.x 出新直链时照此走）
 
 1. 下载 APK（curl -sSL，约 2 分钟）→ 解压 dex 到 `/tmp/wxNN`
-2. 跑 `verify_anchor.py` 比对锚点矩阵 → 列出失效/差异锚点
+2. **跑全量委托校验**：`python3 extract_props.py` → `python3 verify_props.py <版本>` → `python3 classify_fail.py`
+   → 得到该版本逐项 OK/WARN/SIG/FAIL 与 FAIL 根因（孤儿串 / 串消失 / 串分散）
 3. 逐个 dump 真目标，产出该版本的多候选/新特征；**锚点串必须先验「是否被方法引用」**（孤儿串要弃用）
 4. 多命中一律走 `allowMultiple + 候选校验（择优或全 hook）+ allowFailure 跳过`，禁止 `error()` 抛出
 5. 该版本 SDK 层「不支持」必须能干净降级，不阻断其它功能

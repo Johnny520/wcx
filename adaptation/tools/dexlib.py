@@ -80,10 +80,26 @@ def iter_methods(b,d):
                 yield cls,d.method_name(idx),idx,code
 
 def iter_insns(b,code):
+    """遍历指令。必须正确跳过 payload 伪指令（packed/sparse-switch、fill-array-data），
+    否则指令流错位会把数据当指令解释，导致 const-string 批量漏检/误检。"""
     insns=u32(b,code+12); p=code+16; end=p+insns*2
     while p<end:
         op=b[p]
-        if op==0x00 and u16(b,p)==0x0100:
-            p+=2; continue
+        if op==0x00:
+            ident=u16(b,p)
+            if ident==0x0100:                      # packed-switch-payload
+                size=u16(b,p+2)
+                p+=8+size*4                        # ident,size + first_key + targets
+                continue
+            if ident==0x0200:                      # sparse-switch-payload
+                size=u16(b,p+2)
+                p+=4+size*8                        # ident,size + keys[] + targets[]
+                continue
+            if ident==0x0300:                      # fill-array-data-payload
+                width=u16(b,p+2); size=u32(b,p+4)
+                total=8+width*size
+                if total%2: total+=1               # 4 字节对齐补齐
+                p+=total
+                continue
         yield p,op
         p+=WIDTH[op]
