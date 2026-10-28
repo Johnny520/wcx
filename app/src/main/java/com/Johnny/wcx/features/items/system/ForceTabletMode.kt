@@ -19,14 +19,13 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 @Feature(name = "强制平板模式", categories = ["系统与隐私"], description = "让微信将当前设备识别为平板")
 object ForceTabletMode : SwitchFeature(), IResolveDex {
 
-    private val methodIsTablet by dexMethod {
+    // 设备型号白名单串 "Lenovo TB-9707F" 在两版都唯一命中「是否平板」判断方法：
+    // 8.0.76 → com.tencent.mm.ui.bk.B(in5.x0)Z，8.0.79 → com.tencent.mm.ui.j9.a()Z。
+    // 原组合里的 "eebbk" 与 "isRoyoleFoldableDevice!!!" 现已是孤儿串（无任何方法引用），
+    // 拼在一起会让 matcher 恒不命中 —— 故只保留单串锚点，并补 allowFailure 防解析失败抛异常。
+    private val methodIsTablet by dexMethod(allowFailure = true) {
         matcher {
-            usingEqStrings("Lenovo TB-9707F", "eebbk")
-        }
-    }
-    private val methodIsTablet2 by dexMethod {
-        matcher {
-            usingEqStrings("MicroMsg.UIUtils", "isRoyoleFoldableDevice!!!")
+            usingEqStrings("Lenovo TB-9707F")
         }
     }
     private val methodOtherDeviceLoginButtonIsVisible by dexMethod {
@@ -36,22 +35,15 @@ object ForceTabletMode : SwitchFeature(), IResolveDex {
     }
 
     override fun onEnable() {
-        methodIsTablet.hookBefore {
+        if (methodIsTablet.isPlaceholder) {
+            com.Johnny.wcx.utils.WeLogger.w(
+                "ForceTabletMode",
+                "methodIsTablet 未解析（当前微信版本无设备型号判断锚点），跳过 hook"
+            )
+        }
+        if (!methodIsTablet.isPlaceholder) methodIsTablet.hookBefore {
             try {
                 // 仅当原方法返回 boolean 时才设置 result = true，避免对非 boolean 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                val returnType = (method as java.lang.reflect.Method).returnType
-                if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {
-                    result = true
-                }
-            }
-            } catch (e: Throwable) {
-                // 兜底异常捕获
-            }
-        }
-
-        methodIsTablet2.hookBefore {
-            try {
                 if (method is java.lang.reflect.Method) {
                 val returnType = (method as java.lang.reflect.Method).returnType
                 if (returnType == Boolean::class.javaPrimitiveType || returnType == java.lang.Boolean::class.java) {

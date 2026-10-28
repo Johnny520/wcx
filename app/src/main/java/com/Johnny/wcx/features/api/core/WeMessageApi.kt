@@ -322,13 +322,15 @@ object WeMessageApi : ApiFeature(), IResolveDex {
         }
     }
     val classChattingDataAdapter by dexClass(allowFailure = true) {
-        // 8.0.77 已移除 ChattingDataAdapterV3 → allowFailure 降级为 placeholder，
-        // 使用方需用 isPlaceholder 守卫（RemoveMessageSelectionLimit 内已处理）
+        // 定位修正：TAG 串与 "[handleMsgChange] isLockNotify:" 在该类中位于**不同方法**
+        // （TAG 出现在构造器与多个事件方法，isLockNotify 只在 onMsgChange），而 DexKit 的类匹配是
+        // 方法级 AND 语义，两串组合恒不命中 —— 8.0.76 / 8.0.79 均报 Class not found，连带
+        // RemoveMessageSelectionLimit 的两个方法失效。改用 adapter 包内唯一的方法级日志串定位：
+        // 8.0.76 → ui.chatting.adapter.k、8.0.79 → ui.chatting.adapter.k。
+        // 使用方仍需 isPlaceholder 守卫（RemoveMessageSelectionLimit 内已处理）。
+        searchPackages("com.tencent.mm.ui.chatting.adapter")
         matcher {
-            usingEqStrings(
-                "MicroMsg.ChattingDataAdapterV3",
-                "[handleMsgChange] isLockNotify:"
-            )
+            usingEqStrings("[handleMsgChange] isLockNotify:")
         }
     }
     val classTransformChattingComponent by dexClass {

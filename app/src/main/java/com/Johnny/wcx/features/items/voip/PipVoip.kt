@@ -309,11 +309,14 @@ object PipVoip : SwitchFeature(), IResolveDex {
     }
 
     private val classMultiTalkViewModel by dexClass(allowFailure = true) {
+        // "onMicClick/onCameraClick, cur state: " 自 8.0.76 起已是孤儿串（字符串残留但无方法引用），
+        // 原三串 AND 因此恒不命中 → 8.0.76 上整个 PiP 麦克风/摄像头链路解析失败。
+        // 改用 TAG + 仍被引用的 mic 日志串定位 ViewModel：8.0.76 → com.tencent.mm.plugin.multitalk.ui.b0。
+        // 8.0.79 起 multitalk UI 日志体系整体消失（仅剩 MultitalkUtils/SceneSetting），此处干净降级为 placeholder。
         matcher {
             usingEqStrings(
                 "MicroMsg.MT.MultiTalkUIViewModel",
-                "onCameraClick, cur state: ",
-                "onMicClick, cur state: ",
+                "onMicClick, need notify iLink Engine",
             )
         }
     }
@@ -367,10 +370,12 @@ object PipVoip : SwitchFeature(), IResolveDex {
             declaredClass(classMultiTalkViewModel.clazz)
             paramTypes("boolean")
             returnType = "void"
-            usingEqStrings("onMicClick, cur state: ")
+            usingEqStrings("onMicClick, need notify iLink Engine")
         }
     }
 
+    // 注意：摄像头侧日志串 "onCameraClick, cur state: " 在 8.0.76 / 8.0.79 均已成孤儿串，
+    // 无替代串可定位，故此处只能保留 allowFailure 做干净降级（该版本摄像头 PiP 按钮不生效）。
     private val methodMultiTalkCamera by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onCameraClick, cur state: ")
@@ -382,7 +387,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
             declaredClass(classMultiTalkViewModel.clazz)
             type(classObservableState.clazz)
             addReadMethod {
-                usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onMicClick, cur state: ")
+                usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onMicClick, need notify iLink Engine")
             }
         }
     }

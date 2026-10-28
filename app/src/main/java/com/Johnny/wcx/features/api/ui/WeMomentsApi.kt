@@ -179,10 +179,15 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
         }.self
     }
 
+    // 锚点说明（跨版本）：原「MicroMsg.UploadPackHelper + commit sns info ret ...」组合自 8.0.79 起失效——
+    // 该 commit 日志串被 sns.ui.fake.BackgroundVideoFinishUploader 复用，经 DexKit 全量搜索会把类误定位到那里，
+    // 进而让依赖本类的全部委托（构造器 / commit / setContentDes / setUploadList / addImageMediaObjByPath 等）连带解析失败。
+    // 改用 UploadPackHelper 独有的 addImageMediaObjByUrl 日志串与 TAG 组合：
+    // 8.0.76 → sns.model.y7、8.0.79 → sns.model.i8，双版本均唯一命中。
     val classUploadPackHelper by dexClass {
         searchPackages("com.tencent.mm.plugin.sns.model")
         matcher {
-            usingEqStrings("MicroMsg.UploadPackHelper", "commit sns info ret %d, typeFlag %d sightMd5 %s")
+            usingEqStrings("MicroMsg.UploadPackHelper", "addImageMediaObjByUrl")
         }
     }
 
@@ -251,13 +256,14 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
         }
     }
 
+    // 参数个数随版本变化：8.0.76 = f(String,String,String,String)Z（4 参），
+    // 8.0.79 = f(String,String,String,String,String)Z（5 参，见 sns.model.i8）。
+    // 因此不再锁 paramCount / paramTypes，改由调用方按 parameterCount 自适应补空串。
     val methodAddSightObjectByPath by dexMethod {
         searchPackages("com.tencent.mm.plugin.sns.model")
         matcher {
             declaredClass(classUploadPackHelper.clazz)
             returnType(bool)
-            paramCount(4)
-            paramTypes(String::class.java, String::class.java, String::class.java, String::class.java)
             usingStrings("addSightObjectByPath", "com.tencent.mm.plugin.sns.model.UploadPackHelper")
         }
     }
@@ -807,7 +813,15 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             if (copyExistingFile(videoPath, tempVideoPath)) {
                 val helper = ctorUploadPackHelper.constructor.newInstance(15, null)
                 methodSetContentDes.method.invoke(helper, text)
-                methodAddSightObjectByPath.method.invoke(helper, tempVideoPath, tempThumbPath, "", "")
+                // 8.0.76 为 4 参、8.0.79 为 5 参：按真实 parameterCount 补空串，避免 IllegalArgumentException
+                val sightMethod = methodAddSightObjectByPath.method
+                val sightBaseArgs = arrayOf<Any?>(tempVideoPath, tempThumbPath, "", "")
+                val sightArgs = if (sightMethod.parameterCount > sightBaseArgs.size) {
+                    sightBaseArgs.copyOf(sightMethod.parameterCount)
+                } else {
+                    sightBaseArgs
+                }
+                sightMethod.invoke(helper, *sightArgs)
                 if (!sdkId.isNullOrEmpty()) {
                     methodSetSdkId.method.invoke(helper, sdkId)
                 }
