@@ -246,10 +246,10 @@ internal object ThemeSurface {
         val visible = hit != null
         lastChatHit = hit
 
-        // ── ⓪ 正向判定：先问「这里是不是主页面」（唯一放行条件，先算以便本次事件就用上） ──
+        // ── ⓪ 正向判定：先问「这里是不是主页面」（放行条件之一，先算以便本次事件就用上） ──
         onMainPage = ChatPageGuard.detectMainPage(activity, chatPageVisible)
 
-        // ── ① 实时特征命中 = 在聊天页 ──
+        // ── ① 实时特征命中 = 在聊天页（最高优先，特征命中就绝不放行）──
         if (visible) {
             anchorLeaveSince = 0L
             val entered = !viewChatActive
@@ -264,11 +264,23 @@ internal object ThemeSurface {
             return
         }
 
-        // ── ② 特征不命中：清视图侧状态 ──
+        // ── ② 正向权威：已充分确认在主页面（4 个 Tab / FAB / 会话列表），
+        //          却还挂着聊天页状态 —— 那必然是 Fragment onPause 迟到的残留（实测最久 21 秒）。
+        //          以实际视图为准，直接清掉并重挂 —— 这就是「回到主页面 4 页全空」的根治。
+        if (onMainPage && fragmentChatActive) {
+            fragmentChatActive = false
+            viewChatActive = false
+            anchorLeaveSince = 0
+            noteEvent("正向确认在主页面 → 清掉迟到的聊天页状态并重挂")
+            runCatching { applyTabWallpapers(activity) }
+            return
+        }
+
+        // ── ③ 特征不命中：清视图侧状态 ──
         val wasVisible = viewChatActive
         viewChatActive = false
 
-        // ── ③ 锚点侧离开确认：**必须先确认自己在主页面** ──
+        // ── ④ 锚点侧离开确认（兜底，② 已覆盖主页面场景）──
         // Fragment 的 onPause 会迟到（实测 7 秒），需要一个离开信号来补；
         // 但绝不能再用「聊天页里识别漏了」当离开信号 —— 那正是浸透的来源。
         // 只有「特征不命中 **且** 正向确认在主页面」才累计，持续 900ms 才判离开。

@@ -177,6 +177,8 @@ internal object ChatPageGuard {
         var bottomInput = false
         // 底部子项按父容器分组：找「一组 4 个」（Tab 栏），而不是全屏凑数
         val groupCount = java.util.HashMap<Any, Int>()
+        // 主页面正向证据：大面积会话列表（占据上半/中部）
+        var bigList = false
 
         fun walk(v: View, depth: Int) {
             if (visited >= MAX_NODES || depth > MAX_DEPTH) return
@@ -184,9 +186,15 @@ internal object ChatPageGuard {
             if (v.visibility != View.VISIBLE) return
             if (v.width <= 0 || v.height <= 0) return
             if (v.getGlobalVisibleRect(rect)) {
-                // 反证 1：底部输入框（聊天页）
+                // 反证 1：底部输入框（聊天页铁证）
                 if (v is EditText && rect.top > screenH * 0.70f && rect.height() > 10) {
                     bottomInput = true
+                }
+                // 正证据 A：大面积会话列表（主页面内容区）
+                if (!bigList && isRecyclerLike(v) &&
+                    rect.height() > screenH * 0.30f && rect.top < screenH * 0.50f
+                ) {
+                    bigList = true
                 }
                 // 主页面 Tab 项候选：屏幕底部 15%、宽 12%~45% 屏宽、高度小于屏高 8%
                 if (rect.bottom > screenH * 0.85f &&
@@ -207,12 +215,27 @@ internal object ChatPageGuard {
         walk(content, 0)
 
         val tabGroup = groupCount.values.maxOrNull() ?: 0
-        // 主判定：底部 Tab 组齐备 **且** 底部没有聊天输入框 —— 两者都过才算在主页面。
-        // 聊天页要么 Tab 组被盖住、要么底部输入框在，两条任意一条都足以拦住它。
-        // 降级：万一微信改了底部栏结构导致 Tab 组数不到 4（主页面识别漏报会整片没背景），
-        //        在「底部无输入框」的前提下退回旧的聊天页信号作参考，宁可放行也不能丢图。
-        val onMain = !bottomInput && (tabGroup >= 4 || !chatPageVisible)
-        mainPageInfo = "Tab组=${tabGroup} 底部输入框=${if (bottomInput) "有" else "无"} 遍历=${visited}节点"
+
+        // ── 反证（聊天页铁证，任一命中就绝不放行）──
+        if (bottomInput) {
+            mainPageInfo = "底部输入框=有 → 聊天页；Tab组=${tabGroup} 列表=${bigList} FAB=${AddMainScreenFab.visibleInMain} 遍历=${visited}节点"
+            return false
+        }
+
+        // ── 正向证据：**全部用上，任一成立即可**（用户要求的综合判定）──
+        //  A. 底部 4 个 Tab 按钮（同容器 ≥2 个，避免被结构微调卡死）
+        //  B. FAB 悬浮按钮可见 —— FAB 只在 4 个 Tab 主页面显示，主页面专属证据
+        //  C. 会话列表大列表可见（占据内容区）
+        val evidenceTab = tabGroup >= 2
+        val evidenceFab = AddMainScreenFab.visibleInMain
+        val evidenceList = bigList
+        val evidence = evidenceTab || evidenceFab || evidenceList
+        // 注意：这里**不再让 chatPageVisible 参与否决**。
+        // 聊天页的拦截已由 bottomInput（铁证）+ 特征识别承担；若再让 chatPageVisible
+        // 参与，Fragment onPause 迟到（实测 21 秒）期间它恒为 true，会把真正的主页面
+        // 判成非主页面 → 挂载被跳过/绘制被拦 →「回到主页面 4 页全空」。
+        val onMain = evidence
+        mainPageInfo = "Tab组=${tabGroup}${if (evidenceTab) "✓" else "✗"} FAB=${if (evidenceFab) "✓" else "✗"} 列表=${if (evidenceList) "✓" else "✗"} 底部输入框=无 遍历=${visited}节点"
         onMain
     }.onFailure {
         mainPageInfo = "异常：${it.message}"
