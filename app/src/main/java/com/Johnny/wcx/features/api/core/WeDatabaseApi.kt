@@ -42,7 +42,10 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
             declaredClass(classMmKernel.clazz)
             modifiers = Modifier.PUBLIC or Modifier.STATIC
             paramCount = 0
-            usingStrings("mCoreStorage not initialized!")
+            // "mCoreStorage not initialized!" 自 8.0.76 起已是孤儿串（无 const-string 引用），
+            // 换用同一方法里仍存活的 "Kernel not initialized by MMApplication!"：
+            // 8.0.76 hm0/j1.i、8.0.79 pp0/i1.j、8.0.80 zp0/j1.j，三版均唯一命中（paramCount=0 + public static）。
+            usingStrings("Kernel not initialized by MMApplication!")
         }
     }
     private val classCoreStorage by dexClass {

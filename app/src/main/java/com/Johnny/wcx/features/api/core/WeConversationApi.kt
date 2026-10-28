@@ -23,9 +23,13 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     private const val TAG = "WeConversationApi"
 
     internal val classConversationStorage by dexClass {
+        // 两串在这个类里属于**不同方法**（PRAGMA 在构造器、rconversation 在多个查询方法），
+        // 而 DexKit 的类匹配是方法级 AND，两串组合恒不命中（8.0.80 实测 WARN→失败）。
+        // 只保留更独特的 PRAGMA 串，三版本均唯一命中 ConversationStorage：
+        // 8.0.76/8.0.79 → storage.l4、8.0.80 → storage.m4。
         searchPackages("com.tencent.mm.storage")
         matcher {
-            usingEqStrings("rconversation", "PRAGMA table_info( rconversation)")
+            usingEqStrings("PRAGMA table_info( rconversation)")
         }
     }
     private val methodUpdateUnreadByTalker by dexMethod {
@@ -51,7 +55,7 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     private val methodHiddenConvParent by dexMethod {
         matcher {
             declaredClass(classConversationStorage.clazz)
-            usingEqStrings("Update rconversation set parentRef = '", "' where 1 != 1 ")
+            usingEqStrings("' where 1 != 1 ")
         }
     }
 
@@ -153,7 +157,7 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     private val methodDoDeleteConversation by dexMethod {
         searchPackages("com.tencent.mm.ui.conversation")
         matcher {
-            usingStrings("MicroMsg.ConvDelLogic", "oplog modContact user:%s")
+            usingStrings("MicroMsg.ConvDelLogic")
             paramCount = 6
         }
     }
