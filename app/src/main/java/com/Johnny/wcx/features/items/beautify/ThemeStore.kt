@@ -470,6 +470,17 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
     fun restoreDefaultTheme() = restoreDefault()
 
     /**
+     * 主题工坊总开关是否打开 —— **所有重挂 / 绘制入口的总闸**。
+     *
+     * 为什么必须单独有这道闸：[onDisable] 只撤效果、不清 activeThemeId
+     * （否则关掉再打开得重新应用主题），于是那些「只看 activeId、不看开关」的
+     * 路径（焦点补挂、切页 hook、锚点离开重挂）在总开关关掉后仍然会把壁纸挂回去。
+     * 实测现象：关掉总开关后，4 个界面仍显示主页面的背景图片。
+     */
+    fun wallpaperSwitchOn(): Boolean =
+        runCatching { WePrefs.getBoolOrDef(NEW_FEATURE_NAME, false) }.getOrDefault(false)
+
+    /**
      * 清除主题相关缓存（应急用）。
      *
      * 场景：换主题后旧气泡没被替换、或没在用主题却还留着残留气泡时，

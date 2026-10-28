@@ -35,9 +35,16 @@ internal object ChatPageGuard {
 
     private const val TAG = "ChatPageGuard"
 
-    /** 遍历节点上限，防止异常层级导致卡顿。 */
-    private const val MAX_NODES = 1500
-    private const val MAX_DEPTH = 32
+    /**
+     * 遍历节点上限，防止异常层级导致卡顿。
+     *
+     * 注意不能太小：LauncherUI 的 content 下先挂着会话列表 Tab（上百条 item，
+     * 每条 10+ 个 View），深度优先很容易在走到聊天页 Fragment 之前就把额度耗光，
+     * 表现就是「明明在聊天页里却识别未命中」→ 误判离开 → 壁纸挂回去变浸透。
+     * 实测上限提到 6000 仍只有几毫秒开销（且有 400ms 检测节流兜底）。
+     */
+    private const val MAX_NODES = 6000
+    private const val MAX_DEPTH = 50
 
     /** 输入框必须在屏幕这个比例以下（排除顶部搜索框）。 */
     private const val INPUT_MIN_TOP_RATIO = 0.5f
@@ -52,6 +59,11 @@ internal object ChatPageGuard {
     private val savedBackground = WeakHashMap<ViewGroup, android.graphics.drawable.Drawable?>()
 
     private val patched = WeakHashMap<ViewGroup, Boolean>()
+
+    /** 最近一次识别未命中的原因（诊断用；命中时写「命中」）。 */
+    @Volatile
+    var lastMissInfo: String = "未检测"
+        private set
 
     /** 识别结果。 */
     data class Hit(
@@ -113,11 +125,20 @@ internal object ChatPageGuard {
 
         walk(content, 0)
 
-        val i0 = input ?: return null
-        val l0 = list ?: return null
-        val t0 = title ?: return null
+        val i0 = input
+        val l0 = list
+        val t0 = title
+        if (i0 == null || l0 == null || t0 == null) {
+            lastMissInfo =
+                "输入框=${if (i0 != null) "✓" else "✗"} " +
+                    "列表=${if (l0 != null) "✓" else "✗"} " +
+                    "标题=${if (t0 != null) "✓" else "✗"} " +
+                    "遍历=$visited节点/上限$MAX_NODES"
+            return null
+        }
 
         val container = resolveContainer(content, i0, l0, t0) ?: return null
+        lastMissInfo = "命中 遍历=$visited节点"
         Hit(
             container = container,
             hasInput = true,
