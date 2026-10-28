@@ -167,6 +167,19 @@ internal object ThemeSurface {
     private val chatPageVisible: Boolean
         get() = fragmentChatActive || viewChatActive
 
+    /**
+     * 【正向】当前是否在 4 个 Tab 主页面 —— 背景的**唯一放行条件**。
+     *
+     * 旧逻辑是「证明不在聊天页才放行」：聊天页里只要识别漏一项（输入框/列表），
+     * 就被误判为「已离开」→ 壁纸挂回聊天页 → 浸透（实测「只有第一次进不浸透」）。
+     * 用户给出的正向方案把方向反过来了：**只有确认在主页面才放行**，
+     * 聊天页无论如何都证明不了自己在主页面，识别再失败也锁死不放行。
+     * 默认 true：检测尚未跑时先按主页面处理，避免启动首帧空图。
+     */
+    @Volatile
+    var onMainPage = true
+        private set
+
     @Volatile
     private var lastChatHit: ChatPageGuard.Hit? = null
 
@@ -202,7 +215,9 @@ internal object ThemeSurface {
         } else {
             "特征=未命中[${ChatPageGuard.lastMissInfo}]"
         }
-        return if (chatPageVisible) "聊天页中：$byFragment，$byView" else "不是聊天页（$byFragment，$byView）"
+        val main = if (onMainPage) "主页面=✓" else "主页面=✗"
+        val out = if (chatPageVisible) "聊天页中：$byFragment，$byView" else "不是聊天页（$byFragment，$byView）"
+        return "$out [$main ${ChatPageGuard.mainPageInfo}]"
     }
 
     /**
@@ -231,7 +246,10 @@ internal object ThemeSurface {
         val visible = hit != null
         lastChatHit = hit
 
-        // ── ① 实时特征命中 = 在聊天页（唯一真相，与锚点无关） ──
+        // ── ⓪ 正向判定：先问「这里是不是主页面」（唯一放行条件，先算以便本次事件就用上） ──
+        onMainPage = ChatPageGuard.detectMainPage(activity, chatPageVisible)
+
+        // ── ① 实时特征命中 = 在聊天页 ──
         if (visible) {
             anchorLeaveSince = 0L
             val entered = !viewChatActive
@@ -250,21 +268,24 @@ internal object ThemeSurface {
         val wasVisible = viewChatActive
         viewChatActive = false
 
-        // ── ③ 锚点侧离开确认 ──
-        // Fragment 的 onPause 会迟到（实测 7 秒），所以用「特征持续不命中」当离开确认；
-        // 时间防抖 900ms，覆盖页面转场（相册往返、资料页往返）的瞬态不命中。
+        // ── ③ 锚点侧离开确认：**必须先确认自己在主页面** ──
+        // Fragment 的 onPause 会迟到（实测 7 秒），需要一个离开信号来补；
+        // 但绝不能再用「聊天页里识别漏了」当离开信号 —— 那正是浸透的来源。
+        // 只有「特征不命中 **且** 正向确认在主页面」才累计，持续 900ms 才判离开。
         if (fragmentChatActive) {
-            if (anchorLeaveSince == 0L) {
+            if (!onMainPage) {
+                anchorLeaveSince = 0L   // 不在主页面：不论识别结果如何，一律不当「已离开」
+            } else if (anchorLeaveSince == 0L) {
                 anchorLeaveSince = now
             } else if (now - anchorLeaveSince >= ANCHOR_LEAVE_CONFIRM_MS) {
                 anchorLeaveSince = 0L
-                noteEvent("特征持续不命中 → 判离开聊天页（onPause 迟到兜底）")
+                noteEvent("已在主页面且特征持续不命中 → 判离开聊天页（onPause 迟到兜底）")
                 runCatching { onChattingFragmentHidden() }
                 return
             }
         }
 
-        if (wasVisible) {
+        if (wasVisible && onMainPage) {
             noteEvent("离开聊天页 → 重挂壁纸")
             runCatching { applyTabWallpapers(activity) }
         }
@@ -682,6 +703,13 @@ internal object ThemeSurface {
             }
             return
         }
+        // 【正向闸】挂载前刷新「是否在 4 个 Tab 主页面」：不在主页面一律不挂。
+        // 聊天页与二级页面都不需要壁纸，挂上去只会带来「挂着却要挡着不画」的不一致。
+        runCatching { onMainPage = ChatPageGuard.detectMainPage(activity, chatPageVisible) }
+        if (!onMainPage) {
+            noteEvent("挂载前识别到非主页面 → 跳过挂载")
+            return
+        }
         if (wallpaperFailStreak >= 3) return
         val decor = activity.window?.decorView as? ViewGroup
         if (decor == null) {
@@ -708,7 +736,7 @@ internal object ThemeSurface {
         val file = fileForTab(files, tab) ?: files.firstOrNull { it != null }
         val alphaPct = ThemeStore.overlayOpacity()
         val result = TabWallpaperRenderer.apply(activity, file, tab, alphaPct) {
-            !chatPageVisible && ThemeStore.wallpaperSwitchOn()
+            onMainPage && !chatPageVisible && ThemeStore.wallpaperSwitchOn()
         }
         if (result != "ok") {
             wallpaperFailStreak += 1
@@ -736,7 +764,7 @@ internal object ThemeSurface {
             if (files.all { it == null }) return@runCatching
             val file = fileForTab(files, position) ?: files.firstOrNull { it != null }
             val result = TabWallpaperRenderer.apply(activity, file, position, ThemeStore.overlayOpacity()) {
-                !chatPageVisible && ThemeStore.wallpaperSwitchOn()
+                onMainPage && !chatPageVisible && ThemeStore.wallpaperSwitchOn()
             }
             WeLogger.i(TAG, "切页换图 → Tab=$position 文件=${file?.name ?: "null"} 结果=$result")
         }.onFailure { WeLogger.w(TAG, "切 Tab 换背景失败：${it.message}") }

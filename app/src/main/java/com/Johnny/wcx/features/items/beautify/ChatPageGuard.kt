@@ -148,6 +148,76 @@ internal object ChatPageGuard {
         )
     }.onFailure { WeLogger.w(TAG, "聊天页识别异常（已降级）：${it.message}") }.getOrNull()
 
+    /** 最近一次「是否在主页面」的正向识别说明（诊断用）。 */
+    @Volatile
+    var mainPageInfo: String = "未检测"
+        private set
+
+    /**
+     * **正向识别「当前是不是 4 个 Tab 主页面」** —— 主题背景的唯一放行条件。
+     *
+     * 为什么必须正向判：之前的逻辑是「证明不在聊天页才放行」，可聊天页里只要
+     * 输入框/列表有一项识别不到，就会被误判成「已离开」→ 壁纸挂回聊天页 → 浸透。
+     * 换成正向判定后，聊天页**永远无法证明自己在主页面**，识别再失败也不会放行，
+     * 方向上就把错误锁死了。
+     *
+     * ## 判据（纯结构，不依赖任何微信类名）
+     * 1. 底部 Tab 栏：**同一父容器下 ≥4 个可见子项**，都落在屏幕底部 15% 内、
+     *    宽度占屏 12%~45%、高度 < 屏高 8%（微信 4 个 Tab 页按钮的固定形态）
+     * 2. **底部没有可见的聊天输入框**（EditText 位于屏高 70% 以下）——
+     *    这是关键反证：聊天页无论别的怎么变，底部输入框一定在。
+     */
+    fun detectMainPage(activity: Activity, chatPageVisible: Boolean): Boolean = runCatching {
+        val decor = activity.window?.decorView as? ViewGroup ?: return false
+        val content = decor.findViewById<ViewGroup>(android.R.id.content) ?: return false
+        val screenH = decor.height.takeIf { it > 0 } ?: return false
+        val screenW = decor.width.takeIf { it > 0 } ?: return false
+        val rect = android.graphics.Rect()
+        var visited = 0
+        var bottomInput = false
+        // 底部子项按父容器分组：找「一组 4 个」（Tab 栏），而不是全屏凑数
+        val groupCount = java.util.HashMap<Any, Int>()
+
+        fun walk(v: View, depth: Int) {
+            if (visited >= MAX_NODES || depth > MAX_DEPTH) return
+            visited++
+            if (v.visibility != View.VISIBLE) return
+            if (v.width <= 0 || v.height <= 0) return
+            if (v.getGlobalVisibleRect(rect)) {
+                // 反证 1：底部输入框（聊天页）
+                if (v is EditText && rect.top > screenH * 0.70f && rect.height() > 10) {
+                    bottomInput = true
+                }
+                // 主页面 Tab 项候选：屏幕底部 15%、宽 12%~45% 屏宽、高度小于屏高 8%
+                if (rect.bottom > screenH * 0.85f &&
+                    rect.width() >= screenW * 0.12f && rect.width() <= screenW * 0.45f &&
+                    rect.height() > 24 && rect.height() < screenH * 0.08f
+                ) {
+                    val parent = v.parent as? View ?: return
+                    groupCount[parent] = (groupCount[parent] ?: 0) + 1
+                }
+            }
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) {
+                    val child = v.getChildAt(i) ?: continue
+                    walk(child, depth + 1)
+                }
+            }
+        }
+        walk(content, 0)
+
+        val tabGroup = groupCount.values.maxOrNull() ?: 0
+        // 主判定：底部 Tab 组齐备 **且** 底部没有聊天输入框 —— 两者都过才算在主页面。
+        // 聊天页要么 Tab 组被盖住、要么底部输入框在，两条任意一条都足以拦住它。
+        // 降级：万一微信改了底部栏结构导致 Tab 组数不到 4（主页面识别漏报会整片没背景），
+        //        在「底部无输入框」的前提下退回旧的聊天页信号作参考，宁可放行也不能丢图。
+        val onMain = !bottomInput && (tabGroup >= 4 || !chatPageVisible)
+        mainPageInfo = "Tab组=${tabGroup} 底部输入框=${if (bottomInput) "有" else "无"} 遍历=${visited}节点"
+        onMain
+    }.onFailure {
+        mainPageInfo = "异常：${it.message}"
+    }.getOrDefault(false)
+
     /** 类名或父类链里含 RecyclerView（库类名不变），避免依赖微信混淆后的具体类。 */
     private fun isRecyclerLike(v: View): Boolean {
         var c: Class<*>? = v.javaClass
