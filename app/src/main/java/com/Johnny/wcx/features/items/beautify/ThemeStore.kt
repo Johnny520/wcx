@@ -642,8 +642,8 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         )
         appendLine(
             "聊天页 Fragment 锚点 = " +
-                (if (chattingFragmentHookOk) "已 hook $chattingFragmentHookCount 个方法（状态权威）"
-                else "未挂上（靠 View 特征识别兜底）")
+                (if (chattingFragmentHookOk) "已 hook $chattingFragmentHookCount 个方法（与实时特征取并集）"
+                else "未挂上（仅靠实时 View 特征识别）")
         )
         appendLine(
             "切页 hook = adapter ${hookedTabsAdapters.size} 处" +

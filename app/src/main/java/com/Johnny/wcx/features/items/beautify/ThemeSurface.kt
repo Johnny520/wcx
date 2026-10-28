@@ -175,28 +175,28 @@ internal object ThemeSurface {
 
     private val chatWatched = java.util.WeakHashMap<ViewGroup, Boolean>()
 
-    /** 聊天页 Fragment 的根 View（用于「返回时 onPause 迟到」的即时离开判定）。 */
-    @Volatile
-    private var anchorViewRef: java.lang.ref.WeakReference<View>? = null
-
     /**
-     * 锚点 View 连续不可见的次数（防抖）。
+     * 锚点「已离开」的起始时间戳（**基于时间**防抖）。
      *
-     * `isShown` 是**瞬态**信号：页面转场（如聊天页 → 相册 → 聊天页）期间
-     * 会短暂为 false，拿它直接翻转状态会把「还在聊天页」误判成「已离开」，
-     * 之后 Fragment 不再触发 onResume 报「出现」→ 状态永久错位 → 持续浸透。
-     * 必须连续多次（每次间隔 checkChatPage 的 400ms 节流，3 次 ≈ ≥800ms）不可见才认定离开。
+     * 不能用调用次数：`checkChatPage(force = true)` 会绕过节流，同一秒内连调多次
+     * 就能把「连续 N 次」打满 —— 实测表现为「刚进聊天页就判离开 → 壁纸挂回去 → 浸透」。
+     *
+     * 也不用 Fragment 根 View 的 `isShown` / detach 事件：`ChattingUIFragment.getView()`
+     * 在 onViewCreated 阶段还没 attach，isShown 天然为 false；相册等转场期间 View 会
+     * detach→attach。两者都会把「还在聊天页」误判成「已离开」。
      */
     @Volatile
-    private var anchorHiddenStreak = 0
+    private var anchorLeaveSince = 0L
+
+    /** 特征持续不命中多久才认定「锚点已离开」（时间防抖，覆盖转场瞬态）。 */
+    private const val ANCHOR_LEAVE_CONFIRM_MS = 900L
 
     fun isChatPageVisible(): Boolean = chatPageVisible
 
     /** 诊断：聊天页识别状态。 */
     fun chatPageStatus(): String {
         val hit = lastChatHit
-        val mode = if (fragmentAnchorAvailable) "权威" else "兜底"
-        val byFragment = (if (fragmentChatActive) "Fragment锚点=命中" else "Fragment锚点=未命中") + "·$mode"
+        val byFragment = if (fragmentChatActive) "Fragment锚点=命中" else "Fragment锚点=未命中"
         val byView = if (hit != null) {
             "特征=命中（输入框=${hit.hasInput} 列表=${hit.hasList} 标题=${hit.hasTitle} ${hit.detail}）"
         } else {
@@ -223,23 +223,6 @@ internal object ThemeSurface {
 
     /** 跑一次聊天页检测；状态切换时做对应动作。 */
     fun checkChatPage(activity: Activity, force: Boolean = false) {
-        // 权威锚点存活校验：微信返回主界面时 ChattingUIFragment.onPause 会迟到（实测 7 秒），
-        // 期间 chatPageVisible 一直为 true → 壁纸挂着但不画，表现就是「退回主界面 4 页全空」。
-        // 这里每次布局变化顺手校验：锚点 View 已 attach 却不可见，立刻判离开。
-        if (fragmentChatActive) {
-            val anchor = anchorViewRef?.get()
-            if (anchor != null && anchor.isAttachedToWindow && !anchor.isShown) {
-                anchorHiddenStreak++
-                if (anchorHiddenStreak >= 3) {
-                    anchorHiddenStreak = 0
-                    noteEvent("锚点 View 持续不可见 → 判离开（onPause 迟到兜底）")
-                    runCatching { onChattingFragmentHidden() }
-                    return
-                }
-            } else {
-                anchorHiddenStreak = 0
-            }
-        }
         val now = android.os.SystemClock.uptimeMillis()
         if (!force && now - lastChatCheckAt < 400L) return
         lastChatCheckAt = now
@@ -248,18 +231,40 @@ internal object ThemeSurface {
         val visible = hit != null
         lastChatHit = hit
 
-        if (visible == viewChatActive) {
-            // 状态没变：仍然确保容器不透明（微信可能自己重设了背景）
-            if (visible) hit?.let { runCatching { ChatPageGuard.ensureOpaque(it.container) } }
+        // ── ① 实时特征命中 = 在聊天页（唯一真相，与锚点无关） ──
+        if (visible) {
+            anchorLeaveSince = 0L
+            val entered = !viewChatActive
+            viewChatActive = true
+            // 每次命中都确保容器不透明（微信可能自己把背景改回透明）
+            hit?.let { runCatching { ChatPageGuard.ensureOpaque(it.container) } }
+            if (entered) {
+                noteEvent("识别到聊天页 → 撤壁纸 + 容器兜底不透明")
+                // 撤掉主界面壁纸层（双保险之一；另一层是容器自身的挡色背景）
+                runCatching { TabWallpaperRenderer.clear(activity) }
+            }
             return
         }
-        viewChatActive = visible
-        if (visible) {
-            noteEvent("识别到聊天页 → 撤壁纸 + 容器兜底不透明")
-            // 撤掉主界面壁纸层（双保险之一；另一个是容器自身的挡色层）
-            TabWallpaperRenderer.clear(activity)
-            hit?.let { runCatching { ChatPageGuard.ensureOpaque(it.container) } }
-        } else {
+
+        // ── ② 特征不命中：清视图侧状态 ──
+        val wasVisible = viewChatActive
+        viewChatActive = false
+
+        // ── ③ 锚点侧离开确认 ──
+        // Fragment 的 onPause 会迟到（实测 7 秒），所以用「特征持续不命中」当离开确认；
+        // 时间防抖 900ms，覆盖页面转场（相册往返、资料页往返）的瞬态不命中。
+        if (fragmentChatActive) {
+            if (anchorLeaveSince == 0L) {
+                anchorLeaveSince = now
+            } else if (now - anchorLeaveSince >= ANCHOR_LEAVE_CONFIRM_MS) {
+                anchorLeaveSince = 0L
+                noteEvent("特征持续不命中 → 判离开聊天页（onPause 迟到兜底）")
+                runCatching { onChattingFragmentHidden() }
+                return
+            }
+        }
+
+        if (wasVisible) {
             noteEvent("离开聊天页 → 重挂壁纸")
             runCatching { applyTabWallpapers(activity) }
         }
@@ -743,14 +748,9 @@ internal object ThemeSurface {
             noteEvent("聊天页 Fragment 出现 → 撤壁纸 + 容器兜底")
         }
         fragmentChatActive = true
-        // 记下锚点 View：微信「返回主界面」时 ChattingUIFragment.onPause 可能迟到好几秒
-        // （Fragment 留在回退栈里），但它的根 View 会立刻不可见/被移除 —— 用它做即时判定。
-        // 只记录 View，不做 detach 直判：转场时 View 会被 detach→attach，
-        // 立即判离开同样会误伤（与 isShown 同类问题）。离开判定统一走 checkChatPage 防抖校验。
-        if (fragmentView != null && anchorViewRef?.get() !== fragmentView) {
-            anchorViewRef = java.lang.ref.WeakReference(fragmentView)
-            anchorHiddenStreak = 0
-        }
+        // 不用 Fragment 根 View 做存活判定（isShown/detach 在 onViewCreated 与转场期间都会误导），
+        // 离开确认统一交给 checkChatPage 的「特征持续不命中」时间防抖。
+        anchorLeaveSince = 0L
         runCatching {
             liveActivities().forEach { act ->
                 if (ThemePages.isLauncher(act)) TabWallpaperRenderer.clear(act)
@@ -763,8 +763,7 @@ internal object ThemeSurface {
     fun onChattingFragmentHidden() {
         val wasActive = fragmentChatActive
         fragmentChatActive = false
-        anchorViewRef = null
-        anchorHiddenStreak = 0
+        anchorLeaveSince = 0L
         // 视图特征可能残留（GlobalLayout 未回调），权威离开时一并清掉，否则 draw 被卡死
         val viewStale = viewChatActive
         viewChatActive = false
