@@ -53,6 +53,16 @@ class DexClassDelegate internal constructor(
     private var cachedClass: Class<*>? = null
     internal var cachedData: ClassData? = null
 
+    /**
+     * 最近一次查找命中的**全部**候选类（含被选中的那个）。
+     *
+     * 用途：`allowMultiple = true` 的场景下，调用方需要自己按方法/字段签名
+     * 从多个候选里挑出真正要用的那个（例：WeMessageApi:classImportMultiVideo
+     * 在 8.0.79 上会同时命中「视频转码参数类」和「Uri 工具类」）。
+     */
+    internal var candidates: List<ClassData> = emptyList()
+        private set
+
     val clazz: Class<*>
         get() {
             if (descriptorString == "com.tencent.mm.ui.LauncherUI")
@@ -105,6 +115,7 @@ class DexClassDelegate internal constructor(
             return false
         }
 
+        candidates = results
         if (results.isEmpty()) {
             if (!allowFailure) {
                 WeLogger.w("DexClassDelegate", "DexKit: No class found for key: $key")

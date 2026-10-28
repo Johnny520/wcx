@@ -168,11 +168,105 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             usingEqStrings("MicroMsg.NetSceneSendMsg", "[mergeMsgSource] rawSource:%s args is null:%s flag:%s")
         }
     }
-    private val classImportMultiVideo by dexClass {
+    /**
+     * ImportMultiVideo（多视频发送）。
+     *
+     * 8.0.79 实测：旧特征串 `MicroMsg.GetVideoMetadata` **会同时命中两个类** ——
+     * - `com.tencent.mm.pluginsdk.model.f3`：视频转码参数类（15 个字段含 VideoTransPara / ABAPrams）
+     * - `mp.b`：Uri / 缩略图工具类（0 字段，只有 2 个静态方法）
+     * 原实现要求唯一命中，DexKit 直接抛「Multiple classes found」。
+     *
+     * 现在三处改动：
+     * ① matcher 换成 ImportMultiVideo 自己的日志 TAG + 它写进媒体元数据的两个键名
+     *    （RemuxInfo / OriginMediaInfo）—— 三串同属一个类，唯一性远高于旧串；
+     * ② `allowMultiple` / `allowFailure` 双开，万一未来版本又命中多个也不再抛异常；
+     * ③ 真正使用前还会用 [resolveImportMultiVideoCtor] 按方法/字段签名再校验一次，
+     *    校验不通过就把该版本标记为「不支持多视频发送」，跳过功能而不影响其它 Dex 解析。
+     */
+    private val classImportMultiVideo by dexClass(
+        allowMultiple = true,
+        allowFailure = true,
+    ) {
         matcher {
-            // 8.0.79 起 "get video file name, dataString " 已被删除，只保留 TAG 串定位。
-            // "MicroMsg.GetVideoMetadata" 在 8.0.71~8.0.79 唯一存在，跨版本通用。
-            usingEqStrings("MicroMsg.GetVideoMetadata")
+            usingEqStrings("MicroMsg.ImportMultiVideo", "RemuxInfo", "OriginMediaInfo")
+        }
+    }
+
+    /** 是否已做过 ImportMultiVideo 定位（无论成功失败，只做一次）。 */
+    @Volatile
+    private var multiVideoResolved = false
+
+    /** 校验通过的 ImportMultiVideo 构造器；null = 该版本不支持。 */
+    @Volatile
+    private var multiVideoCtor: java.lang.reflect.Constructor<*>? = null
+
+    /**
+     * 多候选择优 + 签名校验，返回可用的构造器。
+     *
+     * 每个候选必须同时满足：
+     * 1. 是 [Thread] 子类（微信以 Thread 形式跑转码任务）
+     * 2. 存在 7 参构造器 `(Context, List, ?, String, int, ?, Boolean)`
+     *
+     * 全部候选都不满足 → 返回 null（调用方跳过功能）。全程 try-catch，
+     * 任何异常都降级为「不支持」，绝不向上抛、绝不阻断其它 Dex 解析。
+     */
+    private fun resolveImportMultiVideoCtor(): java.lang.reflect.Constructor<*>? {
+        multiVideoCtor?.let { return it }
+        if (multiVideoResolved) return null
+        multiVideoResolved = true
+        return try {
+            // 候选清单：当前已选中的那个排最前，其余来自 DexKit 的全部命中
+            val names = buildList {
+                runCatching { classImportMultiVideo.getDescriptorString() }
+                    .getOrNull()?.let { add(it) }
+                runCatching { classImportMultiVideo.candidates }
+                    .getOrDefault(emptyList())
+                    .forEach { c -> if (c.name !in this) add(c.name) }
+            }
+            WeLogger.i(TAG, "ImportMultiVideo 候选类(${names.size})：${names.joinToString().ifEmpty { "无" }}")
+            for (name in names) {
+                val cls = runCatching { name.toClass() }.getOrNull()
+                if (cls == null) {
+                    WeLogger.w(TAG, "ImportMultiVideo 候选 $name 加载失败 → 排除")
+                    continue
+                }
+                val fieldTypes = runCatching { cls.declaredFields.map { it.type.name } }
+                    .getOrDefault(emptyList())
+                val isThread = Thread::class.java.isAssignableFrom(cls)
+                val ctor = runCatching {
+                    cls.declaredConstructors.firstOrNull { c ->
+                        c.parameterCount == 7 &&
+                            c.parameterTypes[0].name == "android.content.Context" &&
+                            java.util.List::class.java.isAssignableFrom(c.parameterTypes[1]) &&
+                            c.parameterTypes[3].name == "java.lang.String" &&
+                            (c.parameterTypes[4].name == "int" || c.parameterTypes[4].name == "java.lang.Integer") &&
+                            (c.parameterTypes[6].name == "boolean" || c.parameterTypes[6].name == "java.lang.Boolean")
+                    }
+                }.getOrNull()
+                val hasVideoPara = fieldTypes.any {
+                    it.contains("VideoTransPara") || it.contains("ABAPrams")
+                }
+                val ok = isThread && ctor != null
+                WeLogger.i(
+                    TAG,
+                    "ImportMultiVideo 校验 $name：Thread=$isThread 七参构造器=${ctor != null} " +
+                        "视频参数字段=$hasVideoPara 字段数=${fieldTypes.size} → ${if (ok) "选中" else "排除"}"
+                )
+                if (ok && ctor != null) {
+                    ctor.isAccessible = true
+                    multiVideoCtor = ctor
+                    return ctor
+                }
+            }
+            WeLogger.w(
+                TAG,
+                "ImportMultiVideo 全部候选校验不通过 → 该微信版本标记为不支持多视频发送" +
+                    "（功能跳过，其它 Dex 解析与功能加载不受影响）"
+            )
+            null
+        } catch (t: Throwable) {
+            WeLogger.e(TAG, "ImportMultiVideo 定位异常（已降级为不支持该功能）", t)
+            null
         }
     }
     private val classAppMessage by dexClass {
@@ -1032,16 +1126,21 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }
         }
         return try {
-            WeLogger.i(TAG, "sending video: $videoPath to $toUser")
-            val thread = classImportMultiVideo.clazz.createInstance(
+            val ctor = resolveImportMultiVideoCtor()
+            if (ctor == null) {
+                WeLogger.w(TAG, "sendVideo 跳过：当前微信版本不支持多视频发送（ImportMultiVideo 未定位/校验失败）")
+                return false
+            }
+            WeLogger.i(TAG, "sending video: $videoPath to $toUser（ImportMultiVideo=${ctor.declaringClass.name}）")
+            val thread = ctor.newInstance(
                 HostInfo.application,
                 java.util.Collections.singletonList(videoPath),
                 null, toUser, 2, null, java.lang.Boolean.TRUE
             ) as Thread
             thread.start()
             true
-        } catch (e: Exception) {
-            WeLogger.e(TAG, "sendVideo failed", e); false
+        } catch (t: Throwable) {
+            WeLogger.e(TAG, "sendVideo failed", t); false
         }
     }
 
