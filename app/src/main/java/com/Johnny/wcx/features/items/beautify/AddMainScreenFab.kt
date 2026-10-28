@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import android.content.Context
+import android.content.Intent
 import android.view.View
 import com.Johnny.wcx.constants.PackageNames
 import androidx.activity.ComponentActivity
@@ -89,6 +90,8 @@ import com.composables.icons.materialsymbols.outlinedfilled.Update
 import com.composables.icons.materialsymbols.outlinedfilled.Wallet
 import dev.ujhhgtg.reflekt.firstMethod
 import dev.ujhhgtg.reflekt.reflekt
+import com.Johnny.wcx.activity.settings.SettingsActivity
+import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
@@ -120,11 +123,21 @@ object AddMainScreenFab : ClickableFeature() {
     private val fabExpandedState = mutableStateOf(false)
     private val convListVisibleState = mutableStateOf(true)
 
+    /**
+     * 会话列表是否可见（决定 FAB 是否显示）。
+     *
+     * ⚠️ 判定失败一律按「可见」处理：FAB 是入口，**宁可多显示，也绝不能因为一个内部
+     * View 判定把它长期藏起来**。实测反馈「FAB 用久了会消失，强行停止重进才回来」，
+     * 就是某次判定为 false 之后再也回不到 true（视图树监听挂在旧的 decorView 上会失效）。
+     */
     private fun checkConvListVisible(activity: Activity): Boolean = try {
-        val decorView = activity.window?.decorView ?: return false
+        val decorView = activity.window?.decorView ?: return true
         val list = decorView.findViewWhich<View> { it is WxRecyclerView }
-        list != null && list.isShown
-    } catch (_: Throwable) { false }
+        list?.isShown ?: true
+    } catch (t: Throwable) {
+        WeLogger.w(TAG, "会话列表可见性判定异常（按可见处理）：${t.message}")
+        true
+    }
 
     private const val TAG = "AddMainScreenFab"
     private const val KEY_FAB_CONFIG = "fab_button_configs_json"
@@ -206,9 +219,12 @@ object AddMainScreenFab : ClickableFeature() {
         }
     }
 
-    private fun startActivityByName(context: Context, className: String): Boolean {
-        val host = context as? Activity ?: return false
-        return WeChatQuickActions.openWeChatActivity(host, className)
+    private fun startActivityByName(context: Context, className: String) {
+        val intent = Intent().apply {
+            setClassName(context.packageName, className)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
     }
 
     override fun onEnable() {
@@ -298,33 +314,36 @@ object AddMainScreenFab : ClickableFeature() {
                 val icon = iconPool[item.iconName] ?: MaterialSymbols.OutlinedFilled.Add
                 val action: () -> Unit = when (item.type) {
                     FabType.START_ACTIVITY -> {
-                        {
-                            val target = item.targetActivity
-                            WeLogger.i(TAG, "FAB 动作：${item.type}/${item.name} -> $target")
-                            if (target == null) {
-                                showToast("该按钮未配置目标页面")
-                            } else if (!startActivityByName(activity, target)) {
-                                showToast("打开失败，详见日志")
+                        { item.targetActivity?.let {
+                            try {
+                                startActivityByName(activity, it)
+                            } catch (e: Throwable) {
+                                WeLogger.e(TAG, "START_ACTIVITY 启动失败: $it", e)
                             }
-                        }
+                        } }
                     }
 
                     FabType.MARK_ALL_READ -> {
                         {
-                            WeLogger.i(TAG, "FAB 动作：${item.type}/${item.name}")
-                            WeChatQuickActions.markAllReadAsync(activity)
+                            try {
+                                WeConversationApi.markAllAsRead()
+                                showToast("已将全部未读消息标为已读")
+                            } catch (e: Throwable) {
+                                WeLogger.e(TAG, "清空未读失败", e)
+                            }
                         }
                     }
 
                     FabType.MODULE_SETTINGS -> {
                         {
                             try {
-                                WeLogger.i(TAG, "FAB 动作：${item.type}/${item.name}")
-                                if (!WeChatQuickActions.openModuleSettings(activity)) {
-                                    showToast("打开模块设置失败，详见日志")
-                                }
+                                // Bug Fix (v201): 对齐 WeKit 上游的最简 Intent 启动方式。
+                                // 之前 v196 加的 setPackage(PackageNames.MODULE) 实际上是无效的，
+                                // 真正的代理路由依赖 WeLauncher.init() 中的 ActivityProxy.init()
+                                // 钩子 IActivityManager.startActivity()。去掉 setPackage 即可。
+                                activity.startActivity(Intent(activity, SettingsActivity::class.java))
+                                WeLogger.i(TAG, "MODULE_SETTINGS: 启动模块设置 Activity")
                             } catch (e: Throwable) {
-                                showToast("打开模块设置失败：" + (e.message ?: e.javaClass.simpleName))
                                 WeLogger.e(TAG, "MODULE_SETTINGS 启动失败", e)
                             }
                         }
@@ -480,7 +499,11 @@ object AddMainScreenFab : ClickableFeature() {
                 // 视图布局变更监听（兼容 8.0.76 嵌入式聊天）
                 if (decorView != null) {
                     decorView.viewTreeObserver.addOnGlobalLayoutListener {
-                        convListVisibleState.value = checkConvListVisible(activity)
+                        val visible = checkConvListVisible(activity)
+                        if (visible != convListVisibleState.value) {
+                            WeLogger.i(TAG, "会话列表可见性变化 → FAB ${if (visible) "显示" else "隐藏"}")
+                        }
+                        convListVisibleState.value = visible
                     }
                 }
             }

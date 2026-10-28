@@ -235,6 +235,16 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
     private var lastToolListUpdateTime = now()
 
     override fun onEnable() {
+        try {
+            registerHooks()
+        } catch (t: Throwable) {
+            // 绝不静默：工具栏不显示时必须能从日志看出是「安装失败」还是「注入被跳过」
+            WeLogger.e(TAG, "聊天工具栏安装失败（工具栏将不显示）：${t.message}", t)
+        }
+    }
+
+    /** 真正的 hook 安装（失败要留痕，否则「工具栏失效」无从定位）。 */
+    private fun registerHooks() {
         methodAppPanelInitAppGrid.apply {
             hookBefore {
                 val appPanel = args[0] as LinearLayout
@@ -313,7 +323,12 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(activity)
 
             chatFooter.setLifecycleOwner(lifecycleOwner)
-            val linearLayout = chatFooter.findViewByChildIndexes<LinearLayout>(0, 1)!!
+            val linearLayout = chatFooter.findViewByChildIndexes<LinearLayout>(0, 1)
+            if (linearLayout == null) {
+                // 微信调整了 ChatFooter 内部层级：跳过本次注入（不再 NPE 中断整个 hook）
+                WeLogger.w(TAG, "ChatFooter 层级变化，找不到注入容器（子节点数=${chatFooter.childCount}），本次跳过")
+                return@hookAfter
+            }
             linearLayout.setLifecycleOwner(lifecycleOwner)
             if (linearLayout.findViewWhich<View> { it is ComposeView } != null) return@hookAfter
             activity.window.decorView.setLifecycleOwner(lifecycleOwner)
@@ -381,7 +396,9 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                     }
                 }
             }, 0)
+            WeLogger.i(TAG, "聊天工具栏已注入聊天页（容器子 View 数=${linearLayout.childCount}）")
         }
+        WeLogger.i(TAG, "聊天工具栏 hook 已安装（聊天页创建时注入）")
     }
 
     override fun onDisable() {
