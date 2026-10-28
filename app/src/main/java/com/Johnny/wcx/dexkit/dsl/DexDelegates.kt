@@ -91,8 +91,16 @@ class DexClassDelegate internal constructor(
         setDescriptor("com.tencent.mm.ui.LauncherUI")
     }
 
+    /**
+     * 是否**不可用**（占位符 或 **尚未解析**）。
+     *
+     * 把 `descriptor == null` 也算进来是关键：特征解析还没跑（缓存未建立、
+     * await re-resolution）时委托根本没有 descriptor，此时 `isPlaceholder` 若仍返回
+     * false，调用方的守卫会放行，接着 `.clazz` / `.method` 就抛
+     * `Class/Method not found for key: ...`（8.0.76 实测一个 key 被反复抛 15+ 次）。
+     */
     val isPlaceholder
-        get() = descriptorString == "com.tencent.mm.ui.LauncherUI"
+        get() = descriptorString == null || descriptorString == "com.tencent.mm.ui.LauncherUI"
 
     override fun getDescriptorString(): String? = descriptorString
     override fun loadDescriptor(value: String) = setDescriptor(value)
@@ -192,8 +200,9 @@ class DexFieldDelegate internal constructor(
         setDescriptor(PLACEHOLDER_DESCRIPTOR)
     }
 
+    /** 是否不可用（占位符 或 尚未解析 —— 未解析时 `.field` 同样会抛错）。 */
     val isPlaceholder
-        get() = descriptorString == PLACEHOLDER_DESCRIPTOR
+        get() = descriptorString == null || descriptorString == PLACEHOLDER_DESCRIPTOR
 
     override fun getDescriptorString(): String? = descriptorString
     override fun loadDescriptor(value: String) = setDescriptor(value)
@@ -323,8 +332,14 @@ class DexMethodDelegate internal constructor(
     @Suppress("NOTHING_TO_INLINE")
     inline fun setDescriptor(m: MethodData) = setDescriptor(DexMethodDescriptor(m.className, m.methodName, m.methodSign))
 
+    /**
+     * 是否**不可用**（占位符 或 **尚未解析**）。
+     *
+     * `descriptor == null` 必须算进来：解析未完成时调用方守卫会被 `false` 放行，
+     * 随后 `.method` 抛 `Method not found for key: ...`（实测 8.0.76 反复抛出 15+ 次）。
+     */
     val isPlaceholder
-        get() = descriptor != null &&
+        get() = descriptor == null ||
                 descriptor!!.name == "Lcom/tencent/mm/ui/LauncherUI;->getInstance()Lcom/tencent/mm/ui/LauncherUI;"
 
     fun setDescriptor(className: String, methodName: String, methodSign: String) =

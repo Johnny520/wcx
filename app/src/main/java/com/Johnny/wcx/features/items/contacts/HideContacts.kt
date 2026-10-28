@@ -661,7 +661,11 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
     private fun hookNewMessageNotification() {
         val method = WeConversationApi.methodNotifyConversationChanged
-        if (method.isPlaceholder) {
+        // isPlaceholder 现已涵盖「尚未解析」，但再用 runCatching 兜一层：
+        // 该 key 在 8.0.76 上特征匹配为 0，解析层不可用时必须静默降级，不能抛到上层。
+        if (runCatching { method.isPlaceholder }.getOrDefault(true) ||
+            runCatching { method.method }.isFailure
+        ) {
             WeLogger.w(TAG, "conversation notify method not resolved; new-message suppression unavailable")
             return
         }

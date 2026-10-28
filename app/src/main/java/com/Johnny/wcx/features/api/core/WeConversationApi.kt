@@ -294,8 +294,14 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     }
 
     private fun notifyConversationChanged(talker: String, eventType: Int = 3) {
+        // isPlaceholder 已把「尚未解析」算作不可用；这里再包一层，防 descriptor 解析
+        // 在守卫之后失效（解析未完成/特征漂移）时抛 Method not found 打断调用方。
         if (methodNotifyConversationChanged.isPlaceholder) return
-        methodNotifyConversationChanged.method.invoke(conversationStorage, eventType, conversationStorage, talker)
+        runCatching {
+            methodNotifyConversationChanged.method.invoke(conversationStorage, eventType, conversationStorage, talker)
+        }.onFailure {
+            WeLogger.w(TAG, "notifyConversationChanged 跳过（${it.javaClass.simpleName}）: ${it.message}")
+        }
     }
 
     fun setConversationsVisibility(visible: Boolean, talkers: Array<String>) {

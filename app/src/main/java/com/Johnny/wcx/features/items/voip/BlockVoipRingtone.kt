@@ -67,7 +67,9 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
     // =====================================================================
     // 旧版兜底链（8.0.75 及更早的 playSound）
     // =====================================================================
-    private val methodPlaySoundByLog by dexMethod(allowFailure = true) {
+    // 8.0.76 实测该日志串命中 3 个方法（同名/同串的多个播放入口）。
+    // 允许多命中不报错；使用时把**每个**候选都 hook —— 它们都是「按日志串定位的播放入口」。
+    private val methodPlaySoundByLog by dexMethod(allowMultiple = true, allowFailure = true) {
         matcher {
             usingEqStrings("playSound Failed Throwable t = ")
         }
@@ -96,8 +98,26 @@ object BlockVoipRingtone : ClickableFeature(), IResolveDex {
             WeLogger.i(TAG, "hook enabled: sceneSetting (BaseSceneSetting)")
         } else if (!methodPlaySoundByLog.isPlaceholder) {
             WeLogger.w(TAG, "sceneSetting strict match failed, using log-string fallback")
-            methodPlaySoundByLog.hookBefore { tryBlockRingtone(this) }
-            hooked = true
+            // 多候选：把命中的每个入口都挂上（只挂第一个会漏掉另外两个播放路径）
+            val candidates = runCatching { methodPlaySoundByLog.candidateMethods() }
+                .getOrDefault(emptyList())
+                .ifEmpty { runCatching { listOf(methodPlaySoundByLog.method) }.getOrDefault(emptyList()) }
+            var fallbackHooked = 0
+            val hookedIds = mutableListOf<String>()
+            for (m in candidates) {
+                runCatching { m.hookBefore { tryBlockRingtone(this) } }
+                    .onSuccess {
+                        fallbackHooked++
+                        hookedIds += "${m.declaringClass?.name}#${m.name}"
+                    }
+                    .onFailure { WeLogger.e(TAG, "log-string fallback hook 失败（${m.declaringClass?.name}#${m.name}）", it) }
+            }
+            if (fallbackHooked > 0) {
+                hooked = true
+                WeLogger.i(TAG, "log-string fallback 已 hook $fallbackHooked/${candidates.size} 个候选：${hookedIds.joinToString("、")}")
+            } else {
+                WeLogger.w(TAG, "log-string fallback 无可用候选（候选数=${candidates.size}），未 hook")
+            }
         }
 
         if (!methodIncomingRing.isPlaceholder) {
