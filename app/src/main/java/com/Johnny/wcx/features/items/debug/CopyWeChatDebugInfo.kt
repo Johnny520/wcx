@@ -55,7 +55,7 @@ object CopyWeChatDebugInfo : ClickableFeature(), IResolveDex {
         searchPackages("com.tencent.mm.plugin.setting.ui.setting")
         matcher {
             name = "onClick"
-            usingEqStrings("com/tencent/mm/plugin/setting/ui/setting/SettingsAboutMMHeaderPreference$1", $$"android/view/View$OnClickListener", "onClick")
+            usingEqStrings("com/tencent/mm/plugin/setting/ui/setting/SettingsAboutMMHeaderPreference$1")
         }
     }
 }

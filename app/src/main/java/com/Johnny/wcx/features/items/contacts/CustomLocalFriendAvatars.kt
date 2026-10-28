@@ -101,6 +101,10 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     // ji1.s.og, most of com.tencent.mm.feature.avatar.w calls this,
     // e.g. Cg, ig, cg, og, rg
     private val methodMvvmLoadAvatar1 by dexMethod(allowFailure = true) {
+        // 8.0.80 起 "MicroMsg.AvatarGetContactServiceHelper" 已成孤儿串（无 const-string 引用）。
+        // 只保留仍存活的 "put stack into pool: "，配合原有的 4 参签名
+        // (ImageView, String, String, float) → void：
+        // 8.0.76 = avatar.w.kj / 8.0.79 = avatar.w.Aj / 8.0.80 = avatar.w.Gj，三版均唯一命中。
         matcher {
             paramTypes(
                 "android.widget.ImageView",
@@ -109,7 +113,7 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                 "float"
             )
             returnType(Void.TYPE)
-            usingEqStrings("MicroMsg.AvatarGetContactServiceHelper", "put stack into pool: ")
+            usingEqStrings("put stack into pool: ")
         }
     }
 

@@ -53,10 +53,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
     private val methodOnCreateMenu by dexMethod {
         searchPackages("com.tencent.mm.plugin.sns.ui.listener")
         matcher {
-            usingStrings(
-                "MicroMsg.TimelineOnCreateContextMenuListener",
-                "onMMCreateContextMenu error"
-            )
+            usingStrings("onMMCreateContextMenu error")
         }
     }
     private val methodOnItemSelected by dexMethod {

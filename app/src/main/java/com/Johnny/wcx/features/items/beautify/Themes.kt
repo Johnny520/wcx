@@ -1370,7 +1370,7 @@ object Themes : ClickableFeature(), IResolveDex {
 
     private val methodAppGridGetView by dexMethod {
         matcher {
-            usingStrings("MicroMsg.AppGrid", "pos:", "page:")
+            usingStrings("page:")
             name = "getView"
         }
     }
@@ -1432,7 +1432,7 @@ object Themes : ClickableFeature(), IResolveDex {
     private val classAddressItemConvert by dexClass {
         matcher {
             // 两个 AddressItemConvert 候选类共用日志 tag，用 addressbook_cell 消歧
-            usingStrings("MicroMsg.Mvvm.AddressItemConvert", "onBindViewHolder ", "addressbook_cell")
+            usingStrings("MicroMsg.Mvvm.AddressItemConvert", "addressbook_cell")
         }
     }
 

@@ -15,12 +15,7 @@ object SkipSplash : SwitchFeature(), IResolveDex {
             declaredClass = "com.tencent.mm.plugin.appbrand.AppBrandRuntime"
             returnType = "void"
             paramCount = 0
-            usingEqStrings(
-                "public:prepare",
-                "Loading页展示",
-                "MicroMsg.AppBrandRuntime",
-                "showSplash[AppBrandSplashAd], appId:%s, splash:%s"
-            )
+            usingEqStrings("Loading页展示")
         }
     }
 

@@ -254,12 +254,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
             declaredClass(classFlutterVoipPlugin.clazz)
             paramCount = 4
             returnType = "void"
-            usingEqStrings(
-                "MicroMsg.FlutterVoipPlugin",
-                "minimize: activity=",
-                "voip is already minimized, ignore!",
-                "minimize, permission denied",
-            )
+            usingEqStrings("MicroMsg.FlutterVoipPlugin", "voip is already minimized, ignore!", "minimize, permission denied")
         }
     }
 

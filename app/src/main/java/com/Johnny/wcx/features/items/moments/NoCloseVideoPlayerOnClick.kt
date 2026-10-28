@@ -80,7 +80,7 @@ object NoCloseVideoPlayerOnClick : SwitchFeature(), IResolveDex {
         searchPackages("com.tencent.mm.plugin.sns.ui")
         matcher {
             name = "onTouch"
-            usingEqStrings("com/tencent/mm/plugin/sns/ui/SnsOnlineVideoActivity$5", $$"android/view/View$OnTouchListener", "onTouch")
+            usingEqStrings("com/tencent/mm/plugin/sns/ui/SnsOnlineVideoActivity$5")
         }
     }
 }

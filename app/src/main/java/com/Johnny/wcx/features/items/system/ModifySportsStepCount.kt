@@ -44,7 +44,7 @@ object ModifySportsStepCount : ClickableFeature(), IResolveDex {
     private val methodUploadSteps by dexMethod {
         searchPackages("com.tencent.mm.plugin.sport.model")
         matcher {
-            usingEqStrings("MicroMsg.Sport.DeviceStepManager", "update device Step time: %s stepCount: %s")
+            usingEqStrings("update device Step time: %s stepCount: %s")
         }
     }
 

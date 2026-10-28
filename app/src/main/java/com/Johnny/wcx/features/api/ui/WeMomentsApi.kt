@@ -353,10 +353,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             paramCount(2)
             paramTypes(String::class.java, null)
             returnType(String::class.java)
-            usingEqStrings(
-                "getSnsVideoFullPath",
-                "getSnsVideoFullPath have flag %s, %s >>"
-            )
+            usingEqStrings("getSnsVideoFullPath")
         }
     }
 
@@ -500,7 +497,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             paramCount(3)
             paramTypes(Context::class.java, String::class.java, String::class.java)
             returnType(String::class.java)
-            usingEqStrings("[+] Called exportImage, src: %s", "exportImageImpl")
+            usingEqStrings("[+] Called exportImage, src: %s")
         }
     }
 
