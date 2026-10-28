@@ -17,10 +17,7 @@ object PreventXposedDetection : SwitchFeature(), IResolveDex {
     private val methodCheckStackTraceElements by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.app")
         matcher {
-            usingEqStrings(
-                "de.robv.android.xposed.XposedBridge",
-                "com.zte.heartyservice.SCC.FrameworkBridge"
-            )
+            usingEqStrings("com.zte.heartyservice.SCC.FrameworkBridge")
         }
     }
 

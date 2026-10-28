@@ -69,7 +69,7 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     }
     private val methodSetDnd by dexMethod {
         matcher {
-            usingEqStrings("MicroMsg.OpenImOpLogLogic", "OpenImOpLogLogic OpenIMModContactMuteOplog username:%s switch add")
+            usingEqStrings("MicroMsg.OpenImOpLogLogic")
         }
     }
     private val methodSetNoDnd by dexMethod {

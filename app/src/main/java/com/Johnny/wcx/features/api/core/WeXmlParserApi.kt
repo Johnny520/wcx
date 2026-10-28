@@ -30,7 +30,7 @@ object WeXmlParserApi : ApiFeature(), IResolveDex {
     private val methodXmlParser by dexMethod {
         searchPackages("com.tencent.mm.sdk.platformtools")
         matcher {
-            usingEqStrings("MicroMsg.SDK.XmlParser", "[ %s ]")
+            usingEqStrings("MicroMsg.SDK.XmlParser")
         }
     }
 

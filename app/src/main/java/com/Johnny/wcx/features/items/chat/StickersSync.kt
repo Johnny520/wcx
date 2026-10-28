@@ -255,7 +255,7 @@ object StickersSync : ClickableFeature(), IResolveDex {
     }
     private val methodDownloadImage by dexMethod {
         matcher {
-            usingEqStrings("MicroMsg.Loader.DefaultImageDownloader.HttpClientFactory", "dz[httpURLConnectionGet 300]")
+            usingEqStrings("dz[httpURLConnectionGet 300]")
         }
     }
 

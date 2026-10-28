@@ -271,7 +271,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     // setUploadList 的列表元素, 实况图片必须经此路径构造。
     val classSnsUploadElement by dexClass {
         matcher {
-            usingEqStrings("MicroMsg.SnsUploadElment", "path:%s model:%s")
+            usingEqStrings("MicroMsg.SnsUploadElment")
 
             addMethod {
                 name = "<init>"
@@ -458,7 +458,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     // 通过这几个在构造函数中出现的唯一字符串定位类, 避免依赖混淆类名。
     val classXs4 by dexClass {
         matcher {
-            usingEqStrings("singerName", "albumName", "musicOperationUrl", "albumCoverUrl")
+            usingEqStrings("singerName", "albumName", "musicOperationUrl")
         }
     }
 
@@ -480,13 +480,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             modifiers = Modifier.STATIC
             paramCount(1)
             returnType(String::class.java)
-            usingEqStrings(
-                "<finderFeed>",
-                "</finderFeed>",
-                "<authIconType>",
-                "<fullClipInset>",
-                "<fullCoverUrl>"
-            )
+            usingEqStrings("<authIconType>", "<fullClipInset>", "<fullCoverUrl>")
         }
     }
 

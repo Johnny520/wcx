@@ -199,12 +199,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
     private val classFlutterVoipPlugin by dexClass(allowFailure = true) {
         matcher {
-            usingEqStrings(
-                "MicroMsg.FlutterVoipPlugin",
-                "minimize: activity=",
-                "voip is already minimized, ignore!",
-                "minimize, permission denied",
-            )
+            usingEqStrings("MicroMsg.FlutterVoipPlugin", "voip is already minimized, ignore!", "minimize, permission denied")
         }
     }
 

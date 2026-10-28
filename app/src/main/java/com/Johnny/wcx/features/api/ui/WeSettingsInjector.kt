@@ -88,7 +88,7 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
     }
     private val classSettingLocation by dexClass(allowFailure = true) {
         matcher {
-            usingEqStrings("SettingLocation(parentGroup=", ", frontItem=")
+            usingEqStrings(", frontItem=")
         }
     }
     private val methodSettingGroupAccountInfoGetStringId by dexMethod(allowFailure = true) {

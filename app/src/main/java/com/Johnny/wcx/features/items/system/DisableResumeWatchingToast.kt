@@ -13,15 +13,20 @@ import com.Johnny.wcx.features.core.SwitchFeature
 )
 object DisableResumeWatchingToast : SwitchFeature(), IResolveDex {
 
-    private val methodShowRecoveryToast by dexMethod {
+    private val methodShowRecoveryToast by dexMethod(allowFailure = true) {
+        // 注意：只保留仍被引用的两串会多命中到无关 lambda（实测 8.0.79 落到 f94/a.invoke()），
+        // 因此保留原始 5 串组合。其中 "recoveryObj == null " / "toast_button" /
+        // "topActivity == null or isFinishing or isDestroyed" 在 8.0.76 起已被微信裁成孤儿串
+        // （string_ids 残留、无 const-string 引用）→ 该锚点在 8.0.76+ 恒不命中，
+        // 用 allowFailure 干净降级：功能不生效，但绝不 hook 到错误方法。
         matcher {
             paramCount = 0
             usingEqStrings(
                 "MicroMsg.RecoveryHelper",
-                "topActivity == null or isFinishing or isDestroyed",
+                "view_exp",
                 "recoveryObj == null ",
                 "toast_button",
-                "view_exp",
+                "topActivity == null or isFinishing or isDestroyed",
             )
         }
     }

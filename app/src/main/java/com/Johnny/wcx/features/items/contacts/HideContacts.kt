@@ -942,11 +942,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
      */
     internal val methodFinderLikeDrawerRefresh by dexMethod(allowFailure = true) {
         matcher {
-            usingEqStrings(
-                "Finder.DrawerPresenter",
-                "[refreshData] Cost=",
-                "com/tencent/mm/plugin/finder/view/builder/FinderLikeDrawerBuilder"
-            )
+            usingEqStrings("Finder.DrawerPresenter", "com/tencent/mm/plugin/finder/view/builder/FinderLikeDrawerBuilder")
         }
     }
 
