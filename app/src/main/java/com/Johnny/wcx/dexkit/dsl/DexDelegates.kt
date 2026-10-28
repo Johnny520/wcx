@@ -282,6 +282,26 @@ class DexMethodDelegate internal constructor(
     private var cachedMethod: Method? = null
     internal var cachedData: MethodData? = null
 
+    /**
+     * 最近一次查找命中的**全部**方法候选（含被选中的那个）。
+     *
+     * 用途：`allowMultiple = true` 时调用方可以自行处置多个命中，典型两类：
+     * - 择优：按参数/返回类型签名校验挑出真正的目标（如 ImportMultiVideo）
+     * - 全 hook：谓词类方法的多个重载都该处理（如「是否占用」检查，见 RemoveLimitsDuringCalls）
+     */
+    internal var candidates: List<MethodData> = emptyList()
+        private set
+
+    /** 全部候选转成可反射 hook 的 java Method；解析失败的候选自动丢弃。 */
+    fun candidateMethods(): List<Method> = runCatching {
+        candidates.mapNotNull { cd ->
+            runCatching {
+                DexMethodDescriptor(cd.className, cd.methodName, cd.methodSign)
+                    .getMethodInstance(ClassLoaders.HOST)
+            }.getOrNull()
+        }
+    }.getOrDefault(emptyList())
+
     val method: Method
         get() {
             if (descriptor != null && descriptor!!.name == "Lcom/tencent/mm/ui/LauncherUI;->()Lcom/tencent/mm/ui/LauncherUI;")
@@ -340,6 +360,8 @@ class DexMethodDelegate internal constructor(
             setPlaceholderDescriptor()
             return false
         }
+
+        candidates = results
 
         if (results.isEmpty()) {
             if (!allowFailure) {
