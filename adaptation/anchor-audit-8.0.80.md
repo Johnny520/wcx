@@ -7,9 +7,9 @@
 
 | 版本 | 委托数 | OK | WARN(类级命中但无单方法共现) | SIG(串命中但签名不符) | FAIL | SKIP(无串锚点) |
 |---|---|---|---|---|---|---|
-| 8.0.76 | 515 | 250 | 34 | 10 | 120 | 101 |
+| 8.0.76 | 515 | 253 | 33 | 10 | 118 | 101 |
 | 8.0.79 | 515 | 259 | 33 | 9 | 113 | 101 |
-| 8.0.80 | 515 | 237 | 38 | 9 | 130 | 101 |
+| 8.0.80 | 515 | 240 | 37 | 9 | 128 | 101 |
 
 说明：`WARN` 按 DexKit 的方法级 AND 语义视为**实际会失败**（已由 `classChattingDataAdapter` 的线上日志实证）。
 
@@ -22,12 +22,12 @@
 | 发消息 | `WeMessageApi:classMsgInfoStorage` | FAIL | FAIL | OK |
 | 数据库 | `WeMessageApi:classMmKernel` | FAIL | FAIL | WARN |
 | 数据库 | `WeDatabaseApi:classMmKernel` | WARN | FAIL | WARN |
-| 数据库 | `WeDatabaseApi:methodGetStorage` | FAIL | OK | FAIL |
+| 数据库 | `WeDatabaseApi:methodGetStorage` | OK | OK | OK |
 | 朋友圈 | `WeMomentsApi:classUploadPackHelper` | OK | OK | OK |
 | 朋友圈 | `WeMomentsApi:methodCommit` | OK | OK | OK |
 | 朋友圈 | `WeMomentsApi:methodAddImageMediaObjByPath` | OK | OK | WARN |
 | 朋友圈 | `WeMomentsApi:classSnsMediaObj` | OK | OK | OK |
-| 会话 | `WeConversationApi:classConversationStorage` | WARN | OK | WARN |
+| 会话 | `WeConversationApi:classConversationStorage` | OK | OK | OK |
 | 消息 | `WeMessageApi:classChattingDataAdapter` | OK | OK | OK |
 | 多视频 | `WeMessageApi:classImportMultiVideo` | OK | OK | OK |
 | 平板 | `ForceTabletMode:methodIsTablet` | OK | OK | OK |
@@ -37,7 +37,7 @@
 
 ## 三、8.0.80 相对 8.0.79 的回归清单
 
-共 **49** 项。根因分布：{'A_分散': 6, 'C_孤儿串': 43}
+共 **47** 项。根因分布：{'A_分散': 6, 'C_孤儿串': 41}
 
 | key | 79 → 80 | 根因 | 缺失/孤儿串 |
 |---|---|---|---|
@@ -75,9 +75,7 @@
 | `WeConversationApi:methodGetConversationByTalker` | OK → FAIL | C_孤儿串 | get null with username: |
 | `WeConversationApi:methodSetNoDnd` | OK → FAIL | C_孤儿串 | OpenImOpLogLogic OpenIMModContactMuteOplog username:%s switch cancel |
 | `WeConversationApi:methodUpdateUnreadByTalker` | OK → FAIL | C_孤儿串 | updateUnreadByTalker %s |
-| `WeDatabaseApi:methodGetStorage` | OK → FAIL | C_孤儿串 | mCoreStorage not initialized! |
 | `WeMessageApi:ctorNetSceneSendMsgLocation` | OK → FAIL | A_分散 |  |
-| `WeMessageApi:methodMmKernelGetStorage` | OK → FAIL | C_孤儿串 | mCoreStorage not initialized! |
 | `WeMessageApi:methodRunVoiceService` | OK → FAIL | C_孤儿串 | run() %s |
 | `WeMomentsApi:classImproveInteractionLayout` | OK → FAIL | C_孤儿串 | MicroMsg.Improve.InteractionLayout |
 | `WeMomentsApi:classSnsSourceScene` | OK → FAIL | C_孤儿串 | comment_detail |
@@ -135,17 +133,7 @@
     · `sig_params` 把描述符分隔符逗号当成参数类型 → 所有多参方法被误判「签名不符」
     · `declaredClass{}` / `superClass{}` 块内的串被当成方法体内串 → 类级约束被误用为方法级条件
 
-## 六、工具能力边界（重要，避免误用）
-
-| 工具 | 能自动给出 | 不能自动做 |
-|---|---|---|
-| `auto_probe.py` | 「存活串 + 原签名」在三版本都唯一命中的解 | 语义正确性（曾给出 lambda `invoke()` 作为 Toast 方法的假解） |
-| `migrate2.py` | 从上一版真目标类提取串、在新版本做签名筛选，得 42 项候选 | 区分「同类不同方法」（多个不同功能会推荐到同一批方法），必须人工确认 |
-
-**结论**：自动化只能收敛候选集，最终每一项都要人工核对「方法语义是否与 key 名一致」。
-本轮已在 `auto_probe` 结果中人工剔除 1 项假解（`DisableResumeWatchingToast` → lambda）。
-
-## 七、待办（按优先级）
+## 六、待办（按优先级）
 
 1. 8.0.80 回归 62 项：逐项找「存活串 + 结构约束」替代锚点（当前工具 `suggest2.py` 只能给出 8 项唯一解）
 2. `WARN` 类项（40~46 个/版本）多为「串分散在不同方法」，需要拆成单串 + 签名约束

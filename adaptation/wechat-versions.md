@@ -93,11 +93,18 @@
 
 | 版本 | OK | WARN | SIG | FAIL | SKIP |
 |---|---|---|---|---|---|
-| 8.0.76 | 250 | 34 | 10 | 120 | 101 |
+| 8.0.76 | 253 | 33 | 10 | 118 | 101 |
 | 8.0.79 | 259 | 33 | 9 | 113 | 101 |
-| 8.0.80 | 237 | 38 | 9 | 130 | 101 |
+| 8.0.80 | 240 | 37 | 9 | 128 | 101 |
 
 （表内是本轮修复**之后**的数字。本轮起点：8.0.76 OK 214 / 8.0.79 OK 226 / 8.0.80 OK 202。）
+
+**本轮（2026-10-29）额外修掉的两条核心链路**：
+- `classConversationStorage`：两串（`rconversation` / `PRAGMA table_info( rconversation)`）在类里属不同方法，
+  方法级 AND 恒失败 → 改单 PRAGMA 串，三版唯一命中（76/79 `storage.l4`、80 `storage.m4`），
+  连带 `methodDelChatContact` / `methodIsPlacedTop` / `methodUpdateUnreadByTalker`（76/79）恢复；
+- 取库链 `mCoreStorage not initialized!` 已是孤儿串 → 换 `Kernel not initialized by MMApplication!`，
+  `WeDatabaseApi:methodGetStorage` 与 `WeMessageApi:methodMmKernelGetStorage` 三版均恢复。
 
 **核心结论：8.0.80 上关键链路可用** —— 发消息（`classNetSceneSendMsg`）、朋友圈
 （`classUploadPackHelper` / `methodCommit` / `classSnsMediaObj`）、多视频、强制平板、主题
