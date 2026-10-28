@@ -187,8 +187,13 @@ object WeMessageApi : ApiFeature(), IResolveDex {
         allowMultiple = true,
         allowFailure = true,
     ) {
+        // 串有效性复核（2026-10-29，8.0.76/8.0.79 双版本逐串验证）：
+        // "RemuxInfo"、"OriginMediaInfo" 在两版 dex 里都只剩 string_ids 条目、**无任何 const-string 引用**
+        // （微信裁剪了对应日志调用），三串 AND 因此恒不命中。只保留仍被引用的 TAG：
+        // 8.0.76 → pluginsdk.model.b3 / app.u5 …，8.0.79 → pluginsdk.model.g3 / c71.d3 …
+        // 多命中交给 resolveImportMultiVideoCtor() 按结构（Thread 子类 + 7 参构造器）择优。
         matcher {
-            usingEqStrings("MicroMsg.ImportMultiVideo", "RemuxInfo", "OriginMediaInfo")
+            usingEqStrings("MicroMsg.ImportMultiVideo")
         }
     }
 
@@ -322,15 +327,17 @@ object WeMessageApi : ApiFeature(), IResolveDex {
         }
     }
     val classChattingDataAdapter by dexClass(allowFailure = true) {
-        // 定位修正：TAG 串与 "[handleMsgChange] isLockNotify:" 在该类中位于**不同方法**
-        // （TAG 出现在构造器与多个事件方法，isLockNotify 只在 onMsgChange），而 DexKit 的类匹配是
-        // 方法级 AND 语义，两串组合恒不命中 —— 8.0.76 / 8.0.79 均报 Class not found，连带
-        // RemoveMessageSelectionLimit 的两个方法失效。改用 adapter 包内唯一的方法级日志串定位：
-        // 8.0.76 → ui.chatting.adapter.k、8.0.79 → ui.chatting.adapter.k。
+        // 定位修正（2026-10-29 双版本逐串验证）：
+        //  · 原两串 "[handleMsgChange] isLockNotify:" 在两版都已是**孤儿串**（无 const-string 引用），
+        //    任何依赖于它的组合都恒失败；
+        //  · TAG "MicroMsg.ChattingDataAdapterV3" 仍存活，但 8.0.79 的 adapter 包内有 3 个类引用它
+        //    （k / j / ChattingDataAdapter$chatMsgChange$1），单串会多命中。
+        // 现在用「TAG + [setShowHistoryMsgTipId] 日志」两串方法级 AND：
+        // 8.0.76 唯一命中 adapter.k（V0），8.0.79 唯一命中 adapter.k（i1）。
         // 使用方仍需 isPlaceholder 守卫（RemoveMessageSelectionLimit 内已处理）。
         searchPackages("com.tencent.mm.ui.chatting.adapter")
         matcher {
-            usingEqStrings("[handleMsgChange] isLockNotify:")
+            usingEqStrings("MicroMsg.ChattingDataAdapterV3", "[setShowHistoryMsgTipId] pos:%s msgId:%s")
         }
     }
     val classTransformChattingComponent by dexClass {
