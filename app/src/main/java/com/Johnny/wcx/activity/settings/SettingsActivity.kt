@@ -32,6 +32,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -91,6 +93,7 @@ import com.Johnny.wcx.ui.content.liquid.vibrancy
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
@@ -174,7 +177,7 @@ val FEATURE_CATEGORIES = listOf(
 // ---------------------------------------------------------------------------
 
 /** Navigation targets for the Settings activity's stack. */
-private sealed interface SettingsNavTarget {
+internal sealed interface SettingsNavTarget {
     data object Main : SettingsNavTarget
     data class Category(val name: String) : SettingsNavTarget
     data object License : SettingsNavTarget
@@ -185,11 +188,33 @@ private sealed interface SettingsNavTarget {
     data object ScriptFaq : SettingsNavTarget
     data object HiddenContactsDiagnostics : SettingsNavTarget
     data object ModuleHealth : SettingsNavTarget
+    data object ThemeWorkshop : SettingsNavTarget
+}
+
+/**
+ * 功能对象（在 Compose 之外）点击后要进子页面时的投递口。
+ * 例如「界面美化 → 主题」：ThemeStore.onClick 只能拿到 Activity，拿不到导航栈。
+ */
+internal object SettingsNavigation {
+    val pending = mutableStateOf<SettingsNavTarget?>(null)
+
+    fun requestThemeWorkshop() {
+        pending.value = SettingsNavTarget.ThemeWorkshop
+    }
 }
 
 @Composable
 private fun SettingsRoot(onFinish: () -> Unit) {
     val stack = remember { mutableStateListOf<SettingsNavTarget>(SettingsNavTarget.Main) }
+
+    // 接住功能对象的导航请求，避免「点了主题只弹对话框」这种割裂体验。
+    val navRequest = SettingsNavigation.pending.value
+    LaunchedEffect(navRequest) {
+        if (navRequest != null) {
+            stack.add(navRequest)
+            SettingsNavigation.pending.value = null
+        }
+    }
 
     MiuixStackNavigator(stack = stack, onExitRoot = onFinish) { screen, push, pop ->
         when (screen) {
@@ -225,6 +250,8 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             SettingsNavTarget.ScriptDiagnostics -> ScriptDiagnosticsScreen(onBack = pop)
 
             SettingsNavTarget.ScriptFaq -> ScriptFaqScreen(onBack = pop)
+
+            SettingsNavTarget.ThemeWorkshop -> ThemeWorkshopScreen(onBack = pop)
 
             SettingsNavTarget.HiddenContactsDiagnostics -> HiddenContactsDiagnosticsScreen(onBack = pop)
 
@@ -487,6 +514,13 @@ fun FeatureRow(
 
     fun toggle(requested: Boolean) {
         item as SwitchFeature
+        // 当前微信版本已不支持该功能时直接拒绝开启并说明原因，而不是让用户开了发现没反应。
+        val unavailable = if (requested) item.unavailableReason else null
+        if (unavailable != null) {
+            WeLogger.w("SettingsActivity", "拒绝开启 ${item.displayName}：$unavailable")
+            showToast(unavailable)
+            return
+        }
         if (item.onBeforeToggle(requested, context)) {
             WePrefs.putBool(configKey, requested)
             item.isEnabled = requested

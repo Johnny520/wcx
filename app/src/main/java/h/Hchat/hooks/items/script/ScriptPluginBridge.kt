@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import com.Johnny.wcx.utils.WeLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -38,6 +39,8 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Consumer
 import java.util.function.Function
 
+private const val LOG_TAG = "脚本插件"
+
 class ScriptPluginBridge internal constructor(
     val hostContext: Context,
     val classLoader: ClassLoader,
@@ -68,12 +71,16 @@ class ScriptPluginBridge internal constructor(
     }
 
     fun log(message: Any?) {
-        XposedBridge.log("[WCX:Script] ${message ?: "null"}")
+        val text = message?.toString() ?: "null"
+        XposedBridge.log("[WCX:Script] $text")
+        // 镜像进总日志：否则插件日志只在 LSPosed 日志里，用户在「日志」页看不到。
+        WeLogger.i(LOG_TAG, text)
     }
 
     fun log(pluginName: String?, pluginDir: File?, message: Any?) {
         val text = message?.toString() ?: "null"
         XposedBridge.log("[WCX:Script] [${pluginName.orEmpty()}] $text")
+        WeLogger.i(LOG_TAG, "[${pluginName.orEmpty()}] $text")
         val dir = pluginDir ?: return
         runCatching {
             if (!dir.isDirectory) dir.mkdirs()
@@ -858,8 +865,15 @@ class ScriptPluginBridge internal constructor(
     }
 
     private fun <T> dispatchDialogCallback(callback: Consumer<T>?, value: T) {
-        runCatching { callback?.accept(value) }.onFailure {
+        if (callback == null) {
+            // 插件没提供回调时静默返回，用户会以为「点了没效果」，这里留一条记录便于排查。
+            com.Johnny.wcx.utils.WeLogger.w("ScriptPluginBridge", "模块弹窗回调为空，选择结果被丢弃：$value")
+            return
+        }
+        runCatching { callback.accept(value) }.onFailure {
+            // HLog 只进 LSPosed 日志，用户导出的 WCX 日志里看不到，两边都写一份。
             h.Hchat.utils.HLog.e("[WCX:Script] 模块弹窗回调失败: ${it.message}", it)
+            com.Johnny.wcx.utils.WeLogger.e("ScriptPluginBridge", "模块弹窗回调失败：${it.message}", it)
         }
     }
 

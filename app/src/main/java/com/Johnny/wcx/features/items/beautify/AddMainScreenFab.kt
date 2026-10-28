@@ -123,11 +123,32 @@ object AddMainScreenFab : ClickableFeature() {
     private val fabExpandedState = mutableStateOf(false)
     private val convListVisibleState = mutableStateOf(true)
 
+    /**
+     * FAB 当前是否显示（= 会话列表可见 = 在主页面）。
+     * 供主题的**正向主页面识别**使用：FAB 只在 4 个 Tab 主页面显示，是主页面的强证据。
+     *
+     * 默认 false（而不是 true）：FAB 功能被关掉时不会有任何监听去更新它，
+     * 默认真会变成一条**恒真的假证据**（聊天页里也说「主页面」）。
+     * 主页面即使少了这条，还有「会话列表 / 底部 Tab 组」兜底。
+     */
+    @Volatile
+    var visibleInMain = false
+
+    /**
+     * 会话列表是否可见（决定 FAB 是否显示）。
+     *
+     * ⚠️ 判定失败一律按「可见」处理：FAB 是入口，**宁可多显示，也绝不能因为一个内部
+     * View 判定把它长期藏起来**。实测反馈「FAB 用久了会消失，强行停止重进才回来」，
+     * 就是某次判定为 false 之后再也回不到 true（视图树监听挂在旧的 decorView 上会失效）。
+     */
     private fun checkConvListVisible(activity: Activity): Boolean = try {
-        val decorView = activity.window?.decorView ?: return false
+        val decorView = activity.window?.decorView ?: return true
         val list = decorView.findViewWhich<View> { it is WxRecyclerView }
-        list != null && list.isShown
-    } catch (_: Throwable) { false }
+        list?.isShown ?: true
+    } catch (t: Throwable) {
+        WeLogger.w(TAG, "会话列表可见性判定异常（按可见处理）：${t.message}")
+        true
+    }
 
     private const val TAG = "AddMainScreenFab"
     private const val KEY_FAB_CONFIG = "fab_button_configs_json"
@@ -489,7 +510,12 @@ object AddMainScreenFab : ClickableFeature() {
                 // 视图布局变更监听（兼容 8.0.76 嵌入式聊天）
                 if (decorView != null) {
                     decorView.viewTreeObserver.addOnGlobalLayoutListener {
-                        convListVisibleState.value = checkConvListVisible(activity)
+                        val visible = checkConvListVisible(activity)
+                        if (visible != convListVisibleState.value) {
+                            WeLogger.i(TAG, "会话列表可见性变化 → FAB ${if (visible) "显示" else "隐藏"}")
+                        }
+                        visibleInMain = visible
+                        convListVisibleState.value = visible
                     }
                 }
             }

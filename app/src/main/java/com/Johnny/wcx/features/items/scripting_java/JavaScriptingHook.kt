@@ -271,9 +271,17 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
         }
 
         ChatInputBarEnhancements.methodSendMessage.hookBefore {
-            val chatFooter = thisObject.reflekt().firstField {
-                type = ChatFooter::class
-            }.get()!! as ChatFooter
+            // 取不到 ChatFooter 时旧实现是 `!! as ChatFooter` 直接 NPE —— Xposed hook 里抛异常
+            // 会让点击发送失败。这里降级为跳过脚本回调 + 一条 warn，不影响正常发送。
+            val chatFooter = runCatching {
+                thisObject.reflekt().firstFieldOrNull {
+                    type = ChatFooter::class
+                }?.get() as? ChatFooter
+            }.getOrNull()
+            if (chatFooter == null) {
+                WeLogger.w(TAG, "发送按钮脚本回调跳过：当前微信版本取不到 ChatFooter")
+                return@hookBefore
+            }
             val text = chatFooter.lastText
             JavaEngine.executeAllOnClickSendBtn(scripts, this, text)
         }

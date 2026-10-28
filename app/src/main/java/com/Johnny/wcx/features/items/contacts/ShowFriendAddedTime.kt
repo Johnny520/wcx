@@ -2,7 +2,7 @@ package com.Johnny.wcx.features.items.contacts
 
 import android.app.Activity
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
-import com.Johnny.wcx.features.api.ui.WeContactPrefsScreenApi
+import com.Johnny.wcx.features.api.ui.WeContactHeaderApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger
@@ -17,10 +17,9 @@ import java.time.temporal.ChronoUnit
     categories = ["联系人与群组"],
     description = "在联系人详情页显示添加好友的日期与已添加天数；微信没记录时按最早聊天记录估算",
 )
-object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactInfoProvider {
+object ShowFriendAddedTime : SwitchFeature(), WeContactHeaderApi.Provider {
 
     private const val TAG = "ShowFriendAddedTime"
-    private const val KEY = "wcx_friend_added_time"
     /** 资料页把「当前查看谁」放在 intent 里，不同微信版本/入口的 key 不完全一致，全部试一遍。 */
     private val USERNAME_EXTRAS = listOf("Contact_User", "Chat_User", "Contact_User_Name", "Contact_UUID")
 
@@ -46,45 +45,52 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
     private enum class Source { EXACT, ESTIMATED, NOT_RECORDED, NOT_FRIEND, UNSUPPORTED }
 
     override fun onEnable() {
-        WeContactPrefsScreenApi.addProvider(this)
+        WeContactHeaderApi.addProvider(this)
     }
 
     override fun onDisable() {
-        WeContactPrefsScreenApi.removeProvider(this)
+        WeContactHeaderApi.removeProvider(this)
     }
 
-    override fun getContactInfoItem(activity: Activity): List<WeContactPrefsScreenApi.PreferenceItem> {
+    /**
+     * 显示在联系人资料页头部（昵称 / 微信号 / 地区那一块的下面），
+     * 而不是资料页的 Preference 列表末尾。
+     */
+    override fun getHeaderText(activity: Activity): String? {
+        // 群聊资料页不该出现「添加时间」：那里微信自己有「进群时间」，
+        // 而群成员的「添加时间」按最早聊天记录估算基本都是错的。
+        if (isChatroomInfoPage(activity)) return null
+
         val username = resolveUsername(activity) ?: run {
             val keys = runCatching { activity.intent?.extras?.keySet()?.toList() }.getOrNull()
             WeLogger.w(TAG, "no contact username in intent extras: $keys")
-            return emptyList()
+            return null
         }
 
         val (addedAt, source) = resolveAddedTime(username)
-        val summary = when (source) {
-            Source.NOT_FRIEND -> "该好友未添加，无法查看添加时间"
-            Source.UNSUPPORTED -> "当前微信版本不支持查询"
-            Source.NOT_RECORDED -> "该好友添加于微信记录此时间之前，无法查询"
+        // 查不到的三种情况都只给一个短结论：长句在资料页里既挤又像报错，
+        // 用户实际只想知道「有没有、是多少」。
+        val value = when (source) {
+            Source.NOT_FRIEND -> "非好友无法查询"
+            Source.UNSUPPORTED, Source.NOT_RECORDED -> "未知"
             else -> {
                 val date = runCatching {
                     Instant.ofEpochSecond(addedAt).atZone(ZoneId.systemDefault()).toLocalDate()
-                }.getOrNull() ?: return emptyList()
+                }.getOrNull() ?: return null
                 val days = ChronoUnit.DAYS.between(date, LocalDate.now()).coerceAtLeast(0)
                 val text = "${date.format(dateFormatter)}（${days}天）"
                 if (source == Source.ESTIMATED) "$text · 按最早聊天记录" else text
             }
         }
+        return "添加时间：$value"
+    }
 
-        return listOf(
-            WeContactPrefsScreenApi.PreferenceItem(
-                key = KEY,
-                title = "添加时间",
-                summary = summary,
-                // 放在「注入区」第一位：仍然追加在微信原生布局（头像/昵称/微信号/地区）之后，
-                // 只是排到其它注入项（获取实名尾字、捡漏红包…）前面，不会挤乱原生布局。
-                position = WeContactPrefsScreenApi.POSITION_TOP_OF_INJECTED,
-            )
-        )
+    /** 群聊「聊天信息」页：类名固定，另外 intent 里带 RoomInfo_Contact_User 也是该页面。 */
+    private fun isChatroomInfoPage(activity: Activity): Boolean {
+        if (activity.javaClass.name.endsWith("ChatroomInfoUI")) return true
+        return runCatching {
+            activity.intent?.hasExtra("RoomInfo_Contact_User") == true
+        }.getOrDefault(false)
     }
 
     private fun resolveUsername(activity: Activity): String? {
@@ -95,9 +101,6 @@ object ShowFriendAddedTime : SwitchFeature(), WeContactPrefsScreenApi.IContactIn
         }
         return null
     }
-
-    /** 这一行只是展示，点击不做任何事。 */
-    override fun onItemClick(activity: Activity, key: String): Boolean = false
 
     /**
      * 老版本微信没有记录添加时间（该字段是后来才加的），这种情况用「与该好友最早一条聊天记录」

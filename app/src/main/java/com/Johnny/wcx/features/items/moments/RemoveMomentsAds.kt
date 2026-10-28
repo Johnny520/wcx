@@ -83,7 +83,7 @@ object RemoveMomentsAds : SwitchFeature(), WeDatabaseListenerApi.IInsertListener
         WeLogger.i(TAG, "拦截朋友圈广告: 已关闭，恢复原生广告展示")
         try {
             WeDatabaseListenerApi.removeListener(this)
-        } catch (_: Throwable) {}
+        } catch (e: Throwable) { WeLogger.w(TAG, "hook 回调异常已忽略: " + e.message) }
         attachedRoots.clear()
     }
 

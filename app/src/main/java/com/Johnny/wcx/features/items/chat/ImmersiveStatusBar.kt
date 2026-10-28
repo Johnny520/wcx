@@ -7,7 +7,6 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import com.tencent.mm.ui.chatting.ChattingUI
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.features.core.Feature
@@ -241,20 +240,12 @@ object ImmersiveStatusBar : SwitchFeature() {
                 WeLogger.d(TAG, "Toolbar paddingTop 已调整为: ${statusBarHeight}px")
             }
 
-            // 对整个内容根视图应用 WindowInsets，自动处理安全区域
-            ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, insets ->
-                val statusBars = insets.getInsets(WindowInsetsCompat.Type.statusBars())
-                // 仅当 statusBars.top > 0 时才调整 (避免重复设置)
-                if (statusBars.top > 0) {
-                    view.setPadding(
-                        view.paddingLeft,
-                        statusBars.top,
-                        view.paddingRight,
-                        view.paddingBottom
-                    )
-                }
-                WindowInsetsCompat.CONSUMED
-            }
+            // 不再给内容根视图加状态栏 padding：
+            // 上面已经给标题栏补过一次状态栏高度，这里再来一次，页面顶部就会空出
+            // 两倍状态栏高度——用户看到的就是「内容跟状态栏之间空了一截」。
+            // 同时把旧版设置过的监听摘掉：它会 CONSUMED 掉 insets，让微信自己的
+            // 避让逻辑收不到，底部输入框/导航栏区域也会跟着错位。
+            ViewCompat.setOnApplyWindowInsetsListener(rootView, null)
         }.onFailure {
             WeLogger.e(TAG, "applyContentPadding 失败", it)
         }

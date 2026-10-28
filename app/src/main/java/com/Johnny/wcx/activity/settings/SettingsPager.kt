@@ -189,8 +189,8 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
             MiuixSmallTitle(text = "微信主题", modifier = Modifier.padding(top = 12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
                 PrefArrow(
-                    title = "主题商城",
-                    summary = "六款卡通主题一键应用：全局沉浸壁纸（主页/设置/朋友圈等全部页面）+ 对应主题气泡，支持透明度调节与备份/恢复",
+                    title = "主题工坊",
+                    summary = "内置 6 款全局主题，全局沉浸壁纸（主页/通讯录/发现/我的 4 个界面，或全部界面）+ 对应气泡，支持透明度调节与备份恢复",
                     icon = MaterialSymbols.Outlined.Palette,
                     onClick = { com.Johnny.wcx.features.items.beautify.ThemeStore.onClick(context) },
                 )
@@ -345,22 +345,51 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
 //  Profile card — account info at the top of the Settings tab
 // ---------------------------------------------------------------------------
 
+/**
+ * 查找微信本地头像缓存文件。
+ *
+ * 微信把头像缓存在 `<dataDir>/MicroMsg/avatar/` 下：每个账号一个目录，
+ * 目录名与文件名均为 md5(username)，文件名形如 `user_<md5>.png`。
+ * 命中就直接交给 Coil 加载本地文件，避免每次进设置页都走网络。
+ */
+private fun findLocalAvatar(wxid: String): java.io.File? {
+    val dataDir = runCatching { HostInfo.application.applicationInfo.dataDir }.getOrNull() ?: return null
+    val root = java.io.File(dataDir, "MicroMsg/avatar")
+    if (!root.isDirectory) return null
+    val md5 = runCatching {
+        java.security.MessageDigest.getInstance("MD5")
+            .digest(wxid.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }.getOrNull() ?: return null
+    java.io.File(root, "$md5/user_$md5.png").takeIf { it.isFile }?.let { return it }
+    val dir = java.io.File(root, md5)
+    if (dir.isDirectory) {
+        dir.listFiles { f -> f.isFile && f.name.endsWith(".png", ignoreCase = true) }
+            ?.maxByOrNull { it.lastModified() }
+            ?.let { return it }
+    }
+    return null
+}
+
 @Composable
 private fun ProfileCard() {
     val wxId = remember { WeApi.selfWxId }
 
     // WeChat identity — loaded once from the local DB; doesn't change mid-session.
-    data class WechatIdentity(val nickname: String, val avatarUrl: String)
+    /** [avatar] 是 Coil 的 model：优先本地微信头像缓存文件，取不到才回落到网络 URL。 */
+    data class WechatIdentity(val nickname: String, val avatar: Any?)
 
-    val identity by produceState(WechatIdentity("", "")) {
+    val identity by produceState(WechatIdentity("", null)) {
         withContext(Dispatchers.IO) {
             val db = com.Johnny.wcx.features.api.core.WeDatabaseApi
             val nickname = if (db.isReady) {
                 db.getSelfProfileField(com.Johnny.wcx.features.api.core.models.SelfProfileField.NAME, "")
                     ?.toString().orEmpty()
             } else ""
-            val avatarUrl = if (db.isReady && wxId.isNotEmpty()) db.getAvatarUrl(wxId) else ""
-            value = WechatIdentity(nickname, avatarUrl)
+            // 优先本地缓存：进设置页拉网络头像既慢又可能失败（弱网时卡片一片空白）。
+            val local = if (wxId.isNotEmpty()) findLocalAvatar(wxId) else null
+            val remote = if (local == null && db.isReady && wxId.isNotEmpty()) db.getAvatarUrl(wxId) else ""
+            value = WechatIdentity(nickname, local ?: remote.takeIf { it.isNotEmpty() })
         }
     }
 
@@ -371,9 +400,9 @@ private fun ProfileCard() {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (identity.avatarUrl.isNotEmpty()) {
+            if (identity.avatar != null) {
                 AsyncImage(
-                    model = identity.avatarUrl,
+                    model = identity.avatar,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier

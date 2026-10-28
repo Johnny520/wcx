@@ -218,7 +218,18 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
                     isLatest = true
                 }
                 is UpdateResult.Error -> {
-                    WeLogger.e("HomePager", "Failed to check update", result.cause)
+                    // GitHub 未认证接口是 60 次/小时/IP 共享限流，返回 403 属于正常现象。
+                    // 以前这里用 ERROR + 完整堆栈刷屏，用户看日志会误以为模块出错。
+                    val cause = result.cause
+                    val message = cause?.message.orEmpty()
+                    if (message.contains("403") || message.contains("rate limit", true)) {
+                        WeLogger.w("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
+                    } else {
+                        WeLogger.w(
+                            "HomePager",
+                            "检查更新失败：" + message.ifBlank { cause?.javaClass?.simpleName ?: "未知原因" },
+                        )
+                    }
                     latestVersion = null
                     isLatest = false
                 }

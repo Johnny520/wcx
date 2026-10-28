@@ -159,7 +159,9 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
 
             // 方式2：尝试通过 DexKit 解析的方法
             try {
-                if (methodOpenMiniProgramPanel.method != null) {
+                // DexMethodDelegate.method 在未解析时会抛异常而不是返回 null，所以必须判 isPlaceholder。
+                // 另外 8.0.79 起 openTaskList 字样已从 dex 中消失，这里会直接走方式 3 的手势模拟。
+                if (!methodOpenMiniProgramPanel.isPlaceholder) {
                     methodOpenMiniProgramPanel.method.invoke(launcherUI)
                     WeLogger.i(TAG, "triggered via dexMethod")
                     return

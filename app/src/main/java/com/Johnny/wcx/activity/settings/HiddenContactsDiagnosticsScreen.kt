@@ -108,6 +108,8 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
             runProgress = 0f
             runTitle = title
             runSubtitle = ""
+            val verbose = showOverlay || reportTitle != null
+            if (verbose) SelfCheckLog.start(title, steps.size)
             val collected = mutableListOf<DiagRow>()
             steps.forEachIndexed { index, step ->
                 if (showOverlay) runSubtitle = step.title
@@ -125,6 +127,9 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
                     }
                 }
                 collected += outcome
+                if (verbose) {
+                    outcome.forEach { row -> SelfCheckLog.step(row.ok, row.label, row.value) }
+                }
                 if (showOverlay) {
                     runLog = runLog + (step.title to outcome.all { it.ok })
                     runProgress = (index + 1).toFloat() / steps.size.toFloat().coerceAtLeast(1f)
@@ -132,6 +137,7 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
                 }
             }
             if (replaceRows) rows = collected
+            SelfCheckLog.end(title, collected.count { it.ok }, collected.size)
             running = false
             lastScan = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             if (reportTitle != null) showDiagReport(context, reportTitle, collected)
@@ -211,8 +217,8 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
                             launchScan("密友功能诊断", diagSteps(), showOverlay = true, reportTitle = "密友诊断结果", replaceRows = true)
                         }
                         InsetDivider()
-                        ActionRow("一键修复", "开启总开关 / 启用隐藏联系人 / 推进 Hook 阶段 / 刷新会话列表") {
-                            launchScan("一键修复", repairSteps(), showOverlay = true, reportTitle = "修复结果", replaceRows = false)
+                        ActionRow("一键修复", "体检 → 开启总开关 / 启用隐藏联系人 / 推进 Hook 阶段 / 刷新会话列表 → 复检 → 前后对比") {
+                            launchScan("一键修复", repairFlow(), showOverlay = true, reportTitle = "修复结果", replaceRows = true)
                         }
                         InsetDivider()
                         ActionRow("复制诊断信息", "复制到剪贴板，便于反馈") {
@@ -225,7 +231,14 @@ fun HiddenContactsDiagnosticsScreen(onBack: () -> Unit) {
                     }
                 }
 
-                item { DiagnosticLogCard(context) }
+                item {
+                    Text(
+                        text = "定位过程与失败原因已写入运行日志（日志 → 运行日志），反馈问题时导出该日志发给开发者即可。",
+                        fontSize = 12.sp,
+                        color = BasicComponentDefaults.summaryColor().color,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
                 item {
                     Text(
                         text = "说明：密友的会话/通讯录/标签/搜索/朋友圈/通知/通话等隐藏面已统一由「隐藏联系人」实现，" +
@@ -308,6 +321,53 @@ private fun diagSteps(): List<DiagStep> = listOf(
     DiagStep("隐藏与拦截") { surfaceRows() },
     DiagStep("锚点自检") { anchorRows() },
 )
+
+/**
+ * 一键修复：修复前体检 → 对症修复 → 复检 → 前后对比。
+ * 只给结论，不给「看起来全绿」的流水账。
+ */
+private fun repairFlow(): List<DiagStep> {
+    val before = mutableListOf<DiagRow>()
+    val after = mutableListOf<DiagRow>()
+
+    fun collect(): List<DiagRow> =
+        diagSteps().flatMap { step -> runCatching { step.run() }.getOrDefault(emptyList()) }
+
+    return listOf(
+        DiagStep("修复前体检") {
+            before.clear()
+            before += collect()
+            val bad = before.count { !it.ok }
+            listOf(DiagRow("修复前异常", "体检", "$bad 项", true, "共 ${before.size} 项，异常 $bad 项"))
+        },
+    ) + repairSteps() + listOf(
+        DiagStep("修复后复检") {
+            after.clear()
+            after += collect()
+            val bad = after.count { !it.ok }
+            listOf(DiagRow("修复后异常", "复检", "$bad 项", bad == 0, "共 ${after.size} 项，异常 $bad 项"))
+        },
+        DiagStep("前后对比") {
+            val beforeBad = before.filter { !it.ok }.map { it.label }.toSet()
+            val afterBad = after.filter { !it.ok }.map { it.label }.toSet()
+            val fixed = beforeBad - afterBad
+            val remain = afterBad
+            listOf(
+                DiagRow(
+                    "修复结果", "对比",
+                    if (remain.isEmpty()) "全部通过" else "仍有 ${remain.size} 项异常",
+                    remain.isEmpty(),
+                    buildString {
+                        append("修复前异常 ").append(beforeBad.size).append(" 项，修复后 ")
+                            .append(remain.size).append(" 项")
+                        if (fixed.isNotEmpty()) append("\n已解决：").append(fixed.joinToString("、"))
+                        if (remain.isNotEmpty()) append("\n仍存在：").append(remain.joinToString("、"))
+                    },
+                )
+            )
+        },
+    )
+}
 
 private fun repairSteps(): List<DiagStep> = listOf(
     DiagStep("开启总开关与功能") {

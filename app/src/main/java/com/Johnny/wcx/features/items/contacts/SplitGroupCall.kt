@@ -350,6 +350,15 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
         return true
     }
 
+    /**
+     * 8.0.77 起微信删除了整个多人通话（MultiTalk / ILink）模块，本功能依赖的
+     * SubCoreMultiTalk、ILinkService 等锚点全部不存在，实测 8.0.71~8.0.76 可用。
+     */
+    override val unavailableReason: String?
+        get() = if (classSubCoreMultiTalk.isPlaceholder) {
+            "当前微信版本（8.0.77+）已移除多人通话模块，该功能不可用"
+        } else null
+
     override fun onEnable() {
         WeContactPrefsScreenApi.addProvider(this)
     }

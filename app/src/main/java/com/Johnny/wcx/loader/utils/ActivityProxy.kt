@@ -282,11 +282,25 @@ object ActivityProxy {
             tryRecoverIntent(intent)?.takeIf { it.component != null }?.let {
                 resolvedIntent = it
                 resolvedClass = it.component!!.className
-                WeLogger.w(
+                WeLogger.i(
                     "ProxyInstrumentation",
-                    "recovered intent in newActivity fallback: $resolvedClass"
+                    "recovered intent in newActivity: $resolvedClass"
                 )
             }
+            // ProxyHandlerCallback 已经把 LaunchActivityItem 的 Intent 换回原始 Intent，
+            // token 同时被消费掉，上面取不到；此时改从 Intent 的 component 判定目标模块 Activity。
+            if (!ActProxyMgr.isModuleProxyActivity(resolvedClass)) {
+                val component = intent.component
+                if (component != null && ActProxyMgr.isModuleProxyActivity(component.className)) {
+                    resolvedClass = component.className
+                    resolvedIntent = intent
+                    WeLogger.i(
+                        "ProxyInstrumentation",
+                        "resolved from intent component: $resolvedClass"
+                    )
+                }
+            }
+            WeLogger.i("ProxyInstrumentation", "newActivity: $className -> $resolvedClass")
             // fast path
             // also fixes compatibility with FunBox Zygisk
             // I haven't the foggiest idea of why upstream chose to use try-catch for this
@@ -323,6 +337,10 @@ object ActivityProxy {
             )
 
         override fun callActivityOnCreate(activity: Activity, icicle: Bundle?) {
+            WeLogger.i(
+                "ProxyInstrumentation",
+                "callActivityOnCreate: " + activity.javaClass.name
+            )
             if (ActProxyMgr.isModuleProxyActivity(activity.javaClass.name)) {
                 val cl = ParcelableFixer.hybridClassLoader
                 runCatching {

@@ -40,7 +40,13 @@ fun ListItem(
         modifier = modifier
             .fillMaxWidth()
             .then(if (enabled) Modifier else Modifier.alpha(0.38f))
-            .clickable(enabled = enabled, onClick = onClick ?: {}),
+            // 没有 onClick 时绝不能挂 clickable：否则它会把调用方挂在 modifier 上的 clickable
+            // 全部吃掉（内层优先消费事件），表现就是「点了完全没反应」，而且一条日志都不会有。
+            // 全模块有 130+ 处 ListItem 是靠 modifier 挂点击的，这里修一次全部恢复。
+            .then(
+                if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick)
+                else Modifier
+            ),
         verticalAlignment = verticalAlignment,
     ) {
         leadingContent?.invoke()

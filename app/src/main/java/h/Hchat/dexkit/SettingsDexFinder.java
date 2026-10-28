@@ -24,7 +24,6 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
 
-import de.robv.android.xposed.XposedBridge;
 
 /**
  * SettingsDexFinder - 使用 DexKit 解析微信设置页相关类和方法
@@ -44,7 +43,6 @@ public class SettingsDexFinder {
     private static final String CACHE_KEY = "cache.key";
     private static final String CACHE_CORE_COMPLETE = "cache.core.complete";
     private static final String CACHE_PLUS_COMPLETE = "cache.plus.complete";
-    private static final boolean VERBOSE = false;
 
     private final DexKitBridge dexKit;
     private final ClassLoader classLoader;
@@ -124,6 +122,14 @@ public class SettingsDexFinder {
             if (!resolutionFailed) saveCache(true);
         }
         logDetail("设置Dex 缓存处理完成: " + shortKey(runtimeCacheKey));
+        logDetail("设置Dex 锚点汇总: Preference=" + (preferenceClass != null)
+                + ", IconPreference=" + (iconPreferenceClass != null)
+                + ", addPref=" + (methodAddPref != null)
+                + ", SettingLocation=" + (settingLocationClass != null)
+                + ", SettingGroupMain=" + (settingGroupMainClass != null)
+                + ", PlusSubMenuHelper=" + (plusSubMenuHelperClass != null)
+                + ", plusAdapter=" + (plusSubMenuAdapterMethod != null)
+                + ", plusOnItemClick=" + (plusSubMenuOnItemClickMethod != null));
     }
 
     private void resolveMissingTargets(boolean includePlusMenu) {
@@ -684,10 +690,16 @@ public class SettingsDexFinder {
         return false;
     }
 
+    /**
+     * 关键锚点日志。
+     *
+     * 早期实现由 VERBOSE=false 直接短路，正式版里 DexKit 每一条「未找到」都没有落地，
+     * 用户报「脚本菜单加载失败」时开发者拿不到任何锚点信息。现在统一走 HLog.i：
+     * 只写 WCX 运行日志（I 级落盘，日志页可见 / 可导出），不进 LSPosed 日志，
+     * 单次 resolveAll 约 20 余行，量可控。逐方法的细碎信息仍用 verboseDetail 控制。
+     */
     private void logDetail(String message) {
-        if (VERBOSE) {
-            XposedBridge.log(TAG + " " + message);
-        }
+        h.Hchat.utils.HLog.i(TAG + " " + message);
     }
 
     private boolean loadCache(boolean includePlusMenu) {

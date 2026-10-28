@@ -124,7 +124,7 @@ object QuickBackToBottom : SwitchFeature(), IResolveDex {
      * provider → loader 按 SCENE=2 重新加载消息尾部 (深历史时最新消息不在当前窗口, 必须靠
      * 它加载), presenter 再滚动到目标。两个版本的日志字符串略有差异, 用 usingStrings 取公共子串。
      */
-    private val methodLocationByMsgId by dexMethod {
+    private val methodLocationByMsgId by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.ui.chatting.component")
         matcher {
             usingStrings("MicroMsg.ChattingDataAdapterV3", "[locationByMsgId] position:%s mode:%s")
@@ -132,10 +132,42 @@ object QuickBackToBottom : SwitchFeature(), IResolveDex {
     }
 
     /** ChattingDataAdapterV3.setShowHistoryMsgTipId (8.0.65 U0 / 8.0.76 V0)。 */
-    private val methodSetShowHistoryMsgTipId by dexMethod {
+    private val methodSetShowHistoryMsgTipId by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.ui.chatting.adapter")
         matcher {
             usingStrings("[setShowHistoryMsgTipId] pos:%s")
+        }
+    }
+
+    /**
+     * 日志串会随版本往后追加字段，DexKit 是「字符串常量精确匹配」，
+     * 多一个字就命中不到，所以按版本逐级回落：
+     *   - 8.0.79：`[locationByMsgId] position:%s mode:%s msgId:%s` / `[setShowHistoryMsgTipId] pos:%s msgId:%s`
+     *   - 8.0.71~8.0.78：`[locationByMsgId] position:%s mode:%s` / `[setShowHistoryMsgTipId] pos:%s`
+     */
+    override fun resolveDex(dexKit: org.luckypray.dexkit.DexKitBridge) {
+        if (methodLocationByMsgId.isPlaceholder) {
+            methodLocationByMsgId.find(dexKit, allowFailure = true) {
+                searchPackages("com.tencent.mm.ui.chatting.component")
+                matcher {
+                    usingStrings("MicroMsg.ChattingDataAdapterV3", "[locationByMsgId] position:%s mode:%s msgId:%s")
+                }
+            }
+        }
+        if (methodSetShowHistoryMsgTipId.isPlaceholder) {
+            methodSetShowHistoryMsgTipId.find(dexKit, allowFailure = true) {
+                searchPackages("com.tencent.mm.ui.chatting.adapter")
+                matcher {
+                    usingStrings("[setShowHistoryMsgTipId] pos:%s msgId:%s")
+                }
+            }
+            if (methodSetShowHistoryMsgTipId.isPlaceholder) {
+                methodSetShowHistoryMsgTipId.find(dexKit, allowFailure = true) {
+                    matcher {
+                        usingStrings("[setShowHistoryMsgTipId] pos:%s msgId:%s")
+                    }
+                }
+            }
         }
     }
 
