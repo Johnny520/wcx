@@ -57,6 +57,28 @@
 
 - 新特征（三串 AND）`MicroMsg.ImportMultiVideo` + `RemuxInfo` + `OriginMediaInfo` **唯一命中真目标**（8.0.76→b3、8.0.79→f3）；多命中场景另有 `allowMultiple` + 签名校验 + 干净跳过。
 
+### 3.4 双版本失效锚点修复（2026-10-29，commit `5ec34e1d`）
+
+用 8.0.76 与 8.0.79 两个真机 APK 双向对照，逐个修掉「解析失败」的 key：
+
+| key | 8.0.76 | 8.0.79 | 根因 | 修法 |
+|---|---|---|---|---|
+| `WeMomentsApi:classUploadPackHelper` | ✅ `sns.model.y7` | ❌ 误定位 `sns.ui.fake` 的 `kk4/j` | 锚点串 `commit sns info ret %d, typeFlag %d sightMd5 %s` 被 `BackgroundVideoFinishUploader` 复用 | 改 `MicroMsg.UploadPackHelper` + `addImageMediaObjByUrl`（双版本均唯一命中） |
+| `WeMomentsApi:methodAddSightObjectByPath` | `f(4×String)Z` | `f(5×String)Z` | 参数个数漂移 | 去掉 `paramCount/paramTypes`，调用处按 `parameterCount` 补空串 |
+| `WeMessageApi:classChattingDataAdapter` | ❌ | ❌ | 两串在类中属**不同方法**，DexKit 类匹配是方法级 AND | 改单串 `[handleMsgChange] isLockNotify:` + `searchPackages(ui.chatting.adapter)` |
+| `ForceTabletMode:methodIsTablet` | ❌ | ❌ | `eebbk`、`isRoyoleFoldableDevice!!!` 已成**孤儿串**（有串无引用） | 单串 `Lenovo TB-9707F`（76 → `ui.bk.B`、79 → `ui.j9.a`），补 allowFailure + isPlaceholder 守卫 |
+| `PipVoip:classMultiTalkViewModel` / `methodMultiTalkMic` | ❌ | ❌ | `onMicClick, cur state: ` 是孤儿串；8.0.79 整个 multitalk UI 日志体系消失 | 改 `onMicClick, need notify iLink Engine`（76 → `multitalk.ui.b0.a7(Z)V`，79 干净降级） |
+| `DisableMainPagePullDown:methodOnTouchEvent` | ❌ | ❌ | 声明后从未使用；8.0.79 LauncherUI 已无 `onTouchEvent` | 删除（僵尸代码） |
+| `DisableMainPagePullDown:methodOpenMiniProgramPanel` | ❌ | ❌ | `openTaskList` 字样两版 dex 均消失 | 删除（保留「反射 openTaskList → 手势模拟」两段式） |
+| `CustomLocalFriendAvatars:methodFeatureAvatarSimple1` | ✅ `avatar.w.lj` | ❌ | 8.0.79 移除内部 `View.invalidate` 调用，同形状方法变 2 个 | 去 `addInvoke`，`allowMultiple` + `candidateMethods()` 全候选 hook |
+
+**朋友圈（WeMoments）在 8.0.79 上是整条链路连带失效**：`classUploadPackHelper` 定位错 → 构造器/`commit`/`setContentDes`/`setSdkId`/`setUploadList`/`addImageMediaObjByPath` 全部解析失败 → 发文字/图文/视频朋友圈全部不可用。修正类锚点后 7 个委托在两版均一一对应（`y7` ↔ `i8`）。
+
+**三条硬教训（已写入源码注释）**：
+1. **DexKit 类匹配的 `usingEqStrings` 是方法级 AND** —— 两串若位于同一个类的不同方法里，永远不命中（`classChattingDataAdapter` 就是这种）。
+2. **「字符串存在于 dex」≠「被方法引用」** —— 版本重构后常留下孤儿串（`string_ids` 里有、但没有任何 `const-string` 指向它），只看存在性会误判锚点仍有效。判断必须扫 const-string 引用者。
+3. **日志串会被别的类复用** —— 类锚点要用「该类独有」的串组合，否则跨版本会被新类抢走（`commit sns info ret ...` 被 `BackgroundVideoFinishUploader` 复用即此例）。
+
 ### 3.2 notifyConversationChanged（会话变更通知）
 - 目标形状 `(int, ConversationStorage超类, Object) → void`。
 - 8.0.76：`ConversationStorage` = `com.tencent.mm.storage.l4`（classes9），超类 `s85.a1`，目标 = **`s85.a1.b(I Ls85/a1; Ljava/lang/Object;)V`** ✅ 特征描述仍然匹配。
@@ -78,13 +100,15 @@
 | `dexlib.py` | 自研 DEX 头/字符串/类型/方法表解析（不依赖 androguard，秒级） |
 | `find_defs.py` | 类定义定位（哪个 dex 有某类） |
 | `androguard 4.1.4` | 深度 dump 类成员/const-string 指令（需 pip 重装，沙箱重置后注意） |
+| `scanstr.py` | 精确串 × 方法交叉定位（找出「同时引用指定精确串」的方法，支持包过滤） |
+| `dumcls.py` | dump 指定类的全部方法签名 + 方法内 const-string |
 | `/tmp/wx*.dex` | 解压后的 dex（临时，分析完删除） |
 
 ## 五、新版本适配 SOP（8.0.x 出新直链时照此走）
 
 1. 下载 APK（curl -sSL，约 2 分钟）→ 解压 dex 到 `/tmp/wxNN`
 2. 跑 `verify_anchor.py` 比对锚点矩阵 → 列出失效/差异锚点
-3. 逐个用 androguard dump 真目标，产出该版本的多候选/新特征
+3. 逐个 dump 真目标，产出该版本的多候选/新特征；**锚点串必须先验「是否被方法引用」**（孤儿串要弃用）
 4. 多命中一律走 `allowMultiple + 候选校验（择优或全 hook）+ allowFailure 跳过`，禁止 `error()` 抛出
 5. 该版本 SDK 层「不支持」必须能干净降级，不阻断其它功能
 6. 把**直链 + 逐项结论**回填本文件（保留）
