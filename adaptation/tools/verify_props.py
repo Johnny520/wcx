@@ -42,6 +42,9 @@ def sig_params(desc):
     out, i = [], 0
     while i < len(inner):
         c = inner[i]
+        if c == ',':          # proto_str 用逗号分隔参数，必须跳过
+            i += 1
+            continue
         if c == 'L':
             j = inner.index(';', i)
             out.append(inner[i:j + 1])
@@ -103,7 +106,7 @@ def index_dex_dir(dirpath, exact, substr):
     if substr:
         pat = '|'.join(re.escape(s) for s in sorted(substr, key=len, reverse=True))
         sub_re = re.compile(pat)
-    m_hits, c_hits = {}, {}
+    m_hits, c_hits, sup = {}, {}, {}
     t0 = time.time()
     for fn in sorted(os.listdir(dirpath)):
         if not fn.endswith('.dex'):
@@ -128,6 +131,13 @@ def index_dex_dir(dirpath, exact, substr):
         if not idx_exact and not idx_sub:
             print(f'  [{fn}] 目标串缺失，跳过 ({time.time() - t0:.1f}s)')
             continue
+        # 类 -> 父类（供 declaredClass/superClass 约束使用）
+        for ci in range(d.cd_size):
+            cbase = d.cd_off + ci * 32
+            ccls = d.type_str(u32(b, cbase))
+            sup_off = u32(b, cbase + 8)
+            if sup_off:
+                sup[ccls] = d.type_str(sup_off)
         for cls, mname, midx, co in iter_methods(b, d):
             if co == 0:
                 continue
@@ -157,19 +167,33 @@ def index_dex_dir(dirpath, exact, substr):
             ce, cs = c_hits.get(cls, (set(), set()))
             c_hits[cls] = (ce | ex, cs | sb)
         print(f'  [{fn}] done ({time.time() - t0:.1f}s)')
-    return m_hits, c_hits
+    return m_hits, c_hits, sup
 
 
 def verify(props, dirpath, label):
-    exact, substr = build_targets(props)
+    exact, substr = build_targets([{'eqStrings': p['eqStrings'] + (p.get('classStrings') or []),
+                                    'strings': p['strings']} for p in props])
     print(f'[{label}] 目标串: exact={len(exact)} substr={len(substr)}')
-    m_hits, c_hits = index_dex_dir(dirpath, exact, substr)
+    m_hits, c_hits, sup = index_dex_dir(dirpath, exact, substr)
     print(f'[{label}] 命中方法 {len(m_hits)}, 命中类 {len(c_hits)}')
     res = []
     for p in props:
         if not p['eqStrings'] and not p['strings']:
-            res.append((p['key'], 'SKIP', '无串锚点'))
+            res.append((p['key'], 'SKIP', '无方法级串锚点'))
             continue
+        want_cls = set(p.get('classStrings') or [])
+
+        def cls_ok(cls):
+            if not want_cls:
+                return True
+            ce, cs = c_hits.get(cls, (set(), set()))
+            if want_cls <= (ce | cs):
+                return True
+            s2 = sup.get(cls)
+            if s2:
+                ce2, cs2 = c_hits.get(s2, (set(), set()))
+                return want_cls <= (ce2 | cs2)
+            return False
         cand = []
         cand_nosig = []
         for (cls, midx), (ex, sb, desc, mname) in m_hits.items():
@@ -179,6 +203,8 @@ def verify(props, dirpath, label):
                 continue
             if not pkg_ok(p, cls):
                 continue
+            if not cls_ok(cls):
+                continue
             if p['nameEq'] and mname != p['nameEq']:
                 continue
             cand_nosig.append((cls, mname, desc))
@@ -186,7 +212,7 @@ def verify(props, dirpath, label):
                 continue
             cand.append((cls, mname, desc))
         if cand:
-            res.append((p['key'], 'OK', f'{len(cand)} cand'))
+            res.append((p['key'], 'OK', f'{len(cand)} cand | ' + '; '.join(f'{c[0]}::{c[1]}' for c in cand[:3])))
             continue
         if cand_nosig:
             c = cand_nosig[0]
