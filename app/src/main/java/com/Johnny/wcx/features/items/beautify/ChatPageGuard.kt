@@ -133,12 +133,12 @@ internal object ChatPageGuard {
                 "输入框=${if (i0 != null) "✓" else "✗"} " +
                     "列表=${if (l0 != null) "✓" else "✗"} " +
                     "标题=${if (t0 != null) "✓" else "✗"} " +
-                    "遍历=$visited节点/上限$MAX_NODES"
+                    "遍历=${visited}节点/上限=${MAX_NODES}"
             return null
         }
 
         val container = resolveContainer(content, i0, l0, t0) ?: return null
-        lastMissInfo = "命中 遍历=$visited节点"
+        lastMissInfo = "命中 遍历=${visited}节点"
         Hit(
             container = container,
             hasInput = true,
