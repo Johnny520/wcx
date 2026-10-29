@@ -147,7 +147,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.RowScope
 import top.yukonga.miuix.kmp.basic.Card
-import com.Johnny.wcx.features.hchat.HchatScriptBootstrap
 
 
 private const val PRESS_RELEASE_DELAY_MS = 110L
