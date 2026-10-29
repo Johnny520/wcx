@@ -102,4 +102,4 @@ def iter_insns(b,code):
                 p+=total
                 continue
         yield p,op
-        p+=WIDTH[op]
+        p+=WIDTH[op]*2
