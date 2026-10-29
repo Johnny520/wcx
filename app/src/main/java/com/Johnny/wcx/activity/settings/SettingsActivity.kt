@@ -182,10 +182,6 @@ internal sealed interface SettingsNavTarget {
     data class Category(val name: String) : SettingsNavTarget
     data object License : SettingsNavTarget
     data object Acknowledgements : SettingsNavTarget
-    data object ScriptMarket : SettingsNavTarget
-    data object ScriptManager : SettingsNavTarget
-    data object ScriptDiagnostics : SettingsNavTarget
-    data object ScriptFaq : SettingsNavTarget
     data object HiddenContactsDiagnostics : SettingsNavTarget
     data object ModuleHealth : SettingsNavTarget
 }
@@ -217,10 +213,6 @@ private fun SettingsRoot(onFinish: () -> Unit) {
                 onOpenCategory = { push(SettingsNavTarget.Category(it)) },
                 onOpenLicense = { push(SettingsNavTarget.License) },
                 onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
-                onOpenScriptMarket = { push(SettingsNavTarget.ScriptMarket) },
-                onOpenScriptManager = { push(SettingsNavTarget.ScriptManager) },
-                onOpenScriptDiagnostics = { push(SettingsNavTarget.ScriptDiagnostics) },
-                onOpenScriptFaq = { push(SettingsNavTarget.ScriptFaq) },
                 onOpenModuleHealth = { push(SettingsNavTarget.ModuleHealth) },
             )
 
@@ -238,13 +230,9 @@ private fun SettingsRoot(onFinish: () -> Unit) {
                 onBack = pop,
             )
 
-            SettingsNavTarget.ScriptMarket -> ScriptMarketScreen(onBack = pop)
 
-            SettingsNavTarget.ScriptManager -> ScriptManagerScreen(onBack = pop)
 
-            SettingsNavTarget.ScriptDiagnostics -> ScriptDiagnosticsScreen(onBack = pop)
 
-            SettingsNavTarget.ScriptFaq -> ScriptFaqScreen(onBack = pop)
 
 
             SettingsNavTarget.HiddenContactsDiagnostics -> HiddenContactsDiagnosticsScreen(onBack = pop)
@@ -259,10 +247,6 @@ private fun MainPagerScreen(
     onOpenCategory: (String) -> Unit,
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
-    onOpenScriptMarket: () -> Unit,
-    onOpenScriptManager: () -> Unit,
-    onOpenScriptDiagnostics: () -> Unit,
-    onOpenScriptFaq: () -> Unit,
     onOpenModuleHealth: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 4 })

@@ -37,7 +37,6 @@ import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.core.FeaturesProvider
-import com.Johnny.wcx.features.hchat.HchatScriptBootstrap
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.android.showToast
@@ -723,11 +722,13 @@ private fun lastExitItems(context: Context): List<HealthItem> {
     return out
 }
 
-/** 「一键修复」动作（重建引导链路），供多处复用。 */
+/** 「一键修复」动作（重排未安装的 Hook 任务），供多处复用。 */
 private fun repairAction(context: Context): Pair<String, () -> String> =
     "一键修复" to {
-        runCatching { HchatScriptBootstrap.reinitializeFully().joinToString("；") }
-            .getOrElse { "异常：" + (it.message ?: it.javaClass.simpleName) }
+        runCatching {
+            DexInstallScheduler.retryAllPending()
+            "已重排未完成的 Hook 任务"
+        }.getOrElse { "异常：" + (it.message ?: it.javaClass.simpleName) }
     }
 
 private fun openScriptSwitchAction(context: Context): Pair<String, () -> String> =
@@ -821,14 +822,6 @@ private fun scriptRuntime(context: Context): List<HealthItem> {
         action = if (ready) null else repair.second,
     )
 
-    val bootstrap = runCatching { HchatScriptBootstrap.status }.getOrDefault("未知")
-    val bootstrapOk = bootstrap.contains("成功") || bootstrap.contains("已安装")
-    out += HealthItem(
-        "脚本引导链路", section, if (bootstrapOk) "已就绪" else "未就绪", bootstrapOk,
-        "引导链路状态：$bootstrap",
-        actionLabel = if (bootstrapOk) null else repair.first,
-        action = if (bootstrapOk) null else repair.second,
-    )
 
     val globalOn = runCatching {
         HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME)
@@ -1048,11 +1041,6 @@ private fun moduleRepairSteps(context: Context): List<HealthStep> {
             msg = if (r.isSuccess) "已开启" else "开启失败：" + (r.exceptionOrNull()?.message ?: "未知原因")
         }
         listOf(HealthItem("插件总开关", "开启插件总开关", if (ok) "已开启" else "失败", ok, msg))
-    },
-    HealthStep("重建脚本引导链路") {
-        val lines = runCatching { HchatScriptBootstrap.reinitializeFully() }
-            .getOrElse { listOf("异常：" + (it.message ?: it.javaClass.simpleName)) }
-        listOf(HealthItem("引导链路", "重建脚本引导链路", lines.joinToString("；"), true, lines.joinToString("\n")))
     },
     HealthStep("推进就绪阶段并重排全部 Hook 任务") {
         DexInstallScheduler.ensureWarmupReady()
