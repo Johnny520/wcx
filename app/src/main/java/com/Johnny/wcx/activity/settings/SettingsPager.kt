@@ -809,28 +809,164 @@ private fun ClearConfigDialog(show: Boolean, onDismiss: () -> Unit) {
     )
 }
 
+/** 更新日志的一行：分类标签 + 描述。 */
+private data class ChangelogEntry(val label: String, val text: String)
+
+/**
+ * 把 GitHub Release 的 Markdown 正文解析成「标签 + 描述」列表。
+ * 标签按关键词归类（修复 / 新增 / 优化 / 移除 / 变更），识别不出时归入「变更」。
+ */
+private fun parseChangelog(raw: String?): List<ChangelogEntry> =
+    raw.orEmpty()
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("```") }
+        .map { line ->
+            val text = line.trimStart('-', '*', '•', ' ').trim()
+            val label = when {
+                text.contains("修复") || text.contains("解决") || text.contains("fix", true) -> "修复"
+                text.contains("新增") || text.contains("添加") || text.contains("支持") ||
+                    text.contains("feat", true) -> "新增"
+                text.contains("优化") || text.contains("改进") || text.contains("提升") ||
+                    text.contains("perf", true) -> "优化"
+                text.contains("移除") || text.contains("删除") -> "移除"
+                else -> "变更"
+            }
+            ChangelogEntry(label, text)
+        }
+        .filter { it.text.isNotBlank() }
+        .take(40)
+        .toList()
+
 @Composable
 private fun UpdateAvailableDialog(
     info: UpdateResult.UpdateAvailable?,
     onDismiss: () -> Unit,
     context: Context,
 ) {
-    MiuixConfirmDialog(
-        show = info != null,
-        title = "检测到新版本",
-        message = if (info != null) {
-            "当前版本: ${BuildConfig.VERSION_NAME}\n新版本: ${info.info.versionName}\n是否下载并安装?"
-        } else "",
-        confirmText = "确定",
-        onDismiss = onDismiss,
-        onConfirm = {
-            val target = info ?: return@MiuixConfirmDialog
-            onDismiss()
-            CoroutineScope(Dispatchers.Default).launch {
-                AppUpdater.downloadAndInstall(context, target.info)
+    WindowDialog(show = info != null, title = "发现新版本", onDismissRequest = onDismiss) {
+        val target = info ?: return@WindowDialog
+        val entries = remember(target) { parseChangelog(target.info.changelog) }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = target.info.versionName,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "当前 ${BuildConfig.VERSION_NAME}",
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(bottom = 5.dp),
+                )
             }
-        },
-    )
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "完整包",
+                        fontSize = 11.sp,
+                        color = MiuixTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "GitHub 下载后覆盖安装，不会丢数据",
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            if (entries.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = "本次更新内容",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(6.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 260.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    entries.forEach { entry ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = entry.label,
+                                    fontSize = 10.sp,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = entry.text,
+                                fontSize = 12.sp,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            TextButton(
+                text = "立即更新",
+                onClick = {
+                    onDismiss()
+                    CoroutineScope(Dispatchers.Default).launch {
+                        AppUpdater.downloadAndInstall(context, target.info)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+            Spacer(Modifier.height(6.dp))
+            TextButton(
+                text = "以后再说",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "下载遇到困难？点击前往 GitHub Releases",
+                fontSize = 11.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    "https://github.com/Johnny520/wcx/releases".toUri()
+                                )
+                            )
+                        }
+                    }
+                    .padding(vertical = 8.dp),
+            )
+        }
+    }
 }
 
 @Composable
