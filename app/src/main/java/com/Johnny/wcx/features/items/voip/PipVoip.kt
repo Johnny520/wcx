@@ -238,6 +238,28 @@ object PipVoip : SwitchFeature(), IResolveDex {
                     .invoke(inst, !voipMpMicMuted)
             }.onFailure { WeLogger.e(TAG, "VoIP setMuted 调用失败", it) }
         }
+
+        /**
+         * 视频开关：走 switchCameraOpenStatus(callback)。
+         * 该方法是「按当前状态切换」（内部读 iz4/a.f()/d() 决定开或关），
+         * 参数只需要一个 Flutter 的 Result 回调，用动态代理构造一个空实现传进去即可。
+         * 若回调类型不是接口（Proxy 会抛异常），整个调用被 runCatching 兜住，静默不做。
+         */
+        override fun toggleVideo() {
+            val inst = voipPluginInstance ?: return
+            runCatching {
+                val m = inst.javaClass.methods.firstOrNull {
+                    it.name == "switchCameraOpenStatus" && it.parameterCount == 1
+                } ?: return
+                val cbType = m.parameterTypes[0] ?: return
+                val cb = java.lang.reflect.Proxy.newProxyInstance(
+                    cbType.classLoader ?: javaClass.classLoader,
+                    arrayOf(cbType),
+                ) { _, _, _ -> null }
+                m.invoke(inst, cb)
+                WeLogger.i(TAG, "已请求切换视频开关（switchCameraOpenStatus）")
+            }.onFailure { WeLogger.w(TAG, "switchCameraOpenStatus 调用失败（忽略，不影响通话）", it) }
+        }
     }
 
     private val sessions = WeakHashMap<Activity, Session>()
