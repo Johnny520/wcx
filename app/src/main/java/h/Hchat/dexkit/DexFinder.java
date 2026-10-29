@@ -905,8 +905,7 @@ public class DexFinder {
                 List<ClassData> classes = dexKit.findClass(mkClassUsingStrings(
                         "field_fullpath",
                         "field_fileId",
-                        "field_aesKey",
-                        "field_fileType"));
+                        "field_aesKey"));
                 for (ClassData classData : classes) {
                     try {
                         Class<?> clazz = classData.getInstance(classLoader);
@@ -920,8 +919,7 @@ public class DexFinder {
             if (!isImageCdnTaskClass(imageCdnTaskClass)) {
                 List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(
                         "field_fullpath",
-                        "field_fileId",
-                        "field_fileType"));
+                        "field_fileId"));
                 for (MethodData methodData : methods) {
                     try {
                         Method method = methodData.getMethodInstance(classLoader);
@@ -1220,7 +1218,7 @@ public class DexFinder {
         if (sendImageAsyncParamsClass != null && sendImageCrossParamsClass != null) return;
         try {
             List<ClassData> classes = dexKit.findClass(
-                    mkClassUsingStrings("msg_raw_img_send", "crossParams", "imgPath", "fromUsername", "toUsername"));
+                    mkClassUsingStrings("crossParams", "imgPath", "fromUsername", "toUsername"));
             for (ClassData classData : classes) {
                 try {
                     Class<?> clazz = KavaReflector.loadClass(classData.getName(), classLoader);
@@ -2317,8 +2315,7 @@ public class DexFinder {
             } catch (Throwable ignored) {}
 
             List<ClassData> classes = dexKit.findClass(
-                    mkClassUsingStrings("Micromsg.NetSceneTenpayRemittanceConfirm",
-                            "recv_account_type"));
+                    mkClassUsingStrings("Micromsg.NetSceneTenpayRemittanceConfirm"));
             for (ClassData cd : classes) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
@@ -2355,8 +2352,7 @@ public class DexFinder {
                     && isTransferQueryResponseMethod(transferQueryResponseMethod, transferQueryClass)) return;
 
             List<ClassData> classes = dexKit.findClass(
-                    mkClassUsingStrings("Micromsg.NetSceneTenpayRemittanceQuery",
-                            "recv_account_info", "recv_channel"));
+                    mkClassUsingStrings("Micromsg.NetSceneTenpayRemittanceQuery"));
             for (ClassData cd : classes) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
@@ -2418,7 +2414,7 @@ public class DexFinder {
             if (isContactCardXmlMethod(contactCardXmlMethod)) return;
 
             List<MethodData> methods = dexKit.findMethod(
-                    mkMethodUsingStrings("MicroMsg.SendContactCardHelper", "getBizNameCardString buffer size: "));
+                    mkMethodUsingStrings("MicroMsg.SendContactCardHelper"));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -2429,7 +2425,7 @@ public class DexFinder {
             }
 
             if (contactCardXmlMethod == null) {
-                methods = dexKit.findMethod(mkMethodUsingStrings("bigheadimgurl", "smallheadimgurl"));
+                methods = dexKit.findMethod(mkMethodUsingStrings("bigheadimgurl"));
                 for (MethodData methodData : methods) {
                     try {
                         Method method = methodData.getMethodInstance(classLoader);
@@ -2723,9 +2719,7 @@ public class DexFinder {
             MethodMatcher matcher = new MethodMatcher();
             matcher.usingEqStrings(
                     "MicroMsg.MsgInfoStorageLogic",
-                    "summerdel deleteMsgByTalker[%s] stack[%s]",
-                    "summerdel deleteMsgByTalker is null or empty",
-                    "AsyncDeleteMessageStage1");
+                    "summerdel deleteMsgByTalker[%s] stack[%s]");
             find.matcher(matcher);
             for (MethodData methodData : dexKit.findMethod(find)) {
                 try {
@@ -3076,10 +3070,8 @@ public class DexFinder {
         try {
             List<MethodData> methods = dexKit.findMethod(
                     mkMethodUsingStrings(
-                            "will insert sysmsg from:",
                             "content null, cannot to insert sysmsg!",
-                            "failed to insert sysmsg",
-                            "sysmsg inserted: "));
+                            "failed to insert sysmsg"));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
