@@ -57,6 +57,21 @@
 | `PipVoip:classMultiTalkViewModel` 等 7 项 | 见下节 |
 | `RemoveLimitsDuringCalls:methodCheckDeviceUsing` 等 3 项 | 源码注释：「老版本微信（8.0.7x 早期）才有，新版本已删除，允许失败」 |
 
+## 4.1 双轨处置（兼容优先，降级必须可见）
+
+原则：**能兼容就兼容；兼容不了必须让用户看得见，不允许静默失效。**
+
+| 委托 / 功能 | 兼容路径 | 降级路径 |
+|---|---|---|
+| `HideContacts:methodVoipMpInsertMsg` | `anyOf` 四条分支：≤8.0.79 `(String,boolean,int,long,long,long,int)`+`VoIPMP.Launcher`；8.0.80+ `(long,byte[],boolean,int,int,long,long,int,int,int)`+`VoIPMP.CoreV2`（签名已反汇编核实） | `allowFailure = true` |
+| `AutoAddNearbyFriends` | —（8.0.79 起锚点不存在） | `unavailableReason` → 开关拒绝开启 + Toast「「附近的人」页面已改版，该功能不可用」 |
+| `DisableShareScreenshotToast` | —（日志串 0 引用，TAG 出现在同包 10 个类） | 补 `allowFailure`（原来缺失，会抛异常）+ `unavailableReason` + 占位委托跳过 hook |
+| `PipVoip`（多人通话部分） | 单聊视频通话 `VideoActivity` 仍存在，PiP 正常 | 类缺失日志升到 W 级并写明「多人通话不可用，单聊不受影响」 |
+| `RemoveLimitsDuringCalls` ×3 | 其余 8 项锚点正常，仍生效 | 源码注明「老版本微信才有，新版已删除」，`allowFailure` 静默跳过 |
+| `Themes:classSmileyTabAdapter` | 改成 `TAG + addMethod{getItemCount}` 收敛到唯一类 | 补 `allowFailure`（原来缺失，存在整个 Themes 装挂风险） |
+
+> `unavailableReason` 由 `SettingsActivity` 消费：开关点击时若返回非空，直接 `showToast(reason)` 并拒绝置位（见 `SettingsActivity.toggle()`）。
+
 ## 5. 微信 8.0.80 通话架构变化（PipVoip 失效根因）
 
 ```
