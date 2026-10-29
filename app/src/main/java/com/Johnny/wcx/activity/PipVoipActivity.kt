@@ -201,7 +201,8 @@ class PipVoipActivity : ComponentActivity() {
         ) {
             if (limited) {
                 Text(
-                    text = "通话中",
+                    // 如实反映通话状态；麦克风状态来自 OboeAudioRecorder.g(Z)V 的只读同步
+                    text = if (micMuted) "通话中 · 已静音" else "通话中",
                     color = Color.White,
                     modifier = Modifier.padding(12.dp),
                 )
