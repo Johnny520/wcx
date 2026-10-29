@@ -36,7 +36,6 @@ import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 
 import com.Johnny.wcx.features.core.SwitchFeature
 import java.lang.reflect.Method
-import com.Johnny.wcx.features.items.beautify.ThemePack
 import com.Johnny.wcx.features.items.beautify.AddMainScreenFab
 import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
 import com.Johnny.wcx.ui.utils.dpToPx
@@ -1375,24 +1374,13 @@ object HomeSidePanel : SwitchFeature() {
         }
 
         /** 侧滑栏背景图（主题包里的 wallpaper_panel.png），透明度由 theme_panel_alpha 控制。 */
+        /**
+         * 侧滑栏背景图曾取自「主题工坊」的自定义主题包（ThemePack）。
+         * 主题已回退到「主题商城」+ 6 款内置主题，不再有主题包，这里直接保持无背景。
+         */
         private fun applyPanelBackground() {
-            runCatching {
-                val pack = ThemePack.active()
-                val file = pack?.asset(pack.manifest.optString("wallpaper_panel"))
-                if (file == null || !file.isFile) {
-                    panelBgView.setImageDrawable(null)
-                    panelBgView.alpha = 0f
-                    return
-                }
-                val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-                if (bitmap == null) {
-                    panelBgView.alpha = 0f
-                    return
-                }
-                panelBgView.setImageBitmap(bitmap)
-                val pct = com.Johnny.wcx.preferences.WePrefs.getIntOrDef("theme_panel_alpha", 100)
-                panelBgView.alpha = pct.coerceIn(0, 100) / 100f
-            }.onFailure { com.Johnny.wcx.utils.WeLogger.w("HomeSidePanel", "加载侧滑栏背景失败：${it.message}") }
+            panelBgView.setImageDrawable(null)
+            panelBgView.alpha = 0f
         }
 
         private fun updateDrawerWidth(): Boolean {

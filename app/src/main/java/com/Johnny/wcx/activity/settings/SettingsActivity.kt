@@ -188,7 +188,6 @@ internal sealed interface SettingsNavTarget {
     data object ScriptFaq : SettingsNavTarget
     data object HiddenContactsDiagnostics : SettingsNavTarget
     data object ModuleHealth : SettingsNavTarget
-    data object ThemeWorkshop : SettingsNavTarget
 }
 
 /**
@@ -197,10 +196,6 @@ internal sealed interface SettingsNavTarget {
  */
 internal object SettingsNavigation {
     val pending = mutableStateOf<SettingsNavTarget?>(null)
-
-    fun requestThemeWorkshop() {
-        pending.value = SettingsNavTarget.ThemeWorkshop
-    }
 }
 
 @Composable
@@ -251,7 +246,6 @@ private fun SettingsRoot(onFinish: () -> Unit) {
 
             SettingsNavTarget.ScriptFaq -> ScriptFaqScreen(onBack = pop)
 
-            SettingsNavTarget.ThemeWorkshop -> ThemeWorkshopScreen(onBack = pop)
 
             SettingsNavTarget.HiddenContactsDiagnostics -> HiddenContactsDiagnosticsScreen(onBack = pop)
 
