@@ -65,6 +65,16 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
     private const val WE_CHAT_VOIPMP_RECORDER = "com.tencent.mm.voipmp.v2.audio.backend.OboeAudioRecorder"
 
+    /**
+     * Flutter VoIP 插件的 Native 实现实例（实现 com.tencent.pigeon.flutter_voip.VoIPPluginApi）。
+     *
+     * 8.0.80 的通话 UI 是 Flutter 写的，静音/挂断/最小化都通过这个插件的
+     * setMuted(Z) / hangUp() / minimize(...) 进 Native。拿到实例就能反向控制。
+     * 拿不到（类结构又变了）时保持 null —— 此时 PiP 面板自动退回「只显示状态」。
+     */
+    @Volatile
+    private var voipPluginInstance: Any? = null
+
     private fun wechatClassExists(name: String): Boolean = try {
         Class.forName(name, false, ClassLoaders.HOST) != null
     } catch (e: Throwable) {
@@ -79,6 +89,9 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
         abstract val micMuted: Boolean
         open val videoEnabled: Boolean = true
+
+        /** 是否支持主动控制（静音/挂断）。false 时 PiP 走精简模式，只显示状态。 */
+        open val canControl: Boolean = false
 
         val receiver = object : ResultReceiver(Handler(Looper.getMainLooper())) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
@@ -127,7 +140,8 @@ object PipVoip : SwitchFeature(), IResolveDex {
                         putExtra(PipVoipActivity.EXTRA_MIC_MUTED, muted)
                         putExtra(PipVoipActivity.EXTRA_VIDEO_ENABLED, videoEnabled)
                         putExtra(PipVoipActivity.EXTRA_RESULT_RECEIVER, receiver)
-                        putExtra(PipVoipActivity.EXTRA_LIMITED, limited)
+                        putExtra(PipVoipActivity.EXTRA_LIMITED, limited && !canControl)
+                        putExtra(PipVoipActivity.EXTRA_CAN_CONTROL, canControl)
                     }
                 )
                 activity.moveTaskToBack(true)
@@ -205,11 +219,35 @@ object PipVoip : SwitchFeature(), IResolveDex {
      */
     private class VoipMpSession(activity: Activity) : Session(activity) {
         override val micMuted: Boolean get() = voipMpMicMuted
-        override fun hangUp() = Unit
-        override fun toggleMic() = Unit
+
+        /** 拿不到插件实例时视为不可控，PiP 面板会退回只显示状态。 */
+        override val canControl: Boolean get() = voipPluginInstance != null
+
+        override fun hangUp() {
+            val inst = voipPluginInstance ?: return
+            runCatching {
+                inst.javaClass.getMethod("hangUp").invoke(inst)
+            }.onFailure { WeLogger.e(TAG, "VoIP hangUp 调用失败", it) }
+        }
+
+        override fun toggleMic() {
+            val inst = voipPluginInstance ?: return
+            runCatching {
+                // 接口方法 setMuted(Z)：Native 侧实现最终落到 x83/m.L0(Z)
+                inst.javaClass.getMethod("setMuted", Boolean::class.javaPrimitiveType)
+                    .invoke(inst, !voipMpMicMuted)
+            }.onFailure { WeLogger.e(TAG, "VoIP setMuted 调用失败", it) }
+        }
     }
 
     private val sessions = WeakHashMap<Activity, Session>()
+
+    /** Flutter VoIP 插件实现类：靠实现的接口定位，跨版本稳定（类名会被 R8 混淆）。 */
+    private val classFlutterVoipPluginImpl by dexClass(allowFailure = true) {
+        matcher {
+            addInterface("com.tencent.pigeon.flutter_voip.VoIPPluginApi")
+        }
+    }
 
     private val classBaseVoipManager by dexClass(allowFailure = true) {
         matcher {
@@ -603,6 +641,18 @@ object PipVoip : SwitchFeature(), IResolveDex {
                         WeLogger.i(TAG, "VoIPMP 悬浮窗已移除：退出 PiP 接管")
                     }
                 }.onFailure { WeLogger.w(TAG, "VoIPMP onDetachedFromWindow hook 跳过", it) }
+
+                // Flutter VoIP 插件实例（用于反向控制静音/挂断）
+                runCatching {
+                    if (!classFlutterVoipPluginImpl.isPlaceholder) {
+                        classFlutterVoipPluginImpl.clazz.kotlin.reflekt()
+                            .firstConstructor()
+                            .hookAfter {
+                                voipPluginInstance = thisObject
+                                WeLogger.i(TAG, "Flutter VoIP 插件实例已捕获：8.0.80 PiP 控制面板可用")
+                            }
+                    }
+                }.onFailure { WeLogger.w(TAG, "Flutter VoIP 插件实例捕获失败（Pip 面板将只显示状态）", it) }
 
                 // 麦克风状态：g(Z)V 的参数即「是否静音」（日志 "SDK mic state notified: "）。
                 // 只读同步，供 PiP 面板如实显示；不主动调用，避免误操作。
