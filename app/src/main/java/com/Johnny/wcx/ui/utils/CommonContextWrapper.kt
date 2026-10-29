@@ -53,13 +53,6 @@ class CommonContextWrapper(val base: Context) : ContextWrapper(base) {
         return runCatching { base.getText(id) }.getOrDefault("")
     }
 
-    override fun getText(id: Int, def: CharSequence?): CharSequence {
-        return runCatching { base.getText(id, def) }.getOrDefault(def ?: "")
-    }
-
     @SuppressLint("UseCompatLoadingForDrawables")
     override fun getDrawable(id: Int) = base.getDrawable(id)
-
-    @SuppressLint("UseCompatLoadingForDrawables")
-    override fun getDrawable(id: Int, theme: Resources.Theme?) = base.getDrawable(id, theme)
 }
