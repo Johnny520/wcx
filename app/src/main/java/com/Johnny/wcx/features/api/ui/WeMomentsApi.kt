@@ -546,7 +546,9 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     val classVfs by dexClass {
         searchPackages("com.tencent.mm.vfs")
         matcher {
-            usingEqStrings("MicroMsg.VFSFileOp", "readFileAsString(\"%s\" failed: %s")
+            // 8.0.80 适配：readFileAsString 的失败日志串已被删除（0 引用），
+            // 只用类 TAG 定位；vfs 包内该 TAG 唯一（z6 = VFSFileOp 实现类）
+            usingEqStrings("MicroMsg.VFSFileOp")
         }
     }
 
