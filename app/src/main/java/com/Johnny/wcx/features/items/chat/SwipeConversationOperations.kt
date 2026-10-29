@@ -170,7 +170,8 @@ object SwipeConversationOperations : ClickableFeature(), IResolveDex {
         searchPackages("com.tencent.mm.ui.conversation")
         matcher {
             usingStrings(
-                "MicroMsg.ConversationWithCacheAdapter",
+                // 8.0.80：ConversationWithCacheAdapter TAG 已移到 lp5/cp5 包，ui.conversation 内不再有；
+                // getView 日志串在 ui.conversation 内唯一（t2=会话列表 Adapter），单串锁定
                 "[getView] position="
             )
         }
