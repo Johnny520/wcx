@@ -174,7 +174,7 @@ class PipVoipActivity : ComponentActivity() {
         )
         // 视频开关：8.0.80 的 switchCameraOpenStatus 需要一个 Flutter 回调对象做参数，
         // 暂时不接，避免构造错误参数导致通话异常。老版本（非 limited）保持原行为。
-        if (groupCall && !limited) {
+        if (groupCall || canControl) {
             actions += remoteAction(
                 android.R.drawable.ic_menu_camera,
                 if (videoEnabled) "关闭视频" else "打开视频",
@@ -243,7 +243,7 @@ class PipVoipActivity : ComponentActivity() {
                         contentDescription = if (micMuted) "打开麦克风" else "关闭麦克风",
                     )
                 }
-                if (groupCall) {
+                if (groupCall || canControl) {
                     FilledIconButton(onClick = ::toggleVideo, modifier = Modifier.size(48.dp)) {
                         Icon(
                             if (videoEnabled) MaterialSymbols.Outlined.Videocam_off else MaterialSymbols.Outlined.Videocam,
