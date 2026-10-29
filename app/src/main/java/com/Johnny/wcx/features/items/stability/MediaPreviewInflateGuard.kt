@@ -92,13 +92,16 @@ object MediaPreviewInflateGuard : SwitchFeature() {
                             param.args,
                         )
                     } catch (t: Throwable) {
+                        // invokeOriginalMethod 抛的 InvocationTargetException 会把真实异常包一层，
+                        // 只打 t 的话堆栈里看不到根因（历史日志里就只剩一行 InvocationTargetException）。
+                        val real = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
                         val host = param.thisObject as? View
                         if (host == null) {
                             // 拿不到 Context 就无法降级，只能记录后放行（让原方法自行抛）
-                            WeLogger.e(TAG, "操作栏构建失败且无法降级（宿主不是 View）", t)
+                            WeLogger.e(TAG, "操作栏构建失败且无法降级（宿主不是 View）：${real.javaClass.name}: ${real.message}", real)
                             return
                         }
-                        WeLogger.w(TAG, "媒体预览操作栏构建失败，已降级为空 View（预览页照常打开）", t)
+                        WeLogger.e(TAG, "媒体预览操作栏构建失败：${real.javaClass.name}: ${real.message}，已降级为空 View", real)
                         param.result = View(host.context)
                     }
                 }
