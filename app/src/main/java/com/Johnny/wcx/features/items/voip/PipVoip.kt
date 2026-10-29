@@ -575,16 +575,25 @@ object PipVoip : SwitchFeature(), IResolveDex {
         //   · 不提供静音/摄像头/挂断：Java 侧只有 Oboe native 静音，宁可少做也不做错
         runCatching {
             wechatClassOrNull(WE_CHAT_VOIPMP_FLOAT_CONTAINER)?.let { cls ->
-                cls.reflekt().firstMethodOrNull { name = "onAttachedToWindow"; parameterCount = 0 }
-                    ?.hookAfter {
+                // reflekt() 是 KClass 的扩展，Java Class 需先 .kotlin
+                runCatching {
+                    cls.kotlin.reflekt().firstMethod {
+                        name = "onAttachedToWindow"
+                        parameterCount = 0
+                    }.hookAfter {
                         voipMpActive = true
                         WeLogger.i(TAG, "VoIPMP 悬浮窗已挂载：多人通话 PiP 接管就绪（8.0.80+ 精简模式）")
                     }
-                cls.reflekt().firstMethodOrNull { name = "onDetachedFromWindow"; parameterCount = 0 }
-                    ?.hookAfter {
+                }.onFailure { WeLogger.w(TAG, "VoIPMP onAttachedToWindow hook 跳过", it) }
+                runCatching {
+                    cls.kotlin.reflekt().firstMethod {
+                        name = "onDetachedFromWindow"
+                        parameterCount = 0
+                    }.hookAfter {
                         voipMpActive = false
                         WeLogger.i(TAG, "VoIPMP 悬浮窗已移除：退出 PiP 接管")
                     }
+                }.onFailure { WeLogger.w(TAG, "VoIPMP onDetachedFromWindow hook 跳过", it) }
             }
         }.onFailure { WeLogger.w(TAG, "VoIPMP 悬浮窗 hook 跳过（不影响其他功能）", it) }
     }
