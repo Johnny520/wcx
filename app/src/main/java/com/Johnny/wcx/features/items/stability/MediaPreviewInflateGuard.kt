@@ -45,10 +45,18 @@ object MediaPreviewInflateGuard : SwitchFeature() {
     private const val TARGET_CLASS =
         "com.tencent.mm.plugin.picker.chrome.LocalMediaPreviewActionBarView"
 
-    override val defaultEnabled = true
+    /**
+     * 默认关闭。
+     *
+     * 8.0.80 上发现该护栏的降级返回值（一个裸 View）本身会引发新的崩溃：
+     * 上层拿它当操作栏去取子控件 / getInflateRootView 时拿到 null。
+     * 在找到「能返回合法容器」的正确降级方式之前先默认关闭，
+     * 需要时可在「稳定性」分类里手动开启。
+     */
+    override val defaultEnabled = false
 
-    /** 护栏属于稳定性补丁，始终随模块启动生效。 */
-    override val shouldEnableOnStartup = true
+    /** 不再强制随启动生效：由用户开关控制。 */
+    override val shouldEnableOnStartup = false
 
     override fun onEnable() {
         runCatching {
