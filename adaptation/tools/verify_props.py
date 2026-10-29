@@ -176,6 +176,10 @@ def verify(props, dirpath, label):
     print(f'[{label}] 目标串: exact={len(exact)} substr={len(substr)}')
     m_hits, c_hits, sup = index_dex_dir(dirpath, exact, substr)
     print(f'[{label}] 命中方法 {len(m_hits)}, 命中类 {len(c_hits)}')
+    alive_eq, alive_sb = set(), set()
+    for (_c, _m), (_ex, _sb, _d, _n) in m_hits.items():
+        alive_eq |= _ex
+        alive_sb |= _sb
     res = []
     for p in props:
         if not p['eqStrings'] and not p['strings']:
@@ -194,23 +198,34 @@ def verify(props, dirpath, label):
                 ce2, cs2 = c_hits.get(s2, (set(), set()))
                 return want_cls <= (ce2 | cs2)
             return False
-        cand = []
-        cand_nosig = []
-        for (cls, midx), (ex, sb, desc, mname) in m_hits.items():
-            if not set(p['eqStrings']) <= ex:
-                continue
-            if not set(p['strings']) <= sb:
-                continue
-            if not pkg_ok(p, cls):
-                continue
-            if not cls_ok(cls):
-                continue
-            if p['nameEq'] and mname != p['nameEq']:
-                continue
-            cand_nosig.append((cls, mname, desc))
-            if not match_signature(p, desc):
-                continue
-            cand.append((cls, mname, desc))
+        def match_group(eq, sub):
+            _cand, _cn = [], []
+            for (cls, midx), (ex, sb, desc, mname) in m_hits.items():
+                if not set(eq) <= ex:
+                    continue
+                if not set(sub) <= sb:
+                    continue
+                if not pkg_ok(p, cls):
+                    continue
+                if not cls_ok(cls):
+                    continue
+                if p['nameEq'] and mname != p['nameEq']:
+                    continue
+                _cn.append((cls, mname, desc))
+                if not match_signature(p, desc):
+                    continue
+                _cand.append((cls, mname, desc))
+            return _cand, _cn
+
+        # addMethod { } 之间是 OR：任一分组满足即可
+        groups = [(p['eqStrings'], p['strings'])]
+        if p.get('orGroups'):
+            groups = [(g['eq'], g['sub']) for g in p['orGroups']]
+        cand, cand_nosig = [], []
+        for _eq, _sub in groups:
+            c1, c2 = match_group(_eq, _sub)
+            cand += c1
+            cand_nosig += c2
         if cand:
             res.append((p['key'], 'OK', f'{len(cand)} cand | ' + '; '.join(f'{c[0]}::{c[1]}' for c in cand[:3])))
             continue
@@ -229,6 +244,14 @@ def verify(props, dirpath, label):
             cls_ok.append(cls)
         if cls_ok:
             res.append((p['key'], 'WARN', f'类级命中但无单方法满足: {cls_ok[:2]}'))
+        elif p.get('hasInvoke'):
+            # addInvoke { } 表示「本方法调用了某个满足条件的方法」，属于跨方法约束，
+            # 离线校验器没有方法调用图，无法判定。串全部存活时按 WARN 处理，不判 FAIL。
+            alive = all((s in alive_eq) for s in p['eqStrings']) and all((s in alive_sb) for s in p['strings'])
+            if alive:
+                res.append((p['key'], 'WARN', 'addInvoke 跨方法约束，离线不可判定（串均存活）'))
+            else:
+                res.append((p['key'], 'FAIL', 'addInvoke 且存在已消失的串'))
         else:
             res.append((p['key'], 'FAIL', '无任何候选'))
     return res
