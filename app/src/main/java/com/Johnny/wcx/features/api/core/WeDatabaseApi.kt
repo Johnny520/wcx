@@ -330,9 +330,39 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
     }
 
     override fun onEnable() {
-        methodGetStorage.method.hookAfter {
-            if (::db.isInitialized) return@hookAfter
+        // 8.0.80 实测：MMKernel(zp0.j1) 里同时存在多个「public static 无参」方法——
+        //   j() = getInstance()，返回 MMKernel 自身
+        //   x() = getCoreStorage()，返回 CoreStorage(zp0.b0)
+        // DexKit 的 method matcher 在这两个候选上无法稳定区分（线上日志出现
+        // "CoreStorage(com.tencent.mm.ui.LauncherUI)" 说明 hook 落到了错误方法上），
+        // 因此改为直接用反射按「无参 + 静态 + 返回 CoreStorage」定位目标方法再 hook。
+        runCatching {
+            val kernelCls = classMmKernel.clazz
+            val coreStorageCls = classCoreStorage.clazz
+            WeLogger.i(
+                TAG,
+                "锚点: MMKernel=${kernelCls.name}, CoreStorage=${coreStorageCls.name}"
+            )
+            val target = kernelCls.reflekt().firstMethodOrNull {
+                parameterCount = 0
+                Modifier.isStatic(modifiers)
+                returnType = coreStorageCls
+            }
+            if (target == null) {
+                WeLogger.w(TAG, "未找到返回 CoreStorage 的无参静态方法，数据库服务不可用")
+                return@runCatching
+            }
+            WeLogger.i(TAG, "hook getCoreStorage -> ${kernelCls.name}#${target.name}")
+            target.hookAfter {
+                if (::db.isInitialized) return@hookAfter
+                val storageObj = result ?: return@hookAfter
+                initializeDatabase(storageObj)
+            }
+        }.onFailure { WeLogger.e(TAG, "hook getCoreStorage 失败", it) }
 
+        // 兜底：DexKit 的 methodGetStorage（部分版本仍可用），失败不影响上面的反射路径。
+        runCatching { methodGetStorage.method }.getOrNull()?.hookAfter {
+            if (::db.isInitialized) return@hookAfter
             val storageObj = result ?: return@hookAfter
             initializeDatabase(storageObj)
         }
