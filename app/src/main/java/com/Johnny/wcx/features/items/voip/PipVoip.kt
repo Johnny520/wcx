@@ -45,6 +45,17 @@ object PipVoip : SwitchFeature(), IResolveDex {
     private const val WE_CHAT_VIDEO_ACTIVITY = "com.tencent.mm.plugin.voip.ui.VideoActivity"
     private const val WE_CHAT_MULTI_TALK_MAIN_UI = "com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI"
 
+    /** 8.0.80+ 多人通话的应用内悬浮窗容器（VoIPMP v2 / Flutter 实现）。 */
+    private const val WE_CHAT_VOIPMP_FLOAT_CONTAINER =
+        "com.tencent.mm.voipmp.v2.floatcard.subfloat.VoIPMPFloatSlotContainer"
+
+    /**
+     * 8.0.80+ 多人通话是否进行中（以「微信自己的应用内悬浮窗已挂载」为判据）。
+     * 只用于决定是否接管 PiP；为 false 时所有新增 Hook 立即 return，等于完全不动。
+     */
+    @Volatile
+    private var voipMpActive = false
+
     private fun wechatClassExists(name: String): Boolean = try {
         Class.forName(name, false, ClassLoaders.HOST) != null
     } catch (e: Throwable) {
@@ -92,7 +103,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         abstract fun toggleMic()
         open fun toggleVideo() = Unit
 
-        fun enterPip() {
+        fun enterPip(limited: Boolean = false) {
             if (pipActive) return
             // 8.0.77 加固: 取值(micMuted) 与启动画中画都 runCatching 兜底, 失败回滚 pipActive,
             // 异常只进模块日志, 不进微信执行栈。
@@ -107,6 +118,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
                         putExtra(PipVoipActivity.EXTRA_MIC_MUTED, muted)
                         putExtra(PipVoipActivity.EXTRA_VIDEO_ENABLED, videoEnabled)
                         putExtra(PipVoipActivity.EXTRA_RESULT_RECEIVER, receiver)
+                        putExtra(PipVoipActivity.EXTRA_LIMITED, limited)
                     }
                 )
                 activity.moveTaskToBack(true)
@@ -172,6 +184,20 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
         private val viewModel: Any
             get() = fieldMultiTalkViewModel.field.get(groupActivity)!!
+    }
+
+    /**
+     * 8.0.80+ 多人通话会话（VoIPMP v2 / Flutter 实现）。
+     *
+     * 微信 8.0.80 删除了 MultiTalkMainUI / MultiTalkUIViewModel，静音、摄像头、挂断都搬进了
+     * Flutter 侧；Java 侧目前只暴露 OboeAudioRecorder 的 native 静音（句柄 + 语义都不确定）。
+     * 所以这里只承载「回跳通话页」：PiP 面板走精简模式，不提供会点了无效的控制项。
+     * 后续若在 voipmp.v2 找到可靠控制入口，只需补这三个实现即可。
+     */
+    private class VoipMpSession(activity: Activity) : Session(activity) {
+        override val micMuted: Boolean get() = false
+        override fun hangUp() = Unit
+        override fun toggleMic() = Unit
     }
 
     private val sessions = WeakHashMap<Activity, Session>()
@@ -535,7 +561,45 @@ object PipVoip : SwitchFeature(), IResolveDex {
             if (multiTalkMainUiExists && activity is MultiTalkMainUI) {
                 sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
             }
+            // 8.0.80+ 多人通话：仅在 VoIPMP 悬浮窗存活（= 正在通话）时接管，否则立即返回
+            if (voipMpActive && activity is Activity && activity !is PipVoipActivity) {
+                enterPipForVoipMp(activity)
+            }
         }
+
+        // ── 8.0.80+ 多人通话（VoIPMP v2 / Flutter 实现）────────────────────────────
+        // 微信 8.0.80 删除了 MultiTalkMainUI / MultiTalkUIViewModel，旧 GroupSession 全部失效。
+        // 按「hook 到就接管、hook 不到完全不动」接入：
+        //   · 悬浮窗 VoIPMPFloatSlotContainer 挂载 = 正在多人通话（微信自己弹的应用内小窗）
+        //   · 用户按 Home 时若处于该状态，启动精简 PiP（显示「通话中」，点窗口回通话）
+        //   · 不提供静音/摄像头/挂断：Java 侧只有 Oboe native 静音，宁可少做也不做错
+        runCatching {
+            wechatClassOrNull(WE_CHAT_VOIPMP_FLOAT_CONTAINER)?.let { cls ->
+                cls.reflekt().firstMethodOrNull { name = "onAttachedToWindow"; parameterCount = 0 }
+                    ?.hookAfter {
+                        voipMpActive = true
+                        WeLogger.i(TAG, "VoIPMP 悬浮窗已挂载：多人通话 PiP 接管就绪（8.0.80+ 精简模式）")
+                    }
+                cls.reflekt().firstMethodOrNull { name = "onDetachedFromWindow"; parameterCount = 0 }
+                    ?.hookAfter {
+                        voipMpActive = false
+                        WeLogger.i(TAG, "VoIPMP 悬浮窗已移除：退出 PiP 接管")
+                    }
+            }
+        }.onFailure { WeLogger.w(TAG, "VoIPMP 悬浮窗 hook 跳过（不影响其他功能）", it) }
+    }
+
+    private fun wechatClassOrNull(name: String): Class<*>? = try {
+        Class.forName(name, false, ClassLoaders.HOST)
+    } catch (e: Throwable) {
+        null
+    }
+
+    private fun enterPipForVoipMp(activity: Activity) {
+        runCatching {
+            val session = sessions.getOrPut(activity) { VoipMpSession(activity) }
+            session.enterPip(limited = true)
+        }.onFailure { WeLogger.w(TAG, "enterPipForVoipMp 失败，保持微信原样", it) }
     }
 
     override fun onDisable() {
