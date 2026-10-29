@@ -48,7 +48,9 @@ object PipVoip : SwitchFeature(), IResolveDex {
     private fun wechatClassExists(name: String): Boolean = try {
         Class.forName(name, false, ClassLoaders.HOST) != null
     } catch (e: Throwable) {
-        WeLogger.d(TAG, "$name 不存在(8.0.77 混淆/移除), 跳过相关 Hook")
+        // 提到 W 级（会落文件日志）：8.0.80 起 MultiTalk 被 Flutter 实现整体替换，
+        // 类被物理删除，用户会感知到「多人通话不再进小窗」，需要能在日志里查到原因。
+        WeLogger.w(TAG, "$name 不存在（微信已移除/重构），跳过相关 Hook：多人通话侧功能在该版本不可用（单聊视频通话不受影响）")
         false
     }
 
