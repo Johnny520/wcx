@@ -649,9 +649,6 @@ private fun showReportDialog(context: Context, title: String, items: List<Health
 
 private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能清单与分类启用概况") { featureOverview() },
-    HealthStep("微信公共 API 层") { wechatApiLayer(context) },
-    HealthStep("脚本运行时") { scriptRuntime(context) },
-    HealthStep("Hook 安装任务与就绪阶段") { hookTasks() },
     HealthStep("关键类锚点") { anchors() },
     HealthStep("隐藏联系人") { hiddenContactsSection() },
     HealthStep("退出原因与主线程卡顿") { lastExitItems(context) },
