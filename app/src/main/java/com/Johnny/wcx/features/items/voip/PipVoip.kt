@@ -661,7 +661,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
                         ?.reflekt()
                         ?.firstMethod {
                             name = "g"
-                            parameters(Boolean::class.javaPrimitiveType)
+                            parameters(java.lang.Boolean.TYPE)
                         }
                         ?.hookAfter {
                             val muted = args?.firstOrNull() as? Boolean ?: return@hookAfter
