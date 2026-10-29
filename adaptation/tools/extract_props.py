@@ -165,14 +165,18 @@ def parse_file(path):
              'eqStrings': [], 'strings': [], 'searchPackages': [],
              'paramTypes': [], 'paramCount': None, 'returnType': None,
              'declaredClass': None, 'nameEq': None, 'modifiers': None,
-             'classStrings': []}
+             'classStrings': [], 'orGroups': [], 'hasInvoke': False}
+        if re.search(r'\baddInvoke\s*\{', body):
+            d['hasInvoke'] = True
         for n, args, pos in collect_calls(body):
             in_scope = any(s <= pos < e for s, e, _ in scopes)
             if n in ('usingEqStrings', 'usingStrings'):
                 (d['classStrings'] if in_scope else
                  (d['eqStrings'] if n == 'usingEqStrings' else d['strings'])).extend(strings_in(args))
             elif n == 'searchPackages':
-                d['searchPackages'] += strings_in(args)
+                d['searchPackages'] += [x.replace('${PackageNames.WECHAT}', 'com.tencent.mm')
+                                         .replace('${PackageNames.MODULE}', 'com.Johnny.wcx')
+                                        for x in strings_in(args)]
             elif n == 'paramTypes':
                 d['paramTypes'] += [x.strip().strip('"') for x in strings_in(args)]
             elif n == 'paramCount':
@@ -186,6 +190,26 @@ def parse_file(path):
                 d['nameEq'] = args.strip().strip('"')
             elif n == 'modifiers':
                 d['modifiers'] = args.strip()
+        # addMethod { ... } 之间是 OR 语义（类中存在任一满足条件的方法即可）
+        for mm in re.finditer(r'\baddMethod\s*\{', body):
+            try:
+                bs2, be2 = block_body(body, body.index('{', mm.start()))
+            except Exception:
+                continue
+            blk = body[bs2:be2]
+            g_eq, g_sub = [], []
+            for n, args, _pos in collect_calls(blk):
+                if n == 'usingEqStrings':
+                    g_eq += strings_in(args)
+                elif n == 'usingStrings':
+                    g_sub += strings_in(args)
+            if g_eq or g_sub:
+                nested = bool(re.search(r'\b(returnType|paramTypes|paramCount|declaredClass|superClass|addInterface)\b', blk))
+                d['orGroups'].append({'eq': g_eq, 'sub': g_sub, 'nested': nested})
+        # Kotlin 的 `${'$'}name` / `${"$"}name` 是字面量 $ 的转义写法，dex 里存的是真正的 $，
+        # 不还原会让这一类锚点永远匹配不上（8.0.80 朋友圈菜单 3 项即因此被判 FAIL）。
+        for _k in ('eqStrings', 'strings', 'classStrings'):
+            d[_k] = [x.replace("${'$'}", '$').replace('${"$"}', '$') for x in d[_k]]
         out.append(d)
     return out
 
