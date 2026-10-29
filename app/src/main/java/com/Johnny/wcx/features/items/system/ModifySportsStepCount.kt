@@ -38,7 +38,12 @@ object ModifySportsStepCount : ClickableFeature(), IResolveDex {
     private val methodGetSteps by dexMethod {
         searchPackages("com.tencent.mm.plugin.sport.model")
         matcher {
-            usingEqStrings("MicroMsg.Sport.DeviceStepManager")
+            // 8.0.80: "MicroMsg.Sport.DeviceStepManager" 被 a::onChanged / b::a / c::a / d::a / d::d 共用，
+            // 只有 d::a()J 同时打 "get today step from %s todayStep %d"，用它消歧。
+            usingEqStrings(
+                "MicroMsg.Sport.DeviceStepManager",
+                "get today step from %s todayStep %d"
+            )
         }
     }
     private val methodUploadSteps by dexMethod {

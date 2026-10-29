@@ -73,7 +73,13 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     }
     private val methodSetDnd by dexMethod {
         matcher {
-            usingEqStrings("MicroMsg.OpenImOpLogLogic")
+            // 8.0.80: w41.e2 里 D0(...,Z) 是 "switch cancel"、s0(...,Z) 是 "switch add"，
+            // 两者共用 "MicroMsg.OpenImOpLogLogic"。只用单串会 Multiple methods found，
+            // 这里用 add 那条日志串锁定「设置免打扰」。
+            usingEqStrings(
+                "MicroMsg.OpenImOpLogLogic",
+                "OpenImOpLogLogic OpenIMModContactMuteOplog username:%s switch add"
+            )
         }
     }
     private val methodSetNoDnd by dexMethod {

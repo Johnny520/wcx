@@ -253,7 +253,10 @@ object StickersSync : ClickableFeature(), IResolveDex {
             paramTypes(String::class.java)
         }
     }
-    private val methodDownloadImage by dexMethod {
+    // 功能已移除（见 @Feature name），此处仅为保持类结构完整。
+    // "dz[httpURLConnectionGet 300]" 是通用下载日志，8.0.80 有 4 个方法共用，
+    // 用 allowFailure 降级取首个并打 W 日志，避免 Multiple methods found 中断整条解析。
+    private val methodDownloadImage by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("dz[httpURLConnectionGet 300]")
         }

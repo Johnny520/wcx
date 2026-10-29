@@ -1423,7 +1423,11 @@ object Themes : ClickableFeature(), IResolveDex {
         }
     }
 
-    private val classEnterpriseDefaultViewItem by dexClass {
+    // 8.0.80 实测：openim_acct_type_title 的 9 处引用全部落在协程 invokeSuspend / onActivityCreated /
+    // 普通方法里，已没有任何 ViewItem 构造函数引用它 —— 说明该锚点在本版本失效。
+    // 用 allowFailure 降级（取首个候选 + W 日志），hook 时靠 `thisObject as? ViewGroup` 兜底跳过，
+    // 不能让 Multiple classes found 把整个 Themes 功能带崩。
+    private val classEnterpriseDefaultViewItem by dexClass(allowFailure = true) {
         matcher {
             usingStrings("openim_acct_type_title")
         }

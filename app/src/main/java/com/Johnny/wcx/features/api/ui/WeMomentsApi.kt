@@ -453,7 +453,10 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     // 富媒体音乐元数据对象 (r45.xs4, proto 字段名 "singerName"/"albumName" 等):
     // 内含歌手、专辑、歌词、musicId 等字段; 从 ContentObj.f387092w (字段 17) 反射取出。
     // 通过这几个在构造函数中出现的唯一字符串定位类, 避免依赖混淆类名。
-    val classXs4 by dexClass {
+    // 8.0.80 有 3 个类共用 singerName/albumName/musicOperationUrl（ee2.y / gd5.x05 / i45.m0），
+    // 无法用字符串再区分，降级取首个并打 W 日志；serializeMusicShareXml 仍按参数类型匹配，
+    // 类型不匹配时上层会跳过音乐分享 XML 的补充，不影响其他朋友圈能力。
+    val classXs4 by dexClass(allowFailure = true) {
         matcher {
             usingEqStrings("singerName", "albumName", "musicOperationUrl")
         }
