@@ -120,6 +120,26 @@
 
 锚点优先级（长期）：协议/XML 关键字 ≈ 方法名+签名 > 类 TAG 单串+结构约束 >> TAG+普通日志串。
 
+### 3.6 Hchat 侧 DexFinder 特征串校验（8.0.79，commit `150b78aa`）
+
+`h/Hchat/dexkit/DexFinder.java` 是脚本子系统的独立定位链（36 个 resolve / 65 个 matcher 调用组 / 92 个特征串）。
+注意 resolve 普遍带**多重回退 + isXxxClass 结构校验**，坏串 ≠ 功能失效，必须按「调用组」逐组判定。
+
+**修复 7 个 resolve（9 处 matcher）**：消息清除、名片、转账查询、转账操作、发图片参数类、图片 CDN、
+系统消息插入 —— 删除已成孤儿串的参数、保留存活串（结构校验兜底，多命中安全）。
+
+**无法修复 4 个（记入风险清单）**：
+- 收红包 / 拆红包：`cgi-bin/mmpay-bin/receivewxhb|openwxhb` 连 string_ids 都没有——微信对支付类功能
+  做了字符串运行时混淆，串锚点此路不通，需改调用链/结构特征【存在版本适配风险，需埋点验证】
+- 发视频：8.0.79 重构后旧 Task 类与 `VideoSendFeatureService` 串均为孤儿，
+  需参照 WCX 侧 `WeChatVideoApi.sendViaService`（`ni5.n0.c(Class)` 服务定位器）方案重写
+- EcsGift 礼物：候选串全孤儿
+
+`resolveMarsCdnDownloadApi` 有 `startC2CDownload` 方法名回退，仍可用。
+
+**引擎教训**：`d.string()` 异常若在方法级 try 里，会中断整个方法的指令扫描（长构造器中间一炸后面全漏），
+必须做**单条指令级容错**。此坑已修（verify_dexfinder2.py）。
+
 ### 3.2 notifyConversationChanged（会话变更通知）
 - 目标形状 `(int, ConversationStorage超类, Object) → void`。
 - 8.0.76：`ConversationStorage` = `com.tencent.mm.storage.l4`（classes9），超类 `s85.a1`，目标 = **`s85.a1.b(I Ls85/a1; Ljava/lang/Object;)V`** ✅ 特征描述仍然匹配。
