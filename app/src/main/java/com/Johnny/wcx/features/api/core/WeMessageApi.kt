@@ -1016,17 +1016,6 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }.getOrNull()
 
     fun sendEmojiByMd5(toUser: String, md5: String): Boolean {
-        hchatMedia()?.let { media ->
-            val emojis = runCatching { media.emojis() }.getOrNull()
-            if (emojis != null && emojis.canSendSilently()) {
-                val ok = runCatching { emojis.sendByMd5(toUser, md5) }.getOrDefault(false)
-                if (ok) {
-                    WeLogger.i(TAG, "sent emoji via Hchat media api: $md5")
-                    return true
-                }
-                WeLogger.w(TAG, "Hchat media sendEmojiByMd5 returned false, falling back to legacy path")
-            }
-        }
         return runCatching {
             WeLogger.i(TAG, "sending registered emoji")
             val emojiInfo = WeServiceApi.getEmojiInfoByMd5(md5)
@@ -1125,17 +1114,6 @@ object WeMessageApi : ApiFeature(), IResolveDex {
         if (runCatching { !java.io.File(videoPath).let { it.isFile && it.length() > 0 } }.getOrDefault(true)) {
             WeLogger.w(TAG, "sendVideo skipped: mp4 missing/empty ($videoPath)")
             return false
-        }
-        hchatMedia()?.let { media ->
-            val videos = runCatching { media.videos() }.getOrNull()
-            if (videos != null && videos.canSendSilently()) {
-                val ok = runCatching { videos.send(toUser, videoPath) }.getOrDefault(false)
-                if (ok) {
-                    WeLogger.i(TAG, "sent video via Hchat media api: $videoPath")
-                    return true
-                }
-                WeLogger.w(TAG, "Hchat media sendVideo returned false, falling back to legacy path")
-            }
         }
         return try {
             val ctor = resolveImportMultiVideoCtor()
@@ -1541,39 +1519,11 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }.invokeStatic(msgInfo.instance)
     }
 
-    // -------------------------------------------------------------------------------------
-    // Hchat 侧发送能力桥接
-    //
-    // WCX 这套发送实现是按旧版微信写的，8.0.79 上语音/视频/表情/卡片各自失效在不同环节
-    // （语音是 VoiceLogic 定位、视频是 ImportMultiVideo、卡片是 AppMsgLogic 的特征串）。
-    // h.Hchat 的 media / message API 已按版本做过适配（v320 修过视频 service、v309 修过
-    // AppMsg 13 参、v308 修过消息构造器），这里统一「优先 Hchat、失败回退本类实现」，
-    // 避免同一能力两套逻辑各修一半。
-    // -------------------------------------------------------------------------------------
-
-    private fun hchatMedia(): h.Hchat.hooks.api.media.WeChatMediaApi? = runCatching {
-        h.Hchat.hooks.api.core.WeChatApis.media()?.takeIf { it.isAvailable }
-    }.getOrNull()
-
-    private fun hchatMessages(): h.Hchat.hooks.api.message.WeChatMessageApi? = runCatching {
-        h.Hchat.hooks.api.core.WeChatApis.messages()?.takeIf { it.isAvailable }
-    }.getOrNull()
-
     fun sendVoice(toUser: String, path: String, durationMs: Int): Boolean {
         // 源文件不在就没有任何通道能发出去，先判掉，避免误报「发送成功」
         if (runCatching { !java.io.File(path).let { it.isFile && it.length() > 0 } }.getOrDefault(true)) {
             WeLogger.w(TAG, "sendVoice skipped: source file missing/empty ($path)")
             return false
-        }
-        hchatMedia()?.let { media ->
-            if (media.canSendVoiceSilently()) {
-                val ok = runCatching { media.sendVoice(toUser, path, durationMs) }.getOrDefault(false)
-                if (ok) {
-                    WeLogger.i(TAG, "sent voice via Hchat media api: $path")
-                    return true
-                }
-                WeLogger.w(TAG, "Hchat media sendVoice returned false, falling back to legacy path")
-            }
         }
         var succeeded = runCatching {
             // 准备文件
@@ -1701,14 +1651,6 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
     fun sendXmlAppMsg(target: String, xmlContent: String): Boolean {
         // Hchat 侧 sendXml 走 AppMsgLogic 的 13 参重载（8.0.79 上 6 参那条已不可用）
-        hchatMessages()?.let { messages ->
-            val ok = runCatching { messages.sendXml(target, xmlContent) }.getOrDefault(false)
-            if (ok) {
-                WeLogger.i(TAG, "sent appmsg via Hchat message api")
-                return true
-            }
-            WeLogger.w(TAG, "Hchat message sendXml returned false, falling back to WeAppMsgApi")
-        }
         val appId = extractXmlAttr(xmlContent, "appid")
         val title = extractXmlTag(xmlContent, "title")
 
