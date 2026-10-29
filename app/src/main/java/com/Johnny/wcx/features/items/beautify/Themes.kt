@@ -1442,9 +1442,17 @@ object Themes : ClickableFeature(), IResolveDex {
         }
     }
 
-    private val classSmileyTabAdapter by dexClass {
+    private val classSmileyTabAdapter by dexClass(allowFailure = true) {
         matcher {
-            usingStrings("MicroMsg.emoji.SmileyPanel.SmileyTabAdapter", "setSelection: %s")
+            // 8.0.80 适配：
+            // 1) 原第二锚点 "setSelection: %s" 已被微信删除（0 引用），方法级 AND 永远不成立；
+            // 2) 只剩 TAG 串时会命中两个类：真身（父类 RecyclerView.Adapter、有 getItemCount）
+            //    和一个只含 invoke 的 lambda 类；用 addMethod{getItemCount} 收敛到唯一真身；
+            // 3) 必须 allowFailure：老版本若两个条件都不满足，不能让整个 Themes 装挂。
+            usingStrings("MicroMsg.emoji.SmileyPanel.SmileyTabAdapter")
+            addMethod {
+                name = "getItemCount"
+            }
         }
     }
 
