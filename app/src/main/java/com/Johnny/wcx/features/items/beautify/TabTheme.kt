@@ -270,6 +270,33 @@ object TabTheme : ClickableFeature() {
                         WeLogger.e(TAG, "onPageSelected hook 异常", e)
                     }
                 }
+
+                // 进出聊天等二级页面时同步隐藏/恢复背景。
+                // onPageSelected 只在 Tab 切换时触发，从会话列表直接点进聊天不会触发，
+                // 这里挂 LauncherUI 的 onPause/onResume 兜底，确保聊天页内绝不出现背景图。
+                runCatching {
+                    val launcherClass = activity.javaClass
+                    launcherClass.reflekt()
+                        .firstMethodOrNull { name = "onPause"; parameterCount = 0 }
+                        ?.hookAfter {
+                            if (thisObject === activity) {
+                                bgContainer.visibility = View.GONE
+                            }
+                        }
+                    launcherClass.reflekt()
+                        .firstMethodOrNull { name = "onResume"; parameterCount = 0 }
+                        ?.hookAfter {
+                            if (thisObject === activity) {
+                                bgContainer.visibility = View.VISIBLE
+                                val pos = currentTabState.intValue
+                                tabImageViews.forEach { (idx, iv) ->
+                                    iv.visibility = if (idx == pos) View.VISIBLE else View.GONE
+                                }
+                            }
+                        }
+                }.onFailure {
+                    WeLogger.w(TAG, "hook launcher lifecycle failed: " + (it.message ?: ""))
+                }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
             }
