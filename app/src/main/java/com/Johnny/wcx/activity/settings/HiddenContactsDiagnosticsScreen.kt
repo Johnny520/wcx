@@ -41,11 +41,6 @@ import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.features.items.contacts.hidecontacts.BlockHiddenChatSurface
 import com.Johnny.wcx.features.items.contacts.hidecontacts.BlockHiddenProfileSurface
 import com.Johnny.wcx.utils.android.showToast
-import h.Hchat.hooks.core.DexInstallScheduler
-import h.Hchat.ui.miuix.ActionRow
-import h.Hchat.ui.miuix.InsetDivider
-import h.Hchat.ui.miuix.PageScaffold
-import h.Hchat.ui.miuix.SettingsCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -388,20 +383,6 @@ private fun repairSteps(): List<DiagStep> = listOf(
             DiagRow(
                 "刷新会话列表", "修复", if (ok) "成功" else "失败", ok,
                 "重新加载微信会话列表，让隐藏/恢复立即生效。",
-            )
-        )
-    },
-    DiagStep("重排 Hook 安装任务") {
-        val ok = runCatching {
-            DexInstallScheduler.ensureWarmupReady()
-            DexInstallScheduler.retryAllPending()
-        }.isSuccess
-        listOf(
-            DiagRow(
-                "Hook 安装任务", "修复",
-                "阶段=" + DexInstallScheduler.readyLevelName() + "，待装 " + DexInstallScheduler.pendingCount() + " 个",
-                ok,
-                "强制推进到 WARMUP 并重排全部 Hook 安装任务（隐藏面依赖的 DexKit 钩子都在这里装）。",
             )
         )
     },
