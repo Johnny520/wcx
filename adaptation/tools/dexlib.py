@@ -1,12 +1,13 @@
 import struct
 
-WIDTH={op:1 for op in range(256)}
-for _op in [0x02,0x05,0x08,0x09]+list(range(0x0a,0x13))+[0x13,0x15,0x16,0x19,0x1a,0x1c,0x1f,0x20,0x22,0x23]+\
-           list(range(0x2d,0x3e))+list(range(0x44,0x6e))+list(range(0x90,0xb0))+list(range(0xd0,0xe3))+[0xfe,0xff]:
-    WIDTH[_op]=2
-for _op in [0x03,0x04,0x06,0x14,0x17,0x1b,0x24,0x25,0x26,0x2a,0x2b,0x2c]+\
-           list(range(0x6e,0x73))+list(range(0x74,0x79))+[0xfc,0xfd]:
-    WIDTH[_op]=3
+WIDTH={op:1 for op in range(256)}   # 单位：code unit（1 unit = 2 字节）
+_w2=[0x02,0x05,0x08,0x13,0x15,0x16,0x19,0x1a,0x1c,0x1f,0x20,0x22,0x23,0x29]+\
+    list(range(0x2d,0x3e))+list(range(0x44,0x6e))+list(range(0x90,0xb0))+\
+    list(range(0xd0,0xe3))+[0xfe,0xff]
+for _op in _w2: WIDTH[_op]=2
+_w3=[0x03,0x06,0x09,0x14,0x17,0x1b,0x24,0x25,0x26,0x2a,0x2b,0x2c]+\
+    list(range(0x6e,0x73))+list(range(0x74,0x79))+[0xfc,0xfd]
+for _op in _w3: WIDTH[_op]=3
 for _op in [0xfa,0xfb]: WIDTH[_op]=4
 WIDTH[0x18]=5
 
@@ -87,19 +88,23 @@ def iter_insns(b,code):
         op=b[p]
         if op==0x00:
             ident=u16(b,p)
+            total=None
             if ident==0x0100:                      # packed-switch-payload
                 size=u16(b,p+2)
-                p+=8+size*4                        # ident,size + first_key + targets
-                continue
-            if ident==0x0200:                      # sparse-switch-payload
+                total=8+size*4                     # ident,size + first_key + targets
+            elif ident==0x0200:                    # sparse-switch-payload
                 size=u16(b,p+2)
-                p+=4+size*8                        # ident,size + keys[] + targets[]
-                continue
-            if ident==0x0300:                      # fill-array-data-payload
+                total=4+size*8                     # ident,size + keys[] + targets[]
+            elif ident==0x0300:                    # fill-array-data-payload
                 width=u16(b,p+2); size=u32(b,p+4)
                 total=8+width*size
-                if total%2: total+=1               # 4 字节对齐补齐
-                p+=total
+            if total is not None:
+                endp=p+total
+                base=code+16                       # 指令区起点
+                off=(endp-base)%4                  # payload 必须结束在 4 字节边界
+                if off: endp+=4-off
+                if endp<=p: endp=p+total
+                p=endp
                 continue
         yield p,op
         p+=WIDTH[op]*2
