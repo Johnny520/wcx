@@ -43,8 +43,14 @@ object A11yMockInflateGuard : SwitchFeature() {
     private const val TARGET_CLASS = "com.tencent.mm.accessibility.base.MMBaseAccessibilityConfig"
     private const val TARGET_METHOD = "mockInflateCore"
 
-    /** 允许的最大递归深度。 */
-    private const val MAX_DEPTH = 128
+    /**
+     * 允许的最大递归深度。
+     *
+     * 128 太激进：8.0.80 的媒体预览（picker/chrome）布局嵌套较深，正常调用就能摸到，
+     * 一旦被掐断就会让上层拿到 null。这里放宽到 512 —— 正常场景（含小程序/朋友圈/视频号）
+     * 远达不到，而真正的自递归是上万帧级别，512 仍能在栈溢出之前打断 void 递归链。
+     */
+    private const val MAX_DEPTH = 512
 
     /** 本层深度写在 param 上，after 里按自己那份还原 —— 嵌套调用不会互相吃掉。 */
     private const val EXTRA_DEPTH = "wcx_a11y_mock_inflate_depth"
@@ -82,10 +88,26 @@ object A11yMockInflateGuard : SwitchFeature() {
                     param.setObjectExtra(EXTRA_DEPTH, next)
                     if (next <= MAX_DEPTH) return
 
+                    val returnType = (param.method as? Method)?.returnType
+
+                    // 只掐断「返回 void / 基本类型」的重载。
+                    // 返回引用类型时回 null 会让上层直接 NPE —— 实测 8.0.80 媒体预览
+                    // LocalMediaPreviewActionBarView.a() 里 getInflateRootView() 拿到 null 后
+                    // 立刻 null.findViewById() 崩溃（picker/chrome）。这条路径比 StackOverflow
+                    // 更早触发、影响面更大，所以引用类型一律放行。
+                    if (returnType != null && returnType != Void.TYPE && !returnType.isPrimitive) {
+                        if (trimmedOnceLogged.compareAndSet(false, true)) {
+                            WeLogger.w(
+                                TAG,
+                                "$TARGET_METHOD 深度 $next 超限（返回 ${returnType.simpleName}），放行不掐断，避免上层 NPE",
+                            )
+                        }
+                        return
+                    }
+
                     if (trimmedOnceLogged.compareAndSet(false, true)) {
                         WeLogger.w(TAG, "$TARGET_METHOD 递归深度 $next 超限，已掐断本层（后续静默处理）")
                     }
-                    val returnType = (param.method as? Method)?.returnType
                     param.result = defaultFor(returnType)
                 }
 
@@ -102,7 +124,12 @@ object A11yMockInflateGuard : SwitchFeature() {
         }
     }
 
-    /** 按返回类型给一个安全值：void / 引用类型给 null，基本类型给零值。 */
+    /**
+     * 按返回类型给一个安全值。
+     *
+     * 只对 void / 基本类型使用：引用类型不会走到这里（调用方已放行），
+     * 因为给引用类型返回 null 会让上层 NPE。
+     */
     private fun defaultFor(returnType: Class<*>?): Any? {
         if (returnType == null || returnType == Void.TYPE) return null
         if (!returnType.isPrimitive) return null
