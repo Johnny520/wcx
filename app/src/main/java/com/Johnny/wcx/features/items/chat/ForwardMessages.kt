@@ -20,7 +20,9 @@ import com.Johnny.wcx.utils.android.showToastSuspend
 import com.Johnny.wcx.utils.serialization.XmlUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.withContext
 
 @Feature(
@@ -32,6 +34,15 @@ object ForwardMessages : SwitchFeature(),
     WeChatMessageContextMenuApi.IMenuItemsProvider {
 
     private const val TAG = "ForwardMessages"
+
+    /**
+     * 相邻两次转发之间的间隔。
+     *
+     * 一次选几十上百个对象时，连续不间断调用发送接口会触发微信服务端风控，
+     * 表现为「后面一大部分转发失败，聊天里看不到任何消息」——目标会话本身是正常的。
+     * 500ms 是实测能稳定发完、又不至于让用户等太久的折中值。
+     */
+    private const val FORWARD_INTERVAL_MS = 500L
 
     override fun onEnable() {
         WeChatMessageContextMenuApi.addProvider(this)
@@ -105,9 +116,13 @@ object ForwardMessages : SwitchFeature(),
             showToastSuspend("正在转发 ${msgInfos.size} 条消息到 ${wxIds.size} 个对象...")
 
             var success = 0
-            wxIds.forEach { wxId ->
-                msgInfos.forEach { msgInfo ->
+            var done = 0
+            // 串行 + 固定间隔，避免短时间密集请求被服务端限流（原先是不带间隔的连续发送）
+            for (wxId in wxIds) {
+                for (msgInfo in msgInfos) {
                     if (sendTo(wxId, msgInfo)) success++
+                    done++
+                    if (done < total) delay(FORWARD_INTERVAL_MS.milliseconds)
                 }
             }
 
