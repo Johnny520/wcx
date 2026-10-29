@@ -56,6 +56,15 @@ object PipVoip : SwitchFeature(), IResolveDex {
     @Volatile
     private var voipMpActive = false
 
+    /**
+     * 8.0.80+ 多人通话的麦克风状态（来自 OboeAudioRecorder.g(Z)V 的实参）。
+     * 只用于 PiP 面板如实显示，不做控制——Java 侧没有可靠的「设置静音」入口。
+     */
+    @Volatile
+    private var voipMpMicMuted = false
+
+    private const val WE_CHAT_VOIPMP_RECORDER = "com.tencent.mm.voipmp.v2.audio.backend.OboeAudioRecorder"
+
     private fun wechatClassExists(name: String): Boolean = try {
         Class.forName(name, false, ClassLoaders.HOST) != null
     } catch (e: Throwable) {
@@ -195,7 +204,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
      * 后续若在 voipmp.v2 找到可靠控制入口，只需补这三个实现即可。
      */
     private class VoipMpSession(activity: Activity) : Session(activity) {
-        override val micMuted: Boolean get() = false
+        override val micMuted: Boolean get() = voipMpMicMuted
         override fun hangUp() = Unit
         override fun toggleMic() = Unit
     }
@@ -594,6 +603,22 @@ object PipVoip : SwitchFeature(), IResolveDex {
                         WeLogger.i(TAG, "VoIPMP 悬浮窗已移除：退出 PiP 接管")
                     }
                 }.onFailure { WeLogger.w(TAG, "VoIPMP onDetachedFromWindow hook 跳过", it) }
+
+                // 麦克风状态：g(Z)V 的参数即「是否静音」（日志 "SDK mic state notified: "）。
+                // 只读同步，供 PiP 面板如实显示；不主动调用，避免误操作。
+                runCatching {
+                    wechatClassOrNull(WE_CHAT_VOIPMP_RECORDER)?.kotlin
+                        ?.reflekt()
+                        ?.firstMethod {
+                            name = "g"
+                            paramTypes(Boolean::class.javaPrimitiveType)
+                        }
+                        ?.hookAfter {
+                            val muted = args?.firstOrNull() as? Boolean ?: return@hookAfter
+                            voipMpMicMuted = muted
+                            WeLogger.i(TAG, "VoIPMP 麦克风状态同步：muted=$muted")
+                        }
+                }.onFailure { WeLogger.w(TAG, "VoIPMP 麦克风状态 hook 跳过", it) }
             }
         }.onFailure { WeLogger.w(TAG, "VoIPMP 悬浮窗 hook 跳过（不影响其他功能）", it) }
     }
