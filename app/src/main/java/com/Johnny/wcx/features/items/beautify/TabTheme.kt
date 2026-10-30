@@ -96,12 +96,8 @@ object TabTheme : ClickableFeature() {
     private const val TAG = "TabTheme"
     private const val OVERLAY_TAG_PREFIX = "wcx_tab_theme_"
 
-    /** 记录每个 Tab 页上我们加的背景 ImageView，便于换图 / 撤图。 */
-    private val pageImageViews = java.util.IdentityHashMap<View, ImageView>()
-
-    /** 顶部标题栏（状态栏 + 微信/加号那栏）背景，ViewPager 之外，需要单独补一条。 */
-    private var topBarImage: ImageView? = null
-    private var topBarPos: Int = -1
+    /** Tab 索引 -> 背景 ImageView（叠加在 decorView 的背景容器里，覆盖整个窗口）。 */
+    private val bgImages = HashMap<Int, ImageView>()
 
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
@@ -155,297 +151,98 @@ object TabTheme : ClickableFeature() {
         WeLogger.i(TAG, "applyTheme: installing LauncherUI doOnCreate hook")
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
             try {
-                WeLogger.i(TAG, "LauncherUI doOnCreate fired, preparing tab backgrounds")
-            val activity = thisObject.reflekt()
-                .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
-                .get()!! as Activity
+                val activity = thisObject.reflekt()
+                    .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
+                    .get()!! as Activity
+                val tabsAdapter = thisObject.reflekt()
+                    .firstField { name = "mTabsAdapter" }
+                    .get()!!
+                WeLogger.i(TAG, "doOnCreate fired: " + activity.javaClass.name)
 
-            val viewPager = thisObject.reflekt()
-                .firstField { name = "mViewPager" }
-                .get()!! as ViewGroup
-            val tabsAdapter = thisObject.reflekt()
-                .firstField { name = "mTabsAdapter" }
-                .get()!!
-            WeLogger.i(
-                TAG,
-                "LauncherUI fields: activity=" + activity.javaClass.name +
-                    ", pager=" + viewPager.javaClass.name,
-            )
+                if (transparentStatusBar) applyImmersiveStatusBar(activity)
 
-            val currentTabState = mutableIntStateOf(0)
-            tabsAdapter.reflekt()
-                .firstMethod { name = "onPageScrolled" }
-                .hookBefore {
-                    val position = args[0] as Int
-                    val positionOffset = args[1] as Float
-                    if (positionOffset == 0f) {
-                        currentTabState.intValue = position
-                    }
-                }
+                val decor = activity.window?.decorView as? ViewGroup ?: return@hookAfter
+                val hostName = activity.javaClass.name
 
-            val lifecycleOwner = LifecycleOwnerProvider.lifecycleOwner
-            val pager = viewPager
-
-            // 沉浸式全屏：让 Tab 页内容延伸到状态栏 / 导航栏下方
-            if (transparentStatusBar) {
-                applyImmersiveStatusBar(activity)
-            }
-
-            // ── 背景挂在「每个 Tab 页自己的容器」上，而不是 DecorView ──
-            //
-            // 旧实现把背景 ImageView 加到 decorView 上：decorView 属于整个窗口，
-            // 而微信聊天页（ChattingUI，独立 Activity）的窗口在沉浸式转场期间是透明的，
-            // 于是整个窗口的内容连同背景图一起透出来。只能靠 onPause 之类做判定去藏，
-            // 藏不干净还会闪、还会一卡一卡。
-            //
-            // 改为挂在 Tab 页容器内之后，聊天页是另一个 Activity，两者不在同一条绘制链上，
-            // 物理上不可能透——不需要任何聊天页判定，也不需要 Tab 切换时反复开关可见性。
-            // （这是 MDWechat 的做法：它把图设到各 Tab 自己的 ListView 上。）
-            fun decoratePage(page: View, pos: Int) {
-                val group = page as? ViewGroup ?: return
-                val file = getTabBackgroundFile(pos)
-                val existing = pageImageViews[page]
-
-                if (!file.exists()) {
-                    if (existing != null) {
-                        (existing.parent as? ViewGroup)?.removeView(existing)
-                        pageImageViews.remove(page)
-                        WeLogger.i(TAG, "tab bg #" + pos + " removed")
-                    }
-                    return
-                }
-                if (existing != null) {
-                    existing.alpha = opacity.coerceIn(0f, 1f)
-                    return
-                }
-
-                // FrostedContentView -> LayoutListenerView -> FrameLayout，
-                // 加到最上层是安全的（不会被当成 LinearLayout 的兄弟挤占布局），
-                // 且真实子 View 的绘制不受 dispatchDraw 里 canvas 裁剪的影响
-                // （之前用 overlay/dispatchDraw 补画，正好被那条裁剪切掉 1px，表现为标题栏下一条白线）。
-                val iv = ImageView(group.context).apply {
-                    tag = OVERLAY_TAG_PREFIX + "bg_" + pos
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                    setLifecycleOwner(lifecycleOwner)
-                    load(file.toFile()) {
-                        crossfade(false)
-                        memoryCachePolicy(CachePolicy.DISABLED)
-                        diskCachePolicy(CachePolicy.DISABLED)
-                    }
-                    alpha = opacity.coerceIn(0f, 1f)
-                    isClickable = false
-                    isFocusable = false
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                }
-                group.addView(iv)
-                pageImageViews[page] = iv
-                WeLogger.i(
-                    TAG,
-                    "tab bg #" + pos + " added to " + page.javaClass.simpleName +
-                        " (alpha=" + iv.alpha + ", size=" + page.width + "x" + page.height + ")",
-                )
-            }
-
-            /**
-             * 顶部标题栏（状态栏 + 「微信」/加号那一栏）需要单独补背景。
-             *
-             * 实测 CustomViewPager 是全屏的（top == 0），标题栏是浮在它之上的盖层，
-             * 所以不能用「pager.top 以上那一条」的思路，改为直接找那个盖层 ViewGroup，
-             * 把自己的 ImageView 叠到它里头（FrameLayout 系则 addView 最上层，否则退回 overlay）。
-             */
-            fun dumpTree(v: View, depth: Int, maxDepth: Int) {
-                if (depth > maxDepth) return
-                val loc = IntArray(2)
-                v.getLocationInWindow(loc)
-                WeLogger.i(
-                    TAG,
-                    "  ".repeat(depth) + v.javaClass.name + " " +
-                        v.width + "x" + v.height + " @" + loc[0] + "," + loc[1] +
-                        (if (v === pager) "   <== pager" else ""),
-                )
-                if (v is ViewGroup) {
-                    for (i2 in 0 until v.childCount) dumpTree(v.getChildAt(i2), depth + 1, maxDepth)
-                }
-            }
-
-            fun containsView(parent: View, child: View): Boolean {
-                var c: View? = child
-                var guard = 0
-                while (c != null && guard < 40) {
-                    if (c === parent) return true
-                    c = c.parent as? View
-                    guard++
-                }
-                return false
-            }
-
-            fun findTopBarHost(root: ViewGroup?, depth: Int = 0): ViewGroup? {
-                if (root == null || depth > 8) return null
-                val screenH = activity.resources.displayMetrics.heightPixels
-                for (i2 in 0 until root.childCount) {
-                    val c = root.getChildAt(i2)
-                    if (c !is ViewGroup) continue
-                    if (containsView(c, pager)) {
-                        findTopBarHost(c, depth + 1)?.let { return it }
-                        continue
-                    }
-                    val loc = IntArray(2)
-                    c.getLocationInWindow(loc)
-                    val looksLikeTopBar = loc[1] in -40..200 &&
-                        c.height in 1..(screenH / 5) &&
-                        c.width >= activity.resources.displayMetrics.widthPixels * 9 / 10
-                    if (looksLikeTopBar) {
-                        WeLogger.i(
-                            TAG,
-                            "topbar candidate: " + c.javaClass.name + " @" + loc[0] + "," + loc[1] +
-                                " size=" + c.width + "x" + c.height,
+                // 背景容器挂在 decorView 最上层：状态栏、标题栏、内容区一律覆盖。
+                // 挂在 Tab 页容器里只能覆盖内容区，标题栏（ViewPager 之上的盖层）会留白；
+                // 挂在这里才是整屏。代价是聊天页窗口透明时会被看到，所以下面用
+                // onPostResume 精确控制可见性来规避。
+                val containerTag = OVERLAY_TAG_PREFIX + "container"
+                val container = decor.findViewWithTag<android.widget.FrameLayout>(containerTag)
+                    ?: android.widget.FrameLayout(activity).apply {
+                        tag = containerTag
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
                         )
-                        return c
-                    }
-                    findTopBarHost(c, depth + 1)?.let { return it }
-                }
-                return null
-            }
-
-            var treeDumped = false
-
-            fun decorateTopBar(pos: Int) {
-                val decor = activity.window?.decorView ?: return
-                if (!treeDumped) {
-                    treeDumped = true
-                    WeLogger.i(TAG, "===== LauncherUI view tree (top 5 levels) =====")
-                    runCatching { dumpTree(decor, 0, 5) }
-                    WeLogger.i(TAG, "===== end view tree =====")
-                }
-                val file = getTabBackgroundFile(pos)
-                if (!file.exists()) return
-
-                // 在整个 decorView 里找「贴顶、接近满宽、高度不超过屏幕 1/5、且不包含 pager」的容器，
-                // 作为标题栏宿主。找到就把背景叠进去；找不到就只留日志等下一轮定位。
-                val host = runCatching { findTopBarHost(decor as? ViewGroup, 0) }.getOrNull()
-                if (host != null && topBarImage == null) {
-                    val v = ImageView(host.context).apply {
-                        tag = OVERLAY_TAG_PREFIX + "topbar"
-                        scaleType = ImageView.ScaleType.CENTER_CROP
                         isClickable = false
                         isFocusable = false
                         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                        setLifecycleOwner(lifecycleOwner)
-                    }
-                    runCatching {
-                        host.addView(
-                            v,
-                            ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                            ),
+                    }.also { decor.addView(it) }
+
+                bgImages.clear()
+                for (tabIndex in 0..3) {
+                    val file = getTabBackgroundFile(tabIndex)
+                    if (!file.exists()) continue
+                    val iv = ImageView(activity).apply {
+                        tag = OVERLAY_TAG_PREFIX + "tab_" + tabIndex
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        layoutParams = android.widget.FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
                         )
-                        topBarImage = v
+                        setLifecycleOwner(LifecycleOwnerProvider.lifecycleOwner)
+                        load(file.toFile()) {
+                            crossfade(false)
+                            memoryCachePolicy(CachePolicy.DISABLED)
+                            diskCachePolicy(CachePolicy.DISABLED)
+                        }
+                        alpha = opacity.coerceIn(0f, 1f)
+                        visibility = View.GONE
+                        isClickable = false
+                        isFocusable = false
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    }
+                    container.addView(iv)
+                    bgImages[tabIndex] = iv
+                }
+                WeLogger.i(TAG, "bg container on decorView, images=" + bgImages.size)
+
+                fun showTab(pos: Int) {
+                    bgImages.forEach { (i, v) ->
+                        v.visibility = if (i == pos) View.VISIBLE else View.GONE
+                    }
+                }
+
+                val currentTabState = mutableIntStateOf(0)
+                tabsAdapter.reflekt()
+                    .firstMethod { name = "onPageScrolled" }
+                    .hookBefore {
+                        val position = args[0] as Int
+                        val positionOffset = args[1] as Float
+                        if (positionOffset == 0f && currentTabState.intValue != position) {
+                            currentTabState.intValue = position
+                            showTab(position)
+                        }
+                    }
+                showTab(0)
+
+                // 只在宿主（LauncherUI）处于前台时显示背景。
+                // 单一入口 onPostResume：每次有 Activity 真正回到前台就重设一次，
+                // 不和 onPause 互相打架，聊天页（独立 Activity、窗口透明）也就不会透出背景。
+                Activity::class.java.reflekt()
+                    .firstMethodOrNull { name = "onPostResume"; parameterCount = 0 }
+                    ?.hookAfter {
+                        val a = thisObject as? Activity ?: return@hookAfter
+                        val isHost = a.javaClass.name == hostName
+                        container.visibility = if (isHost) View.VISIBLE else View.GONE
                         WeLogger.i(
                             TAG,
-                            "topbar bg added to " + host.javaClass.name +
-                                " size=" + host.width + "x" + host.height,
+                            "onPostResume " + a.javaClass.simpleName + " -> bg " +
+                                (if (isHost) "VISIBLE" else "GONE"),
                         )
-                    }.onFailure {
-                        WeLogger.w(TAG, "topbar addView failed: " + (it.message ?: ""))
                     }
-                } else if (host == null) {
-                    WeLogger.i(TAG, "topbar host still not found")
-                }
-
-                val iv = topBarImage ?: return
-                iv.alpha = opacity.coerceIn(0f, 1f)
-                if (topBarPos != pos) {
-                    topBarPos = pos
-                    iv.load(file.toFile()) {
-                        crossfade(false)
-                        memoryCachePolicy(CachePolicy.DISABLED)
-                        diskCachePolicy(CachePolicy.DISABLED)
-                    }
-                }
-            }
-
-            var lastLoggedChildCount = -1
-            fun decorateAllPages() {
-                if (pager.childCount != lastLoggedChildCount) {
-                    lastLoggedChildCount = pager.childCount
-                    WeLogger.i(TAG, "decorateAllPages: pager.childCount=" + pager.childCount)
-                }
-                for (i in 0 until pager.childCount) {
-                    val child = pager.getChildAt(i)
-                    val idx = pager.indexOfChild(child)
-                    if (idx in 0..3) decoratePage(child, idx)
-                }
-                decorateTopBar(currentTabState.intValue)
-            }
-
-            decorateAllPages()
-            // doOnCreate 时 ViewPager 往往还没把 4 个 page 加进来（走的是 addViewInLayout），
-            // 这里延时补几次，等布局完成后再挂一遍。
-            for (delay in longArrayOf(300L, 1200L, 3000L)) {
-                pager.postDelayed({ runCatching { decorateAllPages() } }, delay)
-            }
-
-            // Tab 页被新建 / 复用时补挂。
-            // ViewPager 内部是通过 addViewInLayout 把 page 塞进来的，只 hook addView 抓不到，
-            // 所以两个入口都挂上。
-            fun onPageAttached(child: View?, container: ViewGroup?) {
-                if (child == null || container == null) return
-                val idx = container.indexOfChild(child)
-                if (idx in 0..3) {
-                    decoratePage(child, idx)
-                } else {
-                    WeLogger.i(TAG, "page attached at idx=" + idx + ", skip decorate")
-                }
-            }
-
-            var hooked = 0
-            for (spec in arrayOf("addView" to 3, "addViewInLayout" to 3, "addViewInLayout" to 4)) {
-                runCatching {
-                    val m = pager.reflekt()
-                        .firstMethodOrNull { name = spec.first; parameterCount = spec.second }
-                        ?: return@runCatching
-                    m.hookAfter {
-                        onPageAttached(args.getOrNull(0) as? View, thisObject as? ViewGroup)
-                    }
-                    hooked++
-                    WeLogger.i(TAG, "hooked " + spec.first + "/" + spec.second + "args")
-                }.onFailure {
-                    WeLogger.w(TAG, "hook " + spec.first + " failed: " + (it.message ?: ""))
-                }
-            }
-            WeLogger.i(TAG, "page attach hooks installed: " + hooked)
-
-            // 最可靠的兜底时机：初始布局完成后 ViewPager 必会回调一次 onPageScrolled(0, 0f, 0)。
-            // addViewInLayout 万一抓不到，这里也能把 4 个 page 扫一遍。
-            tabsAdapter.reflekt()
-                .firstMethodOrNull { name = "onPageScrolled"; parameterCount = 3 }
-                ?.hookAfter {
-                    runCatching {
-                        if ((args.getOrNull(1) as? Float) == 0f) decorateAllPages()
-                    }.onFailure {
-                        WeLogger.w(TAG, "onPageScrolled decorate failed: " + (it.message ?: ""))
-                    }
-                }
-
-            // 切换 Tab 时补齐（应对页面重建后 tag 丢失）
-            tabsAdapter.reflekt()
-                .firstMethod { name = "onPageSelected" }
-                .hookAfter {
-                    runCatching {
-                        currentTabState.intValue = args[0] as Int
-                        decorateAllPages()
-                    }.onFailure {
-                        WeLogger.e(TAG, "onPageSelected 补挂背景失败", it)
-                    }
-                }
-
-            // 背景用 ViewOverlay 叠加，不占用 View.background，
-            // 所以不必再拦微信的 setBackground*（它设它的，互不干扰）。
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
             }
