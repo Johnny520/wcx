@@ -272,30 +272,40 @@ object TabTheme : ClickableFeature() {
                 }
 
                 // 进出聊天等二级页面时同步隐藏/恢复背景。
-                // onPageSelected 只在 Tab 切换时触发，从会话列表直接点进聊天不会触发，
-                // 这里挂 LauncherUI 的 onPause/onResume 兜底，确保聊天页内绝不出现背景图。
+                // onPageSelected 只在 Tab 切换时触发，从会话列表直接点进聊天不会触发；
+                // 且微信聊天页为沉浸式（窗口背景透明），LauncherUI 的 DecorView 会透出来，
+                // 所以必须在离开主界面时主动隐藏。
+                //
+                // 注意：LauncherUI 自身并未 override onPause/onResume，从 activity.javaClass
+                // 上找这两个方法会返回 null（旧实现因此静默失效）。这里直接 hook
+                // android.app.Activity——它自己声明了这两个方法，必然能取到。
+                val hostActivity = activity
+                val hostActivityName = hostActivity.javaClass.name
                 runCatching {
-                    val launcherClass = activity.javaClass
-                    launcherClass.reflekt()
+                    Activity::class.java.reflekt()
                         .firstMethodOrNull { name = "onPause"; parameterCount = 0 }
                         ?.hookAfter {
-                            if (thisObject === activity) {
+                            val a = thisObject as? Activity ?: return@hookAfter
+                            if (a === hostActivity || a.javaClass.name == hostActivityName) {
                                 bgContainer.visibility = View.GONE
+                                WeLogger.i(TAG, "host activity paused -> hide tab background")
                             }
                         }
-                    launcherClass.reflekt()
+                    Activity::class.java.reflekt()
                         .firstMethodOrNull { name = "onResume"; parameterCount = 0 }
                         ?.hookAfter {
-                            if (thisObject === activity) {
+                            val a = thisObject as? Activity ?: return@hookAfter
+                            if (a === hostActivity || a.javaClass.name == hostActivityName) {
                                 bgContainer.visibility = View.VISIBLE
                                 val pos = currentTabState.intValue
                                 tabImageViews.forEach { (idx, iv) ->
                                     iv.visibility = if (idx == pos) View.VISIBLE else View.GONE
                                 }
+                                WeLogger.i(TAG, "host activity resumed -> show tab background #" + pos)
                             }
                         }
                 }.onFailure {
-                    WeLogger.w(TAG, "hook launcher lifecycle failed: " + (it.message ?: ""))
+                    WeLogger.w(TAG, "hook Activity lifecycle failed: " + (it.message ?: ""))
                 }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
