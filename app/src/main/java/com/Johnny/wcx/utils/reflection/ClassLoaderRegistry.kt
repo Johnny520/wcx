@@ -84,7 +84,7 @@ object ClassLoaderRegistry {
                             .get(loadedApk) as? ClassLoader
                     }.getOrNull()?.let { walkChain(it) }
                 }
-            }.onFailure { h.Hchat.utils.HLog.i("ClassLoaderRegistry: $fieldName: $it") }
+            }.onFailure { com.Johnny.wcx.utils.WeLogger.w("ClassLoaderRegistry", "$fieldName: $it") }
         }
     }
 
@@ -129,7 +129,7 @@ object ClassLoaderRegistry {
                 ?.filterIsInstance<ClassLoader>()
                 ?.forEach { walkChain(it) }
 
-        }.onFailure { h.Hchat.utils.HLog.i("ClassLoaderRegistry: heap scan failed: $it") }
+        }.onFailure { com.Johnny.wcx.utils.WeLogger.w("ClassLoaderRegistry", "heap scan failed: $it") }
     }
 
     // ────────────────────────────────────────────────────────────────

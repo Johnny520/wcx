@@ -101,6 +101,10 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     // ji1.s.og, most of com.tencent.mm.feature.avatar.w calls this,
     // e.g. Cg, ig, cg, og, rg
     private val methodMvvmLoadAvatar1 by dexMethod(allowFailure = true) {
+        // 8.0.80 起 "MicroMsg.AvatarGetContactServiceHelper" 已成孤儿串（无 const-string 引用）。
+        // 只保留仍存活的 "put stack into pool: "，配合原有的 4 参签名
+        // (ImageView, String, String, float) → void：
+        // 8.0.76 = avatar.w.kj / 8.0.79 = avatar.w.Aj / 8.0.80 = avatar.w.Gj，三版均唯一命中。
         matcher {
             paramTypes(
                 "android.widget.ImageView",
@@ -109,7 +113,7 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                 "float"
             )
             returnType(Void.TYPE)
-            usingEqStrings("MicroMsg.AvatarGetContactServiceHelper", "put stack into pool: ")
+            usingEqStrings("put stack into pool: ")
         }
     }
 
@@ -138,7 +142,11 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     }
 
     // com.tencent.mm.feature.avatar.w.pg; an exception: this doesn't call methodMvvmLoadAvatar
-    private val methodFeatureAvatarSimple1 by dexMethod {
+    // 跨版本说明：8.0.76 唯一命中 AvatarDrawable.lj(ImageView,String)V（内部调 View.invalidate）；
+    // 8.0.79 已移除该 invalidate 调用，同形状方法变成两个（Bj / yj），旧 addInvoke 条件导致 0 命中。
+    // 因此去掉 addInvoke，改用 allowMultiple 把该类所有 (ImageView,String)V 候选都 hook
+    // （头像替换是幂等覆盖，多点 hook 无副作用，且能覆盖聊天/通讯录/朋友圈不同入口）。
+    private val methodFeatureAvatarSimple1 by dexMethod(allowMultiple = true, allowFailure = true) {
         matcher {
             declaredClass(classAvatarDrawable.clazz)
             paramTypes(
@@ -146,11 +154,6 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                 "java.lang.String"
             )
             returnType(Void.TYPE)
-
-            addInvoke {
-                declaredClass = "android.view.View"
-                name = "invalidate"
-            }
         }
     }
 
@@ -257,35 +260,44 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                 continue
             }
 
-            try {
-                delegate.method.hookBefore {
-                    val imageView = args.getOrNull(0) as? ImageView ?: return@hookBefore
-                    val wxId = args.getOrNull(1) as? String ?: return@hookBefore
+            // allowMultiple 的委托（如 methodFeatureAvatarSimple1）会把同签名的方法全部返回，
+            // 统一遍历候选逐个 hook，避免只挂上第一个导致部分入口漏改头像。
+            val targets = delegate.candidateMethods()
+            if (targets.isEmpty()) {
+                WeLogger.w(TAG, "skipping hook $name: no candidate method resolved")
+                continue
+            }
+            for (target in targets) {
+                try {
+                    target.hookBefore {
+                        val imageView = args.getOrNull(0) as? ImageView ?: return@hookBefore
+                        val wxId = args.getOrNull(1) as? String ?: return@hookBefore
 
-                    val redirectedId = fallbackUsernameProvider?.invoke(wxId)
-                    if (redirectedId != null) {
-                        args[1] = redirectedId
-                        return@hookBefore
-                    }
+                        val redirectedId = fallbackUsernameProvider?.invoke(wxId)
+                        if (redirectedId != null) {
+                            args[1] = redirectedId
+                            return@hookBefore
+                        }
 
-                    if (applyCustomAvatar(imageView, wxId, roundAvatarRadiusFactor)) {
-                        try {
-                            // 仅当原方法返回 void 时才设置 result = null
-                            if (method is java.lang.reflect.Method) {
-                                val returnType = (method as java.lang.reflect.Method).returnType
-                                if (returnType == Void.TYPE) {
-                                    result = null
+                        if (applyCustomAvatar(imageView, wxId, roundAvatarRadiusFactor)) {
+                            try {
+                                // 仅当原方法返回 void 时才设置 result = null
+                                if (method is java.lang.reflect.Method) {
+                                    val returnType = (method as java.lang.reflect.Method).returnType
+                                    if (returnType == Void.TYPE) {
+                                        result = null
+                                    }
                                 }
+                            } catch (e: Throwable) {
+                                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                             }
-                        } catch (e: Throwable) {
-                            // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
                         }
                     }
+                } catch (e: Exception) {
+                    WeLogger.w(TAG, "failed to hook $name on ${target.name}, avatar loading may be affected", e)
                 }
-                WeLogger.i(TAG, "hook $name set up successfully")
-            } catch (e: Exception) {
-                WeLogger.w(TAG, "failed to hook $name, avatar loading may be affected", e)
             }
+            WeLogger.i(TAG, "hook $name set up on ${targets.size} target(s)")
         }
 
         if (!methodHdGallerySetUsername.isPlaceholder) {

@@ -106,7 +106,7 @@ object WeServiceApi : ApiFeature(), IResolveDex {
     private val classEmojiStorageMgr by dexClass {
         searchPackages("com.tencent.mm.storage")
         matcher {
-            usingEqStrings("MicroMsg.emoji.EmojiStorageMgr", "EmojiStorageMgr: %s")
+            usingEqStrings("MicroMsg.emoji.EmojiStorageMgr")
         }
     }
     val methodSaveEmojiThumb by dexMethod {

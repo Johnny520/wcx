@@ -30,7 +30,11 @@ object WeXmlParserApi : ApiFeature(), IResolveDex {
     private val methodXmlParser by dexMethod {
         searchPackages("com.tencent.mm.sdk.platformtools")
         matcher {
-            usingEqStrings("MicroMsg.SDK.XmlParser", "[ %s ]")
+            // 8.0.80: ja 类里两个方法共用 "MicroMsg.SDK.XmlParser" tag —
+            // c(Node)String 是 nodeToString，d(String,String,String)Map 才是真正的解析入口。
+            // 用返回类型 Map 锁死解析方法，避免 Multiple methods found。
+            returnType(Map::class.java)
+            usingEqStrings("MicroMsg.SDK.XmlParser")
         }
     }
 

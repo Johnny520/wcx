@@ -179,10 +179,15 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
         }.self
     }
 
+    // 锚点说明（跨版本）：原「MicroMsg.UploadPackHelper + commit sns info ret ...」组合自 8.0.79 起失效——
+    // 该 commit 日志串被 sns.ui.fake.BackgroundVideoFinishUploader 复用，经 DexKit 全量搜索会把类误定位到那里，
+    // 进而让依赖本类的全部委托（构造器 / commit / setContentDes / setUploadList / addImageMediaObjByPath 等）连带解析失败。
+    // 改用 UploadPackHelper 独有的 addImageMediaObjByUrl 日志串与 TAG 组合：
+    // 8.0.76 → sns.model.y7、8.0.79 → sns.model.i8，双版本均唯一命中。
     val classUploadPackHelper by dexClass {
         searchPackages("com.tencent.mm.plugin.sns.model")
         matcher {
-            usingEqStrings("MicroMsg.UploadPackHelper", "commit sns info ret %d, typeFlag %d sightMd5 %s")
+            usingEqStrings("MicroMsg.UploadPackHelper", "addImageMediaObjByUrl")
         }
     }
 
@@ -251,13 +256,14 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
         }
     }
 
+    // 参数个数随版本变化：8.0.76 = f(String,String,String,String)Z（4 参），
+    // 8.0.79 = f(String,String,String,String,String)Z（5 参，见 sns.model.i8）。
+    // 因此不再锁 paramCount / paramTypes，改由调用方按 parameterCount 自适应补空串。
     val methodAddSightObjectByPath by dexMethod {
         searchPackages("com.tencent.mm.plugin.sns.model")
         matcher {
             declaredClass(classUploadPackHelper.clazz)
             returnType(bool)
-            paramCount(4)
-            paramTypes(String::class.java, String::class.java, String::class.java, String::class.java)
             usingStrings("addSightObjectByPath", "com.tencent.mm.plugin.sns.model.UploadPackHelper")
         }
     }
@@ -265,7 +271,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     // setUploadList 的列表元素, 实况图片必须经此路径构造。
     val classSnsUploadElement by dexClass {
         matcher {
-            usingEqStrings("MicroMsg.SnsUploadElment", "path:%s model:%s")
+            usingEqStrings("MicroMsg.SnsUploadElment")
 
             addMethod {
                 name = "<init>"
@@ -347,10 +353,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             paramCount(2)
             paramTypes(String::class.java, null)
             returnType(String::class.java)
-            usingEqStrings(
-                "getSnsVideoFullPath",
-                "getSnsVideoFullPath have flag %s, %s >>"
-            )
+            usingEqStrings("getSnsVideoFullPath")
         }
     }
 
@@ -450,9 +453,12 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     // 富媒体音乐元数据对象 (r45.xs4, proto 字段名 "singerName"/"albumName" 等):
     // 内含歌手、专辑、歌词、musicId 等字段; 从 ContentObj.f387092w (字段 17) 反射取出。
     // 通过这几个在构造函数中出现的唯一字符串定位类, 避免依赖混淆类名。
-    val classXs4 by dexClass {
+    // 8.0.80 有 3 个类共用 singerName/albumName/musicOperationUrl（ee2.y / gd5.x05 / i45.m0），
+    // 无法用字符串再区分，降级取首个并打 W 日志；serializeMusicShareXml 仍按参数类型匹配，
+    // 类型不匹配时上层会跳过音乐分享 XML 的补充，不影响其他朋友圈能力。
+    val classXs4 by dexClass(allowFailure = true) {
         matcher {
-            usingEqStrings("singerName", "albumName", "musicOperationUrl", "albumCoverUrl")
+            usingEqStrings("singerName", "albumName", "musicOperationUrl")
         }
     }
 
@@ -474,13 +480,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             modifiers = Modifier.STATIC
             paramCount(1)
             returnType(String::class.java)
-            usingEqStrings(
-                "<finderFeed>",
-                "</finderFeed>",
-                "<authIconType>",
-                "<fullClipInset>",
-                "<fullCoverUrl>"
-            )
+            usingEqStrings("<authIconType>", "<fullClipInset>", "<fullCoverUrl>")
         }
     }
 
@@ -500,7 +500,7 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             paramCount(3)
             paramTypes(Context::class.java, String::class.java, String::class.java)
             returnType(String::class.java)
-            usingEqStrings("[+] Called exportImage, src: %s", "exportImageImpl")
+            usingEqStrings("[+] Called exportImage, src: %s")
         }
     }
 
@@ -549,7 +549,9 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
     val classVfs by dexClass {
         searchPackages("com.tencent.mm.vfs")
         matcher {
-            usingEqStrings("MicroMsg.VFSFileOp", "readFileAsString(\"%s\" failed: %s")
+            // 8.0.80 适配：readFileAsString 的失败日志串已被删除（0 引用），
+            // 只用类 TAG 定位；vfs 包内该 TAG 唯一（z6 = VFSFileOp 实现类）
+            usingEqStrings("MicroMsg.VFSFileOp")
         }
     }
 
@@ -807,7 +809,15 @@ object WeMomentsApi : ApiFeature(), IResolveDex {
             if (copyExistingFile(videoPath, tempVideoPath)) {
                 val helper = ctorUploadPackHelper.constructor.newInstance(15, null)
                 methodSetContentDes.method.invoke(helper, text)
-                methodAddSightObjectByPath.method.invoke(helper, tempVideoPath, tempThumbPath, "", "")
+                // 8.0.76 为 4 参、8.0.79 为 5 参：按真实 parameterCount 补空串，避免 IllegalArgumentException
+                val sightMethod = methodAddSightObjectByPath.method
+                val sightBaseArgs = arrayOf<Any?>(tempVideoPath, tempThumbPath, "", "")
+                val sightArgs = if (sightMethod.parameterCount > sightBaseArgs.size) {
+                    sightBaseArgs.copyOf(sightMethod.parameterCount)
+                } else {
+                    sightBaseArgs
+                }
+                sightMethod.invoke(helper, *sightArgs)
                 if (!sdkId.isNullOrEmpty()) {
                     methodSetSdkId.method.invoke(helper, sdkId)
                 }

@@ -96,10 +96,7 @@ object SwipeMessageOperations : ClickableFeature(), IResolveDex,
     private val classChattingItemContainer by dexClass {
         searchPackages("com.tencent.mm.ui.chatting.viewitems")
         matcher {
-            usingEqStrings(
-                "MicroMsg.ChattingItemContainer",
-                "warn!!! cacheSize:%s sysSize:%s"
-            )
+            usingEqStrings("MicroMsg.ChattingItemContainer")
         }
     }
 

@@ -42,7 +42,12 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
             declaredClass(classMmKernel.clazz)
             modifiers = Modifier.PUBLIC or Modifier.STATIC
             paramCount = 0
-            usingStrings("mCoreStorage not initialized!")
+            // 返回类型必须是 CoreStorage，否则会误中 MMKernel 的单例 getter。
+            // 8.0.80 实测：zp0.j1 里 j()=getInstance()（返回 MMKernel 自身）、x()=getCoreStorage()（返回 zp0.b0=CoreStorage），
+            // 两者都满足 public+static+无参，仅靠 "Kernel not initialized by MMApplication!" 会命中 j()，
+            // 导致 storageObj 是 MMKernel，随后 initializeDatabase 在其上找不到 SqliteDB 字段而整条「数据库服务」装挂。
+            returnType = classCoreStorage.clazz.name
+            usingStrings("Kernel not initialized by MMApplication!")
         }
     }
     private val classCoreStorage by dexClass {
@@ -325,9 +330,39 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
     }
 
     override fun onEnable() {
-        methodGetStorage.method.hookAfter {
-            if (::db.isInitialized) return@hookAfter
+        // 8.0.80 实测：MMKernel(zp0.j1) 里同时存在多个「public static 无参」方法——
+        //   j() = getInstance()，返回 MMKernel 自身
+        //   x() = getCoreStorage()，返回 CoreStorage(zp0.b0)
+        // DexKit 的 method matcher 在这两个候选上无法稳定区分（线上日志出现
+        // "CoreStorage(com.tencent.mm.ui.LauncherUI)" 说明 hook 落到了错误方法上），
+        // 因此改为直接用反射按「无参 + 静态 + 返回 CoreStorage」定位目标方法再 hook。
+        runCatching {
+            val kernelCls = classMmKernel.clazz
+            val coreStorageCls = classCoreStorage.clazz
+            WeLogger.i(
+                TAG,
+                "锚点: MMKernel=${kernelCls.name}, CoreStorage=${coreStorageCls.name}"
+            )
+            val target = kernelCls.reflekt().firstMethodOrNull {
+                parameterCount = 0
+                modifiers?.let { Modifier.isStatic(it) } == true
+                returnType = coreStorageCls
+            }
+            if (target == null) {
+                WeLogger.w(TAG, "未找到返回 CoreStorage 的无参静态方法，数据库服务不可用")
+                return@runCatching
+            }
+            WeLogger.i(TAG, "hook getCoreStorage -> ${kernelCls.name}#${target.name}")
+            target.hookAfter {
+                if (::db.isInitialized) return@hookAfter
+                val storageObj = result ?: return@hookAfter
+                initializeDatabase(storageObj)
+            }
+        }.onFailure { WeLogger.e(TAG, "hook getCoreStorage 失败", it) }
 
+        // 兜底：DexKit 的 methodGetStorage（部分版本仍可用），失败不影响上面的反射路径。
+        runCatching { methodGetStorage.method }.getOrNull()?.hookAfter {
+            if (::db.isInitialized) return@hookAfter
             val storageObj = result ?: return@hookAfter
             initializeDatabase(storageObj)
         }
@@ -352,19 +387,59 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
 
     @Synchronized
     private fun initializeDatabase(storageObj: Any) {
-        val wrapperObj = storageObj.reflekt()
-            .firstField {
-                type {
-                    it == classSqliteDbWrapper.clazz ||
-                            it == classSqliteDbWrapper.clazz.interfaces[0]
-                }
-            }.get() ?: return
+        // 1) 已知 wrapper 类型精确匹配（8.0.79 及更早）。8.0.80 起
+        //    "MicroMsg.SqliteDB" / "sql is null " 两个特征串已消失，classSqliteDbWrapper 解析失败，
+        //    这里必须全程 runCatching，否则 NoSuchElementException 会让整个「数据库服务」装挂。
+        val byType = runCatching {
+            val wrapperCls = classSqliteDbWrapper.clazz
+            storageObj.reflekt()
+                .firstFieldOrNull {
+                    type {
+                        it == wrapperCls || it == wrapperCls.interfaces.getOrNull(0)
+                    }
+                }?.get()
+        }.getOrNull()
 
-        db = wrapperObj.reflekt()
-            .firstMethod {
-                parameterCount = 0
-                returnType = "com.tencent.wcdb.database.SQLiteDatabase"
-            }.invoke()!! as SQLiteDatabase
+        // 2) 结构兜底（不依赖任何字符串锚点）：
+        //    CoreStorage 里"某个字段的类型，拥有 无参 且 返回 SQLiteDatabase 的方法"即为 wrapper。
+        val byShape = if (byType != null) null else runCatching {
+            storageObj.reflekt()
+                .firstFieldOrNull {
+                    type { cls ->
+                        cls.declaredMethods.any { m ->
+                            m.parameterCount == 0 && (
+                                    m.returnType.name == "com.tencent.wcdb.database.SQLiteDatabase" ||
+                                            m.returnType.name == "android.database.sqlite.SQLiteDatabase"
+                                    )
+                        }
+                    }
+                }?.get()
+        }.getOrNull()
+
+        val wrapperObj = byType ?: byShape
+        if (wrapperObj == null) {
+            WeLogger.w(
+                TAG,
+                "initializeDatabase: CoreStorage(${storageObj.javaClass.name}) 中未找到 SqliteDB wrapper，本次跳过"
+            )
+            return
+        }
+
+        val database = runCatching {
+            wrapperObj.reflekt()
+                .firstMethodOrNull {
+                    parameterCount = 0
+                    returnType = "com.tencent.wcdb.database.SQLiteDatabase"
+                }?.invoke() as? SQLiteDatabase
+        }.getOrNull()
+
+        if (database == null) {
+            WeLogger.w(TAG, "initializeDatabase: wrapper(${wrapperObj.javaClass.name}) 未取到 SQLiteDatabase")
+            return
+        }
+
+        db = database
+        WeLogger.i(TAG, "数据库服务就绪：${storageObj.javaClass.name} -> ${wrapperObj.javaClass.name}")
     }
 
     @Suppress("NOTHING_TO_INLINE")

@@ -18,10 +18,7 @@ object EnableWebViewFeatures : SwitchFeature(), IResolveDex {
     private val methodInitWebViewFeatures by dexMethod {
         matcher {
             declaredClass = "com.tencent.mm.plugin.webview.ui.tools.WebViewUI"
-            usingEqStrings(
-                "banRightBtn:%b, showFixToolsBtn:%b",
-                "MicroMsg.WebViewFtsQuickHelper"
-            )
+            usingEqStrings("banRightBtn:%b, showFixToolsBtn:%b")
         }
     }
 

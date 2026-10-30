@@ -36,7 +36,6 @@ import com.Johnny.wcx.features.api.ui.WeMainActivityBeautifyApi
 
 import com.Johnny.wcx.features.core.SwitchFeature
 import java.lang.reflect.Method
-import com.Johnny.wcx.features.items.beautify.ThemePack
 import com.Johnny.wcx.features.items.beautify.AddMainScreenFab
 import com.Johnny.wcx.ui.utils.LifecycleOwnerProvider
 import com.Johnny.wcx.ui.utils.dpToPx
@@ -248,21 +247,58 @@ object HomeSidePanel : SwitchFeature() {
         val payPlugin: Class<*>,
     )
 
-    /** 静默反射查找微信钱包缓存符号；8.0.65~8.0.71 有效，8.0.76 有变化时返回 null（仅跳过余额）。 */
+    /**
+     * 静默反射查找微信钱包缓存符号。
+     *
+     * 缓存类的混淆名跨版本会变（8.0.65~8.0.71 是 m1，8.0.79/8.0.80 是 j1），
+     * 所以不写死名字，改为按结构特征校验：同时具备
+     *   i(2 参) -> Object   读缓存
+     *   j(2 参) -> void     写缓存（回调里能拿到余额）
+     * 再加「支付插件类里有方法返回该缓存类」做交叉确认。
+     * 找不到就返回 null，仅跳过余额行，不影响侧边栏其它功能。
+     */
     private fun resolveWalletSymbolsReflexively(): WalletSymbols? = runCatching {
-        val cacheClass = Class.forName("com.tencent.mm.wallet_core.model.m1")
-        val read = cacheClass.declaredMethods.firstOrNull {
-            it.name == "i" && it.parameterCount == 2 && it.returnType == Any::class.java
+        val cacheCandidates = arrayOf(
+            "com.tencent.mm.wallet_core.model.j1",
+            "com.tencent.mm.wallet_core.model.m1",
+        )
+        var cacheClass: Class<*>? = null
+        var readMethod: java.lang.reflect.Method? = null
+        var writeMethod: java.lang.reflect.Method? = null
+        for (name in cacheCandidates) {
+            val c = runCatching { Class.forName(name) }.getOrNull() ?: continue
+            val r = c.declaredMethods.firstOrNull {
+                it.name == "i" && it.parameterCount == 2 && it.returnType == Any::class.java
+            }
+            val w = c.declaredMethods.firstOrNull {
+                it.name == "j" && it.parameterCount == 2 && it.returnType == Void.TYPE
+            }
+            if (r != null && w != null) {
+                cacheClass = c
+                readMethod = r
+                writeMethod = w
+                break
+            }
         }
-        val write = cacheClass.declaredMethods.firstOrNull {
-            it.name == "j" && it.parameterCount == 2 && it.returnType == Void.TYPE
+        val cache = cacheClass
+        val read = readMethod
+        val write = writeMethod
+        if (cache == null || read == null || write == null) {
+            WeLogger.w(TAG, "wallet cache class not found in candidates")
+            return@runCatching null
         }
-        if (read == null || write == null) return@runCatching null
-        val payPlugin = Class.forName("com.tencent.mm.plugin.wxpay.g")
-        val hasCacheAccessor = payPlugin.declaredMethods.any { it.returnType == cacheClass }
-        if (!hasCacheAccessor) return@runCatching null
-        WalletSymbols(read, write, payPlugin)
-    }.getOrNull()
+
+        val pay = runCatching { Class.forName("com.tencent.mm.plugin.wxpay.g") }.getOrNull()
+        if (pay == null || pay.declaredMethods.none { it.returnType == cache }) {
+            WeLogger.w(TAG, "wallet pay plugin class not resolved")
+            return@runCatching null
+        }
+        WeLogger.i(TAG, "wallet symbols resolved: cache=" + cache.name + ", pay=" + pay.name)
+        WalletSymbols(read, write, pay)
+    }.getOrElse {
+        WeLogger.w(TAG, "resolveWalletSymbolsReflexively failed: " + (it.message ?: ""))
+        null
+    }
 
     internal fun uninstallPanel() {
         sessions.values.mapNotNull { it.get() }.forEach { it.detach() }
@@ -1375,24 +1411,13 @@ object HomeSidePanel : SwitchFeature() {
         }
 
         /** 侧滑栏背景图（主题包里的 wallpaper_panel.png），透明度由 theme_panel_alpha 控制。 */
+        /**
+         * 侧滑栏背景图曾取自「主题工坊」的自定义主题包（ThemePack）。
+         * 主题已回退到「主题商城」+ 6 款内置主题，不再有主题包，这里直接保持无背景。
+         */
         private fun applyPanelBackground() {
-            runCatching {
-                val pack = ThemePack.active()
-                val file = pack?.asset(pack.manifest.optString("wallpaper_panel"))
-                if (file == null || !file.isFile) {
-                    panelBgView.setImageDrawable(null)
-                    panelBgView.alpha = 0f
-                    return
-                }
-                val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-                if (bitmap == null) {
-                    panelBgView.alpha = 0f
-                    return
-                }
-                panelBgView.setImageBitmap(bitmap)
-                val pct = com.Johnny.wcx.preferences.WePrefs.getIntOrDef("theme_panel_alpha", 100)
-                panelBgView.alpha = pct.coerceIn(0, 100) / 100f
-            }.onFailure { com.Johnny.wcx.utils.WeLogger.w("HomeSidePanel", "加载侧滑栏背景失败：${it.message}") }
+            panelBgView.setImageDrawable(null)
+            panelBgView.alpha = 0f
         }
 
         private fun updateDrawerWidth(): Boolean {

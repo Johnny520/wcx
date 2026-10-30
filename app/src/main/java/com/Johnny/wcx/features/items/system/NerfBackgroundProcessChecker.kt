@@ -14,7 +14,7 @@ object NerfBackgroundProcessChecker : SwitchFeature(), IResolveDex {
 
     private val methodPerformProcessCheck by dexMethod {
         matcher {
-            usingEqStrings("MicroMsg.AbstractProcessChecker", "pass this check,because request is null! ????")
+            usingEqStrings("pass this check,because request is null! ????")
         }
     }
 

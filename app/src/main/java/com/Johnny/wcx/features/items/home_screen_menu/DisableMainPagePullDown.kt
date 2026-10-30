@@ -10,8 +10,6 @@ import android.widget.ImageView
 import com.tencent.mm.ui.LauncherUI
 import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
-import com.Johnny.wcx.dexkit.abc.IResolveDex
-import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.ui.WeHomeScreenPopupMenuApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
@@ -73,28 +71,16 @@ object MiniProgramIcon : Drawable() {
 }
 
 @Feature(name = "禁止主页下滑进入最近页面", categories = ["小程序"], description = "禁止主页下滑进入最近页面，支持通过加号菜单和标题栏图标唤起小程序面板")
-object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuItemsProvider, IResolveDex {
+object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenuItemsProvider {
 
     // 两个独立开关
     private var showInPlusMenu by WePrefs.prefOption("disable_main_page_pull_down_show_in_menu", true)
     private var showInTitleBar by WePrefs.prefOption("disable_main_page_pull_down_show_in_title_bar", false)
 
-    // DexKit 方法：查找 LauncherUI 中处理下拉手势的方法
-    private val methodOnTouchEvent by dexMethod {
-        searchPackages("com.tencent.mm.ui")
-        matcher {
-            usingEqStrings("MicroMsg.LauncherUI", "onTouchEvent")
-        }
-    }
-
-    // DexKit 方法：查找打开小程序面板的方法
-    private val methodOpenMiniProgramPanel by dexMethod {
-        searchPackages("com.tencent.mm")
-        matcher {
-            usingEqStrings("MicroMsg.LauncherUI", "openTaskList")
-        }
-    }
-
+    // 说明：原先的两个 DexKit 委托已删除（8.0.76 / 8.0.79 双版本验证均为 0 命中，属死锚点）：
+    //  · methodOnTouchEvent：声明后从未被使用（僵尸代码）；且 8.0.79 起 LauncherUI 已无 onTouchEvent 方法。
+    //  · methodOpenMiniProgramPanel：依赖的 "openTaskList" 字样在两版 dex 中都已消失。
+    // 唤起小程序面板改为「反射 openTaskList（旧版）→ 模拟下拉手势（兜底）」两段式，见 triggerMiniProgramPanel。
     private var titleBarIconView: View? = null
 
     override fun onEnable() {
@@ -155,19 +141,6 @@ object DisableMainPagePullDown : SwitchFeature(), WeHomeScreenPopupMenuApi.IMenu
                 return
             } catch (e: NoSuchMethodException) {
                 WeLogger.d(TAG, "openTaskList method not found, trying alternative")
-            }
-
-            // 方式2：尝试通过 DexKit 解析的方法
-            try {
-                // DexMethodDelegate.method 在未解析时会抛异常而不是返回 null，所以必须判 isPlaceholder。
-                // 另外 8.0.79 起 openTaskList 字样已从 dex 中消失，这里会直接走方式 3 的手势模拟。
-                if (!methodOpenMiniProgramPanel.isPlaceholder) {
-                    methodOpenMiniProgramPanel.method.invoke(launcherUI)
-                    WeLogger.i(TAG, "triggered via dexMethod")
-                    return
-                }
-            } catch (e: Exception) {
-                WeLogger.d(TAG, "dexMethod trigger failed", e)
             }
 
             // 方式3：模拟 dispatchTouchEvent 发送下拉手势

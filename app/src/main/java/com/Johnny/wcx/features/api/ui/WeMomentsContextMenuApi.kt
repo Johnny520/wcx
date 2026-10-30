@@ -53,10 +53,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
     private val methodOnCreateMenu by dexMethod {
         searchPackages("com.tencent.mm.plugin.sns.ui.listener")
         matcher {
-            usingStrings(
-                "MicroMsg.TimelineOnCreateContextMenuListener",
-                "onMMCreateContextMenu error"
-            )
+            usingStrings("onMMCreateContextMenu error")
         }
     }
     private val methodOnItemSelected by dexMethod {
@@ -70,7 +67,9 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
     private val methodImproveOnItemSelectedRegister2 by dexMethod(allowFailure = true) {
-        searchPackages("com.tencent.mm.plugin.sns.ui.improve.item.click")
+        // 8.0.80 适配：这三个 click 实现类已被 R8 混淆进 zk4 包（原包名只留在字符串常量里），
+        // searchPackages 会把它们全部过滤掉。现在靠「register lambda 类名串（全 APK 唯一）
+        // + onMMMenuItemSelected 串 + (MenuItem,int)->void 签名」定位，不再限制包名。
         matcher {
             paramCount(2)
             paramTypes("android.view.MenuItem", "int")
@@ -82,7 +81,9 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
     private val methodImproveOnItemSelectedRegister3 by dexMethod(allowFailure = true) {
-        searchPackages("com.tencent.mm.plugin.sns.ui.improve.item.click")
+        // 8.0.80 适配：这三个 click 实现类已被 R8 混淆进 zk4 包（原包名只留在字符串常量里），
+        // searchPackages 会把它们全部过滤掉。现在靠「register lambda 类名串（全 APK 唯一）
+        // + onMMMenuItemSelected 串 + (MenuItem,int)->void 签名」定位，不再限制包名。
         matcher {
             paramCount(2)
             paramTypes("android.view.MenuItem", "int")
@@ -94,7 +95,9 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
     private val methodImproveMultiPhotoOnItemSelected by dexMethod(allowFailure = true) {
-        searchPackages("com.tencent.mm.plugin.sns.ui.improve.item.click")
+        // 8.0.80 适配：这三个 click 实现类已被 R8 混淆进 zk4 包（原包名只留在字符串常量里），
+        // searchPackages 会把它们全部过滤掉。现在靠「register lambda 类名串（全 APK 唯一）
+        // + onMMMenuItemSelected 串 + (MenuItem,int)->void 签名」定位，不再限制包名。
         matcher {
             paramCount(2)
             paramTypes("android.view.MenuItem", "int")

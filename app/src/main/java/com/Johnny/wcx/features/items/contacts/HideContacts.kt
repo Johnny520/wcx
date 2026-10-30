@@ -661,7 +661,11 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
     private fun hookNewMessageNotification() {
         val method = WeConversationApi.methodNotifyConversationChanged
-        if (method.isPlaceholder) {
+        // isPlaceholder 现已涵盖「尚未解析」，但再用 runCatching 兜一层：
+        // 该 key 在 8.0.76 上特征匹配为 0，解析层不可用时必须静默降级，不能抛到上层。
+        if (runCatching { method.isPlaceholder }.getOrDefault(true) ||
+            runCatching { method.method }.isFailure
+        ) {
             WeLogger.w(TAG, "conversation notify method not resolved; new-message suppression unavailable")
             return
         }
@@ -938,11 +942,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
      */
     internal val methodFinderLikeDrawerRefresh by dexMethod(allowFailure = true) {
         matcher {
-            usingEqStrings(
-                "Finder.DrawerPresenter",
-                "[refreshData] Cost=",
-                "com/tencent/mm/plugin/finder/view/builder/FinderLikeDrawerBuilder"
-            )
+            usingEqStrings("Finder.DrawerPresenter", "com/tencent/mm/plugin/finder/view/builder/FinderLikeDrawerBuilder")
         }
     }
 
@@ -1128,28 +1128,51 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
     }
 
     /** `mp5.q2.Ii(String toUser, ...)` — VoIPMP call-record insertion (未接听 / 已取消 / duration). */
-    internal val methodVoipMpInsertMsg by dexMethod {
+    internal val methodVoipMpInsertMsg by dexMethod(allowFailure = true) {
         matcher {
-            paramTypes(
-                "java.lang.String",
-                "boolean",
-                "int",
-                "long",
-                "long",
-                "long",
-                "int",
-            )
-            returnType("void")
+            // 多版本兼容（签名/ TAG 都按版本分支，DexKit 的 anyOf 是 OR）：
+            //   ≤8.0.79 : (String,boolean,int,long,long,long,int) + TAG "MicroMsg.VoIPMP.Launcher"
+            //   8.0.80+  : (long,byte[],boolean,int,int,long,long,int,int,int) + TAG "MicroMsg.VoIPMP.CoreV2"
+            // 8.0.80 把 VoIPMP 重构成 v2 并把日志 TAG 改成 CoreV2、参数扩到 10 个，
+            // 旧的两条分支在新版匹配不到；这里四条分支并存，任意一版命中即可。
+            // 全部不命中时 allowFailure 保证静默降级（不装挂、不闪退）。
             anyOf(
                 MethodMatcher().apply {
+                    paramTypes(
+                        "java.lang.String", "boolean", "int", "long", "long", "long", "int",
+                    )
+                    returnType("void")
                     usingEqStrings(
                         "MicroMsg.VoIPMP.Launcher",
                         "insertMsg() called with: toUser = ",
                     )
                 },
                 MethodMatcher().apply {
+                    paramTypes(
+                        "java.lang.String", "boolean", "int", "long", "long", "long", "int",
+                    )
+                    returnType("void")
                     declaredClass {
                         usingEqStrings("MicroMsg.VoIPMP.Launcher", "closeReceiverBanner")
+                    }
+                },
+                MethodMatcher().apply {
+                    paramTypes(
+                        "long", "byte[]", "boolean", "int", "int", "long", "long", "int", "int", "int",
+                    )
+                    returnType("void")
+                    usingEqStrings(
+                        "MicroMsg.VoIPMP.CoreV2",
+                        "insertMsg() called with: toUser = ",
+                    )
+                },
+                MethodMatcher().apply {
+                    paramTypes(
+                        "long", "byte[]", "boolean", "int", "int", "long", "long", "int", "int", "int",
+                    )
+                    returnType("void")
+                    declaredClass {
+                        usingEqStrings("MicroMsg.VoIPMP.CoreV2", "closeReceiverBanner")
                     }
                 },
             )

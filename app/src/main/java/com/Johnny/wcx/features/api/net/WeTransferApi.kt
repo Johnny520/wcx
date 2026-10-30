@@ -28,10 +28,7 @@ object WeTransferApi : ApiFeature(), IResolveDex {
     val classNetSceneTenpayRemittanceGen by dexClass {
         searchPackages("com.tencent.mm.plugin.remittance.model")
         matcher {
-            usingEqStrings(
-                "Micromsg.NetSceneTenpayRemittanceGen",
-                "payScene: %s, channel: %s dynamicCodeUrl: %s mch_name: %s nickname: %s receiver_true_name %s placeorder_reserves: %s unpayType: %s cancel_outtradeno:%s cancel_reason:%s placeorderAttach:%s"
-            )
+            usingEqStrings("Micromsg.NetSceneTenpayRemittanceGen")
         }
     }
 

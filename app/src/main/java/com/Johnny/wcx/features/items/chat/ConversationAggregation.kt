@@ -202,11 +202,19 @@ object ConversationAggregation : ClickableFeature(),
     }
     private val methodConversationStorageQueryByParent by dexMethod(allowFailure = true) {
         matcher {
-            usingStrings(
-                "select * from rconversation where ",
-                " order by flag desc, conversationTime desc"
+            // 8.0.80 起 "select * from rconversation where " 是孤儿串（无 const-string 引用），
+            // 只保留仍存活的排序子句。真实签名在两版都是 5 参：
+            // (int, List, String, boolean, String) → Cursor
+            // （原写的 4 参 (int,List,String,int) 一直匹配不上）。
+            // 8.0.76/8.0.79 = storage.l4.s、8.0.80 = storage.m4.s，三版均唯一命中。
+            usingStrings(" order by flag desc, conversationTime desc")
+            paramTypes(
+                "int",
+                "java.util.List",
+                "java.lang.String",
+                "boolean",
+                "java.lang.String"
             )
-            paramTypes("int", "java.util.List", "java.lang.String", "int")
             returnType("android.database.Cursor")
         }
     }
@@ -252,7 +260,7 @@ object ConversationAggregation : ClickableFeature(),
     // reflecting its members' (still-unread) state.
     private val methodConversationStorageUpdateUnreadByTalker by dexMethod(allowFailure = true) {
         matcher {
-            usingStrings("MicroMsg.ConversationStorage", "updateUnreadByTalker %s", "update conversation failed")
+            usingStrings("MicroMsg.ConversationStorage", "update conversation failed")
             paramTypes("java.lang.String")
             returnType("boolean")
         }

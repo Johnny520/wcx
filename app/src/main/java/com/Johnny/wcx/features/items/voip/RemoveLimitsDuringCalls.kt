@@ -31,27 +31,40 @@ object RemoveLimitsDuringCalls : SwitchFeature(), IResolveDex {
         val skipped = mutableListOf<String>()
 
         targets().forEach { (label, delegate) ->
-            val method = runCatching { delegate.method }.getOrNull()
-            if (method == null || delegate.isPlaceholder) {
+            // 多候选兼容：命中多个时**每个 boolean 候选都 hook** —— 它们都是「是否占用」的
+            // 谓词，只 hook 取到的第一个会在 8.0.76 这类版本上漏掉另一个重载。
+            // candidates 为空（走了缓存、或 DexKit 未跑）时退回单个 method。
+            val methods = runCatching { delegate.candidateMethods() }.getOrDefault(emptyList())
+                .ifEmpty { runCatching { listOf(delegate.method) }.getOrDefault(emptyList()) }
+            if (methods.isEmpty() || delegate.isPlaceholder) {
                 skipped += label
                 return@forEach
             }
-            // 只拦返回 boolean 的：这些方法都是「是否占用」的谓词，
-            // 钉成 false 就等于「没有占用」。其它返回类型一律不碰，避免把 void 方法写坏。
-            if (method.returnType != Boolean::class.javaPrimitiveType &&
-                method.returnType != java.lang.Boolean::class.java
-            ) {
-                skipped += "$label(${method.returnType?.simpleName})"
-                return@forEach
+            var hookedForLabel = 0
+            val seen = mutableSetOf<String>()
+            for (method in methods) {
+                // 只拦返回 boolean 的：钉成 false 就等于「没有占用」，其它类型一律不碰
+                if (method.returnType != Boolean::class.javaPrimitiveType &&
+                    method.returnType != java.lang.Boolean::class.java
+                ) {
+                    skipped += "$label(${method.returnType?.simpleName})"
+                    continue
+                }
+                val id = "${method.declaringClass?.name}#${method.name}"
+                if (!seen.add(id)) continue
+                runCatching {
+                    method.hookBefore { result = false }
+                }.onSuccess { hookedForLabel++ }
+                    .onFailure { WeLogger.e(TAG, "$label hook 失败（$id）", it) }
             }
-            runCatching {
-                delegate.hookBefore { result = false }
-            }.onSuccess {
-                hooked++
-                WeLogger.i(TAG, "$label 已 hook: ${method.declaringClass?.name}#${method.name}")
-            }.onFailure {
+            if (hookedForLabel > 0) {
+                hooked += hookedForLabel
+                WeLogger.i(
+                    TAG,
+                    "$label 已 hook ${hookedForLabel}/${methods.size} 个候选：${seen.joinToString("、")}"
+                )
+            } else {
                 skipped += label
-                WeLogger.e(TAG, "$label hook 失败", it)
             }
         }
 
@@ -97,7 +110,9 @@ object RemoveLimitsDuringCalls : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodIsCameraUsing by dexMethod(allowFailure = true) {
+    // 8.0.76 实测该特征命中 2 个重载（do：isCameraUsing 多签名）。
+    // 这里允许「多命中不报错」，实际由 onEnable 对**每个** boolean 候选都 hook（见下）。
+    private val methodIsCameraUsing by dexMethod(allowMultiple = true, allowFailure = true) {
         matcher {
             usingEqStrings(OC, "isCameraUsing")
             returnType = "boolean"
@@ -127,7 +142,7 @@ object RemoveLimitsDuringCalls : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodCheckAppBrandVoiceUsing2 by dexMethod(allowFailure = true) {
+    private val methodCheckAppBrandVoiceUsing2 by dexMethod(allowMultiple = true, allowFailure = true) {
         matcher {
             usingEqStrings(OC, "checkAppBrandVoiceUsingAndShowToast isVoiceUsing:%b, isCameraUsing:%b")
             returnType = "boolean"

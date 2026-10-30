@@ -24,6 +24,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,24 @@ class PipVoipActivity : ComponentActivity() {
     private var videoEnabled by mutableStateOf(true)
     private var closing = false
 
+    /**
+     * 8.0.80+ 多人通话的「精简模式」。
+     *
+     * 微信 8.0.80 把多人通话重写成 Flutter 实现（MultiTalkMainUI / MultiTalkUIViewModel 被物理删除），
+     * 目前只有 OboeAudioRecorder 的 native 静音方法，语义和句柄都不确定。
+     * 与其给用户一排点了没反应（甚至误操作）的按钮，这里只显示「通话中」——
+     * 用户点一下 PiP 窗口即可展开并返回通话（系统行为 → onPictureInPictureModeChanged → RESULT_RESTORE）。
+     */
+    private var limited = false
+
+    /**
+     * 是否支持主动控制（静音 / 挂断）。
+     *
+     * 只有拿到 Flutter VoIP 插件实例（VoIPPluginApi 实现）时才为 true；
+     * 此时精简模式也会显示静音/挂断按钮，否则只显示状态，绝不出现点了没反应的按钮。
+     */
+    private var canControl = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.action == ACTION_CLOSE) {
@@ -64,6 +83,8 @@ class PipVoipActivity : ComponentActivity() {
         )!!
         current = this
         groupCall = intent.getBooleanExtra(EXTRA_GROUP_CALL, false)
+        limited = intent.getBooleanExtra(EXTRA_LIMITED, false)
+        canControl = intent.getBooleanExtra(EXTRA_CAN_CONTROL, false)
         micMuted = intent.getBooleanExtra(EXTRA_MIC_MUTED, false)
         videoEnabled = intent.getBooleanExtra(EXTRA_VIDEO_ENABLED, true)
         setContent {
@@ -127,7 +148,17 @@ class PipVoipActivity : ComponentActivity() {
     }
 
     private fun updatePipParams(): PictureInPictureParams {
-        val actions = mutableListOf(
+        val actions = mutableListOf<RemoteAction>()
+        if (limited && !canControl) {
+            // 精简模式：不放任何自定义 action（放了也控制不了，只会误导）
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .setActions(actions)
+                .build()
+            setPictureInPictureParams(params)
+            return params
+        }
+        actions += listOf(
             remoteAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "挂断",
@@ -141,7 +172,9 @@ class PipVoipActivity : ComponentActivity() {
                 REQUEST_TOGGLE_MIC,
             ),
         )
-        if (groupCall) {
+        // 视频开关：8.0.80 的 switchCameraOpenStatus 需要一个 Flutter 回调对象做参数，
+        // 暂时不接，避免构造错误参数导致通话异常。老版本（非 limited）保持原行为。
+        if (groupCall || canControl) {
             actions += remoteAction(
                 android.R.drawable.ic_menu_camera,
                 if (videoEnabled) "关闭视频" else "打开视频",
@@ -177,6 +210,14 @@ class PipVoipActivity : ComponentActivity() {
                 .background(Color(0xFF151515)),
             contentAlignment = Alignment.Center,
         ) {
+            if (limited && !canControl) {
+                Text(
+                    // 如实反映通话状态；麦克风状态来自 OboeAudioRecorder.g(Z)V 的只读同步
+                    text = if (micMuted) "通话中 · 已静音" else "通话中",
+                    color = Color.White,
+                    modifier = Modifier.padding(12.dp),
+                )
+            } else {
             Row(
                 modifier = Modifier.padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -202,7 +243,7 @@ class PipVoipActivity : ComponentActivity() {
                         contentDescription = if (micMuted) "打开麦克风" else "关闭麦克风",
                     )
                 }
-                if (groupCall) {
+                if (groupCall || canControl) {
                     FilledIconButton(onClick = ::toggleVideo, modifier = Modifier.size(48.dp)) {
                         Icon(
                             if (videoEnabled) MaterialSymbols.Outlined.Videocam_off else MaterialSymbols.Outlined.Videocam,
@@ -210,6 +251,7 @@ class PipVoipActivity : ComponentActivity() {
                         )
                     }
                 }
+            }
             }
         }
     }
@@ -219,6 +261,12 @@ class PipVoipActivity : ComponentActivity() {
         const val EXTRA_GROUP_CALL = "pip_voip_group_call"
         const val EXTRA_MIC_MUTED = "pip_voip_mic_muted"
         const val EXTRA_VIDEO_ENABLED = "pip_voip_video_enabled"
+
+        /** 精简模式：只显示「通话中」，不提供静音/摄像头/挂断（8.0.80+ 多人通话暂无可控入口）。 */
+        const val EXTRA_LIMITED = "pip_voip_limited"
+
+        /** 是否支持主动控制（拿到 Flutter VoIP 插件实例时为 true）。 */
+        const val EXTRA_CAN_CONTROL = "pip_voip_can_control"
 
         const val ACTION_CLOSE = "com.Johnny.wcx.action.CLOSE_VOIP_PIP"
         private const val ACTION_HANG_UP = "com.Johnny.wcx.action.HANG_UP_VOIP"

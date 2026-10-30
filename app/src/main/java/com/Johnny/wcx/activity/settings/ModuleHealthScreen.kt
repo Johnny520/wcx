@@ -36,8 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.api.core.WeConversationApi
+import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.core.FeaturesProvider
-import com.Johnny.wcx.features.hchat.HchatScriptBootstrap
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.android.showToast
@@ -46,17 +46,6 @@ import com.Johnny.wcx.utils.MainThreadWatchdog
 import com.Johnny.wcx.utils.crash.ProcessTimeline
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.utils.reflection.ClassLoaders
-import h.Hchat.hooks.api.core.WeChatApis
-import h.Hchat.hooks.core.DexInstallScheduler
-import h.Hchat.hooks.core.HookRegistry
-import h.Hchat.hooks.items.script.ScriptPluginRuntime
-import h.Hchat.hooks.items.script.ScriptPluginSettings
-import h.Hchat.hooks.items.script.market.PluginMarketSettings
-import h.Hchat.preferences.HchatStorage
-import h.Hchat.ui.miuix.ActionRow
-import h.Hchat.ui.miuix.InsetDivider
-import h.Hchat.ui.miuix.PageScaffold
-import h.Hchat.ui.miuix.SettingsCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -239,7 +228,7 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                         off = items.count { !it.ok && it.inactive },
                         moduleVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                         wechatVersion = runCatching {
-                            WeChatApis.version()?.current()?.displayVersion() ?: "未识别"
+                            com.Johnny.wcx.utils.HostInfo.versionName
                         }.getOrDefault("未识别"),
                         internalVersion = "${BuildConfig.VERSION_CODE}",
                         lastScan = lastScan,
@@ -660,9 +649,6 @@ private fun showReportDialog(context: Context, title: String, items: List<Health
 
 private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能清单与分类启用概况") { featureOverview() },
-    HealthStep("微信公共 API 层") { wechatApiLayer(context) },
-    HealthStep("脚本运行时") { scriptRuntime(context) },
-    HealthStep("Hook 安装任务与就绪阶段") { hookTasks() },
     HealthStep("关键类锚点") { anchors() },
     HealthStep("隐藏联系人") { hiddenContactsSection() },
     HealthStep("退出原因与主线程卡顿") { lastExitItems(context) },
@@ -723,17 +709,12 @@ private fun lastExitItems(context: Context): List<HealthItem> {
     return out
 }
 
-/** 「一键修复」动作（重建引导链路），供多处复用。 */
+/** 「一键修复」动作：脚本子系统下线后只剩微信数据库一项可自愈，这里给出真实结论。 */
 private fun repairAction(context: Context): Pair<String, () -> String> =
-    "一键修复" to {
-        runCatching { HchatScriptBootstrap.reinitializeFully().joinToString("；") }
-            .getOrElse { "异常：" + (it.message ?: it.javaClass.simpleName) }
-    }
-
-private fun openScriptSwitchAction(context: Context): Pair<String, () -> String> =
-    "开启总开关" to {
-        runCatching { ScriptPluginRuntime.setGlobalEnabled(context, true) }
-            .fold({ "插件总开关已开启" }, { "开启失败：" + (it.message ?: "未知原因") })
+    "重新检测" to {
+        runCatching {
+            if (WeDatabaseApi.isReady) "微信数据库已就绪" else "微信数据库仍未就绪，请查看「关键类锚点」"
+        }.getOrElse { "异常：" + (it.message ?: it.javaClass.simpleName) }
     }
 
 private fun featureOverview(): List<HealthItem> {
@@ -760,183 +741,6 @@ private fun featureOverview(): List<HealthItem> {
             }
             out += HealthItem("分类·$category", "功能清单与分类启用概况", "${list.size} 个，已启用 $on", true, detail)
         }
-    return out
-}
-
-private fun wechatApiLayer(context: Context): List<HealthItem> {
-    val section = "微信公共 API 层"
-    val out = mutableListOf<HealthItem>()
-    val repair = repairAction(context)
-    out += apiItem(section, "微信 API·数据库", runCatching { WeChatApis.database() }.getOrNull(), repair)
-    out += apiItem(section, "微信 API·账号", runCatching { WeChatApis.account() }.getOrNull(), repair)
-    out += apiItem(section, "微信 API·联系人", runCatching { WeChatApis.contacts() }.getOrNull(), repair)
-    out += apiItem(section, "微信 API·会话", runCatching { WeChatApis.conversations() }.getOrNull(), repair)
-    out += apiItem(section, "微信 API·消息", runCatching { WeChatApis.messages() }.getOrNull(), repair)
-    out += apiItem(section, "微信 API·群聊", runCatching { WeChatApis.chatrooms() }.getOrNull(), repair)
-    out += apiItem(section, "微信 API·版本", runCatching { WeChatApis.version() }.getOrNull(), repair)
-
-    val issues = runCatching { WeChatApis.diagnostics()?.buildCompatibilityIssues() }.getOrNull().orEmpty()
-    val report = runCatching { WeChatApis.diagnostics()?.buildReport() }.getOrNull().orEmpty()
-    out += HealthItem(
-        "微信 API·完整性自检", section,
-        if (issues.isBlank()) "全部能力就绪" else "存在缺失项",
-        issues.isBlank(),
-        if (issues.isBlank()) {
-            "微信公共 API 全部关键能力均可用。\n\n完整报告：\n$report"
-        } else {
-            "以下关键能力缺失，对应的用户功能可能失效：\n$issues\n\n完整报告：\n$report"
-        },
-        actionLabel = if (issues.isBlank()) null else repair.first,
-        action = if (issues.isBlank()) null else repair.second,
-    )
-    return out
-}
-
-private fun apiItem(section: String, label: String, obj: Any?, repair: Pair<String, () -> String>?): HealthItem =
-    if (obj != null) {
-        HealthItem(label, section, "已解析", true, "已成功取得该 API 对象：${obj.javaClass.name}。")
-    } else {
-        HealthItem(
-            label, section, "未解析", false,
-            "未取得该 API 对象。\n通常是 DexKit 预热未完成，或当前微信版本未适配。\n点「${repair?.first ?: "一键修复"}」重建引导链路后可重试。",
-            actionLabel = repair?.first,
-            action = repair?.second,
-        )
-    }
-
-private fun scriptRuntime(context: Context): List<HealthItem> {
-    val section = "脚本运行时"
-    val out = mutableListOf<HealthItem>()
-    val repair = repairAction(context)
-    val openSwitch = openScriptSwitchAction(context)
-
-    val readinessDetail = runCatching { ScriptPluginRuntime.scriptApiReadinessDetail() }.getOrNull()
-    val ready = readinessDetail == null
-    out += HealthItem(
-        "脚本运行时就绪", section,
-        if (ready) "已就绪" else "未就绪", ready,
-        if (ready) "脚本运行时依赖的微信数据库（rcontact/chatroom）可读，插件可正常加载。"
-        else "未就绪原因：$readinessDetail\n这会导致「插件总开关」打不开、插件全部加载失败。",
-        actionLabel = if (ready) null else repair.first,
-        action = if (ready) null else repair.second,
-    )
-
-    val bootstrap = runCatching { HchatScriptBootstrap.status }.getOrDefault("未知")
-    val bootstrapOk = bootstrap.contains("成功") || bootstrap.contains("已安装")
-    out += HealthItem(
-        "脚本引导链路", section, if (bootstrapOk) "已就绪" else "未就绪", bootstrapOk,
-        "引导链路状态：$bootstrap",
-        actionLabel = if (bootstrapOk) null else repair.first,
-        action = if (bootstrapOk) null else repair.second,
-    )
-
-    val globalOn = runCatching {
-        HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME)
-            .getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE)
-    }.getOrDefault(false)
-    out += HealthItem(
-        "插件总开关", section, if (globalOn) "已开启" else "已关闭", globalOn,
-        if (globalOn) "插件总开关已开启，启动时会自动加载已启用的插件。"
-        else "插件总开关未开启，所有脚本插件都不会工作。",
-        actionLabel = if (globalOn) null else openSwitch.first,
-        action = if (globalOn) null else openSwitch.second,
-        inactive = !globalOn,
-    )
-
-    val hookCount = runCatching { HookRegistry.get().size() }.getOrDefault(0)
-    out += HealthItem(
-        "脚本 Hook 注册", section, "$hookCount 个", hookCount > 0,
-        if (hookCount > 0) "已注册 $hookCount 个 Hook（脚本的消息/菜单等监听）。"
-        else "0 个：脚本引导链路可能未完成。",
-        actionLabel = if (hookCount > 0) null else repair.first,
-        action = if (hookCount > 0) null else repair.second,
-    )
-
-    val abi = runCatching { Class.forName("me.hd.wauxv.plugin.api.callback.PluginCallBack") }.isSuccess
-    out += HealthItem(
-        "脚本运行库（ABI）", section, if (abi) "已加载" else "缺失", abi,
-        if (abi) "插件运行时依赖的关键类已加载。"
-        else "关键类缺失：插件会全部加载失败，请更新到最新版本（无法自动修复）。",
-    )
-
-    val plugins = runCatching { ScriptPluginRuntime.listPlugins(context) }.getOrDefault(emptyList())
-    val enabledPlugins = plugins.count {
-        runCatching { ScriptPluginRuntime.isPluginEnabled(context, it.id) }.getOrDefault(false)
-    }
-    out += HealthItem(
-        "本地插件", section, "已装 ${plugins.size} 个，已启用 $enabledPlugins 个",
-        plugins.isEmpty() || enabledPlugins > 0,
-        when {
-            plugins.isEmpty() -> "尚未安装任何脚本插件。可到「脚本」页的在线插件市场安装。"
-            enabledPlugins == 0 -> "已安装 ${plugins.size} 个插件，但一个都没启用——请在「脚本」页逐个开启。"
-            else -> "已安装 ${plugins.size} 个插件，已启用 $enabledPlugins 个。"
-        },
-        inactive = enabledPlugins == 0,
-    )
-
-    val loadErrors = collectPluginLoadErrors(context)
-    val reloadAct: Pair<String, () -> String> = "重载全部插件" to {
-        val enabled = plugins.filter {
-            runCatching { ScriptPluginRuntime.isPluginEnabled(context, it.id) }.getOrDefault(false)
-        }
-        var ok = 0
-        enabled.forEach { p -> runCatching { ScriptPluginRuntime.reloadPluginAsync(context, p.id) }.onSuccess { ok++ } }
-        "已重载 $ok/${enabled.size} 个已启用插件"
-    }
-    out += HealthItem(
-        "插件加载错误", section,
-        if (loadErrors.isEmpty()) "无" else loadErrors.joinToString(" ｜ "),
-        loadErrors.isEmpty(),
-        if (loadErrors.isEmpty()) "最近一次插件加载没有报错。"
-        else "以下插件最近一次加载失败：\n" + loadErrors.joinToString("\n") + "\n可尝试重载全部插件。",
-        actionLabel = if (loadErrors.isEmpty()) null else reloadAct.first,
-        action = if (loadErrors.isEmpty()) null else reloadAct.second,
-    )
-
-    val server = runCatching { PluginMarketSettings.serviceUrl(context) }.getOrNull().orEmpty()
-    out += HealthItem(
-        "市场服务器地址", section, server.ifBlank { "为空" }, server.isNotBlank(),
-        if (server.isNotBlank()) "在线插件市场服务器：$server"
-        else "为空——在线插件市场不可用。到「脚本功能诊断」页切换服务器。",
-    )
-    return out
-}
-
-private fun hookTasks(): List<HealthItem> {
-    val section = "Hook 安装任务与就绪阶段"
-    val snapshot = runCatching { DexInstallScheduler.snapshot() }.getOrDefault(emptyList())
-    val pending = snapshot.count { !it.installed }
-    val out = mutableListOf<HealthItem>()
-
-    val retryAll: Pair<String, () -> String> = "重排重试" to {
-        runCatching { DexInstallScheduler.ensureWarmupReady(); DexInstallScheduler.retryAllPending() }
-        "已触发重排重试，当前待装 " + runCatching { DexInstallScheduler.pendingCount() }.getOrDefault(0) + " 个"
-    }
-    out += HealthItem(
-        "Hook 安装任务", section, "共 ${snapshot.size} 个，待装 $pending", pending == 0,
-        "模块共有 ${snapshot.size} 个需要 DexKit 解析后安装的 Hook 任务，当前待装 $pending 个。\n待装/失败的任务会让对应功能暂时失效。",
-        actionLabel = if (pending == 0) null else retryAll.first,
-        action = if (pending == 0) null else retryAll.second,
-    )
-    snapshot.forEach { task ->
-        val ok = task.installed
-        val value = if (ok) "✅ 已安装" else "⚠ ${if (task.paused) "已暂停" else "待重试"}（第 ${task.retryIndex} 次）"
-        out += HealthItem(
-            "· ${task.label}", section, value, ok,
-            "key=${task.key}\n阶段=${task.stage}\n运行中=${task.running}\n已暂停=${task.paused}\n重试次数=${task.retryIndex}\n\n" +
-                if (ok) "该 Hook 已安装完成。"
-                else "该 Hook 尚未安装成功——点「重试安装」立即重排重试（推进到 WARMUP 后再执行一轮）。",
-            actionLabel = if (ok) null else "重试安装",
-            action = if (ok) null else retryAll.second,
-        )
-    }
-    val level = runCatching { DexInstallScheduler.readyLevelName() }.getOrDefault("未知")
-    out += HealthItem(
-        "就绪阶段", section, level, level.contains("WARMUP"),
-        "阶段顺序：EARLY < BRIDGE < WARMUP。\n只有推进到 WARMUP 后，脚本级 Hook（菜单/消息监听等）才会执行。当前为 $level。",
-        actionLabel = if (level.contains("WARMUP")) null else retryAll.first,
-        action = if (level.contains("WARMUP")) null else retryAll.second,
-    )
     return out
 }
 
@@ -1019,65 +823,6 @@ private fun moduleRepairSteps(context: Context): List<HealthStep> {
     val afterFix = mutableListOf<HealthItem>()
 
     val checklist = listOf(
-    HealthStep("补建脚本目录") {
-        val dir = runCatching { ScriptPluginRuntime.scriptDir(context) }.getOrNull()
-        val ok = when {
-            dir == null -> false
-            dir.isDirectory -> true
-            else -> dir.mkdirs() || dir.isDirectory
-        }
-        listOf(
-            HealthItem(
-                "脚本目录", "补建脚本目录", if (ok) "就绪" else "失败", ok,
-                dir?.let { "目录：" + it.absolutePath + if (ok) "（已就绪）" else "（创建失败）" } ?: "无法获取脚本目录",
-            )
-        )
-    },
-    HealthStep("开启插件总开关") {
-        val on = runCatching {
-            HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME)
-                .getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE)
-        }.getOrDefault(false)
-        val ok: Boolean
-        val msg: String
-        if (on) {
-            ok = true; msg = "已是开启状态"
-        } else {
-            val r = runCatching { ScriptPluginRuntime.setGlobalEnabled(context, true) }
-            ok = r.isSuccess
-            msg = if (r.isSuccess) "已开启" else "开启失败：" + (r.exceptionOrNull()?.message ?: "未知原因")
-        }
-        listOf(HealthItem("插件总开关", "开启插件总开关", if (ok) "已开启" else "失败", ok, msg))
-    },
-    HealthStep("重建脚本引导链路") {
-        val lines = runCatching { HchatScriptBootstrap.reinitializeFully() }
-            .getOrElse { listOf("异常：" + (it.message ?: it.javaClass.simpleName)) }
-        listOf(HealthItem("引导链路", "重建脚本引导链路", lines.joinToString("；"), true, lines.joinToString("\n")))
-    },
-    HealthStep("推进就绪阶段并重排全部 Hook 任务") {
-        DexInstallScheduler.ensureWarmupReady()
-        DexInstallScheduler.retryAllPending()
-        listOf(
-            HealthItem(
-                "Hook 任务", "推进就绪阶段并重排全部 Hook 任务",
-                "阶段=" + DexInstallScheduler.readyLevelName() + "，待装 " + DexInstallScheduler.pendingCount() + " 个", true,
-                "已强制推进到 WARMUP，并把所有未装任务的计数清零后重排重试。",
-            )
-        )
-    },
-    HealthStep("重新加载全部已启用插件") {
-        val plugins = runCatching { ScriptPluginRuntime.listPlugins(context) }.getOrDefault(emptyList())
-        val enabled = plugins.filter {
-            runCatching { ScriptPluginRuntime.isPluginEnabled(context, it.id) }.getOrDefault(false)
-        }
-        var ok = 0
-        enabled.forEach { plugin ->
-            runCatching { ScriptPluginRuntime.reloadPluginAsync(context, plugin.id) }.onSuccess { ok++ }
-        }
-        listOf(
-            HealthItem("已启用插件", "重新加载全部已启用插件", "已重载 $ok/${enabled.size} 个", true, "重新加载了所有已启用的脚本插件。")
-        )
-    },
     HealthStep("隐藏联系人刷新") {
         val ok = runCatching { WeConversationApi.reloadConversations() }.isSuccess
         listOf(
@@ -1143,31 +888,4 @@ private fun moduleRepairSteps(context: Context): List<HealthStep> {
             )
         },
     )
-}
-
-/** 采集各插件最近一次加载失败原因（读插件目录 log.txt 尾部）。 */
-private fun collectPluginLoadErrors(context: Context): List<String> {
-    val plugins = runCatching { ScriptPluginRuntime.listPlugins(context) }.getOrDefault(emptyList())
-    return runCatching {
-        plugins.mapNotNull { plugin ->
-            val message = runCatching {
-                val logFile = java.io.File(plugin.dir, "log.txt")
-                if (!logFile.isFile) {
-                    null
-                } else {
-                    val lines = logFile.readLines().takeLast(120)
-                    val index = lines.indexOfLast { it.contains("ERROR") }
-                    val okIndex = lines.indexOfLast { it.contains("插件加载成功") }
-                    if (index < 0 || index < okIndex) {
-                        null
-                    } else {
-                        val head = lines[index].substringAfter("ERROR", lines[index]).trim()
-                        val detail = lines.getOrNull(index + 1)?.trim().orEmpty()
-                        "$head $detail".trim()
-                    }
-                }
-            }.getOrNull()
-            message?.takeIf { it.isNotBlank() }?.let { "${plugin.displayName ?: plugin.id}: $it" }
-        }
-    }.getOrDefault(emptyList())
 }

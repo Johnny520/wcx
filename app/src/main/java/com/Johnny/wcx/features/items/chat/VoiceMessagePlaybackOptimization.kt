@@ -93,7 +93,7 @@ object VoiceMessagePlaybackOptimization : ClickableFeature(), IResolveDex {
     private val methodSwitchTask by dexMethod {
         matcher {
             declaredClass {
-                usingEqStrings("speaker true", "speaker off")
+                usingEqStrings("speaker off")
             }
             paramCount = 0
             returnType("boolean")
@@ -104,7 +104,7 @@ object VoiceMessagePlaybackOptimization : ClickableFeature(), IResolveDex {
     private val methodSetSpeakerOn by dexMethod {
         matcher {
             declaredClass {
-                usingEqStrings("MicroMsg.AutoPlay", "onSensorEvent, isON:")
+                usingEqStrings("MicroMsg.AutoPlay")
             }
             usingEqStrings("speakerOn has been set %s")
             paramTypes(bool)
@@ -115,7 +115,7 @@ object VoiceMessagePlaybackOptimization : ClickableFeature(), IResolveDex {
     private val methodSwitchSpeaker by dexMethod {
         matcher {
             declaredClass {
-                usingEqStrings("MicroMsg.AutoPlay", "onSensorEvent, isON:")
+                usingEqStrings("MicroMsg.AutoPlay")
             }
             usingEqStrings("switchSpeaker, isSpeakerOn: %b, isPlaying: %b")
             paramCount = 0

@@ -49,13 +49,14 @@ object WeConversationListViewApi : ApiFeature(), IResolveDex {
     private var latestListView: WeakReference<ListView>? = null
 
     private val methodLegacyGetView by dexMethod(allowFailure = true) {
-        searchPackages("com.tencent.mm.ui.conversation")
+        // 8.0.80 适配：ConversationWithCacheAdapter 的 TAG 已从该 Adapter 移走，且 Adapter 本身
+        // 迁到 cp5 包（不在 ui.conversation 下），原 searchPackages 会把它整体过滤掉。
+        // 现在靠 getView 日志串（全 APK 唯一）+ 完整签名约束定位，不再限制包名。
         matcher {
             name = "getView"
             paramTypes("int", "android.view.View", "android.view.ViewGroup")
             returnType = "android.view.View"
             usingEqStrings(
-                "MicroMsg.ConversationWithCacheAdapter",
                 "Get Item duplicated: positionMaps: %s username [%s, %d] Map: %s datas: %d",
             )
         }

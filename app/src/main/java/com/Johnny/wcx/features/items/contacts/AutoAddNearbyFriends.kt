@@ -34,6 +34,15 @@ object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
         }
     }
 
+    /**
+     * 8.0.79 起「附近的人」页面改版，两个锚点串均不存在，整个功能无可用界面。
+     * 返回非空后设置页会拒绝开启并直接提示，避免用户开了开关却毫无反应。
+     */
+    override val unavailableReason: String?
+        get() = if (methodCreateMenu.isPlaceholder || methodMenuOnClick.isPlaceholder) {
+            "当前微信版本（8.0.79+）「附近的人」页面已改版，该功能不可用"
+        } else null
+
     override fun onEnable() {
         if (methodCreateMenu.isPlaceholder || methodMenuOnClick.isPlaceholder) {
             WeLogger.w(

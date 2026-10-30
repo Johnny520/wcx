@@ -50,7 +50,8 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
         searchPackages("${PackageNames.WECHAT}.ui.chatting.component")
         matcher {
             usingEqStrings(
-                "MicroMsg.ChatItemQuickSelectComponent",
+                // 8.0.80：TAG 串与 initViews 串被拆到同一类的不同方法，方法级 AND 失效；
+                // 该串在 component 包内唯一（仅 ChatItemQuickSelectComponent 持有），单串精确锁定
                 "initViews: chattingQuickSelectRootUp="
             )
         }

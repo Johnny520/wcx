@@ -93,6 +93,15 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     val classNetSceneSendMsg by dexClass {
         matcher {
             methods {
+                // 微信 8.0.79+ 把 "MicroMsg.NetSceneSendMsg" 从 J(I)V 挪到了 doScene，
+                // 原来「paramCount=1 且两串同方法」的组合在 8.0.79/8.0.80 上不再成立，
+                // 导致整个类定位失败 -> sendText/复读/抢红包自动回复统一返回 false。
+                // 首选锚点改为 doScene + 两串同时存在（8.0.80 实测唯一命中 Lq61/s0）；
+                // 旧版形态保留作兜底。
+                add {
+                    name = "doScene"
+                    usingEqStrings("MicroMsg.NetSceneSendMsg", "Req MsgSource %s")
+                }
                 add {
                     paramCount = 1
                     usingStrings("MicroMsg.NetSceneSendMsg", "markMsgFailed for id:%d")
@@ -168,11 +177,110 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             usingEqStrings("MicroMsg.NetSceneSendMsg", "[mergeMsgSource] rawSource:%s args is null:%s flag:%s")
         }
     }
-    private val classImportMultiVideo by dexClass {
+    /**
+     * ImportMultiVideo（多视频发送）。
+     *
+     * 8.0.79 实测：旧特征串 `MicroMsg.GetVideoMetadata` **会同时命中两个类** ——
+     * - `com.tencent.mm.pluginsdk.model.f3`：视频转码参数类（15 个字段含 VideoTransPara / ABAPrams）
+     * - `mp.b`：Uri / 缩略图工具类（0 字段，只有 2 个静态方法）
+     * 原实现要求唯一命中，DexKit 直接抛「Multiple classes found」。
+     *
+     * 现在三处改动：
+     * ① matcher 换成 ImportMultiVideo 自己的日志 TAG + 它写进媒体元数据的两个键名
+     *    （RemuxInfo / OriginMediaInfo）—— 三串同属一个类，唯一性远高于旧串；
+     * ② `allowMultiple` / `allowFailure` 双开，万一未来版本又命中多个也不再抛异常；
+     * ③ 真正使用前还会用 [resolveImportMultiVideoCtor] 按方法/字段签名再校验一次，
+     *    校验不通过就把该版本标记为「不支持多视频发送」，跳过功能而不影响其它 Dex 解析。
+     */
+    private val classImportMultiVideo by dexClass(
+        allowMultiple = true,
+        allowFailure = true,
+    ) {
+        // 串有效性复核（2026-10-29，8.0.76/8.0.79 双版本逐串验证）：
+        // "RemuxInfo"、"OriginMediaInfo" 在两版 dex 里都只剩 string_ids 条目、**无任何 const-string 引用**
+        // （微信裁剪了对应日志调用），三串 AND 因此恒不命中。只保留仍被引用的 TAG：
+        // 8.0.76 → pluginsdk.model.b3 / app.u5 …，8.0.79 → pluginsdk.model.g3 / c71.d3 …
+        // 多命中交给 resolveImportMultiVideoCtor() 按结构（Thread 子类 + 7 参构造器）择优。
         matcher {
-            // 8.0.79 起 "get video file name, dataString " 已被删除，只保留 TAG 串定位。
-            // "MicroMsg.GetVideoMetadata" 在 8.0.71~8.0.79 唯一存在，跨版本通用。
-            usingEqStrings("MicroMsg.GetVideoMetadata")
+            usingEqStrings("MicroMsg.ImportMultiVideo")
+        }
+    }
+
+    /** 是否已做过 ImportMultiVideo 定位（无论成功失败，只做一次）。 */
+    @Volatile
+    private var multiVideoResolved = false
+
+    /** 校验通过的 ImportMultiVideo 构造器；null = 该版本不支持。 */
+    @Volatile
+    private var multiVideoCtor: java.lang.reflect.Constructor<*>? = null
+
+    /**
+     * 多候选择优 + 签名校验，返回可用的构造器。
+     *
+     * 每个候选必须同时满足：
+     * 1. 是 [Thread] 子类（微信以 Thread 形式跑转码任务）
+     * 2. 存在 7 参构造器 `(Context, List, ?, String, int, ?, Boolean)`
+     *
+     * 全部候选都不满足 → 返回 null（调用方跳过功能）。全程 try-catch，
+     * 任何异常都降级为「不支持」，绝不向上抛、绝不阻断其它 Dex 解析。
+     */
+    private fun resolveImportMultiVideoCtor(): java.lang.reflect.Constructor<*>? {
+        multiVideoCtor?.let { return it }
+        if (multiVideoResolved) return null
+        multiVideoResolved = true
+        return try {
+            // 候选清单：当前已选中的那个排最前，其余来自 DexKit 的全部命中
+            val names = buildList {
+                runCatching { classImportMultiVideo.getDescriptorString() }
+                    .getOrNull()?.let { add(it) }
+                runCatching { classImportMultiVideo.candidates }
+                    .getOrDefault(emptyList())
+                    .forEach { c -> if (c.name !in this) add(c.name) }
+            }
+            WeLogger.i(TAG, "ImportMultiVideo 候选类(${names.size})：${names.joinToString().ifEmpty { "无" }}")
+            for (name in names) {
+                val cls = runCatching { name.toClass() }.getOrNull()
+                if (cls == null) {
+                    WeLogger.w(TAG, "ImportMultiVideo 候选 $name 加载失败 → 排除")
+                    continue
+                }
+                val fieldTypes = runCatching { cls.declaredFields.map { it.type.name } }
+                    .getOrDefault(emptyList())
+                val isThread = Thread::class.java.isAssignableFrom(cls)
+                val ctor = runCatching {
+                    cls.declaredConstructors.firstOrNull { c ->
+                        c.parameterCount == 7 &&
+                            c.parameterTypes[0].name == "android.content.Context" &&
+                            java.util.List::class.java.isAssignableFrom(c.parameterTypes[1]) &&
+                            c.parameterTypes[3].name == "java.lang.String" &&
+                            (c.parameterTypes[4].name == "int" || c.parameterTypes[4].name == "java.lang.Integer") &&
+                            (c.parameterTypes[6].name == "boolean" || c.parameterTypes[6].name == "java.lang.Boolean")
+                    }
+                }.getOrNull()
+                val hasVideoPara = fieldTypes.any {
+                    it.contains("VideoTransPara") || it.contains("ABAPrams")
+                }
+                val ok = isThread && ctor != null
+                WeLogger.i(
+                    TAG,
+                    "ImportMultiVideo 校验 $name：Thread=$isThread 七参构造器=${ctor != null} " +
+                        "视频参数字段=$hasVideoPara 字段数=${fieldTypes.size} → ${if (ok) "选中" else "排除"}"
+                )
+                if (ok && ctor != null) {
+                    ctor.isAccessible = true
+                    multiVideoCtor = ctor
+                    return ctor
+                }
+            }
+            WeLogger.w(
+                TAG,
+                "ImportMultiVideo 全部候选校验不通过 → 该微信版本标记为不支持多视频发送" +
+                    "（功能跳过，其它 Dex 解析与功能加载不受影响）"
+            )
+            null
+        } catch (t: Throwable) {
+            WeLogger.e(TAG, "ImportMultiVideo 定位异常（已降级为不支持该功能）", t)
+            null
         }
     }
     private val classAppMessage by dexClass {
@@ -228,13 +336,17 @@ object WeMessageApi : ApiFeature(), IResolveDex {
         }
     }
     val classChattingDataAdapter by dexClass(allowFailure = true) {
-        // 8.0.77 已移除 ChattingDataAdapterV3 → allowFailure 降级为 placeholder，
-        // 使用方需用 isPlaceholder 守卫（RemoveMessageSelectionLimit 内已处理）
+        // 定位修正（2026-10-29 双版本逐串验证）：
+        //  · 原两串 "[handleMsgChange] isLockNotify:" 在两版都已是**孤儿串**（无 const-string 引用），
+        //    任何依赖于它的组合都恒失败；
+        //  · TAG "MicroMsg.ChattingDataAdapterV3" 仍存活，但 8.0.79 的 adapter 包内有 3 个类引用它
+        //    （k / j / ChattingDataAdapter$chatMsgChange$1），单串会多命中。
+        // 现在用「TAG + [setShowHistoryMsgTipId] 日志」两串方法级 AND：
+        // 8.0.76 唯一命中 adapter.k（V0），8.0.79 唯一命中 adapter.k（i1）。
+        // 使用方仍需 isPlaceholder 守卫（RemoveMessageSelectionLimit 内已处理）。
+        searchPackages("com.tencent.mm.ui.chatting.adapter")
         matcher {
-            usingEqStrings(
-                "MicroMsg.ChattingDataAdapterV3",
-                "[handleMsgChange] isLockNotify:"
-            )
+            usingEqStrings("MicroMsg.ChattingDataAdapterV3", "[setShowHistoryMsgTipId] pos:%s msgId:%s")
         }
     }
     val classTransformChattingComponent by dexClass {
@@ -333,7 +445,10 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             declaredClass(classMmKernel.clazz)
             modifiers = Modifier.PUBLIC or Modifier.STATIC
             paramCount = 0
-            usingStrings("mCoreStorage not initialized!")
+            // "mCoreStorage not initialized!" 自 8.0.76 起已是孤儿串（无 const-string 引用），
+            // 换用同一方法里仍存活的 "Kernel not initialized by MMApplication!"：
+            // 8.0.76 hm0/j1.i、8.0.79 pp0/i1.j、8.0.80 zp0/j1.j，三版均唯一命中（paramCount=0 + public static）。
+            usingStrings("Kernel not initialized by MMApplication!")
         }
     }
     private val classVoiceLogic by dexClass {
@@ -353,7 +468,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }
     private val classSceneVoiceService by dexClass {
         matcher {
-            usingEqStrings("MicroMsg.SceneVoiceService", "//voicetrymore", "getVoiceService %s")
+            usingEqStrings("getVoiceService %s")
         }
     }
 
@@ -910,17 +1025,6 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     }.getOrNull()
 
     fun sendEmojiByMd5(toUser: String, md5: String): Boolean {
-        hchatMedia()?.let { media ->
-            val emojis = runCatching { media.emojis() }.getOrNull()
-            if (emojis != null && emojis.canSendSilently()) {
-                val ok = runCatching { emojis.sendByMd5(toUser, md5) }.getOrDefault(false)
-                if (ok) {
-                    WeLogger.i(TAG, "sent emoji via Hchat media api: $md5")
-                    return true
-                }
-                WeLogger.w(TAG, "Hchat media sendEmojiByMd5 returned false, falling back to legacy path")
-            }
-        }
         return runCatching {
             WeLogger.i(TAG, "sending registered emoji")
             val emojiInfo = WeServiceApi.getEmojiInfoByMd5(md5)
@@ -1020,28 +1124,22 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             WeLogger.w(TAG, "sendVideo skipped: mp4 missing/empty ($videoPath)")
             return false
         }
-        hchatMedia()?.let { media ->
-            val videos = runCatching { media.videos() }.getOrNull()
-            if (videos != null && videos.canSendSilently()) {
-                val ok = runCatching { videos.send(toUser, videoPath) }.getOrDefault(false)
-                if (ok) {
-                    WeLogger.i(TAG, "sent video via Hchat media api: $videoPath")
-                    return true
-                }
-                WeLogger.w(TAG, "Hchat media sendVideo returned false, falling back to legacy path")
-            }
-        }
         return try {
-            WeLogger.i(TAG, "sending video: $videoPath to $toUser")
-            val thread = classImportMultiVideo.clazz.createInstance(
+            val ctor = resolveImportMultiVideoCtor()
+            if (ctor == null) {
+                WeLogger.w(TAG, "sendVideo 跳过：当前微信版本不支持多视频发送（ImportMultiVideo 未定位/校验失败）")
+                return false
+            }
+            WeLogger.i(TAG, "sending video: $videoPath to $toUser（ImportMultiVideo=${ctor.declaringClass.name}）")
+            val thread = ctor.newInstance(
                 HostInfo.application,
                 java.util.Collections.singletonList(videoPath),
                 null, toUser, 2, null, java.lang.Boolean.TRUE
             ) as Thread
             thread.start()
             true
-        } catch (e: Exception) {
-            WeLogger.e(TAG, "sendVideo failed", e); false
+        } catch (t: Throwable) {
+            WeLogger.e(TAG, "sendVideo failed", t); false
         }
     }
 
@@ -1430,39 +1528,11 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }.invokeStatic(msgInfo.instance)
     }
 
-    // -------------------------------------------------------------------------------------
-    // Hchat 侧发送能力桥接
-    //
-    // WCX 这套发送实现是按旧版微信写的，8.0.79 上语音/视频/表情/卡片各自失效在不同环节
-    // （语音是 VoiceLogic 定位、视频是 ImportMultiVideo、卡片是 AppMsgLogic 的特征串）。
-    // h.Hchat 的 media / message API 已按版本做过适配（v320 修过视频 service、v309 修过
-    // AppMsg 13 参、v308 修过消息构造器），这里统一「优先 Hchat、失败回退本类实现」，
-    // 避免同一能力两套逻辑各修一半。
-    // -------------------------------------------------------------------------------------
-
-    private fun hchatMedia(): h.Hchat.hooks.api.media.WeChatMediaApi? = runCatching {
-        h.Hchat.hooks.api.core.WeChatApis.media()?.takeIf { it.isAvailable }
-    }.getOrNull()
-
-    private fun hchatMessages(): h.Hchat.hooks.api.message.WeChatMessageApi? = runCatching {
-        h.Hchat.hooks.api.core.WeChatApis.messages()?.takeIf { it.isAvailable }
-    }.getOrNull()
-
     fun sendVoice(toUser: String, path: String, durationMs: Int): Boolean {
         // 源文件不在就没有任何通道能发出去，先判掉，避免误报「发送成功」
         if (runCatching { !java.io.File(path).let { it.isFile && it.length() > 0 } }.getOrDefault(true)) {
             WeLogger.w(TAG, "sendVoice skipped: source file missing/empty ($path)")
             return false
-        }
-        hchatMedia()?.let { media ->
-            if (media.canSendVoiceSilently()) {
-                val ok = runCatching { media.sendVoice(toUser, path, durationMs) }.getOrDefault(false)
-                if (ok) {
-                    WeLogger.i(TAG, "sent voice via Hchat media api: $path")
-                    return true
-                }
-                WeLogger.w(TAG, "Hchat media sendVoice returned false, falling back to legacy path")
-            }
         }
         var succeeded = runCatching {
             // 准备文件
@@ -1590,14 +1660,6 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
     fun sendXmlAppMsg(target: String, xmlContent: String): Boolean {
         // Hchat 侧 sendXml 走 AppMsgLogic 的 13 参重载（8.0.79 上 6 参那条已不可用）
-        hchatMessages()?.let { messages ->
-            val ok = runCatching { messages.sendXml(target, xmlContent) }.getOrDefault(false)
-            if (ok) {
-                WeLogger.i(TAG, "sent appmsg via Hchat message api")
-                return true
-            }
-            WeLogger.w(TAG, "Hchat message sendXml returned false, falling back to WeAppMsgApi")
-        }
         val appId = extractXmlAttr(xmlContent, "appid")
         val title = extractXmlTag(xmlContent, "title")
 

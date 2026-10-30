@@ -23,9 +23,13 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     private const val TAG = "WeConversationApi"
 
     internal val classConversationStorage by dexClass {
+        // 两串在这个类里属于**不同方法**（PRAGMA 在构造器、rconversation 在多个查询方法），
+        // 而 DexKit 的类匹配是方法级 AND，两串组合恒不命中（8.0.80 实测 WARN→失败）。
+        // 只保留更独特的 PRAGMA 串，三版本均唯一命中 ConversationStorage：
+        // 8.0.76/8.0.79 → storage.l4、8.0.80 → storage.m4。
         searchPackages("com.tencent.mm.storage")
         matcher {
-            usingEqStrings("rconversation", "PRAGMA table_info( rconversation)")
+            usingEqStrings("PRAGMA table_info( rconversation)")
         }
     }
     private val methodUpdateUnreadByTalker by dexMethod {
@@ -51,7 +55,7 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     private val methodHiddenConvParent by dexMethod {
         matcher {
             declaredClass(classConversationStorage.clazz)
-            usingEqStrings("Update rconversation set parentRef = '", "' where 1 != 1 ")
+            usingEqStrings("' where 1 != 1 ")
         }
     }
 
@@ -69,7 +73,13 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     }
     private val methodSetDnd by dexMethod {
         matcher {
-            usingEqStrings("MicroMsg.OpenImOpLogLogic", "OpenImOpLogLogic OpenIMModContactMuteOplog username:%s switch add")
+            // 8.0.80: w41.e2 里 D0(...,Z) 是 "switch cancel"、s0(...,Z) 是 "switch add"，
+            // 两者共用 "MicroMsg.OpenImOpLogLogic"。只用单串会 Multiple methods found，
+            // 这里用 add 那条日志串锁定「设置免打扰」。
+            usingEqStrings(
+                "MicroMsg.OpenImOpLogLogic",
+                "OpenImOpLogLogic OpenIMModContactMuteOplog username:%s switch add"
+            )
         }
     }
     private val methodSetNoDnd by dexMethod {
@@ -153,7 +163,7 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     private val methodDoDeleteConversation by dexMethod {
         searchPackages("com.tencent.mm.ui.conversation")
         matcher {
-            usingStrings("MicroMsg.ConvDelLogic", "oplog modContact user:%s")
+            usingStrings("MicroMsg.ConvDelLogic")
             paramCount = 6
         }
     }
@@ -294,8 +304,14 @@ object WeConversationApi : ApiFeature(), IResolveDex {
     }
 
     private fun notifyConversationChanged(talker: String, eventType: Int = 3) {
+        // isPlaceholder 已把「尚未解析」算作不可用；这里再包一层，防 descriptor 解析
+        // 在守卫之后失效（解析未完成/特征漂移）时抛 Method not found 打断调用方。
         if (methodNotifyConversationChanged.isPlaceholder) return
-        methodNotifyConversationChanged.method.invoke(conversationStorage, eventType, conversationStorage, talker)
+        runCatching {
+            methodNotifyConversationChanged.method.invoke(conversationStorage, eventType, conversationStorage, talker)
+        }.onFailure {
+            WeLogger.w(TAG, "notifyConversationChanged 跳过（${it.javaClass.simpleName}）: ${it.message}")
+        }
     }
 
     fun setConversationsVisibility(visible: Boolean, talkers: Array<String>) {

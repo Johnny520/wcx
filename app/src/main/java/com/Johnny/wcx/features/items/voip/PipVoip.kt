@@ -45,10 +45,42 @@ object PipVoip : SwitchFeature(), IResolveDex {
     private const val WE_CHAT_VIDEO_ACTIVITY = "com.tencent.mm.plugin.voip.ui.VideoActivity"
     private const val WE_CHAT_MULTI_TALK_MAIN_UI = "com.tencent.mm.plugin.multitalk.ui.MultiTalkMainUI"
 
+    /** 8.0.80+ 多人通话的应用内悬浮窗容器（VoIPMP v2 / Flutter 实现）。 */
+    private const val WE_CHAT_VOIPMP_FLOAT_CONTAINER =
+        "com.tencent.mm.voipmp.v2.floatcard.subfloat.VoIPMPFloatSlotContainer"
+
+    /**
+     * 8.0.80+ 多人通话是否进行中（以「微信自己的应用内悬浮窗已挂载」为判据）。
+     * 只用于决定是否接管 PiP；为 false 时所有新增 Hook 立即 return，等于完全不动。
+     */
+    @Volatile
+    private var voipMpActive = false
+
+    /**
+     * 8.0.80+ 多人通话的麦克风状态（来自 OboeAudioRecorder.g(Z)V 的实参）。
+     * 只用于 PiP 面板如实显示，不做控制——Java 侧没有可靠的「设置静音」入口。
+     */
+    @Volatile
+    private var voipMpMicMuted = false
+
+    private const val WE_CHAT_VOIPMP_RECORDER = "com.tencent.mm.voipmp.v2.audio.backend.OboeAudioRecorder"
+
+    /**
+     * Flutter VoIP 插件的 Native 实现实例（实现 com.tencent.pigeon.flutter_voip.VoIPPluginApi）。
+     *
+     * 8.0.80 的通话 UI 是 Flutter 写的，静音/挂断/最小化都通过这个插件的
+     * setMuted(Z) / hangUp() / minimize(...) 进 Native。拿到实例就能反向控制。
+     * 拿不到（类结构又变了）时保持 null —— 此时 PiP 面板自动退回「只显示状态」。
+     */
+    @Volatile
+    private var voipPluginInstance: Any? = null
+
     private fun wechatClassExists(name: String): Boolean = try {
         Class.forName(name, false, ClassLoaders.HOST) != null
     } catch (e: Throwable) {
-        WeLogger.d(TAG, "$name 不存在(8.0.77 混淆/移除), 跳过相关 Hook")
+        // 提到 W 级（会落文件日志）：8.0.80 起 MultiTalk 被 Flutter 实现整体替换，
+        // 类被物理删除，用户会感知到「多人通话不再进小窗」，需要能在日志里查到原因。
+        WeLogger.w(TAG, "$name 不存在（微信已移除/重构），跳过相关 Hook：多人通话侧功能在该版本不可用（单聊视频通话不受影响）")
         false
     }
 
@@ -57,6 +89,9 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
         abstract val micMuted: Boolean
         open val videoEnabled: Boolean = true
+
+        /** 是否支持主动控制（静音/挂断）。false 时 PiP 走精简模式，只显示状态。 */
+        open val canControl: Boolean = false
 
         val receiver = object : ResultReceiver(Handler(Looper.getMainLooper())) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
@@ -90,7 +125,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
         abstract fun toggleMic()
         open fun toggleVideo() = Unit
 
-        fun enterPip() {
+        fun enterPip(limited: Boolean = false) {
             if (pipActive) return
             // 8.0.77 加固: 取值(micMuted) 与启动画中画都 runCatching 兜底, 失败回滚 pipActive,
             // 异常只进模块日志, 不进微信执行栈。
@@ -105,6 +140,8 @@ object PipVoip : SwitchFeature(), IResolveDex {
                         putExtra(PipVoipActivity.EXTRA_MIC_MUTED, muted)
                         putExtra(PipVoipActivity.EXTRA_VIDEO_ENABLED, videoEnabled)
                         putExtra(PipVoipActivity.EXTRA_RESULT_RECEIVER, receiver)
+                        putExtra(PipVoipActivity.EXTRA_LIMITED, limited && !canControl)
+                        putExtra(PipVoipActivity.EXTRA_CAN_CONTROL, canControl)
                     }
                 )
                 activity.moveTaskToBack(true)
@@ -172,7 +209,67 @@ object PipVoip : SwitchFeature(), IResolveDex {
             get() = fieldMultiTalkViewModel.field.get(groupActivity)!!
     }
 
+    /**
+     * 8.0.80+ 多人通话会话（VoIPMP v2 / Flutter 实现）。
+     *
+     * 微信 8.0.80 删除了 MultiTalkMainUI / MultiTalkUIViewModel，静音、摄像头、挂断都搬进了
+     * Flutter 侧；Java 侧目前只暴露 OboeAudioRecorder 的 native 静音（句柄 + 语义都不确定）。
+     * 所以这里只承载「回跳通话页」：PiP 面板走精简模式，不提供会点了无效的控制项。
+     * 后续若在 voipmp.v2 找到可靠控制入口，只需补这三个实现即可。
+     */
+    private class VoipMpSession(activity: Activity) : Session(activity) {
+        override val micMuted: Boolean get() = voipMpMicMuted
+
+        /** 拿不到插件实例时视为不可控，PiP 面板会退回只显示状态。 */
+        override val canControl: Boolean get() = voipPluginInstance != null
+
+        override fun hangUp() {
+            val inst = voipPluginInstance ?: return
+            runCatching {
+                inst.javaClass.getMethod("hangUp").invoke(inst)
+            }.onFailure { WeLogger.e(TAG, "VoIP hangUp 调用失败", it) }
+        }
+
+        override fun toggleMic() {
+            val inst = voipPluginInstance ?: return
+            runCatching {
+                // 接口方法 setMuted(Z)：Native 侧实现最终落到 x83/m.L0(Z)
+                inst.javaClass.getMethod("setMuted", Boolean::class.javaPrimitiveType)
+                    .invoke(inst, !voipMpMicMuted)
+            }.onFailure { WeLogger.e(TAG, "VoIP setMuted 调用失败", it) }
+        }
+
+        /**
+         * 视频开关：走 switchCameraOpenStatus(callback)。
+         * 该方法是「按当前状态切换」（内部读 iz4/a.f()/d() 决定开或关），
+         * 参数只需要一个 Flutter 的 Result 回调，用动态代理构造一个空实现传进去即可。
+         * 若回调类型不是接口（Proxy 会抛异常），整个调用被 runCatching 兜住，静默不做。
+         */
+        override fun toggleVideo() {
+            val inst = voipPluginInstance ?: return
+            runCatching {
+                val m = inst.javaClass.methods.firstOrNull {
+                    it.name == "switchCameraOpenStatus" && it.parameterCount == 1
+                } ?: return
+                val cbType = m.parameterTypes[0] ?: return
+                val cb = java.lang.reflect.Proxy.newProxyInstance(
+                    cbType.classLoader ?: javaClass.classLoader,
+                    arrayOf(cbType),
+                ) { _, _, _ -> null }
+                m.invoke(inst, cb)
+                WeLogger.i(TAG, "已请求切换视频开关（switchCameraOpenStatus）")
+            }.onFailure { WeLogger.w(TAG, "switchCameraOpenStatus 调用失败（忽略，不影响通话）", it) }
+        }
+    }
+
     private val sessions = WeakHashMap<Activity, Session>()
+
+    /** Flutter VoIP 插件实现类：靠实现的接口定位，跨版本稳定（类名会被 R8 混淆）。 */
+    private val classFlutterVoipPluginImpl by dexClass(allowFailure = true) {
+        matcher {
+            addInterface("com.tencent.pigeon.flutter_voip.VoIPPluginApi")
+        }
+    }
 
     private val classBaseVoipManager by dexClass(allowFailure = true) {
         matcher {
@@ -199,12 +296,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
 
     private val classFlutterVoipPlugin by dexClass(allowFailure = true) {
         matcher {
-            usingEqStrings(
-                "MicroMsg.FlutterVoipPlugin",
-                "minimize: activity=",
-                "voip is already minimized, ignore!",
-                "minimize, permission denied",
-            )
+            usingEqStrings("MicroMsg.FlutterVoipPlugin", "voip is already minimized, ignore!", "minimize, permission denied")
         }
     }
 
@@ -259,12 +351,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
             declaredClass(classFlutterVoipPlugin.clazz)
             paramCount = 4
             returnType = "void"
-            usingEqStrings(
-                "MicroMsg.FlutterVoipPlugin",
-                "minimize: activity=",
-                "voip is already minimized, ignore!",
-                "minimize, permission denied",
-            )
+            usingEqStrings("MicroMsg.FlutterVoipPlugin", "voip is already minimized, ignore!", "minimize, permission denied")
         }
     }
 
@@ -309,11 +396,14 @@ object PipVoip : SwitchFeature(), IResolveDex {
     }
 
     private val classMultiTalkViewModel by dexClass(allowFailure = true) {
+        // "onMicClick/onCameraClick, cur state: " 自 8.0.76 起已是孤儿串（字符串残留但无方法引用），
+        // 原三串 AND 因此恒不命中 → 8.0.76 上整个 PiP 麦克风/摄像头链路解析失败。
+        // 改用 TAG + 仍被引用的 mic 日志串定位 ViewModel：8.0.76 → com.tencent.mm.plugin.multitalk.ui.b0。
+        // 8.0.79 起 multitalk UI 日志体系整体消失（仅剩 MultitalkUtils/SceneSetting），此处干净降级为 placeholder。
         matcher {
             usingEqStrings(
                 "MicroMsg.MT.MultiTalkUIViewModel",
-                "onCameraClick, cur state: ",
-                "onMicClick, cur state: ",
+                "onMicClick, need notify iLink Engine",
             )
         }
     }
@@ -367,10 +457,12 @@ object PipVoip : SwitchFeature(), IResolveDex {
             declaredClass(classMultiTalkViewModel.clazz)
             paramTypes("boolean")
             returnType = "void"
-            usingEqStrings("onMicClick, cur state: ")
+            usingEqStrings("onMicClick, need notify iLink Engine")
         }
     }
 
+    // 注意：摄像头侧日志串 "onCameraClick, cur state: " 在 8.0.76 / 8.0.79 均已成孤儿串，
+    // 无替代串可定位，故此处只能保留 allowFailure 做干净降级（该版本摄像头 PiP 按钮不生效）。
     private val methodMultiTalkCamera by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onCameraClick, cur state: ")
@@ -382,7 +474,7 @@ object PipVoip : SwitchFeature(), IResolveDex {
             declaredClass(classMultiTalkViewModel.clazz)
             type(classObservableState.clazz)
             addReadMethod {
-                usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onMicClick, cur state: ")
+                usingEqStrings("MicroMsg.MT.MultiTalkUIViewModel", "onMicClick, need notify iLink Engine")
             }
         }
     }
@@ -538,7 +630,82 @@ object PipVoip : SwitchFeature(), IResolveDex {
             if (multiTalkMainUiExists && activity is MultiTalkMainUI) {
                 sessions[activity]?.enterPip() ?: WeLogger.w(TAG, "no session for $activity, leaving wechat alone")
             }
+            // 8.0.80+ 多人通话：仅在 VoIPMP 悬浮窗存活（= 正在通话）时接管，否则立即返回
+            if (voipMpActive && activity is Activity && activity !is PipVoipActivity) {
+                enterPipForVoipMp(activity)
+            }
         }
+
+        // ── 8.0.80+ 多人通话（VoIPMP v2 / Flutter 实现）────────────────────────────
+        // 微信 8.0.80 删除了 MultiTalkMainUI / MultiTalkUIViewModel，旧 GroupSession 全部失效。
+        // 按「hook 到就接管、hook 不到完全不动」接入：
+        //   · 悬浮窗 VoIPMPFloatSlotContainer 挂载 = 正在多人通话（微信自己弹的应用内小窗）
+        //   · 用户按 Home 时若处于该状态，启动精简 PiP（显示「通话中」，点窗口回通话）
+        //   · 不提供静音/摄像头/挂断：Java 侧只有 Oboe native 静音，宁可少做也不做错
+        runCatching {
+            wechatClassOrNull(WE_CHAT_VOIPMP_FLOAT_CONTAINER)?.let { cls ->
+                // reflekt() 是 KClass 的扩展，Java Class 需先 .kotlin
+                runCatching {
+                    cls.kotlin.reflekt().firstMethod {
+                        name = "onAttachedToWindow"
+                        parameterCount = 0
+                    }.hookAfter {
+                        voipMpActive = true
+                        WeLogger.i(TAG, "VoIPMP 悬浮窗已挂载：多人通话 PiP 接管就绪（8.0.80+ 精简模式）")
+                    }
+                }.onFailure { WeLogger.w(TAG, "VoIPMP onAttachedToWindow hook 跳过", it) }
+                runCatching {
+                    cls.kotlin.reflekt().firstMethod {
+                        name = "onDetachedFromWindow"
+                        parameterCount = 0
+                    }.hookAfter {
+                        voipMpActive = false
+                        WeLogger.i(TAG, "VoIPMP 悬浮窗已移除：退出 PiP 接管")
+                    }
+                }.onFailure { WeLogger.w(TAG, "VoIPMP onDetachedFromWindow hook 跳过", it) }
+
+                // Flutter VoIP 插件实例（用于反向控制静音/挂断）
+                runCatching {
+                    if (!classFlutterVoipPluginImpl.isPlaceholder) {
+                        classFlutterVoipPluginImpl.clazz.kotlin.reflekt()
+                            .firstConstructor()
+                            .hookAfter {
+                                voipPluginInstance = thisObject
+                                WeLogger.i(TAG, "Flutter VoIP 插件实例已捕获：8.0.80 PiP 控制面板可用")
+                            }
+                    }
+                }.onFailure { WeLogger.w(TAG, "Flutter VoIP 插件实例捕获失败（Pip 面板将只显示状态）", it) }
+
+                // 麦克风状态：g(Z)V 的参数即「是否静音」（日志 "SDK mic state notified: "）。
+                // 只读同步，供 PiP 面板如实显示；不主动调用，避免误操作。
+                runCatching {
+                    wechatClassOrNull(WE_CHAT_VOIPMP_RECORDER)?.kotlin
+                        ?.reflekt()
+                        ?.firstMethod {
+                            name = "g"
+                            parameters(java.lang.Boolean.TYPE)
+                        }
+                        ?.hookAfter {
+                            val muted = args?.firstOrNull() as? Boolean ?: return@hookAfter
+                            voipMpMicMuted = muted
+                            WeLogger.i(TAG, "VoIPMP 麦克风状态同步：muted=$muted")
+                        }
+                }.onFailure { WeLogger.w(TAG, "VoIPMP 麦克风状态 hook 跳过", it) }
+            }
+        }.onFailure { WeLogger.w(TAG, "VoIPMP 悬浮窗 hook 跳过（不影响其他功能）", it) }
+    }
+
+    private fun wechatClassOrNull(name: String): Class<*>? = try {
+        Class.forName(name, false, ClassLoaders.HOST)
+    } catch (e: Throwable) {
+        null
+    }
+
+    private fun enterPipForVoipMp(activity: Activity) {
+        runCatching {
+            val session = sessions.getOrPut(activity) { VoipMpSession(activity) }
+            session.enterPip(limited = true)
+        }.onFailure { WeLogger.w(TAG, "enterPipForVoipMp 失败，保持微信原样", it) }
     }
 
     override fun onDisable() {
