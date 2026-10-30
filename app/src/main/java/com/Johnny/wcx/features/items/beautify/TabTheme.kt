@@ -229,20 +229,37 @@ object TabTheme : ClickableFeature() {
                 showTab(0)
 
                 // 只在宿主（LauncherUI）处于前台时显示背景。
-                // 单一入口 onPostResume：每次有 Activity 真正回到前台就重设一次，
-                // 不和 onPause 互相打架，聊天页（独立 Activity、窗口透明）也就不会透出背景。
-                Activity::class.java.reflekt()
-                    .firstMethodOrNull { name = "onPostResume"; parameterCount = 0 }
-                    ?.hookAfter {
-                        val a = thisObject as? Activity ?: return@hookAfter
-                        val isHost = a.javaClass.name == hostName
-                        container.visibility = if (isHost) View.VISIBLE else View.GONE
-                        WeLogger.i(
-                            TAG,
-                            "onPostResume " + a.javaClass.simpleName + " -> bg " +
-                                (if (isHost) "VISIBLE" else "GONE"),
-                        )
+                //
+                // 只在「当前 Activity 是不是 LauncherUI」这一个条件上做判断，任何其它 Activity
+                // （聊天页、朋友圈、设置……）一律隐藏。这样聊天页即便窗口透明也看不到背景。
+                //
+                // 同时挂 onResume 和 onPostResume：
+                // - onResume 时机更早（新 Activity 绘制前就执行），能避免一帧的透出；
+                // - onPostResume 更靠后，作为兜底（个别 Activity 会在中间重设窗口状态）。
+                // 两者都只做「设可见性」，语义一致，不会互相打架。
+                fun applyVisibility(a: Activity) {
+                    val isHost = a.javaClass.name == hostName
+                    container.visibility = if (isHost) View.VISIBLE else View.GONE
+                    WeLogger.i(
+                        TAG,
+                        "activity resumed: " + a.javaClass.name + " -> bg " +
+                            (if (isHost) "VISIBLE" else "GONE"),
+                    )
+                }
+
+                for (methodName in arrayOf("onResume", "onPostResume")) {
+                    runCatching {
+                        Activity::class.java.reflekt()
+                            .firstMethodOrNull { name = methodName; parameterCount = 0 }
+                            ?.hookAfter {
+                                val a = thisObject as? Activity ?: return@hookAfter
+                                applyVisibility(a)
+                            }
+                        WeLogger.i(TAG, "hooked Activity." + methodName)
+                    }.onFailure {
+                        WeLogger.w(TAG, "hook Activity." + methodName + " failed: " + (it.message ?: ""))
                     }
+                }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
             }
