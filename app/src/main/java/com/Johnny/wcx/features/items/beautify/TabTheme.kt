@@ -160,6 +160,38 @@ object TabTheme : ClickableFeature() {
      */
     private val loggedBarClasses = HashSet<String>()
 
+    /** 已经打过日志的 Tab 页内层 View 类名，避免重复刷。 */
+    private val loggedPageContainers = HashSet<String>()
+
+    /**
+     * 把 Tab 页内层容器的底色清空，让写在下层的背景图透上来。
+     *
+     * 主页（会话列表）的列表本身是透明的，所以直接就能看到背景；
+     * 而通讯录（AddressUI 里的 Preference/列表容器）和发现（FindMoreFriendsUI 的
+     * MMPreferenceFragment 容器）各自带一层不透明底色，会把背景整个盖住，
+     * 表现为「顶部一条白 + 下面也白」。这里只往下清 3 层，避免动到业务控件。
+     */
+    private fun clearPageContainerBackgrounds(
+        root: ViewGroup,
+        keep: View?,
+        depth: Int = 0,
+    ) {
+        if (depth > 3) return
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (child === keep) continue
+            if (child !is ViewGroup) continue
+            if (child.background != null) {
+                runCatching { child.background = null }
+                val cn = child.javaClass.name
+                if (loggedPageContainers.add(cn + "#" + depth)) {
+                    WeLogger.i(TAG, "cleared page container bg: " + cn + " depth=" + depth)
+                }
+            }
+            clearPageContainerBackgrounds(child, keep, depth + 1)
+        }
+    }
+
     private fun makeTopBarsTransparent(root: ViewGroup, depth: Int = 0) {
         if (depth > 12) return
         for (i in 0 until root.childCount) {
@@ -273,6 +305,7 @@ object TabTheme : ClickableFeature() {
                     if (existing != null) {
                         existing.alpha = opacity.coerceIn(0f, 1f)
                         bgImages[pos] = existing
+                        runCatching { clearPageContainerBackgrounds(group, existing) }
                         return
                     }
                     val iv = ImageView(group.context).apply {
@@ -295,6 +328,7 @@ object TabTheme : ClickableFeature() {
                     }
                     group.addView(iv)
                     bgImages[pos] = iv
+                    runCatching { clearPageContainerBackgrounds(group, iv) }
                     val loc = IntArray(2)
                     group.getLocationInWindow(loc)
                     WeLogger.i(
