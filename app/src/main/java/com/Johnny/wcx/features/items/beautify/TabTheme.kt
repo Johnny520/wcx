@@ -270,16 +270,30 @@ object TabTheme : ClickableFeature() {
             // （这是 MDWechat 的做法：它把图设到各 Tab 自己的 ListView 上。）
             fun decoratePage(page: View, pos: Int) {
                 val file = getTabBackgroundFile(pos)
-                val prev = pageOverlayDrawables.remove(page)
+                val prev = pageOverlayDrawables[page]
                 val d = if (file.exists()) loadTabBackgroundDrawable(page.context, pos) else null
+                val newAlpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
+
                 if (d == null) {
                     if (prev != null) {
                         pageOverlayDrawables.remove(page)
                         page.invalidate()
+                        WeLogger.i(TAG, "tab bg #" + pos + " cleared")
                     }
                     return
                 }
-                d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
+
+                // 已经是同一张图：只同步透明度，绝不 invalidate。
+                // onPageScrolled 在静止状态下也会反复回调，这里若每次重绘会造成持续刷新和绘制撕裂。
+                if (prev === d) {
+                    if (d.alpha != newAlpha) {
+                        d.alpha = newAlpha
+                        page.invalidate()
+                    }
+                    return
+                }
+
+                d.alpha = newAlpha
                 pageOverlayDrawables[page] = d
                 // 给这个容器的类挂 dispatchDraw，之后每一次重绘都会把图补画上去
                 ensureDispatchHook(page.javaClass)
@@ -287,12 +301,16 @@ object TabTheme : ClickableFeature() {
                 WeLogger.i(
                     TAG,
                     "tab bg #" + pos + " attached to " + page.javaClass.simpleName +
-                        " (alpha=" + d.alpha + ", size=" + page.width + "x" + page.height + ")",
+                        " (alpha=" + newAlpha + ", size=" + page.width + "x" + page.height + ")",
                 )
             }
 
+            var lastLoggedChildCount = -1
             fun decorateAllPages() {
-                WeLogger.i(TAG, "decorateAllPages: pager.childCount=" + pager.childCount)
+                if (pager.childCount != lastLoggedChildCount) {
+                    lastLoggedChildCount = pager.childCount
+                    WeLogger.i(TAG, "decorateAllPages: pager.childCount=" + pager.childCount)
+                }
                 for (i in 0 until pager.childCount) {
                     val child = pager.getChildAt(i)
                     val idx = pager.indexOfChild(child)
