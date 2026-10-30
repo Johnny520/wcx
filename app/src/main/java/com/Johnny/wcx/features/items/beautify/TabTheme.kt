@@ -247,6 +247,30 @@ object TabTheme : ClickableFeature() {
                     )
                 }
 
+                // 最可靠的一重：窗口焦点。
+                // LauncherUI 一旦失焦，说明它被别的 Activity（聊天页等）盖住了，
+                // 这时无论聊天页窗口是否透明，都必须把背景收起来。
+                // 这个信号比 onResume/onPostResume 更贴近「用户眼下能不能看到我」，
+                // 也是持续隐藏（而不是只压一帧）的关键。
+                runCatching {
+                    Activity::class.java.reflekt()
+                        .firstMethodOrNull { name = "onWindowFocusChanged"; parameterCount = 1 }
+                        ?.hookAfter {
+                            val a = thisObject as? Activity ?: return@hookAfter
+                            if (a.javaClass.name != hostName) return@hookAfter
+                            val hasFocus = args.getOrNull(0) as? Boolean ?: return@hookAfter
+                            container.visibility = if (hasFocus) View.VISIBLE else View.GONE
+                            WeLogger.i(
+                                TAG,
+                                "LauncherUI focus=" + hasFocus + " -> bg " +
+                                    (if (hasFocus) "VISIBLE" else "GONE"),
+                            )
+                        }
+                    WeLogger.i(TAG, "hooked Activity.onWindowFocusChanged")
+                }.onFailure {
+                    WeLogger.w(TAG, "hook onWindowFocusChanged failed: " + (it.message ?: ""))
+                }
+
                 // 第三重（最直接）：只要创建的是聊天页，立刻把背景隐藏。
                 // 不依赖 onResume / onPostResume 的时机，也不依赖它走哪条父类链。
                 // ChattingUI 有 26 个变体，全部继承它，用 isInstance 一次覆盖。
