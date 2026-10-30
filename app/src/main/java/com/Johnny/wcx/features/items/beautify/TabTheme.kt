@@ -307,6 +307,22 @@ object TabTheme : ClickableFeature() {
                 }.onFailure {
                     WeLogger.w(TAG, "hook Activity lifecycle failed: " + (it.message ?: ""))
                 }
+
+                // 双保险：聊天页窗口透明，万一上面的 onPause 时序不够早，
+                // 再挂一次 ChattingUI 的 onResume 主动隐藏。
+                runCatching {
+                    val wxLoader = hostActivity.javaClass.classLoader
+                    val chattingCls = Class.forName(
+                        "com.tencent.mm.ui.chatting.ChattingUI", false, wxLoader,
+                    )
+                    chattingCls.reflekt()
+                        .firstMethodOrNull { name = "onResume"; parameterCount = 0 }
+                        ?.hookAfter {
+                            bgContainer.visibility = View.GONE
+                        }
+                }.onFailure {
+                    WeLogger.w(TAG, "hook ChattingUI failed: " + (it.message ?: ""))
+                }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
             }
