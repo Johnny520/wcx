@@ -99,6 +99,10 @@ object TabTheme : ClickableFeature() {
     /** 记录每个 Tab 页上我们加的背景 ImageView，便于换图 / 撤图。 */
     private val pageImageViews = java.util.IdentityHashMap<View, ImageView>()
 
+    /** 顶部标题栏（状态栏 + 微信/加号那栏）背景，ViewPager 之外，需要单独补一条。 */
+    private var topBarImage: ImageView? = null
+    private var topBarPos: Int = -1
+
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
 
@@ -246,6 +250,63 @@ object TabTheme : ClickableFeature() {
                 )
             }
 
+            /**
+             * 顶部标题栏（状态栏 + 「微信」/加号那一栏）在 ViewPager 之外，
+             * Tab 页里的背景覆盖不到它，这里单独补一条同高的背景。
+             *
+             * 用 pager 父容器的 ViewGroupOverlay 放 ImageView：overlay 里的 View
+             * 不参与父容器的布局测量，不会把标题栏挤下去；绘制层级在父容器所有子 View 之上，
+             * 正好盖住标题栏原本的白色底。
+             */
+            fun decorateTopBar(pos: Int) {
+                val parent = pager.parent as? ViewGroup ?: return
+                val topHeight = pager.top
+                if (topHeight <= 0) return
+
+                val file = getTabBackgroundFile(pos)
+                if (!file.exists()) {
+                    val old = topBarImage
+                    if (old != null) {
+                        runCatching { (old.parent as? ViewGroup)?.removeView(old) }
+                        runCatching { parent.overlay.remove(old) }
+                        topBarImage = null
+                        topBarPos = -1
+                    }
+                    return
+                }
+
+                var iv = topBarImage
+                if (iv == null) {
+                    val v = ImageView(parent.context).apply {
+                        tag = OVERLAY_TAG_PREFIX + "topbar"
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        isClickable = false
+                        isFocusable = false
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        setLifecycleOwner(lifecycleOwner)
+                    }
+                    val ov = parent.overlay
+                    if (ov !is android.view.ViewGroupOverlay) {
+                        WeLogger.w(TAG, "topbar overlay unsupported: " + ov.javaClass.name)
+                        return
+                    }
+                    ov.add(v)
+                    topBarImage = v
+                    iv = v
+                    WeLogger.i(TAG, "topbar bg view added, height=" + topHeight)
+                }
+                iv.layout(0, 0, parent.width, topHeight)
+                iv.alpha = opacity.coerceIn(0f, 1f)
+                if (topBarPos != pos) {
+                    topBarPos = pos
+                    iv.load(file.toFile()) {
+                        crossfade(false)
+                        memoryCachePolicy(CachePolicy.DISABLED)
+                        diskCachePolicy(CachePolicy.DISABLED)
+                    }
+                }
+            }
+
             var lastLoggedChildCount = -1
             fun decorateAllPages() {
                 if (pager.childCount != lastLoggedChildCount) {
@@ -257,6 +318,7 @@ object TabTheme : ClickableFeature() {
                     val idx = pager.indexOfChild(child)
                     if (idx in 0..3) decoratePage(child, idx)
                 }
+                decorateTopBar(currentTabState.intValue)
             }
 
             decorateAllPages()
