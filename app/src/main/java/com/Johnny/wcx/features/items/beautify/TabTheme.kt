@@ -102,6 +102,14 @@ object TabTheme : ClickableFeature() {
     /** 记录哪些 Tab 页容器的背景是我们改的，便于撤图时精确还原。 */
     private val pageBgHolders = java.util.IdentityHashMap<View, Boolean>()
 
+    /**
+     * 正在写背景的标记。
+     * 我们自己也通过 View.background = 来设图，而下面又 hook 了 setBackground* 去拦微信的重设，
+     * 不加这个标记第二次设置就会被自己的 hook 吞掉。View 操作都在主线程，volatile 足够。
+     */
+    @Volatile
+    private var applyingTabBackground = false
+
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
 
@@ -148,6 +156,33 @@ object TabTheme : ClickableFeature() {
      * 解码某个 Tab 的背景图。只在 LauncherUI 首次创建时跑一次（之后走缓存），
      * 用 inSampleSize 降采样避免大图占太多内存。
      */
+    /**
+     * 在 Tab 页子树里找出「主列表」（ListView / RecyclerView）。
+     *
+     * 微信 Tab 页的容器本身往往是空壳，真正铺满屏幕的是内层列表，它自带不透明底色，
+     * 会把我设在容器上的 background 整个盖住（表现为只有状态栏那一条能看到图）。
+     * 所以要把同一张图直接设到主列表上。取面积最大的一个，避免误伤搜索框下拉之类的小列表。
+     */
+    private fun pickMainList(root: View?, depth: Int = 0, best: View? = null): View? {
+        val group = root as? ViewGroup ?: return best
+        if (depth > 6) return best
+        var picked = best
+        for (i in 0 until group.childCount) {
+            val child = group.getChildAt(i)
+            val cn = child.javaClass.name
+            val isList = child is android.widget.AbsListView || cn.contains("RecyclerView")
+            if (isList) {
+                if (picked == null || child.width * child.height > picked.width * picked.height) {
+                    picked = child
+                }
+            }
+            if (child is ViewGroup) {
+                pickMainList(child, depth + 1, picked)?.let { picked = it }
+            }
+        }
+        return picked
+    }
+
     private fun loadTabBackgroundDrawable(
         context: android.content.Context,
         tabIndex: Int,
@@ -252,8 +287,19 @@ object TabTheme : ClickableFeature() {
                 }
                 val d = loadTabBackgroundDrawable(page.context, pos) ?: return
                 d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
-                page.background = d
+
+                // 容器本身负责状态栏 / 导航栏那两条区域；内层主列表负责内容区。
+                // 写的时候要挂上 applyingTabBackground，否则会被下面的 setBackground* hook 吞掉。
+                val list = pickMainList(page)
+                applyingTabBackground = true
+                try {
+                    page.background = d
+                    if (list != null) list.background = d
+                } finally {
+                    applyingTabBackground = false
+                }
                 pageBgHolders[page] = true
+                if (list != null) pageBgHolders[list] = true
             }
 
             fun decorateAllPages() {
@@ -292,31 +338,24 @@ object TabTheme : ClickableFeature() {
                     }
                 }
 
-            // 微信会给 Tab 内的列表设不透明底色，把背景图整个盖住，这里让开。
-            // 只拦 ListView / RecyclerView，其它 View 立刻放行，避免全进程 View 都去走父链。
-            runCatching {
-                View::class.java.reflekt()
-                    .firstMethodOrNull { name = "setBackgroundColor"; parameterCount = 1 }
-                    ?.hookBefore {
-                        val v = thisObject as? View ?: return@hookBefore
-                        // 用类名判断，避免直接依赖 recyclerview 库
-                        val cn = v.javaClass.name
-                        if (!cn.endsWith("ListView") && !cn.contains("RecyclerView")) {
-                            return@hookBefore
-                        }
-                        var p = v.parent
-                        var depth = 0
-                        while (p != null && depth < 8) {
-                            if (p === pager) {
+            // 微信会反复给 Tab 页容器 / 列表重设不透明底色，把我们设的图盖掉
+            // （表现：只有状态栏那条能看到图，内容区全白）。
+            // 这里只拦「我们自己改过背景的 View」，用 IdentityHashMap 精确匹配，
+            // 其它 View 一次哈希查询就放行，开销可忽略。
+            for (setterName in arrayOf("setBackgroundColor", "setBackground", "setBackgroundDrawable")) {
+                runCatching {
+                    View::class.java.reflekt()
+                        .firstMethodOrNull { name = setterName; parameterCount = 1 }
+                        ?.hookBefore {
+                            if (applyingTabBackground) return@hookBefore
+                            val v = thisObject as? View ?: return@hookBefore
+                            if (pageBgHolders[v] == true) {
                                 result = null
-                                return@hookBefore
                             }
-                            p = p.parent
-                            depth++
                         }
-                    }
-            }.onFailure {
-                WeLogger.w(TAG, "hook View.setBackgroundColor failed: " + (it.message ?: ""))
+                }.onFailure {
+                    WeLogger.w(TAG, "hook View." + setterName + " failed: " + (it.message ?: ""))
+                }
             }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
