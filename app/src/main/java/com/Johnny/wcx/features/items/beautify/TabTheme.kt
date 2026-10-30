@@ -158,6 +158,8 @@ object TabTheme : ClickableFeature() {
      * Tab 页容器实测是全屏 1080x2400，背景其实已经铺满；只是被标题栏这块不透明底色盖住。
      * 抠掉底色后，标题文字与图标仍在自己那一层，背景就能透上来。
      */
+    private val loggedBarClasses = HashSet<String>()
+
     private fun makeTopBarsTransparent(root: ViewGroup, depth: Int = 0) {
         if (depth > 12) return
         for (i in 0 until root.childCount) {
@@ -175,7 +177,11 @@ object TabTheme : ClickableFeature() {
                         transparentBars[sub] = true
                     }
                 }
-                WeLogger.i(TAG, "title bar made transparent: " + cn)
+                // 只在首次发现时打日志，避免每次重抠都刷屏
+                if (!loggedBarClasses.contains(cn)) {
+                    loggedBarClasses.add(cn)
+                    WeLogger.i(TAG, "title bar made transparent: " + cn)
+                }
             }
             if (child is ViewGroup) makeTopBarsTransparent(child, depth + 1)
         }
@@ -328,14 +334,24 @@ object TabTheme : ClickableFeature() {
                     }
                 }
 
-                // 切 Tab 时微信会更新标题栏内容，底色也可能被重设，这里再抠一次
+                // 切 Tab 时微信会更新标题栏内容并重设底色。
+                // 立刻抠一次不够——切页动画结束、页面 attach 完成后微信可能又设回去，
+                // 所以再补几次延迟重抠（通讯录/发现页尤其明显）。
+                fun refreshBars() {
+                    runCatching {
+                        val root = activity.window?.decorView as? ViewGroup
+                        if (root != null) makeTopBarsTransparent(root)
+                    }
+                }
+
                 tabsAdapter.reflekt()
                     .firstMethodOrNull { name = "onPageSelected"; parameterCount = 1 }
                     ?.hookAfter {
                         runCatching { decorateAll() }
-                        runCatching {
-                            val root = activity.window?.decorView as? ViewGroup
-                            if (root != null) makeTopBarsTransparent(root)
+                        refreshBars()
+                        val decorForDelay = activity.window?.decorView
+                        for (delay in longArrayOf(150L, 400L, 900L, 1600L)) {
+                            decorForDelay?.postDelayed({ refreshBars() }, delay)
                         }
                     }
             } catch (e: Throwable) {
