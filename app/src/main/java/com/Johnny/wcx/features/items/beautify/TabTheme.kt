@@ -96,6 +96,12 @@ object TabTheme : ClickableFeature() {
     private const val TAG = "TabTheme"
     private const val OVERLAY_TAG_PREFIX = "wcx_tab_theme_"
 
+    /** Tab 页背景图片缓存，避免每次重建都重新解码（图片通常几 MB）。 */
+    private val tabBgCache = HashMap<String, android.graphics.drawable.BitmapDrawable>()
+
+    /** 记录哪些 Tab 页容器的背景是我们改的，便于撤图时精确还原。 */
+    private val pageBgHolders = java.util.IdentityHashMap<View, Boolean>()
+
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
 
@@ -136,6 +142,29 @@ object TabTheme : ClickableFeature() {
 
     private fun hasTabBackground(tabIndex: Int): Boolean {
         return getTabBackgroundFile(tabIndex).exists()
+    }
+
+    /**
+     * 解码某个 Tab 的背景图。只在 LauncherUI 首次创建时跑一次（之后走缓存），
+     * 用 inSampleSize 降采样避免大图占太多内存。
+     */
+    private fun loadTabBackgroundDrawable(
+        context: android.content.Context,
+        tabIndex: Int,
+    ): android.graphics.drawable.BitmapDrawable? {
+        val file = getTabBackgroundFile(tabIndex)
+        if (!file.exists()) return null
+        val key = file.toString()
+        tabBgCache[key]?.let { if (it.bitmap?.isRecycled != true) return it }
+        return runCatching {
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
+            val bmp = android.graphics.BitmapFactory.decodeFile(file.toString(), opts) ?: return null
+            android.graphics.drawable.BitmapDrawable(context.resources, bmp)
+                .also { tabBgCache[key] = it }
+        }.getOrElse {
+            WeLogger.w(TAG, "decode tab background #$tabIndex failed: " + (it.message ?: ""))
+            null
+        }
     }
 
     override fun onEnable() {
@@ -197,132 +226,98 @@ object TabTheme : ClickableFeature() {
                 }
 
             val lifecycleOwner = LifecycleOwnerProvider.lifecycleOwner
+            val pager = viewPager
 
-            // 沉浸式全屏渲染：将背景加到 decorView，覆盖状态栏和导航栏
+            // 沉浸式全屏：让 Tab 页内容延伸到状态栏 / 导航栏下方
             if (transparentStatusBar) {
                 applyImmersiveStatusBar(activity)
             }
 
-            val decor = activity.window?.decorView as? ViewGroup ?: return@hookAfter
-
-            val config = loadConfig()
-
-            // 检查是否已有背景容器，避免重复添加
-            val existingTag = "${OVERLAY_TAG_PREFIX}container"
-            var bgContainer = decor.findViewWithTag<android.widget.FrameLayout>(existingTag)
-            if (bgContainer == null) {
-                bgContainer = android.widget.FrameLayout(activity).apply {
-                    tag = existingTag
-                    setLifecycleOwner(lifecycleOwner)
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    isClickable = false
-                    isFocusable = false
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            // ── 背景挂在「每个 Tab 页自己的容器」上，而不是 DecorView ──
+            //
+            // 旧实现把背景 ImageView 加到 decorView 上：decorView 属于整个窗口，
+            // 而微信聊天页（ChattingUI，独立 Activity）的窗口在沉浸式转场期间是透明的，
+            // 于是整个窗口的内容连同背景图一起透出来。只能靠 onPause 之类做判定去藏，
+            // 藏不干净还会闪、还会一卡一卡。
+            //
+            // 改为挂在 Tab 页容器内之后，聊天页是另一个 Activity，两者不在同一条绘制链上，
+            // 物理上不可能透——不需要任何聊天页判定，也不需要 Tab 切换时反复开关可见性。
+            // （这是 MDWechat 的做法：它把图设到各 Tab 自己的 ListView 上。）
+            fun decoratePage(page: View, pos: Int) {
+                val file = getTabBackgroundFile(pos)
+                if (!file.exists()) {
+                    // 该 Tab 没配图：把我们之前设过的背景撤掉，不动微信自己的背景
+                    if (pageBgHolders.remove(page) != null) page.background = null
+                    return
                 }
-                decor.addView(bgContainer)
+                val d = loadTabBackgroundDrawable(page.context, pos) ?: return
+                d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
+                page.background = d
+                pageBgHolders[page] = true
             }
 
-            val tabImageViews = mutableMapOf<Int, ImageView>()
+            fun decorateAllPages() {
+                for (i in 0 until pager.childCount) {
+                    val child = pager.getChildAt(i)
+                    val idx = pager.indexOfChild(child)
+                    if (idx in 0..3) decoratePage(child, idx)
+                }
+            }
 
-            for (tabIndex in 0..3) {
-                val tabFile = getTabBackgroundFile(tabIndex)
-                if (tabFile.exists()) {
-                    val iv = ImageView(activity).apply {
-                        tag = "${OVERLAY_TAG_PREFIX}tab_$tabIndex"
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        visibility = if (tabIndex == 0) View.VISIBLE else View.GONE
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        load(tabFile.toFile()) {
-                            crossfade(true)
-                            memoryCachePolicy(CachePolicy.DISABLED)
-                            diskCachePolicy(CachePolicy.DISABLED)
-                        }
-                        alpha = opacity
+            decorateAllPages()
+
+            // Tab 页被新建 / 复用时补挂
+            runCatching {
+                pager.reflekt()
+                    .firstMethodOrNull { name = "addView"; parameterCount = 3 }
+                    ?.hookAfter {
+                        val child = args.getOrNull(0) as? View ?: return@hookAfter
+                        val container = thisObject as? ViewGroup ?: return@hookAfter
+                        val idx = container.indexOfChild(child)
+                        if (idx in 0..3) decoratePage(child, idx)
                     }
-                    bgContainer.addView(iv)
-                    tabImageViews[tabIndex] = iv
-                }
+            }.onFailure {
+                WeLogger.w(TAG, "hook WxViewPager.addView failed: " + (it.message ?: ""))
             }
 
-            // 页面切换时检测是否为聊天会话页面，是则隐藏模块主题背景
+            // 切换 Tab 时补齐（应对页面重建后 tag 丢失）
             tabsAdapter.reflekt()
                 .firstMethod { name = "onPageSelected" }
                 .hookAfter {
-                    try {
-                        val position = args[0] as Int
-                        val inChatPage = isChatActivityForeground()
-                        tabImageViews.forEach { (idx, iv) ->
-                            if (inChatPage) {
-                                // 聊天会话页面内，模块全局主题背景强制失效
-                                iv.visibility = View.GONE
-                            } else {
-                                iv.visibility = if (idx == position) View.VISIBLE else View.GONE
-                            }
-                        }
-                    } catch (e: Throwable) {
-                        WeLogger.e(TAG, "onPageSelected hook 异常", e)
+                    runCatching {
+                        currentTabState.intValue = args[0] as Int
+                        decorateAllPages()
+                    }.onFailure {
+                        WeLogger.e(TAG, "onPageSelected 补挂背景失败", it)
                     }
                 }
 
-                // 进出聊天等二级页面时同步隐藏/恢复背景。
-                // onPageSelected 只在 Tab 切换时触发，从会话列表直接点进聊天不会触发；
-                // 且微信聊天页为沉浸式（窗口背景透明），LauncherUI 的 DecorView 会透出来，
-                // 所以必须在离开主界面时主动隐藏。
-                //
-                // 注意：LauncherUI 自身并未 override onPause/onResume，从 activity.javaClass
-                // 上找这两个方法会返回 null（旧实现因此静默失效）。这里直接 hook
-                // android.app.Activity——它自己声明了这两个方法，必然能取到。
-                val hostActivity = activity
-                val hostActivityName = hostActivity.javaClass.name
-                runCatching {
-                    Activity::class.java.reflekt()
-                        .firstMethodOrNull { name = "onPause"; parameterCount = 0 }
-                        ?.hookAfter {
-                            val a = thisObject as? Activity ?: return@hookAfter
-                            if (a === hostActivity || a.javaClass.name == hostActivityName) {
-                                bgContainer.visibility = View.GONE
-                                WeLogger.i(TAG, "host activity paused -> hide tab background")
+            // 微信会给 Tab 内的列表设不透明底色，把背景图整个盖住，这里让开。
+            // 只拦 ListView / RecyclerView，其它 View 立刻放行，避免全进程 View 都去走父链。
+            runCatching {
+                View::class.java.reflekt()
+                    .firstMethodOrNull { name = "setBackgroundColor"; parameterCount = 1 }
+                    ?.hookBefore {
+                        val v = thisObject as? View ?: return@hookBefore
+                        // 用类名判断，避免直接依赖 recyclerview 库
+                        val cn = v.javaClass.name
+                        if (!cn.endsWith("ListView") && !cn.contains("RecyclerView")) {
+                            return@hookBefore
+                        }
+                        var p = v.parent
+                        var depth = 0
+                        while (p != null && depth < 8) {
+                            if (p === pager) {
+                                result = null
+                                return@hookBefore
                             }
+                            p = p.parent
+                            depth++
                         }
-                    Activity::class.java.reflekt()
-                        .firstMethodOrNull { name = "onResume"; parameterCount = 0 }
-                        ?.hookAfter {
-                            val a = thisObject as? Activity ?: return@hookAfter
-                            if (a === hostActivity || a.javaClass.name == hostActivityName) {
-                                bgContainer.visibility = View.VISIBLE
-                                val pos = currentTabState.intValue
-                                tabImageViews.forEach { (idx, iv) ->
-                                    iv.visibility = if (idx == pos) View.VISIBLE else View.GONE
-                                }
-                                WeLogger.i(TAG, "host activity resumed -> show tab background #" + pos)
-                            }
-                        }
-                }.onFailure {
-                    WeLogger.w(TAG, "hook Activity lifecycle failed: " + (it.message ?: ""))
-                }
-
-                // 双保险：聊天页窗口透明，万一上面的 onPause 时序不够早，
-                // 再挂一次 ChattingUI 的 onResume 主动隐藏。
-                runCatching {
-                    val wxLoader = hostActivity.javaClass.classLoader
-                    val chattingCls = Class.forName(
-                        "com.tencent.mm.ui.chatting.ChattingUI", false, wxLoader,
-                    )
-                    chattingCls.reflekt()
-                        .firstMethodOrNull { name = "onResume"; parameterCount = 0 }
-                        ?.hookAfter {
-                            bgContainer.visibility = View.GONE
-                        }
-                }.onFailure {
-                    WeLogger.w(TAG, "hook ChattingUI failed: " + (it.message ?: ""))
-                }
+                    }
+            }.onFailure {
+                WeLogger.w(TAG, "hook View.setBackgroundColor failed: " + (it.message ?: ""))
+            }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
             }
