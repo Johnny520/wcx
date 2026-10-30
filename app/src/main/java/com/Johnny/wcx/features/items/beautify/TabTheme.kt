@@ -96,8 +96,14 @@ object TabTheme : ClickableFeature() {
     private const val TAG = "TabTheme"
     private const val OVERLAY_TAG_PREFIX = "wcx_tab_theme_"
 
-    /** Tab 索引 -> 背景 ImageView（叠加在 decorView 的背景容器里，覆盖整个窗口）。 */
+    /** Tab 索引 -> 背景 ImageView（挂在各 Tab 页容器里）。 */
     private val bgImages = HashMap<Int, ImageView>()
+
+    /** 已被我们抠成透明的标题栏 View（含其直接子 View），用于持续拦截微信的重设。 */
+    private val transparentBars = java.util.IdentityHashMap<View, Boolean>()
+
+    @Volatile
+    private var barGuardInstalled = false
 
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
@@ -161,14 +167,44 @@ object TabTheme : ClickableFeature() {
                 cn.endsWith("MMActionBar") || cn.contains("TitleBar")
             if (looksLikeBar) {
                 runCatching { child.background = null }
+                transparentBars[child] = true
                 if (child is ViewGroup) {
                     for (j in 0 until child.childCount) {
-                        runCatching { child.getChildAt(j).background = null }
+                        val sub = child.getChildAt(j)
+                        runCatching { sub.background = null }
+                        transparentBars[sub] = true
                     }
                 }
                 WeLogger.i(TAG, "title bar made transparent: " + cn)
             }
             if (child is ViewGroup) makeTopBarsTransparent(child, depth + 1)
+        }
+    }
+
+    /**
+     * 持续拦截微信对标题栏的底色重设。
+     *
+     * 微信在界面恢复时会重新给 ActionBar 设白底，光抠一次只能维持到下一次恢复。
+     * 这里按「我们抠过的 View」精确匹配（IdentityHashMap），直接吞掉 setBackground* 调用，
+     * 其它 View 一次哈希查询就放行，开销可忽略。
+     */
+    private fun installBarBackgroundGuard() {
+        if (barGuardInstalled) return
+        barGuardInstalled = true
+        for (setterName in arrayOf("setBackgroundColor", "setBackground", "setBackgroundDrawable")) {
+            runCatching {
+                View::class.java.reflekt()
+                    .firstMethodOrNull { name = setterName; parameterCount = 1 }
+                    ?.hookBefore {
+                        val v = thisObject as? View ?: return@hookBefore
+                        if (transparentBars[v] == true) {
+                            result = null
+                        }
+                    }
+                WeLogger.i(TAG, "bar bg guard installed: " + setterName)
+            }.onFailure {
+                WeLogger.w(TAG, "install guard " + setterName + " failed: " + (it.message ?: ""))
+            }
         }
     }
 
@@ -190,8 +226,26 @@ object TabTheme : ClickableFeature() {
                 if (transparentStatusBar) applyImmersiveStatusBar(activity)
 
                 val decor = activity.window?.decorView as? ViewGroup ?: return@hookAfter
+                val hostName = activity.javaClass.name
 
                 runCatching { makeTopBarsTransparent(decor) }
+                installBarBackgroundGuard()
+
+                // 微信在恢复界面时会重建/重设标题栏，这里每次宿主回到前台都重新抠一遍，
+                // 配合上面的 setBackground* 拦截，保证「进出聊天页/通讯录/下拉小程序」之后不再变白。
+                runCatching {
+                    Activity::class.java.reflekt()
+                        .firstMethodOrNull { name = "onResume"; parameterCount = 0 }
+                        ?.hookAfter {
+                            val a = thisObject as? Activity ?: return@hookAfter
+                            if (a.javaClass.name != hostName) return@hookAfter
+                            val root = a.window?.decorView as? ViewGroup ?: return@hookAfter
+                            runCatching { makeTopBarsTransparent(root) }
+                        }
+                    WeLogger.i(TAG, "title bar refresh hook installed")
+                }.onFailure {
+                    WeLogger.w(TAG, "hook onResume for bar refresh failed: " + (it.message ?: ""))
+                }
 
                 bgImages.clear()
 
