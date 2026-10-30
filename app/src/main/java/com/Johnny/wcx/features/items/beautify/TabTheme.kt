@@ -257,58 +257,86 @@ object TabTheme : ClickableFeature() {
              * 所以不能用「pager.top 以上那一条」的思路，改为直接找那个盖层 ViewGroup，
              * 把自己的 ImageView 叠到它里头（FrameLayout 系则 addView 最上层，否则退回 overlay）。
              */
-            fun findTopOverlay(root: ViewGroup, depth: Int = 0): ViewGroup? {
-                if (depth > 4) return null
-                for (idx in 0 until root.childCount) {
-                    val c = root.getChildAt(idx)
-                    if (c === pager) continue
+            fun dumpTree(v: View, depth: Int, maxDepth: Int) {
+                if (depth > maxDepth) return
+                val loc = IntArray(2)
+                v.getLocationInWindow(loc)
+                WeLogger.i(
+                    TAG,
+                    "  ".repeat(depth) + v.javaClass.name + " " +
+                        v.width + "x" + v.height + " @" + loc[0] + "," + loc[1] +
+                        (if (v === pager) "   <== pager" else ""),
+                )
+                if (v is ViewGroup) {
+                    for (i2 in 0 until v.childCount) dumpTree(v.getChildAt(i2), depth + 1, maxDepth)
+                }
+            }
+
+            fun containsView(parent: View, child: View): Boolean {
+                var c: View? = child
+                var guard = 0
+                while (c != null && guard < 40) {
+                    if (c === parent) return true
+                    c = c.parent as? View
+                    guard++
+                }
+                return false
+            }
+
+            fun findTopBarHost(root: ViewGroup?, depth: Int = 0): ViewGroup? {
+                if (root == null || depth > 8) return null
+                val screenH = activity.resources.displayMetrics.heightPixels
+                for (i2 in 0 until root.childCount) {
+                    val c = root.getChildAt(i2)
                     if (c !is ViewGroup) continue
+                    if (containsView(c, pager)) {
+                        findTopBarHost(c, depth + 1)?.let { return it }
+                        continue
+                    }
                     val loc = IntArray(2)
                     c.getLocationInWindow(loc)
-                    val ploc = IntArray(2)
-                    pager.getLocationInWindow(ploc)
-                    val dy = loc[1] - ploc[1]
-                    val looksLikeTopBar = dy <= 0 &&
-                        c.height in 1..(pager.height / 4) &&
-                        c.width >= pager.width * 3 / 4
+                    val looksLikeTopBar = loc[1] in -40..200 &&
+                        c.height in 1..(screenH / 5) &&
+                        c.width >= activity.resources.displayMetrics.widthPixels * 9 / 10
                     if (looksLikeTopBar) {
                         WeLogger.i(
                             TAG,
-                            "topbar candidate: " + c.javaClass.name + " dy=" + dy +
+                            "topbar candidate: " + c.javaClass.name + " @" + loc[0] + "," + loc[1] +
                                 " size=" + c.width + "x" + c.height,
                         )
                         return c
                     }
-                    findTopOverlay(c, depth + 1)?.let { return it }
+                    findTopBarHost(c, depth + 1)?.let { return it }
                 }
                 return null
             }
 
+            var treeDumped = false
+
             fun decorateTopBar(pos: Int) {
-                WeLogger.i(
-                    TAG,
-                    "decorateTopBar: pager.top=" + pager.top + " h=" + pager.height +
-                        " parent=" + (pager.parent?.javaClass?.name ?: "null"),
-                )
-                val host = (pager.parent as? ViewGroup)?.let { findTopOverlay(it) } ?: run {
-                    WeLogger.i(TAG, "topbar host not found")
-                    return
+                val decor = activity.window?.decorView ?: return
+                if (!treeDumped) {
+                    treeDumped = true
+                    WeLogger.i(TAG, "===== LauncherUI view tree (top 5 levels) =====")
+                    runCatching { dumpTree(decor, 0, 5) }
+                    WeLogger.i(TAG, "===== end view tree =====")
                 }
                 val file = getTabBackgroundFile(pos)
                 if (!file.exists()) return
 
-                var iv = topBarImage
-                val tagName = OVERLAY_TAG_PREFIX + "topbar"
-                if (iv == null) {
+                // 在整个 decorView 里找「贴顶、接近满宽、高度不超过屏幕 1/5、且不包含 pager」的容器，
+                // 作为标题栏宿主。找到就把背景叠进去；找不到就只留日志等下一轮定位。
+                val host = runCatching { findTopBarHost(decor as? ViewGroup, 0) }.getOrNull()
+                if (host != null && topBarImage == null) {
                     val v = ImageView(host.context).apply {
-                        tag = tagName
+                        tag = OVERLAY_TAG_PREFIX + "topbar"
                         scaleType = ImageView.ScaleType.CENTER_CROP
                         isClickable = false
                         isFocusable = false
                         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                         setLifecycleOwner(lifecycleOwner)
                     }
-                    if (host is android.view.ViewGroup) {
+                    runCatching {
                         host.addView(
                             v,
                             ViewGroup.LayoutParams(
@@ -316,15 +344,20 @@ object TabTheme : ClickableFeature() {
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                             ),
                         )
+                        topBarImage = v
+                        WeLogger.i(
+                            TAG,
+                            "topbar bg added to " + host.javaClass.name +
+                                " size=" + host.width + "x" + host.height,
+                        )
+                    }.onFailure {
+                        WeLogger.w(TAG, "topbar addView failed: " + (it.message ?: ""))
                     }
-                    topBarImage = v
-                    iv = v
-                    WeLogger.i(
-                        TAG,
-                        "topbar bg added to " + host.javaClass.name +
-                            " size=" + host.width + "x" + host.height,
-                    )
+                } else if (host == null) {
+                    WeLogger.i(TAG, "topbar host still not found")
                 }
+
+                val iv = topBarImage ?: return
                 iv.alpha = opacity.coerceIn(0f, 1f)
                 if (topBarPos != pos) {
                     topBarPos = pos
