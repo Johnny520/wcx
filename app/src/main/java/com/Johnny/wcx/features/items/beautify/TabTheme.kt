@@ -96,17 +96,8 @@ object TabTheme : ClickableFeature() {
     private const val TAG = "TabTheme"
     private const val OVERLAY_TAG_PREFIX = "wcx_tab_theme_"
 
-    /** Tab 页背景图片缓存，避免每次重建都重新解码（图片通常几 MB）。 */
-    private val tabBgCache = HashMap<String, android.graphics.drawable.BitmapDrawable>()
-
-    /** 记录每个 Tab 页当前要绘制的背景图。 */
-    private val pageOverlayDrawables =
-        java.util.IdentityHashMap<View, android.graphics.drawable.BitmapDrawable>()
-
-    /** 已经 hook 过 dispatchDraw 的容器类，避免重复挂。 */
-    private val dispatchHookedClasses = java.util.Collections.newSetFromMap(
-        java.util.WeakHashMap<Class<*>, Boolean>(),
-    )
+    /** 记录每个 Tab 页上我们加的背景 ImageView，便于换图 / 撤图。 */
+    private val pageImageViews = java.util.IdentityHashMap<View, ImageView>()
 
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
@@ -148,68 +139,6 @@ object TabTheme : ClickableFeature() {
 
     private fun hasTabBackground(tabIndex: Int): Boolean {
         return getTabBackgroundFile(tabIndex).exists()
-    }
-
-    /**
-     * 解码某个 Tab 的背景图。只在 LauncherUI 首次创建时跑一次（之后走缓存），
-     * 用 inSampleSize 降采样避免大图占太多内存。
-     */
-    /**
-     * 给某个 Tab 页容器的类挂 dispatchDraw，在子 View 绘制完成后把背景图补画上去。
-     *
-     * 为什么不用 ViewOverlay：微信 Tab 页容器是 FrostedContentView，它重写了 dispatchDraw
-     * 做磨砂模糊（用 saveLayer 做离屏绘制）。ViewOverlay 是 View.draw() 的最后一步，
-     * 会被它的离屏/裁剪吃掉——表现为图确实挂上了（日志有 attached，尺寸也正常）却画不出来。
-     * 直接在 dispatchDraw 之后补画，稳定且层级正确（在内容之上、不影响交互）。
-     */
-    private fun ensureDispatchHook(pageClass: Class<*>) {
-        if (!dispatchHookedClasses.add(pageClass)) return
-        runCatching {
-            pageClass.reflekt()
-                .firstMethodOrNull { name = "dispatchDraw"; parameterCount = 1 }
-                ?.hookAfter {
-                    val v = thisObject as? View ?: return@hookAfter
-                    val canvas = args.getOrNull(0) as? android.graphics.Canvas ?: return@hookAfter
-                    val d = pageOverlayDrawables[v] ?: return@hookAfter
-                    if (v.width <= 0 || v.height <= 0) return@hookAfter
-                    var saved = false
-                    try {
-                        val cnt = canvas.save()
-                        saved = true
-                        d.setBounds(0, 0, v.width, v.height)
-                        d.draw(canvas)
-                        canvas.restoreToCount(cnt)
-                        saved = false
-                    } finally {
-                        if (saved) runCatching { canvas.restore() }
-                    }
-                }
-            WeLogger.i(TAG, "dispatchDraw hooked: " + pageClass.name)
-        }.onFailure {
-            WeLogger.w(TAG, "hook dispatchDraw failed for " + pageClass.name + ": " + (it.message ?: ""))
-        }
-    }
-
-    private fun loadTabBackgroundDrawable(
-        context: android.content.Context,
-        tabIndex: Int,
-    ): android.graphics.drawable.BitmapDrawable? {
-        val file = getTabBackgroundFile(tabIndex)
-        if (!file.exists()) {
-            WeLogger.i(TAG, "tab bg #" + tabIndex + " not set: " + file)
-            return null
-        }
-        val key = file.toString()
-        tabBgCache[key]?.let { if (it.bitmap?.isRecycled != true) return it }
-        return runCatching {
-            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }
-            val bmp = android.graphics.BitmapFactory.decodeFile(file.toString(), opts) ?: return null
-            android.graphics.drawable.BitmapDrawable(context.resources, bmp)
-                .also { tabBgCache[key] = it }
-        }.getOrElse {
-            WeLogger.w(TAG, "decode tab background #$tabIndex failed: " + (it.message ?: ""))
-            null
-        }
     }
 
     override fun onEnable() {
@@ -269,39 +198,51 @@ object TabTheme : ClickableFeature() {
             // 物理上不可能透——不需要任何聊天页判定，也不需要 Tab 切换时反复开关可见性。
             // （这是 MDWechat 的做法：它把图设到各 Tab 自己的 ListView 上。）
             fun decoratePage(page: View, pos: Int) {
+                val group = page as? ViewGroup ?: return
                 val file = getTabBackgroundFile(pos)
-                val prev = pageOverlayDrawables[page]
-                val d = if (file.exists()) loadTabBackgroundDrawable(page.context, pos) else null
-                val newAlpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
+                val existing = pageImageViews[page]
 
-                if (d == null) {
-                    if (prev != null) {
-                        pageOverlayDrawables.remove(page)
-                        page.invalidate()
-                        WeLogger.i(TAG, "tab bg #" + pos + " cleared")
+                if (!file.exists()) {
+                    if (existing != null) {
+                        (existing.parent as? ViewGroup)?.removeView(existing)
+                        pageImageViews.remove(page)
+                        WeLogger.i(TAG, "tab bg #" + pos + " removed")
                     }
                     return
                 }
-
-                // 已经是同一张图：只同步透明度，绝不 invalidate。
-                // onPageScrolled 在静止状态下也会反复回调，这里若每次重绘会造成持续刷新和绘制撕裂。
-                if (prev === d) {
-                    if (d.alpha != newAlpha) {
-                        d.alpha = newAlpha
-                        page.invalidate()
-                    }
+                if (existing != null) {
+                    existing.alpha = opacity.coerceIn(0f, 1f)
                     return
                 }
 
-                d.alpha = newAlpha
-                pageOverlayDrawables[page] = d
-                // 给这个容器的类挂 dispatchDraw，之后每一次重绘都会把图补画上去
-                ensureDispatchHook(page.javaClass)
-                page.invalidate()
+                // FrostedContentView -> LayoutListenerView -> FrameLayout，
+                // 加到最上层是安全的（不会被当成 LinearLayout 的兄弟挤占布局），
+                // 且真实子 View 的绘制不受 dispatchDraw 里 canvas 裁剪的影响
+                // （之前用 overlay/dispatchDraw 补画，正好被那条裁剪切掉 1px，表现为标题栏下一条白线）。
+                val iv = ImageView(group.context).apply {
+                    tag = OVERLAY_TAG_PREFIX + "bg_" + pos
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    setLifecycleOwner(lifecycleOwner)
+                    load(file.toFile()) {
+                        crossfade(false)
+                        memoryCachePolicy(CachePolicy.DISABLED)
+                        diskCachePolicy(CachePolicy.DISABLED)
+                    }
+                    alpha = opacity.coerceIn(0f, 1f)
+                    isClickable = false
+                    isFocusable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+                group.addView(iv)
+                pageImageViews[page] = iv
                 WeLogger.i(
                     TAG,
-                    "tab bg #" + pos + " attached to " + page.javaClass.simpleName +
-                        " (alpha=" + newAlpha + ", size=" + page.width + "x" + page.height + ")",
+                    "tab bg #" + pos + " added to " + page.javaClass.simpleName +
+                        " (alpha=" + iv.alpha + ", size=" + page.width + "x" + page.height + ")",
                 )
             }
 
