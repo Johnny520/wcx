@@ -247,6 +247,39 @@ object TabTheme : ClickableFeature() {
                     )
                 }
 
+                // 第三重（最直接）：只要创建的是聊天页，立刻把背景隐藏。
+                // 不依赖 onResume / onPostResume 的时机，也不依赖它走哪条父类链。
+                // ChattingUI 有 26 个变体，全部继承它，用 isInstance 一次覆盖。
+                val chattingClass = runCatching {
+                    Class.forName(
+                        "com.tencent.mm.ui.chatting.ChattingUI",
+                        false,
+                        activity.javaClass.classLoader,
+                    )
+                }.getOrNull()
+                if (chattingClass == null) {
+                    WeLogger.w(TAG, "ChattingUI class not found, onCreate guard disabled")
+                } else {
+                    runCatching {
+                        Activity::class.java.reflekt()
+                            .firstMethodOrNull { name = "onCreate"; parameterCount = 1 }
+                            ?.hookAfter {
+                                val a = thisObject as? Activity ?: return@hookAfter
+                                if (chattingClass.isInstance(a)) {
+                                    container.visibility = View.GONE
+                                    WeLogger.i(
+                                        TAG,
+                                        "chatting activity created: " + a.javaClass.name +
+                                            " -> bg GONE",
+                                    )
+                                }
+                            }
+                        WeLogger.i(TAG, "hooked Activity.onCreate for ChattingUI guard")
+                    }.onFailure {
+                        WeLogger.w(TAG, "hook onCreate guard failed: " + (it.message ?: ""))
+                    }
+                }
+
                 for (methodName in arrayOf("onResume", "onPostResume")) {
                     runCatching {
                         Activity::class.java.reflekt()
