@@ -99,16 +99,9 @@ object TabTheme : ClickableFeature() {
     /** Tab 页背景图片缓存，避免每次重建都重新解码（图片通常几 MB）。 */
     private val tabBgCache = HashMap<String, android.graphics.drawable.BitmapDrawable>()
 
-    /** 记录哪些 Tab 页容器的背景是我们改的，便于撤图时精确还原。 */
-    private val pageBgHolders = java.util.IdentityHashMap<View, Boolean>()
-
-    /**
-     * 正在写背景的标记。
-     * 我们自己也通过 View.background = 来设图，而下面又 hook 了 setBackground* 去拦微信的重设，
-     * 不加这个标记第二次设置就会被自己的 hook 吞掉。View 操作都在主线程，volatile 足够。
-     */
-    @Volatile
-    private var applyingTabBackground = false
+    /** 记录每个 Tab 页当前叠加的 overlay drawable，便于换图 / 撤图时精确移除。 */
+    private val pageOverlayDrawables =
+        java.util.IdentityHashMap<View, android.graphics.drawable.BitmapDrawable>()
 
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
@@ -156,33 +149,6 @@ object TabTheme : ClickableFeature() {
      * 解码某个 Tab 的背景图。只在 LauncherUI 首次创建时跑一次（之后走缓存），
      * 用 inSampleSize 降采样避免大图占太多内存。
      */
-    /**
-     * 在 Tab 页子树里找出「主列表」（ListView / RecyclerView）。
-     *
-     * 微信 Tab 页的容器本身往往是空壳，真正铺满屏幕的是内层列表，它自带不透明底色，
-     * 会把我设在容器上的 background 整个盖住（表现为只有状态栏那一条能看到图）。
-     * 所以要把同一张图直接设到主列表上。取面积最大的一个，避免误伤搜索框下拉之类的小列表。
-     */
-    private fun pickMainList(root: View?, depth: Int = 0, best: View? = null): View? {
-        val group = root as? ViewGroup ?: return best
-        if (depth > 6) return best
-        var picked = best
-        for (i in 0 until group.childCount) {
-            val child = group.getChildAt(i)
-            val cn = child.javaClass.name
-            val isList = child is android.widget.AbsListView || cn.contains("RecyclerView")
-            if (isList) {
-                if (picked == null || child.width * child.height > picked.width * picked.height) {
-                    picked = child
-                }
-            }
-            if (child is ViewGroup) {
-                pickMainList(child, depth + 1, picked)?.let { picked = it }
-            }
-        }
-        return picked
-    }
-
     private fun loadTabBackgroundDrawable(
         context: android.content.Context,
         tabIndex: Int,
@@ -205,34 +171,6 @@ object TabTheme : ClickableFeature() {
     override fun onEnable() {
         if (!tabThemeEnabled) return
         applyTheme()
-    }
-
-    /**
-     * 检测当前前台 Activity 是否为聊天会话页面。
-     * 聊天会话页面内，模块全局主题背景应强制失效，避免与用户自定义聊天背景重叠。
-     */
-    private fun isChatActivityForeground(): Boolean {
-        return try {
-            val atClass = Class.forName("android.app.ActivityThread")
-            val currentAtMethod = atClass.getDeclaredMethod("currentActivityThread")
-            val at = currentAtMethod.invoke(null)
-            val activitiesField = atClass.getDeclaredField("mActivities")
-            activitiesField.isAccessible = true
-            val activities = activitiesField.get(at) as? Map<*, *> ?: return false
-
-            for (record in activities.values) {
-                val activity = record?.javaClass?.getDeclaredField("activity")
-                    ?.apply { isAccessible = true }
-                    ?.get(record) as? Activity ?: continue
-                if (!activity.isFinishing && activity.javaClass.name.contains("ChattingUI")) {
-                    return true
-                }
-            }
-            false
-        } catch (e: Throwable) {
-            WeLogger.d(TAG, "检测聊天Activity失败: ${e.message}")
-            false
-        }
     }
 
     private fun applyTheme() {
@@ -280,26 +218,24 @@ object TabTheme : ClickableFeature() {
             // （这是 MDWechat 的做法：它把图设到各 Tab 自己的 ListView 上。）
             fun decoratePage(page: View, pos: Int) {
                 val file = getTabBackgroundFile(pos)
-                if (!file.exists()) {
-                    // 该 Tab 没配图：把我们之前设过的背景撤掉，不动微信自己的背景
-                    if (pageBgHolders.remove(page) != null) page.background = null
+                val prev = pageOverlayDrawables.remove(page)
+                val d = if (file.exists()) loadTabBackgroundDrawable(page.context, pos) else null
+                if (d == null) {
+                    if (prev != null) runCatching { page.overlay.remove(prev) }
                     return
                 }
-                val d = loadTabBackgroundDrawable(page.context, pos) ?: return
-                d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
-
-                // 容器本身负责状态栏 / 导航栏那两条区域；内层主列表负责内容区。
-                // 写的时候要挂上 applyingTabBackground，否则会被下面的 setBackground* hook 吞掉。
-                val list = pickMainList(page)
-                applyingTabBackground = true
-                try {
-                    page.background = d
-                    if (list != null) list.background = d
-                } finally {
-                    applyingTabBackground = false
+                // 同一张图已经叠着就别动，避免切 Tab 时反复 remove/add 造成闪烁
+                if (prev === d) {
+                    d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
+                    pageOverlayDrawables[page] = d
+                    return
                 }
-                pageBgHolders[page] = true
-                if (list != null) pageBgHolders[list] = true
+                if (prev != null) runCatching { page.overlay.remove(prev) }
+                d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
+                runCatching { page.overlay.add(d) }.onFailure {
+                    WeLogger.w(TAG, "add tab background overlay failed: " + (it.message ?: ""))
+                }
+                pageOverlayDrawables[page] = d
             }
 
             fun decorateAllPages() {
@@ -338,25 +274,8 @@ object TabTheme : ClickableFeature() {
                     }
                 }
 
-            // 微信会反复给 Tab 页容器 / 列表重设不透明底色，把我们设的图盖掉
-            // （表现：只有状态栏那条能看到图，内容区全白）。
-            // 这里只拦「我们自己改过背景的 View」，用 IdentityHashMap 精确匹配，
-            // 其它 View 一次哈希查询就放行，开销可忽略。
-            for (setterName in arrayOf("setBackgroundColor", "setBackground", "setBackgroundDrawable")) {
-                runCatching {
-                    View::class.java.reflekt()
-                        .firstMethodOrNull { name = setterName; parameterCount = 1 }
-                        ?.hookBefore {
-                            if (applyingTabBackground) return@hookBefore
-                            val v = thisObject as? View ?: return@hookBefore
-                            if (pageBgHolders[v] == true) {
-                                result = null
-                            }
-                        }
-                }.onFailure {
-                    WeLogger.w(TAG, "hook View." + setterName + " failed: " + (it.message ?: ""))
-                }
-            }
+            // 背景用 ViewOverlay 叠加，不占用 View.background，
+            // 所以不必再拦微信的 setBackground*（它设它的，互不干扰）。
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
             }
