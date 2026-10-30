@@ -154,7 +154,10 @@ object TabTheme : ClickableFeature() {
         tabIndex: Int,
     ): android.graphics.drawable.BitmapDrawable? {
         val file = getTabBackgroundFile(tabIndex)
-        if (!file.exists()) return null
+        if (!file.exists()) {
+            WeLogger.i(TAG, "tab bg #" + tabIndex + " not set: " + file)
+            return null
+        }
         val key = file.toString()
         tabBgCache[key]?.let { if (it.bitmap?.isRecycled != true) return it }
         return runCatching {
@@ -169,13 +172,16 @@ object TabTheme : ClickableFeature() {
     }
 
     override fun onEnable() {
+        WeLogger.i(TAG, "onEnable: tabThemeEnabled=" + tabThemeEnabled)
         if (!tabThemeEnabled) return
         applyTheme()
     }
 
     private fun applyTheme() {
+        WeLogger.i(TAG, "applyTheme: installing LauncherUI doOnCreate hook")
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
             try {
+                WeLogger.i(TAG, "LauncherUI doOnCreate fired, preparing tab backgrounds")
             val activity = thisObject.reflekt()
                 .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
                 .get()!! as Activity
@@ -186,6 +192,11 @@ object TabTheme : ClickableFeature() {
             val tabsAdapter = thisObject.reflekt()
                 .firstField { name = "mTabsAdapter" }
                 .get()!!
+            WeLogger.i(
+                TAG,
+                "LauncherUI fields: activity=" + activity.javaClass.name +
+                    ", pager=" + viewPager.javaClass.name,
+            )
 
             val currentTabState = mutableIntStateOf(0)
             tabsAdapter.reflekt()
@@ -236,9 +247,15 @@ object TabTheme : ClickableFeature() {
                     WeLogger.w(TAG, "add tab background overlay failed: " + (it.message ?: ""))
                 }
                 pageOverlayDrawables[page] = d
+                WeLogger.i(
+                    TAG,
+                    "tab bg #" + pos + " attached to " + page.javaClass.simpleName +
+                        " (alpha=" + d.alpha + ", size=" + page.width + "x" + page.height + ")",
+                )
             }
 
             fun decorateAllPages() {
+                WeLogger.i(TAG, "decorateAllPages: pager.childCount=" + pager.childCount)
                 for (i in 0 until pager.childCount) {
                     val child = pager.getChildAt(i)
                     val idx = pager.indexOfChild(child)
@@ -247,20 +264,41 @@ object TabTheme : ClickableFeature() {
             }
 
             decorateAllPages()
-
-            // Tab 页被新建 / 复用时补挂
-            runCatching {
-                pager.reflekt()
-                    .firstMethodOrNull { name = "addView"; parameterCount = 3 }
-                    ?.hookAfter {
-                        val child = args.getOrNull(0) as? View ?: return@hookAfter
-                        val container = thisObject as? ViewGroup ?: return@hookAfter
-                        val idx = container.indexOfChild(child)
-                        if (idx in 0..3) decoratePage(child, idx)
-                    }
-            }.onFailure {
-                WeLogger.w(TAG, "hook WxViewPager.addView failed: " + (it.message ?: ""))
+            // doOnCreate 时 ViewPager 往往还没把 4 个 page 加进来（走的是 addViewInLayout），
+            // 这里延时补几次，等布局完成后再挂一遍。
+            for (delay in longArrayOf(300L, 1200L, 3000L)) {
+                pager.postDelayed({ runCatching { decorateAllPages() } }, delay)
             }
+
+            // Tab 页被新建 / 复用时补挂。
+            // ViewPager 内部是通过 addViewInLayout 把 page 塞进来的，只 hook addView 抓不到，
+            // 所以两个入口都挂上。
+            fun onPageAttached(child: View?, container: ViewGroup?) {
+                if (child == null || container == null) return
+                val idx = container.indexOfChild(child)
+                if (idx in 0..3) {
+                    decoratePage(child, idx)
+                } else {
+                    WeLogger.i(TAG, "page attached at idx=" + idx + ", skip decorate")
+                }
+            }
+
+            var hooked = 0
+            for (spec in arrayOf("addView" to 3, "addViewInLayout" to 3, "addViewInLayout" to 4)) {
+                runCatching {
+                    val m = pager.reflekt()
+                        .firstMethodOrNull { name = spec.first; parameterCount = spec.second }
+                        ?: return@runCatching
+                    m.hookAfter {
+                        onPageAttached(args.getOrNull(0) as? View, thisObject as? ViewGroup)
+                    }
+                    hooked++
+                    WeLogger.i(TAG, "hooked " + spec.first + "/" + spec.second + "args")
+                }.onFailure {
+                    WeLogger.w(TAG, "hook " + spec.first + " failed: " + (it.message ?: ""))
+                }
+            }
+            WeLogger.i(TAG, "page attach hooks installed: " + hooked)
 
             // 切换 Tab 时补齐（应对页面重建后 tag 丢失）
             tabsAdapter.reflekt()
