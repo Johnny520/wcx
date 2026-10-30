@@ -191,7 +191,12 @@ object TabTheme : ClickableFeature() {
     private fun installBarBackgroundGuard() {
         if (barGuardInstalled) return
         barGuardInstalled = true
-        for (setterName in arrayOf("setBackgroundColor", "setBackground", "setBackgroundDrawable")) {
+        for (setterName in arrayOf(
+            "setBackgroundColor",
+            "setBackground",
+            "setBackgroundDrawable",
+            "setBackgroundResource",
+        )) {
             runCatching {
                 View::class.java.reflekt()
                     .firstMethodOrNull { name = setterName; parameterCount = 1 }
@@ -284,10 +289,13 @@ object TabTheme : ClickableFeature() {
                     }
                     group.addView(iv)
                     bgImages[pos] = iv
+                    val loc = IntArray(2)
+                    group.getLocationInWindow(loc)
                     WeLogger.i(
                         TAG,
                         "tab bg #" + pos + " added to " + group.javaClass.simpleName +
-                            " size=" + group.width + "x" + group.height,
+                            " size=" + group.width + "x" + group.height +
+                            " y=" + loc[1],
                     )
                 }
 
@@ -320,10 +328,15 @@ object TabTheme : ClickableFeature() {
                     }
                 }
 
+                // 切 Tab 时微信会更新标题栏内容，底色也可能被重设，这里再抠一次
                 tabsAdapter.reflekt()
                     .firstMethodOrNull { name = "onPageSelected"; parameterCount = 1 }
                     ?.hookAfter {
                         runCatching { decorateAll() }
+                        runCatching {
+                            val root = activity.window?.decorView as? ViewGroup
+                            if (root != null) makeTopBarsTransparent(root)
+                        }
                     }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
