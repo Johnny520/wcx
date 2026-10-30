@@ -300,6 +300,18 @@ object TabTheme : ClickableFeature() {
             }
             WeLogger.i(TAG, "page attach hooks installed: " + hooked)
 
+            // 最可靠的兜底时机：初始布局完成后 ViewPager 必会回调一次 onPageScrolled(0, 0f, 0)。
+            // addViewInLayout 万一抓不到，这里也能把 4 个 page 扫一遍。
+            tabsAdapter.reflekt()
+                .firstMethodOrNull { name = "onPageScrolled"; parameterCount = 3 }
+                ?.hookAfter {
+                    runCatching {
+                        if ((args.getOrNull(1) as? Float) == 0f) decorateAllPages()
+                    }.onFailure {
+                        WeLogger.w(TAG, "onPageScrolled decorate failed: " + (it.message ?: ""))
+                    }
+                }
+
             // 切换 Tab 时补齐（应对页面重建后 tag 丢失）
             tabsAdapter.reflekt()
                 .firstMethod { name = "onPageSelected" }
