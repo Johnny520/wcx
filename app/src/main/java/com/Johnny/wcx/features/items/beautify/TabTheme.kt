@@ -147,6 +147,31 @@ object TabTheme : ClickableFeature() {
         applyTheme()
     }
 
+    /**
+     * 把标题栏（ActionBar 及其内部容器）的底色设成透明，露出下面 Tab 页里的背景图。
+     * Tab 页容器实测是全屏 1080x2400，背景其实已经铺满；只是被标题栏这块不透明底色盖住。
+     * 抠掉底色后，标题文字与图标仍在自己那一层，背景就能透上来。
+     */
+    private fun makeTopBarsTransparent(root: ViewGroup, depth: Int = 0) {
+        if (depth > 12) return
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            val cn = child.javaClass.name
+            val looksLikeBar = cn.contains("ActionBar") || cn.contains("Toolbar") ||
+                cn.endsWith("MMActionBar") || cn.contains("TitleBar")
+            if (looksLikeBar) {
+                runCatching { child.background = null }
+                if (child is ViewGroup) {
+                    for (j in 0 until child.childCount) {
+                        runCatching { child.getChildAt(j).background = null }
+                    }
+                }
+                WeLogger.i(TAG, "title bar made transparent: " + cn)
+            }
+            if (child is ViewGroup) makeTopBarsTransparent(child, depth + 1)
+        }
+    }
+
     private fun applyTheme() {
         WeLogger.i(TAG, "applyTheme: installing LauncherUI doOnCreate hook")
         WeMainActivityBeautifyApi.methodDoOnCreate.hookAfter {
@@ -154,6 +179,9 @@ object TabTheme : ClickableFeature() {
                 val activity = thisObject.reflekt()
                     .firstField { type = "com.tencent.mm.ui.MMFragmentActivity" }
                     .get()!! as Activity
+                val viewPager = thisObject.reflekt()
+                    .firstField { name = "mViewPager" }
+                    .get()!! as ViewGroup
                 val tabsAdapter = thisObject.reflekt()
                     .firstField { name = "mTabsAdapter" }
                     .get()!!
@@ -162,33 +190,30 @@ object TabTheme : ClickableFeature() {
                 if (transparentStatusBar) applyImmersiveStatusBar(activity)
 
                 val decor = activity.window?.decorView as? ViewGroup ?: return@hookAfter
-                val hostName = activity.javaClass.name
 
-                // 背景容器挂在 decorView 最上层：状态栏、标题栏、内容区一律覆盖。
-                // 挂在 Tab 页容器里只能覆盖内容区，标题栏（ViewPager 之上的盖层）会留白；
-                // 挂在这里才是整屏。代价是聊天页窗口透明时会被看到，所以下面用
-                // onPostResume 精确控制可见性来规避。
-                val containerTag = OVERLAY_TAG_PREFIX + "container"
-                val container = decor.findViewWithTag<android.widget.FrameLayout>(containerTag)
-                    ?: android.widget.FrameLayout(activity).apply {
-                        tag = containerTag
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
-                        isClickable = false
-                        isFocusable = false
-                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    }.also { decor.addView(it) }
+                runCatching { makeTopBarsTransparent(decor) }
 
                 bgImages.clear()
-                for (tabIndex in 0..3) {
-                    val file = getTabBackgroundFile(tabIndex)
-                    if (!file.exists()) continue
-                    val iv = ImageView(activity).apply {
-                        tag = OVERLAY_TAG_PREFIX + "tab_" + tabIndex
+
+                fun decoratePage(page: View, pos: Int) {
+                    val group = page as? ViewGroup ?: return
+                    val tagName = OVERLAY_TAG_PREFIX + "bg"
+                    val file = getTabBackgroundFile(pos)
+                    val existing = group.findViewWithTag<ImageView>(tagName)
+                    if (!file.exists()) {
+                        if (existing != null) group.removeView(existing)
+                        bgImages.remove(pos)
+                        return
+                    }
+                    if (existing != null) {
+                        existing.alpha = opacity.coerceIn(0f, 1f)
+                        bgImages[pos] = existing
+                        return
+                    }
+                    val iv = ImageView(group.context).apply {
+                        tag = tagName
                         scaleType = ImageView.ScaleType.CENTER_CROP
-                        layoutParams = android.widget.FrameLayout.LayoutParams(
+                        layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
@@ -199,124 +224,53 @@ object TabTheme : ClickableFeature() {
                             diskCachePolicy(CachePolicy.DISABLED)
                         }
                         alpha = opacity.coerceIn(0f, 1f)
-                        visibility = View.GONE
                         isClickable = false
                         isFocusable = false
                         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                     }
-                    container.addView(iv)
-                    bgImages[tabIndex] = iv
-                }
-                WeLogger.i(TAG, "bg container on decorView, images=" + bgImages.size)
-
-                fun showTab(pos: Int) {
-                    bgImages.forEach { (i, v) ->
-                        v.visibility = if (i == pos) View.VISIBLE else View.GONE
-                    }
-                }
-
-                val currentTabState = mutableIntStateOf(0)
-                tabsAdapter.reflekt()
-                    .firstMethod { name = "onPageScrolled" }
-                    .hookBefore {
-                        val position = args[0] as Int
-                        val positionOffset = args[1] as Float
-                        if (positionOffset == 0f && currentTabState.intValue != position) {
-                            currentTabState.intValue = position
-                            showTab(position)
-                        }
-                    }
-                showTab(0)
-
-                // 只在宿主（LauncherUI）处于前台时显示背景。
-                //
-                // 只在「当前 Activity 是不是 LauncherUI」这一个条件上做判断，任何其它 Activity
-                // （聊天页、朋友圈、设置……）一律隐藏。这样聊天页即便窗口透明也看不到背景。
-                //
-                // 同时挂 onResume 和 onPostResume：
-                // - onResume 时机更早（新 Activity 绘制前就执行），能避免一帧的透出；
-                // - onPostResume 更靠后，作为兜底（个别 Activity 会在中间重设窗口状态）。
-                // 两者都只做「设可见性」，语义一致，不会互相打架。
-                fun applyVisibility(a: Activity) {
-                    val isHost = a.javaClass.name == hostName
-                    container.visibility = if (isHost) View.VISIBLE else View.GONE
+                    group.addView(iv)
+                    bgImages[pos] = iv
                     WeLogger.i(
                         TAG,
-                        "activity resumed: " + a.javaClass.name + " -> bg " +
-                            (if (isHost) "VISIBLE" else "GONE"),
+                        "tab bg #" + pos + " added to " + group.javaClass.simpleName +
+                            " size=" + group.width + "x" + group.height,
                     )
                 }
 
-                // 最可靠的一重：窗口焦点。
-                // LauncherUI 一旦失焦，说明它被别的 Activity（聊天页等）盖住了，
-                // 这时无论聊天页窗口是否透明，都必须把背景收起来。
-                // 这个信号比 onResume/onPostResume 更贴近「用户眼下能不能看到我」，
-                // 也是持续隐藏（而不是只压一帧）的关键。
-                runCatching {
-                    Activity::class.java.reflekt()
-                        .firstMethodOrNull { name = "onWindowFocusChanged"; parameterCount = 1 }
-                        ?.hookAfter {
-                            val a = thisObject as? Activity ?: return@hookAfter
-                            if (a.javaClass.name != hostName) return@hookAfter
-                            val hasFocus = args.getOrNull(0) as? Boolean ?: return@hookAfter
-                            container.visibility = if (hasFocus) View.VISIBLE else View.GONE
-                            WeLogger.i(
-                                TAG,
-                                "LauncherUI focus=" + hasFocus + " -> bg " +
-                                    (if (hasFocus) "VISIBLE" else "GONE"),
-                            )
-                        }
-                    WeLogger.i(TAG, "hooked Activity.onWindowFocusChanged")
-                }.onFailure {
-                    WeLogger.w(TAG, "hook onWindowFocusChanged failed: " + (it.message ?: ""))
+                fun decorateAll() {
+                    for (i2 in 0 until viewPager.childCount) {
+                        val child = viewPager.getChildAt(i2)
+                        val idx = viewPager.indexOfChild(child)
+                        if (idx in 0..3) decoratePage(child, idx)
+                    }
                 }
 
-                // 第三重（最直接）：只要创建的是聊天页，立刻把背景隐藏。
-                // 不依赖 onResume / onPostResume 的时机，也不依赖它走哪条父类链。
-                // ChattingUI 有 26 个变体，全部继承它，用 isInstance 一次覆盖。
-                val chattingClass = runCatching {
-                    Class.forName(
-                        "com.tencent.mm.ui.chatting.ChattingUI",
-                        false,
-                        activity.javaClass.classLoader,
-                    )
-                }.getOrNull()
-                if (chattingClass == null) {
-                    WeLogger.w(TAG, "ChattingUI class not found, onCreate guard disabled")
-                } else {
+                decorateAll()
+                for (delay in longArrayOf(300L, 1200L, 3000L)) {
+                    viewPager.postDelayed({ runCatching { decorateAll() } }, delay)
+                }
+                WeLogger.i(TAG, "bg attached to pages, count=" + bgImages.size)
+
+                for (spec in arrayOf("addView" to 3, "addViewInLayout" to 3, "addViewInLayout" to 4)) {
                     runCatching {
-                        Activity::class.java.reflekt()
-                            .firstMethodOrNull { name = "onCreate"; parameterCount = 1 }
+                        viewPager.reflekt()
+                            .firstMethodOrNull { name = spec.first; parameterCount = spec.second }
                             ?.hookAfter {
-                                val a = thisObject as? Activity ?: return@hookAfter
-                                if (chattingClass.isInstance(a)) {
-                                    container.visibility = View.GONE
-                                    WeLogger.i(
-                                        TAG,
-                                        "chatting activity created: " + a.javaClass.name +
-                                            " -> bg GONE",
-                                    )
+                                val child = args.getOrNull(0) as? View
+                                val container = thisObject as? ViewGroup
+                                if (child != null && container != null) {
+                                    val idx = container.indexOfChild(child)
+                                    if (idx in 0..3) decoratePage(child, idx)
                                 }
                             }
-                        WeLogger.i(TAG, "hooked Activity.onCreate for ChattingUI guard")
-                    }.onFailure {
-                        WeLogger.w(TAG, "hook onCreate guard failed: " + (it.message ?: ""))
                     }
                 }
 
-                for (methodName in arrayOf("onResume", "onPostResume")) {
-                    runCatching {
-                        Activity::class.java.reflekt()
-                            .firstMethodOrNull { name = methodName; parameterCount = 0 }
-                            ?.hookAfter {
-                                val a = thisObject as? Activity ?: return@hookAfter
-                                applyVisibility(a)
-                            }
-                        WeLogger.i(TAG, "hooked Activity." + methodName)
-                    }.onFailure {
-                        WeLogger.w(TAG, "hook Activity." + methodName + " failed: " + (it.message ?: ""))
+                tabsAdapter.reflekt()
+                    .firstMethodOrNull { name = "onPageSelected"; parameterCount = 1 }
+                    ?.hookAfter {
+                        runCatching { decorateAll() }
                     }
-                }
             } catch (e: Throwable) {
                 WeLogger.e(TAG, "applyTheme hookAfter 异常", e)
             }
