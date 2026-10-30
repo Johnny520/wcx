@@ -93,6 +93,15 @@ object WeMessageApi : ApiFeature(), IResolveDex {
     val classNetSceneSendMsg by dexClass {
         matcher {
             methods {
+                // 微信 8.0.79+ 把 "MicroMsg.NetSceneSendMsg" 从 J(I)V 挪到了 doScene，
+                // 原来「paramCount=1 且两串同方法」的组合在 8.0.79/8.0.80 上不再成立，
+                // 导致整个类定位失败 -> sendText/复读/抢红包自动回复统一返回 false。
+                // 首选锚点改为 doScene + 两串同时存在（8.0.80 实测唯一命中 Lq61/s0）；
+                // 旧版形态保留作兜底。
+                add {
+                    name = "doScene"
+                    usingEqStrings("MicroMsg.NetSceneSendMsg", "Req MsgSource %s")
+                }
                 add {
                     paramCount = 1
                     usingStrings("MicroMsg.NetSceneSendMsg", "markMsgFailed for id:%d")
