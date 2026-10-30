@@ -99,9 +99,14 @@ object TabTheme : ClickableFeature() {
     /** Tab 页背景图片缓存，避免每次重建都重新解码（图片通常几 MB）。 */
     private val tabBgCache = HashMap<String, android.graphics.drawable.BitmapDrawable>()
 
-    /** 记录每个 Tab 页当前叠加的 overlay drawable，便于换图 / 撤图时精确移除。 */
+    /** 记录每个 Tab 页当前要绘制的背景图。 */
     private val pageOverlayDrawables =
         java.util.IdentityHashMap<View, android.graphics.drawable.BitmapDrawable>()
+
+    /** 已经 hook 过 dispatchDraw 的容器类，避免重复挂。 */
+    private val dispatchHookedClasses = java.util.Collections.newSetFromMap(
+        java.util.WeakHashMap<Class<*>, Boolean>(),
+    )
 
     private val themesDir by lazy { (KnownPaths.moduleData / "tab_themes").createDirsSafe() }
     private val currentThemeDir by lazy { (themesDir / "current").createDirsSafe() }
@@ -149,6 +154,42 @@ object TabTheme : ClickableFeature() {
      * 解码某个 Tab 的背景图。只在 LauncherUI 首次创建时跑一次（之后走缓存），
      * 用 inSampleSize 降采样避免大图占太多内存。
      */
+    /**
+     * 给某个 Tab 页容器的类挂 dispatchDraw，在子 View 绘制完成后把背景图补画上去。
+     *
+     * 为什么不用 ViewOverlay：微信 Tab 页容器是 FrostedContentView，它重写了 dispatchDraw
+     * 做磨砂模糊（用 saveLayer 做离屏绘制）。ViewOverlay 是 View.draw() 的最后一步，
+     * 会被它的离屏/裁剪吃掉——表现为图确实挂上了（日志有 attached，尺寸也正常）却画不出来。
+     * 直接在 dispatchDraw 之后补画，稳定且层级正确（在内容之上、不影响交互）。
+     */
+    private fun ensureDispatchHook(pageClass: Class<*>) {
+        if (!dispatchHookedClasses.add(pageClass)) return
+        runCatching {
+            pageClass.reflekt()
+                .firstMethodOrNull { name = "dispatchDraw"; parameterCount = 1 }
+                ?.hookAfter {
+                    val v = thisObject as? View ?: return@hookAfter
+                    val canvas = args.getOrNull(0) as? android.graphics.Canvas ?: return@hookAfter
+                    val d = pageOverlayDrawables[v] ?: return@hookAfter
+                    if (v.width <= 0 || v.height <= 0) return@hookAfter
+                    var saved = false
+                    try {
+                        val cnt = canvas.save()
+                        saved = true
+                        d.setBounds(0, 0, v.width, v.height)
+                        d.draw(canvas)
+                        canvas.restoreToCount(cnt)
+                        saved = false
+                    } finally {
+                        if (saved) runCatching { canvas.restore() }
+                    }
+                }
+            WeLogger.i(TAG, "dispatchDraw hooked: " + pageClass.name)
+        }.onFailure {
+            WeLogger.w(TAG, "hook dispatchDraw failed for " + pageClass.name + ": " + (it.message ?: ""))
+        }
+    }
+
     private fun loadTabBackgroundDrawable(
         context: android.content.Context,
         tabIndex: Int,
@@ -232,21 +273,17 @@ object TabTheme : ClickableFeature() {
                 val prev = pageOverlayDrawables.remove(page)
                 val d = if (file.exists()) loadTabBackgroundDrawable(page.context, pos) else null
                 if (d == null) {
-                    if (prev != null) runCatching { page.overlay.remove(prev) }
+                    if (prev != null) {
+                        pageOverlayDrawables.remove(page)
+                        page.invalidate()
+                    }
                     return
                 }
-                // 同一张图已经叠着就别动，避免切 Tab 时反复 remove/add 造成闪烁
-                if (prev === d) {
-                    d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
-                    pageOverlayDrawables[page] = d
-                    return
-                }
-                if (prev != null) runCatching { page.overlay.remove(prev) }
                 d.alpha = (opacity.coerceIn(0f, 1f) * 255).toInt()
-                runCatching { page.overlay.add(d) }.onFailure {
-                    WeLogger.w(TAG, "add tab background overlay failed: " + (it.message ?: ""))
-                }
                 pageOverlayDrawables[page] = d
+                // 给这个容器的类挂 dispatchDraw，之后每一次重绘都会把图补画上去
+                ensureDispatchHook(page.javaClass)
+                page.invalidate()
                 WeLogger.i(
                     TAG,
                     "tab bg #" + pos + " attached to " + page.javaClass.simpleName +
