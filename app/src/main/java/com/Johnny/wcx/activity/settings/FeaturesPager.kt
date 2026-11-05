@@ -2,6 +2,11 @@ package com.Johnny.wcx.activity.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.graphics.Color
+import com.Johnny.wcx.ui.style.RoundIconBox
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -51,6 +56,13 @@ import top.yukonga.miuix.kmp.basic.Switch
 //  Page 1 — Features (search bar + category list)
 // ---------------------------------------------------------------------------
 
+private val CATEGORY_GRADIENTS = listOf(
+    WxPalette.GradBlue,
+    WxPalette.GradMint,
+    WxPalette.GradPurple,
+    WxPalette.GradPink,
+)
+
 @Composable
 fun FeaturesPager(onOpenCategory: (String) -> Unit) {
     val showAprilFools = remember { LocalDate.now().isAprilFools }
@@ -74,6 +86,14 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
         }
     }
     val switchStates = remember { mutableStateMapOf<String, Boolean>() }
+
+    // 每个分类的启用概况（已启用 / 总数），用于分类卡片副标题
+    val categoryStat = remember {
+        FEATURE_CATEGORIES.associate { entry ->
+            val all = FeaturesProvider.ALL_HOOK_ITEMS.filter { entry.first in it.categories }
+            entry.first to (all.count { WePrefs.getBoolOrFalse(it.name) } to all.size)
+        }
+    }
 
     // A back press while searching clears the query first (after the IME's own
     // back has dismissed the keyboard) rather than exiting the module settings.
@@ -161,24 +181,46 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
             }
 
             item {
-                Card(
-                    modifier = Modifier
-                        .padding(top = 12.dp)
-                        .fillMaxWidth()
+                Column(
+                    modifier = Modifier.padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    FEATURE_CATEGORIES.forEach { (name, icon) ->
-                        ArrowPreference(
-                            title = name,
-                            startAction = {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    tint = MiuixTheme.colorScheme.onBackground,
-                                )
-                            },
-                            onClick = { onOpenCategory(name) },
-                        )
+                    FEATURE_CATEGORIES.chunked(2).forEachIndexed { rowIndex, pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            pair.forEachIndexed { colIndex, entry ->
+                                val name = entry.first
+                                val icon = entry.second
+                                val stat = categoryStat[name]
+                                SoftCard(
+                                    modifier = Modifier.weight(1f),
+                                    gradient = CATEGORY_GRADIENTS[(rowIndex * 2 + colIndex) % CATEGORY_GRADIENTS.size],
+                                    onClick = { onOpenCategory(name) },
+                                ) {
+                                    RoundIconBox(
+                                        icon = icon,
+                                        tint = WxPalette.Primary,
+                                        background = Color.White,
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = name,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF1F2A24),
+                                    )
+                                    Text(
+                                        text = if (stat != null && stat.second > 0) {
+                                            "已启用 ${stat.first}/${stat.second}"
+                                        } else {
+                                            "暂无功能"
+                                        },
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF5F6B64),
+                                    )
+                                }
+                            }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -272,16 +314,23 @@ fun CategoryDetailScreen(
 
         if (isMasterSwitchCategory) {
             item {
-                Card(
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .fillMaxWidth(),
-                ) {
-                    ArrowPreference(
-                        title = "密友功能诊断",
-                        startAction = {},
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    SoftCard(
+                        gradient = WxPalette.GradPink,
                         onClick = { onOpenHiddenContactsDiagnostics() },
-                    )
+                    ) {
+                        Text(
+                            text = "密友功能诊断",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF1F2A24),
+                        )
+                        Text(
+                            text = "检查隐藏面开关与关键锚点状态",
+                            fontSize = 12.sp,
+                            color = Color(0xFF5F6B64),
+                        )
+                    }
                 }
             }
         }
