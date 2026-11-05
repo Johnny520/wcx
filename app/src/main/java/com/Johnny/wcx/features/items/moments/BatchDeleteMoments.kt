@@ -661,7 +661,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 从 SnsInfo.content 的 XML 里提取可读摘要。
      *
      * 微信把朋友圈内容以 TimelineObject XML 存在 content 列：
-
      *   <contentDesc>文字内容</contentDesc>
      *   <contentObject><contentStyle>2</contentStyle><title/>...</contentObject>
      *   <mediaList><media>…</media></mediaList>
@@ -671,8 +670,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 并按 contentStyle / media 数量补一个类型前缀。
      */
     private fun summarize(raw: String?, bodyText: String = ""): String {
-        val style = xmlTag(raw, "contentStyle").toIntOrNull()
-        val mediaCount = runCatching { Regex("<media>").findAll(raw).count() }.getOrDefault(0)
+        val xml = raw ?: ""
+        val style = xmlTag(xml, "contentStyle").toIntOrNull()
+        val mediaCount = runCatching { Regex("<media>").findAll(xml).count() }.getOrDefault(0)
         val kind = when (style) {
             1 -> "文字"
             2 -> if (mediaCount > 1) "图片×$mediaCount" else "图片"
@@ -683,7 +683,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
         val body = bodyText.ifBlank {
             listOf("ContentDesc", "contentDesc", "title", "description")
-                .map { xmlTag(raw ?: "", it) }
+                .map { xmlTag(xml, it) }
                 .firstOrNull { it.isNotBlank() }
                 .orEmpty()
         }.replace(Regex("\\s+"), " ")
