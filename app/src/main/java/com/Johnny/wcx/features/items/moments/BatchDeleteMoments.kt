@@ -7,6 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -30,6 +33,13 @@ import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.content.DefaultColumn
 import com.Johnny.wcx.ui.content.TextButton
+import com.Johnny.wcx.ui.style.DangerBanner
+import com.Johnny.wcx.ui.style.SectionLabel
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.StatusPill
+import com.Johnny.wcx.ui.style.StyleRow
+import com.Johnny.wcx.ui.style.StyleTitle
+import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
@@ -503,107 +513,121 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             var dailyLimit by remember { mutableStateOf(dailyLimitInput) }
 
             AlertDialogContent(
-                title = { Text("批量删除朋友圈") },
+                title = { StyleTitle("批量删除朋友圈") },
                 text = {
                     DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
-                        // ── 风险提示（置顶）───────────────────────────────────
-                        ListItem(
-                            headlineContent = { Text("⚠ 使用前必读") },
-                            supportingContent = {
-                                Text(
-                                    "· 微信对「短时间内大量删除朋友圈」有风控：会出现删除失败、" +
-                                        "朋友圈发布/查看受限等限制。\n" +
-                                        "· 本功能默认 5 秒/条、每 20 条停 60 秒、每日上限 200 条，" +
-                                        "请勿把间隔调到 1 秒以下或单日删除数百条以上。\n" +
-                                        "· 删除不可恢复，不会进入回收站。\n" +
-                                        "· 首次使用需要先手动删除一条朋友圈，用于学习删除参数。"
+
+                        DangerBanner(
+                            title = "⚠ 使用前必读",
+                            message = "· 微信对「短时间内大量删除朋友圈」有风控：会出现删除失败、" +
+                                "朋友圈发布/查看受限等限制。\n" +
+                                "· 默认 5 秒/条、每 20 条停 60 秒、每日上限 200 条，请勿把间隔调到 1 秒以下。\n" +
+                                "· 删除不可恢复，不会进入回收站。\n" +
+                                "· 首次使用需先手动删除一条朋友圈，用于学习删除参数。"
+                        )
+
+                        SoftCard(gradient = WxPalette.GradMint) {
+                            SectionLabel("删除参数")
+                            StyleRow(
+                                icon = Icons.Filled.Info,
+                                title = "opType（自动学习）",
+                                subtitle = if (learnedOpType >= 0) "已学习：opType=$learnedOpType"
+                                else "尚未学习：请先手动删除一条自己的朋友圈",
+                                trailing = {
+                                    StatusPill(
+                                        text = if (learnedOpType >= 0) "已就绪" else "待学习",
+                                        color = if (learnedOpType >= 0) WxPalette.Primary else WxPalette.Warning,
+                                        background = if (learnedOpType >= 0) WxPalette.PrimarySoft else WxPalette.WarningSoft,
+                                    )
+                                },
+                            )
+                        }
+
+                        SoftCard(gradient = WxPalette.GradBlue) {
+                            SectionLabel("筛选范围")
+                            StyleRow(
+                                icon = Icons.Filled.Settings,
+                                title = "按年份筛选",
+                                subtitle = "只删除指定年份区间内的朋友圈",
+                                trailing = {
+                                    Switch(
+                                        checked = mode == FilterMode.BY_YEAR,
+                                        onCheckedChange = { mode = FilterMode.BY_YEAR },
+                                    )
+                                },
+                            )
+                            if (mode == FilterMode.BY_YEAR) {
+                                TextField(
+                                    value = yearFrom,
+                                    onValueChange = { yearFrom = it.filter { c -> c.isDigit() }.take(4) },
+                                    label = { Text("起始年份（含）") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                )
+                                TextField(
+                                    value = yearTo,
+                                    onValueChange = { yearTo = it.filter { c -> c.isDigit() }.take(4) },
+                                    label = { Text("结束年份（含）") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
                                 )
                             }
-                        )
-                        // ── 学习状态 ─────────────────────────────────────────
-                        ListItem(
-                            headlineContent = { Text("删除参数（自动学习）") },
-                            supportingContent = {
-                                Text(
-                                    if (learnedOpType >= 0) "已学习：opType=$learnedOpType"
-                                    else "尚未学习：请先手动删除一条自己的朋友圈，再回到这里"
-                                )
-                            }
-                        )
-                        // ── 筛选模式 ─────────────────────────────────────────
-                        ListItem(
-                            modifier = Modifier.clickable { mode = FilterMode.BY_YEAR },
-                            trailingContent = {
-                                Switch(checked = mode == FilterMode.BY_YEAR, onCheckedChange = { mode = FilterMode.BY_YEAR })
-                            },
-                            headlineContent = { Text("按年份筛选") },
-                            supportingContent = { Text("只删除指定年份区间内的朋友圈") },
-                        )
-                        if (mode == FilterMode.BY_YEAR) {
-                            TextField(
-                                value = yearFrom,
-                                onValueChange = { yearFrom = it.filter { c -> c.isDigit() }.take(4) },
-                                label = { Text("起始年份（含）") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
+                            StyleRow(
+                                icon = Icons.Filled.Settings,
+                                title = "按数量筛选",
+                                subtitle = "从最新的开始，删除指定条数",
+                                trailing = {
+                                    Switch(
+                                        checked = mode == FilterMode.BY_COUNT,
+                                        onCheckedChange = { mode = FilterMode.BY_COUNT },
+                                    )
+                                },
                             )
                             TextField(
-                                value = yearTo,
-                                onValueChange = { yearTo = it.filter { c -> c.isDigit() }.take(4) },
-                                label = { Text("结束年份（含）") },
+                                value = limit,
+                                onValueChange = { limit = it.filter { c -> c.isDigit() }.take(5) },
+                                label = { Text("最多删除条数") },
+                                supportingText = { Text("本次任务上限，实际还受每日上限约束") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                             )
                         }
-                        ListItem(
-                            modifier = Modifier.clickable { mode = FilterMode.BY_COUNT },
-                            trailingContent = {
-                                Switch(checked = mode == FilterMode.BY_COUNT, onCheckedChange = { mode = FilterMode.BY_COUNT })
-                            },
-                            headlineContent = { Text("按数量筛选") },
-                            supportingContent = { Text("从最新的开始，删除指定条数") },
-                        )
-                        TextField(
-                            value = limit,
-                            onValueChange = { limit = it.filter { c -> c.isDigit() }.take(5) },
-                            label = { Text("最多删除条数") },
-                            supportingContent = { Text("本次任务的上限，实际还会受每日上限约束") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                        )
-                        // ── 节流参数 ─────────────────────────────────────────
-                        TextField(
-                            value = interval,
-                            onValueChange = { interval = it.filter { c -> c.isDigit() }.take(6) },
-                            label = { Text("每条间隔（毫秒）") },
-                            supportingContent = { Text("建议 ≥ 3000，过低容易触发风控") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                        )
-                        TextField(
-                            value = batchSize,
-                            onValueChange = { batchSize = it.filter { c -> c.isDigit() }.take(3) },
-                            label = { Text("每批条数") },
-                            supportingContent = { Text("删除多少条后暂停一次") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                        )
-                        TextField(
-                            value = batchPause,
-                            onValueChange = { batchPause = it.filter { c -> c.isDigit() }.take(7) },
-                            label = { Text("批次暂停（毫秒）") },
-                            supportingContent = { Text("建议 ≥ 60000") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                        )
-                        TextField(
-                            value = dailyLimit,
-                            onValueChange = { dailyLimit = it.filter { c -> c.isDigit() }.take(4) },
-                            label = { Text("每日上限（条）") },
-                            supportingContent = { Text("今日已删 ${todayCount()} 条") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                        )
+
+                        SoftCard(gradient = WxPalette.GradPurple) {
+                            SectionLabel("节流参数（建议保持默认）")
+                            TextField(
+                                value = interval,
+                                onValueChange = { interval = it.filter { c -> c.isDigit() }.take(6) },
+                                label = { Text("每条间隔（毫秒）") },
+                                supportingText = { Text("建议 ≥ 3000，过低容易触发风控") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                            )
+                            TextField(
+                                value = batchSize,
+                                onValueChange = { batchSize = it.filter { c -> c.isDigit() }.take(3) },
+                                label = { Text("每批条数") },
+                                supportingText = { Text("删除多少条后暂停一次") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                            )
+                            TextField(
+                                value = batchPause,
+                                onValueChange = { batchPause = it.filter { c -> c.isDigit() }.take(7) },
+                                label = { Text("批次暂停（毫秒）") },
+                                supportingText = { Text("建议 ≥ 60000") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                            )
+                            TextField(
+                                value = dailyLimit,
+                                onValueChange = { dailyLimit = it.filter { c -> c.isDigit() }.take(4) },
+                                label = { Text("每日上限（条）") },
+                                supportingText = { Text("今日已删 ${todayCount()} 条") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                            )
+                        }
                     }
                 },
                 confirmButton = {
