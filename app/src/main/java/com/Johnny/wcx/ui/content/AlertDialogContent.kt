@@ -19,6 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import com.Johnny.wcx.ui.style.WxPalette
 
 @Composable
 fun AlertDialogContent(
@@ -29,15 +34,19 @@ fun AlertDialogContent(
     confirmButton: (@Composable () -> Unit)? = null,
     dismissButton: (@Composable () -> Unit)? = null
 ) {
+    // 全局弹窗外壳：大圆角 + 极浅马卡龙渐变，所有功能弹窗共用一套观感。
     Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        tonalElevation = 6.dp,
+        shape = RoundedCornerShape(24.dp),
+        color = Color.Transparent,
+        tonalElevation = 0.dp,
         modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier
+                .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFF4FAF7))))
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -56,7 +65,10 @@ fun AlertDialogContent(
                     val customStyle = MaterialTheme.typography.headlineSmall.copy(
                         fontWeight = FontWeight.Bold
                     )
-                    CompositionLocalProvider(LocalTextStyle provides customStyle) {
+                    CompositionLocalProvider(
+                        LocalTextStyle provides customStyle,
+                        LocalContentColor provides WxPalette.Primary,
+                    ) {
                         it()
                     }
                 }
