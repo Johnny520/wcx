@@ -46,6 +46,8 @@ import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.utils.AppUpdater
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.UpdateResult
@@ -258,7 +260,7 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
                     text = "WCX",
                     fontSize = 40.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = WxPalette.Primary,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -294,6 +296,7 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
                     },
                     value = enabledCount.toString(),
                     label = "已启用功能",
+                    gradient = WxPalette.GradBlue,
                     onClick = onOpenFeatures,
                 )
                 CountCard(
@@ -308,6 +311,7 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
                     },
                     value = totalCount.toString(),
                     label = "全部功能",
+                    gradient = WxPalette.GradMint,
                     onClick = onOpenFeatures,
                 )
             }
@@ -383,15 +387,11 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
         if (isDark) Color(0xFF4A90FF) else Color(0xFF2563EB)
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
+    SoftCard(
+        gradient = WxPalette.GradMint,
+        contentPadding = 18,
         onClick = { openLsposedManager(context) },
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp)
-        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -460,7 +460,6 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
                 }
             }
         }
-    }
 }
 
 @Composable
@@ -486,39 +485,33 @@ private fun CountCard(
     icon: @Composable () -> Unit,
     value: String,
     label: String,
+    gradient: List<Color>,
     onClick: () -> Unit,
 ) {
-    Card(
+    SoftCard(
         modifier = modifier,
+        gradient = gradient,
         onClick = onClick,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.Start,
+        Box(
+            modifier = Modifier.size(40.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier.size(40.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                icon()
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = value,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Bold,
-                color = MiuixTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = label,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
+            icon()
         }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = value,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF1F2A24),
+        )
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF5F6B64),
+        )
     }
 }
 

@@ -1,6 +1,7 @@
 package com.Johnny.wcx.ui.style
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,10 +70,12 @@ fun SoftCard(
     modifier: Modifier = Modifier,
     gradient: List<Color> = WxPalette.GradPlain,
     contentPadding: Int = 16,
+    onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().then(clickModifier),
         shape = RoundedCornerShape(WxPalette.CardRadius),
         color = Color.Transparent,
         tonalElevation = 0.dp,
