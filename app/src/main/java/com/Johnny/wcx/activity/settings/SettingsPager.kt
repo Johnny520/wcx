@@ -182,7 +182,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "界面", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
-                gradient = WxPalette.GradMint,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -194,7 +193,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "微信主题", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
-                gradient = WxPalette.GradBlue,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -211,7 +209,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "调试", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
-                gradient = WxPalette.GradPurple,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -240,7 +237,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "兼容", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
-                gradient = WxPalette.GradPink,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -269,7 +265,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "配置", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
-                gradient = WxPalette.GradMint,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -298,7 +293,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "更新", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
-                gradient = WxPalette.GradBlue,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -326,7 +320,6 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         item {
             MiuixSmallTitle(text = "关于", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
-                gradient = WxPalette.GradPurple,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -424,7 +417,6 @@ private fun ProfileCard() {
     }
 
     SoftCard(
-        gradient = WxPalette.GradPink,
         contentPadding = 0,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -1396,7 +1388,6 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
 
         item {
             SoftCard(
-                gradient = WxPalette.GradMint,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -1414,7 +1405,6 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         item {
             Spacer(Modifier.height(12.dp))
             SoftCard(
-                gradient = WxPalette.GradBlue,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -1459,7 +1449,6 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         item {
             Spacer(Modifier.height(12.dp))
             SoftCard(
-                gradient = WxPalette.GradPurple,
                 contentPadding = 0,
                 modifier = Modifier.fillMaxWidth(),
             ) {

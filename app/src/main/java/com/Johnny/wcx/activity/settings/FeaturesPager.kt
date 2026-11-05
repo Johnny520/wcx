@@ -50,6 +50,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.constants.Preferences
 import top.yukonga.miuix.kmp.basic.Switch
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.Johnny.wcx.ui.style.SoftDivider
 
 
 // ---------------------------------------------------------------------------
@@ -180,47 +189,31 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                 }
             }
 
+            // 分类列表：一张白卡内多行 + 细分隔线（iOS 分组列表）
             item {
+                val shape = RoundedCornerShape(18.dp)
                 Column(
-                    modifier = Modifier.padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .padding(top = 10.dp)
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(WxPalette.cardBackground())
+                        .border(1.dp, WxPalette.cardBorder(), shape),
                 ) {
-                    FEATURE_CATEGORIES.chunked(2).forEachIndexed { rowIndex, pair ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            pair.forEachIndexed { colIndex, entry ->
-                                val name = entry.first
-                                val icon = entry.second
-                                val stat = categoryStat[name]
-                                SoftCard(
-                                    modifier = Modifier.weight(1f),
-                                    gradient = CATEGORY_GRADIENTS[(rowIndex * 2 + colIndex) % CATEGORY_GRADIENTS.size],
-                                    onClick = { onOpenCategory(name) },
-                                ) {
-                                    RoundIconBox(
-                                        icon = icon,
-                                        tint = WxPalette.Primary,
-                                        background = Color.White,
-                                    )
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = name,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF1F2A24),
-                                    )
-                                    Text(
-                                        text = if (stat != null && stat.second > 0) {
-                                            "已启用 ${stat.first}/${stat.second}"
-                                        } else {
-                                            "暂无功能"
-                                        },
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF5F6B64),
-                                    )
-                                }
-                            }
-                            if (pair.size == 1) Spacer(Modifier.weight(1f))
-                        }
+                    FEATURE_CATEGORIES.forEachIndexed { index, entry ->
+                        val name = entry.first
+                        val stat = categoryStat[name]
+                        CategoryRow(
+                            icon = entry.second,
+                            title = name,
+                            subtitle = if (stat != null && stat.second > 0) {
+                                "已启用 ${stat.first}/${stat.second}"
+                            } else {
+                                "暂无功能"
+                            },
+                            onClick = { onOpenCategory(name) },
+                        )
+                        if (index != FEATURE_CATEGORIES.lastIndex) SoftDivider()
                     }
                 }
             }
@@ -233,6 +226,57 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
 // ---------------------------------------------------------------------------
 //  Category detail (replaces CategorySettingsScreen)
 // ---------------------------------------------------------------------------
+
+/** 分类行：圆角图标 + 分类名 + 启用概况 + 右箭头。 */
+@Composable
+private fun CategoryRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(WxPalette.PrimarySoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = WxPalette.Primary,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.textPrimary(),
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = WxPalette.TextSecondary,
+            )
+        }
+        Text(
+            text = "\u203A",
+            fontSize = 20.sp,
+            color = WxPalette.TextTertiary,
+        )
+    }
+}
 
 @Composable
 fun CategoryDetailScreen(

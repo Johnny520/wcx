@@ -562,7 +562,6 @@ private fun FileSelector(
         files.map { "${it.name}  ·  ${formatBytesSize(runCatching { it.fileSize() }.getOrDefault(0))}" }
     }
     SoftCard(
-        gradient = WxPalette.GradBlue,
         contentPadding = 0,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -596,7 +595,6 @@ private fun RunLogCard(entry: RunLogEntry) {
     )
 
     SoftCard(
-        gradient = WxPalette.GradPink,
         contentPadding = 0,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -678,7 +676,6 @@ private fun RunLogCard(entry: RunLogEntry) {
 @Composable
 private fun CrashSectionCard(section: CrashSection) {
     SoftCard(
-        gradient = WxPalette.GradMint,
         contentPadding = 0,
         modifier = Modifier.fillMaxWidth(),
     ) {
