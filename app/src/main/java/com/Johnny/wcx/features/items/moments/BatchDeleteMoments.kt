@@ -278,18 +278,28 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         return db
     }
 
+    /**
+     * 在 SnsInfoStorage 里找可执行查询的对象。
+     *
+     * 微信 8.0.80 的库封装类被混淆成短名（实测 `gg5.k0`），方法名也一并混淆
+     * （rawQuery 变成 `B`），所以不能只靠「字段类型是不是 SQLiteDatabase」
+     * 判断，改为行为匹配：凡是持有「接受 (String, String[]) 且返回 Cursor」
+     * 方法的对象，都当作可查询的库。
+     */
     private fun findDbIn(obj: Any, depth: Int): Any? {
         if (depth > 3) return null
         for (f in obj.javaClass.declaredFields) {
+            val v = runCatching {
+                f.isAccessible = true
+                f.get(obj)
+            }.getOrNull() ?: continue
             val tn = f.type.name
             if (tn == "com.tencent.wcdb.database.SQLiteDatabase" ||
-                tn == "android.database.sqlite.SQLiteDatabase"
+                tn == "android.database.sqlite.SQLiteDatabase" ||
+                queryMethodOf(v) != null
             ) {
-                val v = runCatching {
-                    f.isAccessible = true
-                    f.get(obj)
-                }.getOrNull()
-                if (v != null) return v
+                WeLogger.i(TAG, "朋友圈库对象：${v.javaClass.name}（字段 ${f.name}）")
+                return v
             }
         }
         for (f in obj.javaClass.declaredFields) {
@@ -304,10 +314,25 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         return null
     }
 
+    /**
+     * 找「(String, String[]) -> Cursor」的方法，即 rawQuery（方法名可能被混淆）。
+     */
+    private fun queryMethodOf(target: Any): java.lang.reflect.Method? = runCatching {
+        target.javaClass.methods.firstOrNull { m ->
+            m.parameterTypes.size == 2 &&
+                m.parameterTypes[0] == String::class.java &&
+                m.parameterTypes[1].name == "[Ljava.lang.String;" &&
+                android.database.Cursor::class.java.isAssignableFrom(m.returnType) &&
+                m.name != "query" &&
+                m.name != "queryWithFactory"
+        }
+    }.getOrNull()
+
     /** 优先查朋友圈库，失败回退主库。 */
     private fun querySns(sql: String, args: Array<String>?): android.database.Cursor? {
         val db = resolveSnsDb()
         if (db != null) {
+            // 1) 标准 rawQuery
             val cur = runCatching {
                 val m = db.javaClass.getMethod(
                     "rawQuery",
@@ -315,8 +340,16 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     Array<String>::class.java,
                 )
                 m.invoke(db, sql, args) as? android.database.Cursor
-            }.onFailure { WeLogger.w(TAG, "朋友圈库查询异常，回退主库", it) }.getOrNull()
+            }.getOrNull()
             if (cur != null) return cur
+            // 2) 8.0.80+ 方法名被混淆：按签名找 (String, String[]) -> Cursor
+            val cur2 = runCatching {
+                val m = queryMethodOf(db) ?: return@runCatching null
+                m.isAccessible = true
+                m.invoke(db, sql, args) as? android.database.Cursor
+            }.onFailure { WeLogger.w(TAG, "朋友圈库查询异常：${db.javaClass.name}", it) }.getOrNull()
+            if (cur2 != null) return cur2
+            WeLogger.w(TAG, "朋友圈库不可查询，回退主库：${db.javaClass.name}")
         }
         return runCatching {
             @Suppress("UNCHECKED_CAST")
