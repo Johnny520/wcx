@@ -88,8 +88,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     // ── DexKit 定位 ───────────────────────────────────────────────────────────
     /** NetSceneSnsObjectOp：cgi 特征串 + 包过滤，单串避免「同串不同方法」不命中。 */
     private val classSnsObjectOp by dexClass {
+        searchPackages("com.tencent.mm.plugin.sns.model")
         matcher {
-            searchPackages("com.tencent.mm.plugin.sns.model")
             usingEqStrings("/cgi-bin/micromsg-bin/mmsnsobjectop")
         }
     }
@@ -193,9 +193,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                 WeLogger.w(TAG, "未找到 NetSceneSnsObjectOp(long,int) 构造器，opType 学习不可用")
                 return
             }
-            ctor.hookAfterDirectly { param ->
-                val snsId = (param.args.getOrNull(0) as? Long) ?: return@hookAfterDirectly
-                val opType = (param.args.getOrNull(1) as? Int) ?: return@hookAfterDirectly
+            ctor.hookAfterDirectly {
+                val snsId = (args.getOrNull(0) as? Long) ?: return@hookAfterDirectly
+                val opType = (args.getOrNull(1) as? Int) ?: return@hookAfterDirectly
                 if (deletingSnsIds.contains(snsId)) return@hookAfterDirectly
 
                 if (learnedOpType != opType) {
