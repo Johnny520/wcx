@@ -91,6 +91,7 @@ import com.Johnny.wcx.ui.content.FloatingBottomBarItem
 import com.Johnny.wcx.ui.content.MiuixStackNavigator
 import com.Johnny.wcx.ui.content.liquid.vibrancy
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
+import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
@@ -258,7 +259,7 @@ private fun MainPagerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MiuixTheme.colorScheme.background),
+            .background(WxPalette.pageBackground()),
     ) {
         Box(
             modifier = Modifier

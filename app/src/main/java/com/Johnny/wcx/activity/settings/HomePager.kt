@@ -253,20 +253,19 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .wrapContentHeight()
-                    .background(MiuixTheme.colorScheme.surface)
-                    .padding(top = 0.dp, start = 16.dp, end = 16.dp),
+                    .padding(top = 8.dp, start = 18.dp, end = 18.dp, bottom = 2.dp),
             ) {
                 Text(
                     text = "WCX",
-                    fontSize = 40.sp,
+                    fontSize = 34.sp,
                     fontWeight = FontWeight.Bold,
-                    color = WxPalette.Primary,
+                    color = WxPalette.textPrimary(),
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = "微信，解锁超能力，重构你的使用体验",
-                    fontSize = 14.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 13.sp,
+                    color = WxPalette.TextSecondary,
                 )
             }
         }
@@ -358,10 +357,10 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text(
                 text = "设备信息",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MiuixTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 4.dp),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.TextSecondary,
+                modifier = Modifier.padding(start = 6.dp, top = 4.dp),
             )
         }
 

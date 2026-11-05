@@ -1,7 +1,9 @@
 package com.Johnny.wcx.ui.style
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,14 +32,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * WCX 新版视觉规范（马卡龙风格）。
+ * WCX 视觉规范（iOS 分组卡片风格）。
  *
- * 设计基调：浅灰白底 + 柔和渐变卡片 + 大圆角 + 圆形图标容器 + 绿色主色。
- * 目标不是复刻某个 App，而是统一「清爽、低饱和、留白足够」的观感。
+ * 设计基调：浅灰底（#F2F2F7）+ 纯白大圆角卡片 + 分区标题裸排 + 胶囊标签 + 品牌绿点缀。
+ * 层次靠「灰底衬托白卡」而不是阴影，圆角统一 18/14/50 三档。
  */
 object WxPalette {
     /** 页面底色 */
-    val Background = Color(0xFFF7F9FA)
+    val Background = Color(0xFFF2F2F7)
 
     /** 主色（品牌绿） */
     val Primary = Color(0xFF009944)
@@ -52,19 +53,49 @@ object WxPalette {
     val Info = Color(0xFF1E88E5)
     val InfoSoft = Color(0xFFE3F2FD)
 
-    /** 卡片渐变（浅 → 稍深） */
-    val GradBlue = listOf(Color(0xFFE9F3FE), Color(0xFFD6E9FC))
-    val GradMint = listOf(Color(0xFFE4F8F2), Color(0xFFCFEFE6))
-    val GradPurple = listOf(Color(0xFFF3ECFB), Color(0xFFE5D8F7))
-    val GradPink = listOf(Color(0xFFFDECEF), Color(0xFFF9D7DE))
-    val GradPlain = listOf(Color.White, Color(0xFFFFFFFF))
+    /** 文字 */
+    val TextPrimary = Color(0xFF1C1C1E)
+    val TextSecondary = Color(0xFF8E8E93)
+    val TextTertiary = Color(0xFFC7C7CC)
+
+    /** 卡片强调渐变（极浅，接近白，只做轻微区分） */
+    val GradBlue = listOf(Color(0xFFF0F6FF), Color(0xFFE8F1FE))
+    val GradMint = listOf(Color(0xFFEFFAF5), Color(0xFFE3F6EC))
+    val GradPurple = listOf(Color(0xFFF6F1FD), Color(0xFFEDE4FA))
+    val GradPink = listOf(Color(0xFFFDF1F3), Color(0xFFFAE6EA))
+    val GradPlain = listOf(Color.White, Color.White)
 
     /** 卡片圆角 */
-    val CardRadius = 20.dp
+    val CardRadius = 18.dp
     val ChipRadius = 14.dp
+    val PillRadius = 50.dp
+
+    /** 页面底色（跟随深浅色） */
+    @Composable
+    fun pageBackground(): Color =
+        if (isSystemInDarkTheme()) Color(0xFF000000) else Background
+
+    /** 卡片底色（跟随深浅色） */
+    @Composable
+    fun cardBackground(): Color =
+        if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color.White
+
+    /** 主文字色（跟随深浅色） */
+    @Composable
+    fun textPrimary(): Color =
+        if (isSystemInDarkTheme()) Color(0xFFF2F2F7) else TextPrimary
+
+    /** 次文字色 */
+    @Composable
+    fun textSecondary(): Color = TextSecondary
+
+    /** 卡片描边：浅色下几乎不可见，深色下一层极淡白边 */
+    @Composable
+    fun cardBorder(): Color =
+        if (isSystemInDarkTheme()) Color(0x1AFFFFFF) else Color(0x0D000000)
 }
 
-/** 柔和渐变卡片（FkWeChat 风格的主体容器）。 */
+/** 纯白圆角卡片（页面的基本容器）。传 gradient 时用作强调卡。 */
 @Composable
 fun SoftCard(
     modifier: Modifier = Modifier,
@@ -73,17 +104,27 @@ fun SoftCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val dark = isSystemInDarkTheme()
+    val plain = gradient.isEmpty() || gradient === WxPalette.GradPlain || gradient == WxPalette.GradPlain
+    val brush = if (plain) {
+        val c = if (dark) Color(0xFF1C1C1E) else Color.White
+        Brush.linearGradient(listOf(c, c))
+    } else {
+        Brush.linearGradient(gradient)
+    }
     val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    val shape = RoundedCornerShape(WxPalette.CardRadius)
     Surface(
         modifier = modifier.fillMaxWidth().then(clickModifier),
-        shape = RoundedCornerShape(WxPalette.CardRadius),
+        shape = shape,
         color = Color.Transparent,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier
-                .background(Brush.linearGradient(gradient))
+                .background(brush)
+                .border(1.dp, WxPalette.cardBorder(), shape)
                 .padding(contentPadding.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             content = content,
@@ -91,7 +132,7 @@ fun SoftCard(
     }
 }
 
-/** 圆形图标容器：白/浅底 + 彩色图标，直径默认 40dp。 */
+/** 圆形图标容器：浅底 + 彩色图标，直径默认 40dp。 */
 @Composable
 fun RoundIconBox(
     icon: ImageVector,
@@ -116,14 +157,14 @@ fun RoundIconBox(
     }
 }
 
-/** 分组标题：绿色小字，位于卡片上方左侧。 */
+/** 分区标题：灰色小字裸排，位于卡片组上方（iOS 分组列表观感）。 */
 @Composable
-fun SectionLabel(text: String, modifier: Modifier = Modifier, color: Color = WxPalette.Primary) {
+fun SectionLabel(text: String, modifier: Modifier = Modifier, color: Color = WxPalette.TextSecondary) {
     Text(
         text = text,
-        modifier = modifier.padding(start = 6.dp, bottom = 6.dp),
+        modifier = modifier.padding(start = 6.dp, top = 2.dp, bottom = 6.dp),
         fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Medium,
         color = color,
     )
 }
@@ -151,13 +192,13 @@ fun StyleRow(
                 text = title,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color(0xFF2B2B2B),
+                color = WxPalette.textPrimary(),
             )
             if (!subtitle.isNullOrEmpty()) {
                 Text(
                     text = subtitle,
                     fontSize = 12.sp,
-                    color = Color(0xFF8A8A8A),
+                    color = WxPalette.TextSecondary,
                 )
             }
         }
@@ -170,14 +211,16 @@ fun StyleRow(
 /** 风险提示横幅：浅红底 + 红字，置于页面顶部。 */
 @Composable
 fun DangerBanner(title: String, message: String, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(WxPalette.CardRadius)
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(WxPalette.CardRadius),
+        shape = shape,
         color = Color.Transparent,
     ) {
         Column(
             modifier = Modifier
-                .background(Brush.linearGradient(listOf(Color(0xFFFFE9EA), Color(0xFFFFF6F6))))
+                .background(Brush.linearGradient(listOf(Color(0xFFFFE9EA), Color(0xFFFFF6F6))), shape)
+                .border(1.dp, Color(0x14E53935), shape)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -200,7 +243,7 @@ fun DangerBanner(title: String, message: String, modifier: Modifier = Modifier) 
 /** 状态小胶囊。 */
 @Composable
 fun StatusPill(text: String, color: Color = WxPalette.Primary, background: Color = WxPalette.PrimarySoft) {
-    Surface(shape = RoundedCornerShape(WxPalette.ChipRadius), color = background) {
+    Surface(shape = RoundedCornerShape(WxPalette.PillRadius), color = background) {
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -211,27 +254,26 @@ fun StatusPill(text: String, color: Color = WxPalette.Primary, background: Color
     }
 }
 
-/** 轻微的下沉分隔线（卡片内分组）。 */
+/** 卡片内列表项分割线（左右不顶边）。 */
 @Composable
 fun SoftDivider(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp)
+            .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 2.dp)
             .height(1.dp)
-            .background(Color(0x14000000)),
+            .background(if (isSystemInDarkTheme()) Color(0x1FFFFFFF) else Color(0x14000000)),
     )
 }
 
-/** 标题样式：页面主标题（绿色加粗）。 */
+/** 页面主标题：黑色大号粗体（iOS 大标题观感）。 */
 @Composable
 fun StyleTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         modifier = modifier,
-        fontSize = 20.sp,
+        fontSize = 22.sp,
         fontWeight = FontWeight.Bold,
-        color = WxPalette.Primary,
-        style = MaterialTheme.typography.titleLarge,
+        color = WxPalette.textPrimary(),
     )
 }
