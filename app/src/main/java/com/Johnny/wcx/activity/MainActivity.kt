@@ -83,6 +83,7 @@ import com.Johnny.wcx.utils.openInSystem
 import com.Johnny.wcx.utils.registerBshSnapshotDecompileLaunchers
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.WxPalette
+import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
 
@@ -211,25 +212,26 @@ class MainActivity : ComponentActivity() {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             topBar = {
-                CenterAlignedTopAppBar(
+                TopAppBar(
                     title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(horizontalAlignment = Alignment.Start) {
                             Text(
                                 text = BuildConfig.TAG,
-                                style = MaterialTheme.typography.titleLarge,
+                                fontSize = 26.sp,
                                 color = WxPalette.Primary,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                text = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "微信增强模块 · ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
                         scrolledContainerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
-                            .copy(alpha = 0.9f)
+                            .copy(alpha = 0.9f),
                     ),
                     actions = {
                         IconButton(onClick = { showMenu = !showMenu }) {
