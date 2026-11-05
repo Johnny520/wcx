@@ -212,20 +212,21 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            containerColor = WxPalette.pageBackground(),
             topBar = {
                 TopAppBar(
                     title = {
                         Column(horizontalAlignment = Alignment.Start) {
                             Text(
                                 text = BuildConfig.TAG,
-                                fontSize = 26.sp,
-                                color = WxPalette.Primary,
+                                fontSize = 28.sp,
+                                color = WxPalette.textPrimary(),
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
                                 text = "微信增强模块 · ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                                 fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                color = WxPalette.TextSecondary
                             )
                         }
                     },
@@ -312,10 +313,9 @@ class MainActivity : ComponentActivity() {
                     val activationState = rememberActivationState()
                     Card(
                         colors = CardDefaults.cardColors(containerColor = activationState.color),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(18.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .shadow(4.dp, RoundedCornerShape(16.dp))
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
@@ -345,7 +345,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 SoftCard(
-                    gradient = WxPalette.GradMint,
                     contentPadding = 0,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -397,9 +396,10 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp)
+                        .fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = WxPalette.cardBackground()),
+                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -444,9 +444,10 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp)
+                        .fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = WxPalette.cardBackground()),
+                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -635,11 +636,12 @@ class MainActivity : ComponentActivity() {
                         })
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier
-                        .padding(vertical = 4.dp)
-                        .alpha(0.1f),
-                    color = MaterialTheme.colorScheme.onSurface
+                Text(
+                    text = "相关链接",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = WxPalette.TextSecondary,
+                    modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 2.dp)
                 )
 
                 LinkCard(
@@ -737,9 +739,10 @@ class MainActivity : ComponentActivity() {
         ElevatedCard(
             onClick = onClick,
             modifier = Modifier
-                .fillMaxWidth()
-                .shadow(4.dp, RoundedCornerShape(16.dp)),
-            shape = RoundedCornerShape(16.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = WxPalette.cardBackground()),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
