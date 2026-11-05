@@ -276,43 +276,43 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
             ActivationCard(latestVersion, isLatest, isChecking)
         }
 
-        // ---- 统计卡片 ----
+        // ---- 统计卡片（白卡内两个浅灰子卡，仿「网速」双栏） ----
         item {
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                CountCard(
-                    modifier = Modifier.weight(1f),
-                    icon = {
-                        Icon(
-                            imageVector = MaterialSymbols.Outlined.Sports_esports,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp),
-                        )
-                    },
-                    value = enabledCount.toString(),
-                    label = "已启用功能",
-                    gradient = WxPalette.GradBlue,
-                    onClick = onOpenFeatures,
-                )
-                CountCard(
-                    modifier = Modifier.weight(1f),
-                    icon = {
-                        Icon(
-                            imageVector = MaterialSymbols.Outlined.Smartphone,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp),
-                        )
-                    },
-                    value = totalCount.toString(),
-                    label = "全部功能",
-                    gradient = WxPalette.GradMint,
-                    onClick = onOpenFeatures,
-                )
+            SoftCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CountTile(
+                        modifier = Modifier.weight(1f),
+                        icon = {
+                            Icon(
+                                imageVector = MaterialSymbols.Outlined.Sports_esports,
+                                contentDescription = null,
+                                tint = WxPalette.Primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        },
+                        value = enabledCount.toString(),
+                        label = "已启用功能",
+                        onClick = onOpenFeatures,
+                    )
+                    CountTile(
+                        modifier = Modifier.weight(1f),
+                        icon = {
+                            Icon(
+                                imageVector = MaterialSymbols.Outlined.Smartphone,
+                                contentDescription = null,
+                                tint = WxPalette.Primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        },
+                        value = totalCount.toString(),
+                        label = "全部功能",
+                        onClick = onOpenFeatures,
+                    )
+                }
             }
         }
 
@@ -479,37 +479,35 @@ private fun TagChip(text: String, color: Color, textColor: Color = color) {
 }
 
 @Composable
-private fun CountCard(
+private fun CountTile(
     modifier: Modifier,
     icon: @Composable () -> Unit,
     value: String,
     label: String,
-    gradient: List<Color>,
     onClick: () -> Unit,
 ) {
-    SoftCard(
-        modifier = modifier,
-        gradient = gradient,
-        onClick = onClick,
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color(0xFFF2F3F5))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
     ) {
-        Box(
-            modifier = Modifier.size(40.dp),
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(modifier = Modifier.size(22.dp), contentAlignment = Alignment.CenterStart) {
             icon()
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = value,
             fontSize = 30.sp,
             fontWeight = FontWeight.Bold,
-            color = Color(0xFF1F2A24),
+            color = WxPalette.textPrimary(),
         )
         Text(
             text = label,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
-            color = Color(0xFF5F6B64),
+            color = WxPalette.TextSecondary,
         )
     }
 }
