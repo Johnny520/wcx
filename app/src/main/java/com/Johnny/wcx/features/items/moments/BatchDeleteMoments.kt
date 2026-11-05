@@ -727,7 +727,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                 putExtra("INTENT_SNS_LOCAL_ID", item.localId)
                 WeApi.selfWxId?.takeIf { it.isNotEmpty() }?.let { putExtra("INTENT_TALKER", it) }
                 putExtra("INTENT_NEED_RPT_FEED", false)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                // 只有拿不到 Activity 上下文时才另起任务；否则留在当前任务栈，
+                // 这样从朋友圈详情返回时直接回到本页的扫描列表，而不是微信主界面。
+                if (context !is android.app.Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
             WeLogger.i(TAG, "跳转朋友圈详情：snsId=${item.snsId} localId=${item.localId}")
