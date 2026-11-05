@@ -47,6 +47,7 @@ import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.SoftDivider
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.utils.AppUpdater
 import com.Johnny.wcx.utils.HostInfo
@@ -58,6 +59,13 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.style.TextOverflow
+import com.composables.icons.materialsymbols.outlined.Refresh
+import com.composables.icons.materialsymbols.outlined.Chat
+import com.composables.icons.materialsymbols.outlined.Code
 
 
 // ---------------------------------------------------------------------------
@@ -316,39 +324,24 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
             }
         }
 
-        // ---- 模块自检入口 ----
+        // ---- 工具 ----
         item {
-            Spacer(Modifier.height(8.dp))
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenModuleHealth() },
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = MaterialSymbols.Outlined.Build_circle,
-                        contentDescription = null,
-                        tint = MiuixTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "模块自检",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MiuixTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = "检测整个模块的公共依赖与锚点，快速定位哪些功能失效",
-                            fontSize = 12.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
-                }
+            Text(
+                text = "工具",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.TextSecondary,
+                modifier = Modifier.padding(start = 6.dp, top = 10.dp),
+            )
+        }
+        item {
+            HomeCard {
+                HomeRow(
+                    icon = MaterialSymbols.Outlined.Build_circle,
+                    title = "模块自检",
+                    subtitle = "检测公共依赖与锚点，快速定位失效功能",
+                    onClick = onOpenModuleHealth,
+                )
             }
         }
 
@@ -369,6 +362,34 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
             SystemInfoCard(wechatVersion, lspEnvironment, lspApiVersion, !safeIsHost())
         }
 
+        // ---- 相关链接 ----
+        item {
+            Text(
+                text = "相关链接",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.TextSecondary,
+                modifier = Modifier.padding(start = 6.dp, top = 10.dp),
+            )
+        }
+        item {
+            HomeCard {
+                HomeRow(
+                    icon = MaterialSymbols.Outlined.Code,
+                    title = "GitHub",
+                    subtitle = "Johnny520/wcx",
+                    onClick = { safeOpenUrl(context, "https://github.com/Johnny520/wcx") },
+                )
+                SoftDivider()
+                HomeRow(
+                    icon = MaterialSymbols.Outlined.Chat,
+                    title = "交流群组",
+                    subtitle = "https://t.me/wcx12138",
+                    onClick = { safeOpenUrl(context, "https://t.me/wcx12138") },
+                )
+            }
+        }
+
         // ---- 底部留白 ----
         item {
             Spacer(Modifier.height(CONTENT_BOTTOM_INSET))
@@ -380,85 +401,194 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
 private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking: Boolean) {
     val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
-    val accentColor = if (MiuixTheme.isDynamicColor) {
-        MiuixTheme.colorScheme.primary
-    } else {
-        if (isDark) Color(0xFF4A90FF) else Color(0xFF2563EB)
+    val accentColor = if (isDark) Color(0xFF4A90FF) else Color(0xFF2563EB)
+    val statusText = when {
+        isChecking -> "检查中"
+        isLatest -> "已是最新"
+        latestVersion != null -> "有更新"
+        else -> "检查失败"
     }
+    val shape = RoundedCornerShape(22.dp)
 
-    SoftCard(
-        gradient = WxPalette.GradMint,
-        contentPadding = 18,
-        onClick = { openLsposedManager(context) },
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(WxPalette.cardBackground())
+            .border(1.dp, WxPalette.cardBorder(), shape)
+            .clickable { openLsposedManager(context) }
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+        // ① 状态 + 胶囊
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "状态",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.TextSecondary,
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .background(accentColor.copy(alpha = 0.12f), RoundedCornerShape(50))
+                    .padding(horizontal = 10.dp, vertical = 3.dp),
             ) {
-                Box(
-                    modifier = Modifier.size(52.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = MaterialSymbols.Outlined.Check_circle,
-                        tint = accentColor,
-                        contentDescription = null,
-                        modifier = Modifier.size(44.dp),
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "模块已激活",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MiuixTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = formatLocalVersion(),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(accentColor.copy(alpha = 0.1f))
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        text = when {
-                            isChecking -> "检查中..."
-                            isLatest -> "已是最新版本"
-                            latestVersion != null -> "有更新"
-                            else -> "检查失败"
-                        },
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = accentColor,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TagChip(
-                    text = "当前版本 ${formatLocalVersion()}",
+                Text(
+                    text = statusText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
                     color = accentColor,
                 )
-                if (!isChecking && latestVersion != null) {
-                    TagChip(
-                        text = "最新版本 $latestVersion",
-                        color = if (isDark) Color(0xFFFF6B35) else Color(0xFFE65100),
-                        textColor = Color.White,
-                    )
-                }
             }
         }
+        // ② 图标 + 主标题 + 圆形按钮
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(accentColor.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = MaterialSymbols.Outlined.Check_circle,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "模块已激活",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = WxPalette.textPrimary(),
+                )
+                Text(
+                    text = formatLocalVersion(),
+                    fontSize = 12.sp,
+                    color = WxPalette.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(listOf(Color(0xFF5AA9FF), Color(0xFF2563EB)))
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = MaterialSymbols.Outlined.Refresh,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        // ③ 细分割线
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(WxPalette.cardBorder())
+        )
+        // ④ 双栏信息
+        Row {
+            Column(Modifier.weight(1f)) {
+                Text("版本", fontSize = 11.sp, color = WxPalette.TextSecondary)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = BuildConfig.VERSION_NAME,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = WxPalette.textPrimary(),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text("更新", fontSize = 11.sp, color = WxPalette.TextSecondary)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = statusText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accentColor,
+                )
+            }
+        }
+    }
+}
+
+/** 纯白圆角卡片（首页分组列表容器）。 */
+@Composable
+private fun HomeCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(WxPalette.cardBackground())
+            .border(1.dp, WxPalette.cardBorder(), shape),
+        content = content,
+    )
+}
+
+/** 卡片内一行：圆角图标 + 标题/副标题 + 右箭头。 */
+@Composable
+private fun HomeRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(WxPalette.PrimarySoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = WxPalette.Primary,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.textPrimary(),
+            )
+            if (!subtitle.isNullOrEmpty()) {
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = WxPalette.TextSecondary,
+                )
+            }
+        }
+        Text(
+            text = "\u203A",
+            fontSize = 20.sp,
+            color = WxPalette.TextTertiary,
+        )
+    }
 }
 
 @Composable
