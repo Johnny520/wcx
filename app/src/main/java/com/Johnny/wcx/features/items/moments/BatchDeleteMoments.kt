@@ -172,6 +172,69 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         registerDexDelegate(delegateSnsCore)
     }
 
+    /**
+     * SnsInfo DAO 里「按 snsId 取 SnsInfo」的方法（8.0.80 实测是 f2.M2(String)）。
+     *
+     * 朋友圈正文（ContentDesc）不在 SnsInfo 表的 content 列里——content 只存
+     * id/username/contentStyle 这类基础字段，正文走 attrBuf 加密存放，必须由
+     * SnsInfo 自己解密后经 getTimeLine() 取出。
+     */
+    private val methodSnsInfoById by dexMethod(allowMultiple = true, allowFailure = true) {
+        searchPackages("com.tencent.mm.plugin.sns.storage")
+        matcher {
+            paramTypes("java.lang.String")
+            returnType("com.tencent.mm.plugin.sns.storage.SnsInfo")
+        }
+    }
+
+    @Volatile
+    private var cachedSnsDao: Any? = null
+
+    /** 用 SnsInfoStorage 构造 DAO 实例（DAO 构造器只接受 storage）。 */
+    private fun resolveSnsDao(storage: Any): Any? {
+        cachedSnsDao?.let { return it }
+        val cls = runCatching { methodSnsInfoById.method.declaringClass }.getOrNull() ?: return null
+        val dao = runCatching {
+            cls.getDeclaredConstructor(storage.javaClass).apply { isAccessible = true }
+                .newInstance(storage)
+        }.onFailure { WeLogger.w(TAG, "构造 SnsInfo DAO 失败：${it.message}") }.getOrNull()
+        if (dao != null) WeLogger.i(TAG, "SnsInfo DAO 已就绪：${cls.name}")
+        cachedSnsDao = dao
+        return dao
+    }
+
+    /** 按 snsId 取 SnsInfo 对象（DAO 的参数既可能是无符号串也可能是原值，两个都试）。 */
+    private fun snsInfoOf(dao: Any, snsId: Long): Any? {
+        val m = runCatching { methodSnsInfoById.method }.getOrNull() ?: return null
+        m.isAccessible = true
+        for (arg in listOf(java.lang.Long.toUnsignedString(snsId), snsId.toString())) {
+            val r = runCatching { m.invoke(dao, arg) }.getOrNull()
+            if (r != null) return r
+        }
+        return null
+    }
+
+    /** SnsInfo.getLocalid()，微信详情页用它定位；取不到时按无符号 snsId 拼。 */
+    private fun snsInfoLocalId(snsInfo: Any?, snsId: Long): String {
+        val fromInfo = runCatching {
+            snsInfo?.javaClass?.getDeclaredMethod("getLocalid")?.apply { isAccessible = true }
+                ?.invoke(snsInfo) as? String
+        }.getOrNull()
+        return fromInfo?.takeIf { it.isNotEmpty() }
+            ?: ("sns_table_" + java.lang.Long.toUnsignedString(snsId))
+    }
+
+    /** SnsInfo.getTimeLine().ContentDesc —— 朋友圈正文。 */
+    private fun snsInfoText(snsInfo: Any?): String {
+        if (snsInfo == null) return ""
+        val tl = runCatching {
+            snsInfo.javaClass.getDeclaredMethod("getTimeLine").apply { isAccessible = true }
+                .invoke(snsInfo)
+        }.getOrNull() ?: return ""
+        return runCatching { tl.javaClass.getField("ContentDesc").get(tl) as? String }
+            .getOrNull().orEmpty().trim()
+    }
+
     /** 类里是否有「静态 0 参且返回朋友圈库对象」的方法。 */
     private fun isSnsCoreLike(name: String): Boolean {
         if (name.contains('$')) return false
@@ -388,6 +451,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val yearMonth: String,
         val type: Int,
         val preview: String,
+        /** 微信内部本地 id（形如 `sns_table_xxx`），详情页靠它定位这条朋友圈。 */
+        val localId: String,
     )
 
     enum class FilterMode { BY_YEAR, BY_COUNT }
@@ -527,6 +592,11 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val sql = "SELECT snsId, createTime, type, content FROM SnsInfo$where ORDER BY createTime DESC"
         val args = if (hasUser) arrayOf(self) else null
 
+        // 详情页要的 localId、以及正文 ContentDesc，都得走 SnsInfo 对象；
+        // SnsInfo 由 DAO（f2）按 snsId 查出来，DAO 用 storage 构造。
+        val storageObj = runCatching { resolveSnsInfoStorage() }.getOrNull()
+        val dao = storageObj?.let { resolveSnsDao(it) }
+
         val result = mutableListOf<MomentItem>()
         runCatching {
             querySns(sql, args)?.use { c ->
@@ -541,9 +611,14 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     if (snsId == 0L) continue
                     val createTime = c.getLong(iTime)
                     val type = if (iType >= 0) c.getInt(iType) else 0
-                    val preview = if (iContent >= 0) {
+                    val rawXml = if (iContent >= 0) {
                         runCatching { c.getBlob(iContent)?.let { String(it, Charsets.UTF_8) } }.getOrNull()
                     } else null
+
+                    // 正文只能靠 SnsInfo 解密后的 TimeLineObject 拿到
+                    val snsInfo = dao?.let { runCatching { snsInfoOf(it, snsId) }.getOrNull() }
+                    val bodyText = runCatching { snsInfoText(snsInfo) }.getOrDefault("")
+                    val localId = snsInfoLocalId(snsInfo, snsId)
 
                     result.add(
                         MomentItem(
@@ -552,7 +627,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             createTimeText = formatTime(createTime),
                             yearMonth = formatYearMonth(createTime),
                             type = type,
-                            preview = summarize(preview),
+                            preview = summarize(rawXml, bodyText),
+                            localId = localId,
                         )
                     )
                 }
@@ -594,8 +670,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 列表里就只剩一串 snsId+wxid，完全看不出内容。这里改为按标签取值，
      * 并按 contentStyle / media 数量补一个类型前缀。
      */
-    private fun summarize(raw: String?): String {
-        if (raw.isNullOrBlank()) return "（无内容）"
+    private fun summarize(raw: String?, bodyText: String = ""): String {
         val style = xmlTag(raw, "contentStyle").toIntOrNull()
         val mediaCount = runCatching { Regex("<media>").findAll(raw).count() }.getOrDefault(0)
         val kind = when (style) {
@@ -606,11 +681,12 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             5 -> "链接"
             else -> if (mediaCount > 0) (if (mediaCount > 1) "图片×$mediaCount" else "图片") else ""
         }
-        val body = listOf("contentDesc", "title", "description")
-            .map { xmlTag(raw, it) }
-            .firstOrNull { it.isNotBlank() }
-            .orEmpty()
-            .replace(Regex("\\s+"), " ")
+        val body = bodyText.ifBlank {
+            listOf("ContentDesc", "contentDesc", "title", "description")
+                .map { xmlTag(raw ?: "", it) }
+                .firstOrNull { it.isNotBlank() }
+                .orEmpty()
+        }.replace(Regex("\\s+"), " ")
             .trim()
         val text = if (body.length > 50) body.take(50) + "…" else body
         return when {
@@ -648,13 +724,13 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     "com.tencent.mm.plugin.sns.ui.SnsCommentDetailUI",
                 )
                 putExtra("INTENT_SNSID", item.snsId)
-                putExtra("INTENT_SNS_LOCAL_ID", "sns_table_" + item.snsId)
+                putExtra("INTENT_SNS_LOCAL_ID", item.localId)
                 WeApi.selfWxId?.takeIf { it.isNotEmpty() }?.let { putExtra("INTENT_TALKER", it) }
                 putExtra("INTENT_NEED_RPT_FEED", false)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            WeLogger.i(TAG, "跳转朋友圈详情：snsId=${item.snsId}")
+            WeLogger.i(TAG, "跳转朋友圈详情：snsId=${item.snsId} localId=${item.localId}")
         }.onFailure {
             WeLogger.e(TAG, "跳转朋友圈详情失败：snsId=${item.snsId}", it)
             showToast("跳转失败：" + (it.message ?: it.javaClass.simpleName))
