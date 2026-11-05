@@ -68,6 +68,8 @@ import com.Johnny.wcx.utils.android.showToastSuspend
 import com.Johnny.wcx.utils.crash.CrashLogsManager
 import com.Johnny.wcx.utils.formatBytesSize
 import com.Johnny.wcx.utils.formatEpoch
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -559,7 +561,11 @@ private fun FileSelector(
     val labels = remember(files) {
         files.map { "${it.name}  ·  ${formatBytesSize(runCatching { it.fileSize() }.getOrDefault(0))}" }
     }
-    Card(modifier = modifier.fillMaxWidth()) {
+    SoftCard(
+        gradient = WxPalette.GradBlue,
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         WindowDropdownPreference(
             title = "选择日志文件",
             summary = files.getOrNull(selectedIndex)?.let {
@@ -589,7 +595,11 @@ private fun RunLogCard(entry: RunLogEntry) {
         label = "chevron",
     )
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    SoftCard(
+        gradient = WxPalette.GradPink,
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 entry.level?.let { level ->
@@ -667,7 +677,11 @@ private fun RunLogCard(entry: RunLogEntry) {
 
 @Composable
 private fun CrashSectionCard(section: CrashSection) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    SoftCard(
+        gradient = WxPalette.GradMint,
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Column(Modifier.padding(14.dp)) {
             if (section.title.isNotEmpty()) {
                 Text(

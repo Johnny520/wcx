@@ -100,6 +100,8 @@ import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.items.debug.ResetDexCache
 import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.content.MiuixSmallTitle
 import com.Johnny.wcx.ui.utils.GitHubIcon
 import com.Johnny.wcx.ui.utils.theme.AppColorSpec
@@ -179,7 +181,11 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 界面
         item {
             MiuixSmallTitle(text = "界面", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradMint,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 ThemeSection()
             }
         }
@@ -187,7 +193,11 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 微信主题
         item {
             MiuixSmallTitle(text = "微信主题", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradBlue,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "主题工坊",
                     summary = "内置 6 款全局主题，全局沉浸壁纸（主页/通讯录/发现/我的 4 个界面，或全部界面）+ 对应气泡，支持透明度调节与备份恢复",
@@ -200,7 +210,11 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 调试
         item {
             MiuixSmallTitle(text = "调试", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradPurple,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefSwitch(
                     key = Preferences.VERBOSE_LOG,
                     title = "详细日志",
@@ -225,7 +239,11 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 兼容
         item {
             MiuixSmallTitle(text = "兼容", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradPink,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefSwitch(
                     key = Preferences.NO_DEX_RESOLVE,
                     title = "禁用版本适配",
@@ -250,7 +268,11 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 配置
         item {
             MiuixSmallTitle(text = "配置", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradMint,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "导出配置",
                     summary = "将模块配置导出为 JSON",
@@ -275,7 +297,11 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 更新
         item {
             MiuixSmallTitle(text = "更新", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradBlue,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "检查更新",
                     summary = "立即检查模块是否有新版本并自动下载",
@@ -299,7 +325,11 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 关于
         item {
             MiuixSmallTitle(text = "关于", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradPurple,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "鸣谢名单",
                     summary = "感谢为本模块提供基础和灵感的项目与作者",
@@ -393,7 +423,11 @@ private fun ProfileCard() {
         }
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    SoftCard(
+        gradient = WxPalette.GradPink,
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1361,7 +1395,11 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradMint,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "本模块大量功能实现源于 wekit 模块作者，已获作者授权。",
@@ -1375,7 +1413,11 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
 
         item {
             Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradBlue,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1416,7 +1458,11 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
 
         item {
             Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                gradient = WxPalette.GradPurple,
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "首先，我想明确一点：二次创作本身是一件非常好的事情。无论是新增实用功能，还是修复原有缺陷、优化使用体验，这些贡献都能切实提升项目的实用价值，让工具变得更好用、更完善。\n\n在遵守开源精神的前提下，发挥各自的创意与技术，打磨出更优秀、更强大的作品。如果这些改进能够继续以免费的形式开放分享给社区，让更多人受益，甚至可以说，技术进步的最终意义，本就是服务更多人（请允许我在此稍作夸大其词）。\n\n在二次发布或衍生项目中，保留原项目的开源信息、作者署名及相关声明。这既是对开源社区基本规则的尊重，也是对原作者的劳动成果的一种认可。\n当然，是否保留这些信息，最终取决于每位开发者的个人判断与选择。",
