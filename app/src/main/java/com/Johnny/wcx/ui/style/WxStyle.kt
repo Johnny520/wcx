@@ -128,7 +128,7 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier, color: Color = WxP
 /** 通用行：圆形图标 + 标题/副标题 + 右侧值或箭头区。 */
 @Composable
 fun StyleRow(
-    icon: ImageVector,
+    icon: ImageVector? = null,
     title: String,
     subtitle: String? = null,
     iconTint: Color = WxPalette.Primary,
@@ -139,8 +139,10 @@ fun StyleRow(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RoundIconBox(icon = icon, tint = iconTint, background = iconBackground)
-        Spacer(Modifier.width(12.dp))
+        if (icon != null) {
+            RoundIconBox(icon = icon, tint = iconTint, background = iconBackground)
+            Spacer(Modifier.width(12.dp))
+        }
         Column(Modifier.weight(1f).padding(vertical = 2.dp)) {
             Text(
                 text = title,

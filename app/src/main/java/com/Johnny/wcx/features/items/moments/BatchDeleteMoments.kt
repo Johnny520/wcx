@@ -7,9 +7,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -529,7 +526,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         SoftCard(gradient = WxPalette.GradMint) {
                             SectionLabel("删除参数")
                             StyleRow(
-                                icon = Icons.Filled.Info,
                                 title = "opType（自动学习）",
                                 subtitle = if (learnedOpType >= 0) "已学习：opType=$learnedOpType"
                                 else "尚未学习：请先手动删除一条自己的朋友圈",
@@ -546,7 +542,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         SoftCard(gradient = WxPalette.GradBlue) {
                             SectionLabel("筛选范围")
                             StyleRow(
-                                icon = Icons.Filled.Settings,
                                 title = "按年份筛选",
                                 subtitle = "只删除指定年份区间内的朋友圈",
                                 trailing = {
@@ -573,7 +568,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                 )
                             }
                             StyleRow(
-                                icon = Icons.Filled.Settings,
                                 title = "按数量筛选",
                                 subtitle = "从最新的开始，删除指定条数",
                                 trailing = {
