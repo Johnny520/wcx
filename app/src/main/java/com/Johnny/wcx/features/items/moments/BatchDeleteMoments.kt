@@ -2,6 +2,7 @@ package com.Johnny.wcx.features.items.moments
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -16,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.DexClassDelegate
@@ -579,13 +581,84 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private fun formatYearMonth(seconds: Long): String =
         runCatching { yearMonthFormat.format(Date(seconds * 1000)) }.getOrDefault("未知时间")
 
+    /**
+     * 从 SnsInfo.content 的 XML 里提取可读摘要。
+     *
+     * 微信把朋友圈内容以 TimelineObject XML 存在 content 列：
+
+     *   <contentDesc>文字内容</contentDesc>
+     *   <contentObject><contentStyle>2</contentStyle><title/>...</contentObject>
+     *   <mediaList><media>…</media></mediaList>
+     *
+     * 之前直接把所有标签剥掉，会把 <id>/<username> 之类的值也拼进来，
+     * 列表里就只剩一串 snsId+wxid，完全看不出内容。这里改为按标签取值，
+     * 并按 contentStyle / media 数量补一个类型前缀。
+     */
     private fun summarize(raw: String?): String {
-        if (raw.isNullOrBlank()) return ""
-        val text = raw
-            .replace(Regex("<[^>]+>"), " ")
+        if (raw.isNullOrBlank()) return "（无内容）"
+        val style = xmlTag(raw, "contentStyle").toIntOrNull()
+        val mediaCount = runCatching { Regex("<media>").findAll(raw).count() }.getOrDefault(0)
+        val kind = when (style) {
+            1 -> "文字"
+            2 -> if (mediaCount > 1) "图片×$mediaCount" else "图片"
+            3 -> "视频"
+            4 -> "音乐"
+            5 -> "链接"
+            else -> if (mediaCount > 0) (if (mediaCount > 1) "图片×$mediaCount" else "图片") else ""
+        }
+        val body = listOf("contentDesc", "title", "description")
+            .map { xmlTag(raw, it) }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
             .replace(Regex("\\s+"), " ")
             .trim()
-        return if (text.length > 40) text.take(40) + "…" else text
+        val text = if (body.length > 50) body.take(50) + "…" else body
+        return when {
+            text.isNotEmpty() && kind.isNotEmpty() -> "[$kind] $text"
+            text.isNotEmpty() -> text
+            kind.isNotEmpty() -> "[$kind]（无文字内容）"
+            else -> "（无文字内容）"
+        }
+    }
+
+    /** 取 XML 里第一个 <tag>…</tag> 的文本（含 CDATA / 常见实体反转义）。 */
+    private fun xmlTag(xml: String, tag: String): String = runCatching {
+        Regex("<$tag>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</$tag>", RegexOption.DOT_MATCHES_ALL)
+            .find(xml)?.groupValues?.getOrNull(1)
+            ?.replace("&lt;", "<")
+            ?.replace("&gt;", ">")
+            ?.replace("&quot;", "\"")
+            ?.replace("&apos;", "'")
+            ?.replace("&amp;", "&")
+            ?.trim()
+            .orEmpty()
+    }.getOrDefault("")
+
+    /**
+     * 打开微信原生的朋友圈详情页，让用户直接看到这条朋友圈的完整内容。
+     *
+     * 参数取自 8.0.80 的 SnsCommentDetailUI.onCreate：INTENT_SNSID / INTENT_SNS_LOCAL_ID，
+     * localSnsId 由 "sns_table_" + snsId 拼成；INTENT_TALKER 是作者 wxid。
+     */
+    private fun openMomentDetail(context: Context, item: MomentItem) {
+        runCatching {
+            val intent = Intent().apply {
+                setClassName(
+                    context.packageName,
+                    "com.tencent.mm.plugin.sns.ui.SnsCommentDetailUI",
+                )
+                putExtra("INTENT_SNSID", item.snsId)
+                putExtra("INTENT_SNS_LOCAL_ID", "sns_table_" + item.snsId)
+                WeApi.selfWxId?.takeIf { it.isNotEmpty() }?.let { putExtra("INTENT_TALKER", it) }
+                putExtra("INTENT_NEED_RPT_FEED", false)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            WeLogger.i(TAG, "跳转朋友圈详情：snsId=${item.snsId}")
+        }.onFailure {
+            WeLogger.e(TAG, "跳转朋友圈详情失败：snsId=${item.snsId}", it)
+            showToast("跳转失败：" + (it.message ?: it.javaClass.simpleName))
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -980,6 +1053,12 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             )
                         }
                         HorizontalDivider()
+                        Text(
+                            text = "点任意一条可跳转到原朋友圈查看内容；左侧勾选框决定是否删除",
+                            fontSize = 11.sp,
+                            color = Color(0xFF8A8A8A),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                        )
                         LazyColumn(modifier = Modifier.fillMaxWidth().height(340.dp)) {
                             val grouped = items.groupBy { it.yearMonth }
                             grouped.forEach { (month, monthItems) ->
@@ -1008,7 +1087,10 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                 items(monthItems.size, key = { monthItems[it].snsId }) { index ->
                                     val item = monthItems[index]
                                     Row(
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { openMomentDetail(context, item) }
+                                            .padding(vertical = 1.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Checkbox(
