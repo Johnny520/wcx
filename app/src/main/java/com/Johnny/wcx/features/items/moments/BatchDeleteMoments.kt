@@ -129,6 +129,101 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
     }
 
+    // ── 朋友圈数据库（SnsMicroMsg.db）─────────────────────────────────────────
+    /**
+     * 微信把 SnsInfo 表放在独立的 SnsMicroMsg.db 里，EnMicroMsg.db 中没有这张表。
+     * 因此在主库上执行 `SELECT ... FROM SnsInfo` 会直接报「no such table」，
+     * 表现就是扫描永远为空。正确路径是 SnsCore.getSnsInfoStorage() 拿 storage，
+     * 再反射它的 SQLiteDatabase 字段直接查。
+     */
+    private val classSnsCore by dexClass {
+        searchPackages("com.tencent.mm.plugin.sns.model")
+        matcher {
+            usingEqStrings("com.tencent.mm.plugin.sns.model.SnsCore")
+        }
+    }
+
+    private val methodGetSnsInfoStorage by dexMethod {
+        matcher {
+            declaredClass(classSnsCore.clazz)
+            modifiers = java.lang.reflect.Modifier.STATIC
+            paramCount(0)
+            usingEqStrings("getSnsInfoStorage")
+        }
+    }
+
+    @Volatile
+    private var cachedSnsDb: Any? = null
+    @Volatile
+    private var snsDbResolveFailed = false
+
+    private fun resolveSnsDb(): Any? {
+        cachedSnsDb?.let { return it }
+        if (snsDbResolveFailed) return null
+        val storage = runCatching { methodGetSnsInfoStorage.method.invoke(null) }.getOrElse {
+            WeLogger.e(TAG, "取 SnsInfoStorage 失败", it)
+            null
+        }
+        if (storage == null) {
+            snsDbResolveFailed = true
+            return null
+        }
+        val db = findDbIn(storage, 0)
+        if (db == null) {
+            WeLogger.w(TAG, "SnsInfoStorage 里没找到 SQLiteDatabase 字段")
+        } else {
+            cachedSnsDb = db
+            WeLogger.i(TAG, "朋友圈库已定位：${db.javaClass.name}")
+        }
+        return db
+    }
+
+    private fun findDbIn(obj: Any, depth: Int): Any? {
+        if (depth > 3) return null
+        for (f in obj.javaClass.declaredFields) {
+            val tn = f.type.name
+            if (tn == "com.tencent.wcdb.database.SQLiteDatabase" ||
+                tn == "android.database.sqlite.SQLiteDatabase"
+            ) {
+                val v = runCatching {
+                    f.isAccessible = true
+                    f.get(obj)
+                }.getOrNull()
+                if (v != null) return v
+            }
+        }
+        for (f in obj.javaClass.declaredFields) {
+            val v = runCatching {
+                f.isAccessible = true
+                f.get(obj)
+            }.getOrNull() ?: continue
+            if (v.javaClass.name.startsWith("com.tencent.mm.plugin.sns")) {
+                findDbIn(v, depth + 1)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /** 优先查朋友圈库，失败回退主库。 */
+    private fun querySns(sql: String, args: Array<String>?): android.database.Cursor? {
+        val db = resolveSnsDb()
+        if (db != null) {
+            val cur = runCatching {
+                val m = db.javaClass.getMethod(
+                    "rawQuery",
+                    String::class.java,
+                    Array<String>::class.java,
+                )
+                m.invoke(db, sql, args) as? android.database.Cursor
+            }.onFailure { WeLogger.w(TAG, "朋友圈库查询异常，回退主库", it) }.getOrNull()
+            if (cur != null) return cur
+        }
+        return runCatching {
+            @Suppress("UNCHECKED_CAST")
+            WeDatabaseApi.rawQuery(sql, args as Array<Any>?)
+        }.getOrNull()
+    }
+
     // ── 配置（持久化） ────────────────────────────────────────────────────────
     /** 学习到的 opType，-1 表示尚未学到。 */
     private var learnedOpType by WePrefs.prefOption(PREF_OP_TYPE, -1)
@@ -154,6 +249,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val snsId: Long,
         val createTime: Long,
         val createTimeText: String,
+        /** 分组用：如「2023年5月」 */
+        val yearMonth: String,
         val type: Int,
         val preview: String,
     )
@@ -252,7 +349,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     /** 读取 SnsInfo 表的列名，避免硬编码列名在版本间失效。 */
     private fun snsInfoColumns(): Set<String> = runCatching {
         val cols = mutableSetOf<String>()
-        WeDatabaseApi.rawQuery("PRAGMA table_info(SnsInfo)").use { c ->
+        querySns("PRAGMA table_info(SnsInfo)", null)?.use { c ->
             val nameIdx = c.getColumnIndex("name")
             while (c.moveToNext()) {
                 if (nameIdx >= 0) cols.add(c.getString(nameIdx))
@@ -269,7 +366,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      *
      * 依赖列：snsId / userName / createTime / type / content（缺列时降级跳过）。
      */
-    fun loadMyMoments(options: DeleteOptions): List<MomentItem> {
+    fun loadMyMoments(options: DeleteOptions = DeleteOptions()): List<MomentItem> {
         val self = WeApi.selfWxId
         if (self.isNullOrEmpty()) {
             WeLogger.w(TAG, "selfWxId 为空，无法枚举朋友圈")
@@ -293,11 +390,11 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
 
         val sql = "SELECT snsId, createTime, type, content FROM SnsInfo$where ORDER BY createTime DESC"
-        val args = if (hasUser) arrayOf<Any>(self) else null
+        val args = if (hasUser) arrayOf(self) else null
 
         val result = mutableListOf<MomentItem>()
         runCatching {
-            WeDatabaseApi.rawQuery(sql, args).use { c ->
+            querySns(sql, args)?.use { c ->
                 val iSnsId = c.getColumnIndex("snsId")
                 val iTime = c.getColumnIndex("createTime")
                 val iType = c.getColumnIndex("type")
@@ -313,18 +410,16 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         runCatching { c.getBlob(iContent)?.let { String(it, Charsets.UTF_8) } }.getOrNull()
                     } else null
 
-                    if (!passesFilter(createTime, type, preview, options)) continue
-
                     result.add(
                         MomentItem(
                             snsId = snsId,
                             createTime = createTime,
                             createTimeText = formatTime(createTime),
+                            yearMonth = formatYearMonth(createTime),
                             type = type,
                             preview = summarize(preview),
                         )
                     )
-                    if (result.size >= options.limit) break
                 }
             }
         }.onFailure { WeLogger.e(TAG, "枚举朋友圈失败", it) }
@@ -345,6 +440,11 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
     private fun formatTime(seconds: Long): String =
         runCatching { dateFormat.format(Date(seconds * 1000)) }.getOrDefault("")
+
+    private val yearMonthFormat = SimpleDateFormat("yyyy年M月", Locale.US)
+
+    private fun formatYearMonth(seconds: Long): String =
+        runCatching { yearMonthFormat.format(Date(seconds * 1000)) }.getOrDefault("未知时间")
 
     private fun summarize(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
@@ -397,10 +497,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             onProgress(0, 0, "没有符合条件的朋友圈")
             return false
         }
-        if (learnedOpType < 0) {
-            onProgress(0, items.size, "尚未学习删除参数，请先手动删除一条朋友圈")
-            return false
-        }
         if (!running.compareAndSet(false, true)) {
             onProgress(0, items.size, "已有删除任务在执行")
             return false
@@ -429,7 +525,27 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     return@thread
                 }
 
+                // 自动探测 opType：无需用户手动删除来「学习」。
+                // 依次尝试 1→2→3，用第一条试删，命中即锁定该值继续。
+                var startIndex = 0
+                if (learnedOpType < 0 && queue.isNotEmpty()) {
+                    onProgress(0, queue.size, "正在自动识别删除参数…")
+                    val probed = probeOpType(ctor, queue.first().snsId)
+                    if (probed > 0) {
+                        learnedOpType = probed
+                        success++
+                        bumpTodayCount(1)
+                        startIndex = 1
+                        onProgress(1, queue.size, "参数已识别（opType=$probed），开始批量删除")
+                    } else {
+                        WeLogger.e(TAG, "opType 自动探测失败，全部候选均未成功")
+                        onFinished(DeleteReport(queue.size, 0, queue.size, 0, false))
+                        return@thread
+                    }
+                }
+
                 queue.forEachIndexed { index, item ->
+                    if (index < startIndex) return@forEachIndexed
                     if (cancelRequested) {
                         cancelled = true
                         return@forEachIndexed
@@ -472,6 +588,41 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             }
         }
         return true
+    }
+
+    /** 试删一条，依次尝试候选 opType，成功返回该值。 */
+    private fun probeOpType(ctor: Constructor<*>, snsId: Long): Int {
+        for (candidate in intArrayOf(1, 2, 3)) {
+            deleteResults.clear()
+            deletingSnsIds.add(snsId)
+            val sent = runCatching {
+                WeNetSceneApi.sendNetScene(ctor.newInstance(snsId, candidate))
+                true
+            }.getOrElse {
+                WeLogger.w(TAG, "opType=$candidate 发送失败", it)
+                false
+            }
+            if (!sent) {
+                deletingSnsIds.remove(snsId)
+                continue
+            }
+            val deadline = System.currentTimeMillis() + 10_000
+            while (System.currentTimeMillis() < deadline) {
+                val ret = deleteResults.remove(snsId)
+                if (ret != null) {
+                    if (ret == 0) {
+                        deletingSnsIds.remove(snsId)
+                        WeLogger.i(TAG, "opType 探测成功：$candidate")
+                        return candidate
+                    }
+                    WeLogger.w(TAG, "opType=$candidate retcode=$ret，试下一个")
+                    break
+                }
+                Thread.sleep(120)
+            }
+            deletingSnsIds.remove(snsId)
+        }
+        return -1
     }
 
     private fun sleepSafe(ms: Long) {
@@ -520,10 +671,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
-            var mode by remember { mutableStateOf(FilterMode.BY_YEAR) }
-            var yearFrom by remember { mutableStateOf((Calendar.getInstance().get(Calendar.YEAR) - 3).toString()) }
-            var yearTo by remember { mutableStateOf(Calendar.getInstance().get(Calendar.YEAR).toString()) }
-            var limit by remember { mutableStateOf("100") }
             var interval by remember { mutableStateOf(intervalInput) }
             var batchSize by remember { mutableStateOf(batchSizeInput) }
             var batchPause by remember { mutableStateOf(batchPauseInput) }
@@ -560,50 +707,10 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         }
 
                         SoftCard(gradient = WxPalette.GradBlue) {
-                            SectionLabel("筛选范围")
+                            SectionLabel("扫描范围")
                             StyleRow(
-                                title = "按年份筛选",
-                                subtitle = "只删除指定年份区间内的朋友圈",
-                                trailing = {
-                                    Switch(
-                                        checked = mode == FilterMode.BY_YEAR,
-                                        onCheckedChange = { mode = FilterMode.BY_YEAR },
-                                    )
-                                },
-                            )
-                            if (mode == FilterMode.BY_YEAR) {
-                                TextField(
-                                    value = yearFrom,
-                                    onValueChange = { yearFrom = it.filter { c -> c.isDigit() }.take(4) },
-                                    label = { Text("起始年份（含）") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    singleLine = true,
-                                )
-                                TextField(
-                                    value = yearTo,
-                                    onValueChange = { yearTo = it.filter { c -> c.isDigit() }.take(4) },
-                                    label = { Text("结束年份（含）") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    singleLine = true,
-                                )
-                            }
-                            StyleRow(
-                                title = "按数量筛选",
-                                subtitle = "从最新的开始，删除指定条数",
-                                trailing = {
-                                    Switch(
-                                        checked = mode == FilterMode.BY_COUNT,
-                                        onCheckedChange = { mode = FilterMode.BY_COUNT },
-                                    )
-                                },
-                            )
-                            TextField(
-                                value = limit,
-                                onValueChange = { limit = it.filter { c -> c.isDigit() }.take(5) },
-                                label = { Text("最多删除条数") },
-                                supportingText = { Text("本次任务上限，实际还受每日上限约束") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
+                                title = "全部朋友圈",
+                                subtitle = "不做任何筛选，直接列出本账号发过的所有朋友圈\n列表会按「年 / 月」分组，逐条勾选后删除",
                             )
                         }
 
@@ -652,10 +759,10 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         dailyLimitInput = dailyLimit.ifBlank { "200" }
 
                         val options = DeleteOptions(
-                            mode = mode,
-                            yearFrom = yearFrom.toIntOrNull() ?: 2014,
-                            yearTo = yearTo.toIntOrNull() ?: Calendar.getInstance().get(Calendar.YEAR),
-                            limit = limit.toIntOrNull()?.coerceAtLeast(1) ?: 100,
+                            mode = FilterMode.BY_YEAR,
+                            yearFrom = 0,
+                            yearTo = 9999,
+                            limit = Int.MAX_VALUE,
                             intervalMs = intervalInput.toLongOrNull()?.coerceAtLeast(1000L) ?: 5000L,
                             batchSize = batchSizeInput.toIntOrNull()?.coerceAtLeast(1) ?: 20,
                             batchPauseMs = batchPauseInput.toLongOrNull()?.coerceAtLeast(1000L) ?: 60000L,
@@ -675,10 +782,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 扫描在 IO 线程完成，避免长列表查询卡住 UI。
      */
     private fun scanThenPick(context: Context, options: DeleteOptions) {
-        if (learnedOpType < 0) {
-            showToast("请先手动删除一条朋友圈以学习删除参数")
-            return
-        }
         showComposeDialog(context) {
             val scope = rememberCoroutineScope()
             var loading by remember { mutableStateOf(true) }
@@ -745,34 +848,59 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         }
                         HorizontalDivider()
                         LazyColumn(modifier = Modifier.fillMaxWidth().height(340.dp)) {
-                            items(items.size) { index ->
-                                val item = items[index]
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Checkbox(
-                                        checked = selected[item.snsId] == true,
-                                        onCheckedChange = { checked -> selected[item.snsId] = checked },
-                                    )
-                                    Column(Modifier.weight(1f)) {
+                            val grouped = items.groupBy { it.yearMonth }
+                            grouped.forEach { (month, monthItems) ->
+                                // 年月分组标题（如「2023年5月 · 12 条」）
+                                item(key = "header_$month") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp, bottom = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
                                         Text(
-                                            text = item.createTimeText,
+                                            text = month,
                                             fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = Color(0xFF2B2B2B),
+                                            fontWeight = FontWeight.Bold,
+                                            color = WxPalette.Primary,
+                                            modifier = Modifier.weight(1f),
                                         )
-                                        if (item.preview.isNotEmpty()) {
-                                            Text(
-                                                text = item.preview,
-                                                fontSize = 12.sp,
-                                                color = Color(0xFF8A8A8A),
-                                                maxLines = 1,
-                                            )
-                                        }
+                                        Text(
+                                            text = "${monthItems.size} 条",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF8A8A8A),
+                                        )
                                     }
                                 }
-                                if (index != items.lastIndex) SoftDivider()
+                                items(monthItems.size, key = { monthItems[it].snsId }) { index ->
+                                    val item = monthItems[index]
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Checkbox(
+                                            checked = selected[item.snsId] == true,
+                                            onCheckedChange = { checked -> selected[item.snsId] = checked },
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = item.createTimeText,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF2B2B2B),
+                                            )
+                                            if (item.preview.isNotEmpty()) {
+                                                Text(
+                                                    text = item.preview,
+                                                    fontSize = 12.sp,
+                                                    color = Color(0xFF8A8A8A),
+                                                    maxLines = 1,
+                                                )
+                                            }
+                                        }
+                                    }
+                                    SoftDivider()
+                                }
                             }
                         }
                     }
