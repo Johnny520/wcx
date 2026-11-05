@@ -59,6 +59,7 @@ import com.Johnny.wcx.ui.style.StyleTitle
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.reflection.ClassLoaders
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.hookAfterDirectly
 import org.json.JSONObject
@@ -131,25 +132,56 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
     // ── 朋友圈数据库（SnsMicroMsg.db）─────────────────────────────────────────
     /**
-     * 微信把 SnsInfo 表放在独立的 SnsMicroMsg.db 里，EnMicroMsg.db 中没有这张表。
-     * 因此在主库上执行 `SELECT ... FROM SnsInfo` 会直接报「no such table」，
-     * 表现就是扫描永远为空。正确路径是 SnsCore.getSnsInfoStorage() 拿 storage，
-     * 再反射它的 SQLiteDatabase 字段直接查。
+     * 微信把 SnsInfo 表放在独立的 SnsMicroMsg.db 里，EnMicroMsg.db 中没有这张表，
+     * 在主库上执行 `SELECT ... FROM SnsInfo` 会直接返回空。
+     *
+     * 取库路径：SnsCore.getSnsInfoStorage() 拿 SnsInfoStorage，再反射它的
+     * SQLiteDatabase 字段。这里**不用 DexKit 定位类**——用类名字符串匹配会同时
+     * 命中 SnsCore$23 / c5 / p4$$a / p4$$b / p4 五个类，DexKit 抛
+     * 「Multiple classes found」导致整个功能装挂。微信保留了 SnsCore 的原类名，
+     * 直接按名字反射最稳。
      */
-    private val classSnsCore by dexClass {
-        searchPackages("com.tencent.mm.plugin.sns.model")
-        matcher {
-            usingEqStrings("com.tencent.mm.plugin.sns.model.SnsCore")
+    private var snsStorageClassTried = false
+    private var snsStorageClass: Class<*>? = null
+
+    private fun snsCoreClass(): Class<*>? {
+        if (!snsStorageClassTried) {
+            snsStorageClassTried = true
+            snsStorageClass = runCatching {
+                Class.forName("com.tencent.mm.plugin.sns.model.SnsCore", false, ClassLoaders.HOST)
+            }.getOrElse {
+                WeLogger.w(TAG, "未找到 com.tencent.mm.plugin.sns.model.SnsCore：${it.message}")
+                null
+            }
         }
+        return snsStorageClass
     }
 
-    private val methodGetSnsInfoStorage by dexMethod {
-        matcher {
-            declaredClass(classSnsCore.clazz)
-            modifiers = java.lang.reflect.Modifier.STATIC
-            paramCount(0)
-            usingEqStrings("getSnsInfoStorage")
+    /** 调 getSnsInfoStorage()：优先按方法名，退化到「静态 0 参且返回类型名含 SnsInfoStorage」。 */
+    private fun resolveSnsInfoStorage(): Any? {
+        val cls = snsCoreClass() ?: return null
+        val byName = runCatching {
+            cls.declaredMethods.firstOrNull {
+                java.lang.reflect.Modifier.isStatic(it.modifiers) &&
+                    it.parameterCount == 0 &&
+                    it.name == "getSnsInfoStorage"
+            }
+        }.getOrNull()
+        val target = byName ?: runCatching {
+            cls.declaredMethods.firstOrNull {
+                java.lang.reflect.Modifier.isStatic(it.modifiers) &&
+                    it.parameterCount == 0 &&
+                    it.returnType.simpleName.contains("SnsInfoStorage", ignoreCase = true)
+            }
+        }.getOrNull()
+        if (target == null) {
+            WeLogger.w(TAG, "SnsCore 里没找到 getSnsInfoStorage()")
+            return null
         }
+        return runCatching {
+            target.isAccessible = true
+            target.invoke(null)
+        }.onFailure { WeLogger.e(TAG, "调用 getSnsInfoStorage 失败", it) }.getOrNull()
     }
 
     @Volatile
@@ -160,10 +192,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private fun resolveSnsDb(): Any? {
         cachedSnsDb?.let { return it }
         if (snsDbResolveFailed) return null
-        val storage = runCatching { methodGetSnsInfoStorage.method.invoke(null) }.getOrElse {
-            WeLogger.e(TAG, "取 SnsInfoStorage 失败", it)
-            null
-        }
+        val storage = resolveSnsInfoStorage()
         if (storage == null) {
             snsDbResolveFailed = true
             return null
