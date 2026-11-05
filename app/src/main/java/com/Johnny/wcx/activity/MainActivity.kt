@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.composables.icons.materialsymbols.MaterialSymbols
@@ -80,6 +81,8 @@ import com.Johnny.wcx.utils.formatEpoch
 import com.Johnny.wcx.utils.hook_status.HookStatus
 import com.Johnny.wcx.utils.openInSystem
 import com.Johnny.wcx.utils.registerBshSnapshotDecompileLaunchers
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 
 class MainActivity : ComponentActivity() {
 
@@ -213,7 +216,9 @@ class MainActivity : ComponentActivity() {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = BuildConfig.TAG,
-                                style = MaterialTheme.typography.titleLarge
+                                style = MaterialTheme.typography.titleLarge,
+                                color = WxPalette.Primary,
+                                fontWeight = FontWeight.Bold,
                             )
                             Text(
                                 text = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
@@ -336,18 +341,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp),
+                SoftCard(
+                    gradient = WxPalette.GradMint,
+                    contentPadding = 0,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 MaterialSymbols.OutlinedFilled.Info,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
+                                tint = WxPalette.Primary
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Text("构建信息", style = MaterialTheme.typography.titleMedium)
