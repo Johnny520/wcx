@@ -23,6 +23,26 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.net.WeNetSceneApi
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.Johnny.wcx.ui.style.SoftDivider
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.preferences.WePrefs
@@ -642,45 +662,157 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             dailyLimit = dailyLimitInput.toIntOrNull()?.coerceAtLeast(1) ?: 200,
                         )
                         onDismiss()
-                        confirmAndStart(context, options)
-                    }) { Text("扫描并删除") }
+                        scanThenPick(context, options)
+                    }) { Text("开始扫描") }
                 },
                 dismissButton = { TextButton(onDismiss) { Text("取消") } }
             )
         }
     }
 
-    /** 扫描 → 二次确认 → 启动。 */
-    private fun confirmAndStart(context: Context, options: DeleteOptions) {
+    /**
+     * 第一步：扫描。只负责把符合条件的条目列出来，不执行任何删除。
+     * 扫描在 IO 线程完成，避免长列表查询卡住 UI。
+     */
+    private fun scanThenPick(context: Context, options: DeleteOptions) {
         if (learnedOpType < 0) {
             showToast("请先手动删除一条朋友圈以学习删除参数")
             return
         }
+        showComposeDialog(context) {
+            val scope = rememberCoroutineScope()
+            var loading by remember { mutableStateOf(true) }
+            var items by remember { mutableStateOf<List<MomentItem>>(emptyList()) }
 
-        val items = loadMyMoments(options)
-        if (items.isEmpty()) {
-            showToast("没有符合条件的朋友圈")
-            return
+            LaunchedEffect(Unit) {
+                val loaded = runCatching {
+                    withContext(Dispatchers.IO) { loadMyMoments(options) }
+                }.getOrElse {
+                    WeLogger.e(TAG, "扫描朋友圈失败", it)
+                    emptyList()
+                }
+                items = loaded
+                loading = false
+            }
+
+            if (loading) {
+                AlertDialogContent(
+                    title = { StyleTitle("正在扫描") },
+                    text = { Text("正在读取你的朋友圈列表，请稍候…") },
+                    confirmButton = {},
+                    dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                )
+                return@showComposeDialog
+            }
+
+            if (items.isEmpty()) {
+                AlertDialogContent(
+                    title = { StyleTitle("没有可删除的朋友圈") },
+                    text = { Text("当前筛选条件下没有找到你自己的朋友圈。可以返回放宽年份范围或调大数量上限。") },
+                    confirmButton = { Button(onClick = onDismiss) { Text("知道了") } },
+                    dismissButton = {},
+                )
+                return@showComposeDialog
+            }
+
+            // 第二步：列表勾选。默认全选，用户可逐条取消。
+            val selected = remember { mutableStateMapOf<Long, Boolean>() }
+            if (selected.isEmpty()) items.forEach { selected[it.snsId] = true }
+
+            val selectedCount = selected.count { it.value }
+
+            AlertDialogContent(
+                title = { StyleTitle("选择要删除的朋友圈（${items.size} 条）") },
+                text = {
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = selectedCount == items.size,
+                                onCheckedChange = { checked ->
+                                    items.forEach { selected[it.snsId] = checked }
+                                },
+                            )
+                            Text("全选", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.weight(1f))
+                            StatusPill(
+                                text = "已选 $selectedCount / ${items.size}",
+                                color = WxPalette.Primary,
+                                background = WxPalette.PrimarySoft,
+                            )
+                        }
+                        HorizontalDivider()
+                        LazyColumn(modifier = Modifier.fillMaxWidth().height(340.dp)) {
+                            items(items.size) { index ->
+                                val item = items[index]
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(
+                                        checked = selected[item.snsId] == true,
+                                        onCheckedChange = { checked -> selected[item.snsId] = checked },
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = item.createTimeText,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color(0xFF2B2B2B),
+                                        )
+                                        if (item.preview.isNotEmpty()) {
+                                            Text(
+                                                text = item.preview,
+                                                fontSize = 12.sp,
+                                                color = Color(0xFF8A8A8A),
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
+                                }
+                                if (index != items.lastIndex) SoftDivider()
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val picked = items.filter { selected[it.snsId] == true }
+                        if (picked.isEmpty()) {
+                            showToast("还没有选择任何条目")
+                            return@Button
+                        }
+                        onDismiss()
+                        confirmAndDelete(context, picked, options)
+                    }) { Text("删除选中（$selectedCount）") }
+                },
+                dismissButton = { TextButton(onDismiss) { Text("返回") } },
+            )
         }
+    }
 
-        val sample = items.take(3).joinToString("\n") { "· ${it.createTimeText}  ${it.preview}" }
+    /** 第三步：最终确认，展示条数与样例，确认后才真正开始删除。 */
+    private fun confirmAndDelete(context: Context, picked: List<MomentItem>, options: DeleteOptions) {
+        val sample = picked.take(3).joinToString("\n") { "· ${it.createTimeText}  ${it.preview}" }
         showComposeDialog(context) {
             AlertDialogContent(
-                title = { Text("确认删除") },
+                title = { Text("确认删除这 ${picked.size} 条") },
                 text = {
                     Text(
-                        "将删除 ${items.size} 条朋友圈，此操作不可恢复。\n\n" +
-                            "最近 3 条：\n$sample\n\n" +
+                        "删除后不可恢复，且不会进入回收站。\n\n" +
+                            "前 3 条：\n$sample\n\n" +
                             "间隔 ${options.intervalMs / 1000}s / 每 ${options.batchSize} 条暂停 " +
                             "${options.batchPauseMs / 1000}s / 今日已删 ${todayCount()} 条。\n\n" +
-                            "删除过程中可以随时在通知/日志中查看进度，任务不会因为关闭本对话框而中断。"
+                            "任务在后台执行，关闭对话框不会中断。"
                     )
                 },
                 confirmButton = {
                     Button(onClick = {
                         onDismiss()
                         val started = startDelete(
-                            items = items,
+                            items = picked,
                             options = options,
                             onProgress = { done, total, message ->
                                 if (done % 10 == 0 || done == total) {
@@ -701,7 +833,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                 }
                             }
                         )
-                        if (started) showToast("已开始删除 ${items.size} 条，可在日志查看进度")
+                        if (started) showToast("已开始删除 ${picked.size} 条，可在日志查看进度")
                     }) { Text("确认删除") }
                 },
                 dismissButton = { TextButton(onDismiss) { Text("再想想") } }
