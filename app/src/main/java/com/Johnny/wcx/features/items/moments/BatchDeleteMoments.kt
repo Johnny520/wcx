@@ -18,8 +18,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import com.Johnny.wcx.dexkit.abc.IResolveDex
+import com.Johnny.wcx.dexkit.dsl.DexClassDelegate
 import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod
+import org.luckypray.dexkit.query.FindClass
+import org.luckypray.dexkit.query.matchers.ClassMatcher
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.net.WeNetSceneApi
@@ -130,6 +133,67 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
     }
 
+    /**
+     * SnsCore 的类定位（DexKit 多候选二次筛选）。
+     *
+     * 微信 8.0.80 起把 SnsCore 混淆成短名（实测 `p4`），原类名
+     * `com.tencent.mm.plugin.sns.model.SnsCore` 已不存在；同时 TAG 串
+     * 「MicroMsg.SnsCore」被它的一批内部类/匿名类同时引用，直接
+     * `usingEqStrings` 会命中多个类并抛「Multiple classes found」。
+     *
+     * 这里放宽匹配后自己筛：排除内部类（类名含 `$`），并要求该类有
+     * 「静态 0 参、返回 com.tencent.mm.plugin.sns.storage.* 里那个带
+     * `delete(String,String,String[])` 的类」的方法——即 getSnsInfoStorage()。
+     */
+    private val delegateSnsCore = DexClassDelegate("BatchDeleteMoments:snsCore") { d, dexKit ->
+        val candidates = runCatching {
+            dexKit.findClass(
+                FindClass.create()
+                    .searchPackages("com.tencent.mm.plugin.sns.model")
+                    .matcher(ClassMatcher.create().usingEqStrings("MicroMsg.SnsCore"))
+            )
+        }.getOrElse {
+            WeLogger.w(TAG, "DexKit 定位 SnsCore 失败：${it.message}")
+            emptyList()
+        }
+        val picked = candidates.firstOrNull { cd -> isSnsCoreLike(cd.name) }
+        if (picked == null) {
+            WeLogger.w(TAG, "DexKit 候选里没有 SnsCore：${candidates.joinToString { it.name }}")
+            false
+        } else {
+            d.setDescriptor(picked.name)
+            true
+        }
+    }
+
+    init {
+        registerDexDelegate(delegateSnsCore)
+    }
+
+    /** 类里是否有「静态 0 参且返回朋友圈库对象」的方法。 */
+    private fun isSnsCoreLike(name: String): Boolean {
+        if (name.contains('$')) return false
+        return runCatching {
+            Class.forName(name, false, ClassLoaders.HOST).declaredMethods.any { m ->
+                java.lang.reflect.Modifier.isStatic(m.modifiers) &&
+                    m.parameterCount == 0 &&
+                    isSnsInfoStorageType(m.returnType)
+            }
+        }.getOrDefault(false)
+    }
+
+    /** 返回类型是不是 SnsInfoStorage：它独有 `delete(String, String, String[])`。 */
+    private fun isSnsInfoStorageType(t: Class<*>): Boolean = runCatching {
+        t.name.startsWith("com.tencent.mm.plugin.sns.storage.") &&
+            !t.name.endsWith(".SnsInfo") &&
+            t.declaredMethods.any { m ->
+                m.name == "delete" && m.parameterTypes.size == 3 &&
+                    m.parameterTypes[0] == String::class.java &&
+                    m.parameterTypes[1] == String::class.java &&
+                    m.parameterTypes[2].name == "[Ljava.lang.String;"
+            }
+    }.getOrDefault(false)
+
     // ── 朋友圈数据库（SnsMicroMsg.db）─────────────────────────────────────────
     /**
      * 微信把 SnsInfo 表放在独立的 SnsMicroMsg.db 里，EnMicroMsg.db 中没有这张表，
@@ -138,8 +202,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 取库路径：SnsCore.getSnsInfoStorage() 拿 SnsInfoStorage，再反射它的
      * SQLiteDatabase 字段。这里**不用 DexKit 定位类**——用类名字符串匹配会同时
      * 命中 SnsCore$23 / c5 / p4$$a / p4$$b / p4 五个类，DexKit 抛
-     * 「Multiple classes found」导致整个功能装挂。微信保留了 SnsCore 的原类名，
-     * 直接按名字反射最稳。
+     * 「Multiple classes found」导致整个功能装挂。因此这里先用原类名反射
+     * （微信 <= 8.0.79 保留），失败再走 [delegateSnsCore] 的 DexKit 多候选筛选
+     * （8.0.80 起混淆成短名，如 `p4`）。
      */
     private var snsStorageClassTried = false
     private var snsStorageClass: Class<*>? = null
@@ -147,12 +212,18 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private fun snsCoreClass(): Class<*>? {
         if (!snsStorageClassTried) {
             snsStorageClassTried = true
+            // 1) 原类名（微信 <= 8.0.79 保留）
             snsStorageClass = runCatching {
                 Class.forName("com.tencent.mm.plugin.sns.model.SnsCore", false, ClassLoaders.HOST)
-            }.getOrElse {
-                WeLogger.w(TAG, "未找到 com.tencent.mm.plugin.sns.model.SnsCore：${it.message}")
-                null
+            }.getOrNull()
+            // 2) DexKit 多候选二次筛选（8.0.80+ 混淆成短名）
+            if (snsStorageClass == null) {
+                snsStorageClass = runCatching { delegateSnsCore.clazz }.getOrElse {
+                    WeLogger.w(TAG, "SnsCore 定位失败：${it.message}")
+                    null
+                }
             }
+            snsStorageClass?.let { WeLogger.i(TAG, "SnsCore 已定位：${it.name}") }
         }
         return snsStorageClass
     }
@@ -168,10 +239,10 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             }
         }.getOrNull()
         val target = byName ?: runCatching {
-            cls.declaredMethods.firstOrNull {
-                java.lang.reflect.Modifier.isStatic(it.modifiers) &&
-                    it.parameterCount == 0 &&
-                    it.returnType.simpleName.contains("SnsInfoStorage", ignoreCase = true)
+            cls.declaredMethods.firstOrNull { m ->
+                java.lang.reflect.Modifier.isStatic(m.modifiers) &&
+                    m.parameterCount == 0 &&
+                    isSnsInfoStorageType(m.returnType)
             }
         }.getOrNull()
         if (target == null) {
