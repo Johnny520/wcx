@@ -479,7 +479,7 @@ private fun AvatarPlaceholder() {
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh),
+            .background(WxPalette.cardBackground()),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -943,7 +943,7 @@ private fun UpdateAvailableDialog(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                                    .background(WxPalette.cardBackground())
                                     .padding(horizontal = 5.dp, vertical = 1.dp)
                             ) {
                                 Text(
@@ -1346,7 +1346,7 @@ private fun LibraryRow(library: Library, modifier: Modifier = Modifier) {
                             color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                                .background(WxPalette.cardBackground())
                                 .padding(horizontal = 8.dp, vertical = 3.dp),
                         )
                     }

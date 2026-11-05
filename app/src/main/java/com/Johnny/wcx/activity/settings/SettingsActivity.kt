@@ -416,7 +416,22 @@ fun MiuixListScaffold(
                 .padding(horizontal = horizontalPadding),
             contentPadding = innerPadding,
             overscrollEffect = null,
-            content = content,
+            content = {
+                // iOS 大标题：标题不是空的页面在内容顶部放一个 30sp 近黑粗体，
+                // 顶栏的小标题只在滚动/返回时提供上下文。
+                if (title.isNotEmpty()) {
+                    item(key = "page_big_title") {
+                        Text(
+                            text = title,
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = WxPalette.textPrimary(),
+                            modifier = Modifier.padding(start = 6.dp, top = 4.dp, bottom = 10.dp),
+                        )
+                    }
+                }
+                content()
+            },
         )
     }
 }
@@ -440,7 +455,7 @@ fun Modifier.groupedCardItem(index: Int, count: Int): Modifier {
     val bottom = index == count - 1
     return fillMaxWidth()
         .squircleSurface(
-            color = MiuixTheme.colorScheme.surfaceContainer,
+            color = WxPalette.cardBackground(),
             topStart = if (top) r else z,
             topEnd = if (top) r else z,
             bottomEnd = if (bottom) r else z,
