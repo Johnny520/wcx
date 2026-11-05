@@ -76,6 +76,14 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 
 /**
  * 批量删除自己的朋友圈。
@@ -450,6 +458,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         /** 分组用：如「2023年5月」 */
         val yearMonth: String,
         val type: Int,
+        /** 类型标签：图片 / 图片×3 / 视频 / 音乐 / 链接 / 文字，空串表示未知。 */
+        val kind: String,
+        /** 正文摘要（SnsInfo 解密后的 ContentDesc，回落 XML 标签）。 */
         val preview: String,
         /** 微信内部本地 id（形如 `sns_table_xxx`），详情页靠它定位这条朋友圈。 */
         val localId: String,
@@ -627,7 +638,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             createTimeText = formatTime(createTime),
                             yearMonth = formatYearMonth(createTime),
                             type = type,
-                            preview = summarize(rawXml, bodyText),
+                            kind = summarizeKind(rawXml),
+                            preview = summarizeText(rawXml, bodyText),
                             localId = localId,
                         )
                     )
@@ -657,23 +669,12 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private fun formatYearMonth(seconds: Long): String =
         runCatching { yearMonthFormat.format(Date(seconds * 1000)) }.getOrDefault("未知时间")
 
-    /**
-     * 从 SnsInfo.content 的 XML 里提取可读摘要。
-     *
-     * 微信把朋友圈内容以 TimelineObject XML 存在 content 列：
-     *   <contentDesc>文字内容</contentDesc>
-     *   <contentObject><contentStyle>2</contentStyle><title/>...</contentObject>
-     *   <mediaList><media>…</media></mediaList>
-     *
-     * 之前直接把所有标签剥掉，会把 <id>/<username> 之类的值也拼进来，
-     * 列表里就只剩一串 snsId+wxid，完全看不出内容。这里改为按标签取值，
-     * 并按 contentStyle / media 数量补一个类型前缀。
-     */
-    private fun summarize(raw: String?, bodyText: String = ""): String {
+    /** 类型标签：从 content XML 的 contentStyle / media 数量推断。 */
+    private fun summarizeKind(raw: String?): String {
         val xml = raw ?: ""
         val style = xmlTag(xml, "contentStyle").toIntOrNull()
         val mediaCount = runCatching { Regex("<media>").findAll(xml).count() }.getOrDefault(0)
-        val kind = when (style) {
+        return when (style) {
             1 -> "文字"
             2 -> if (mediaCount > 1) "图片×$mediaCount" else "图片"
             3 -> "视频"
@@ -681,20 +682,24 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             5 -> "链接"
             else -> if (mediaCount > 0) (if (mediaCount > 1) "图片×$mediaCount" else "图片") else ""
         }
+    }
+
+    /**
+     * 正文摘要。
+     *
+     * 朋友圈正文不在 SnsInfo 表的 content 列（那里只有 id/username/contentStyle），
+     * 正文走 attrBuf 加密，必须由 SnsInfo 解密后经 getTimeLine().ContentDesc 取出；
+     * bodyText 为空时才回落到 XML 标签。
+     */
+    private fun summarizeText(raw: String?, bodyText: String = ""): String {
+        val xml = raw ?: ""
         val body = bodyText.ifBlank {
             listOf("ContentDesc", "contentDesc", "title", "description")
                 .map { xmlTag(xml, it) }
                 .firstOrNull { it.isNotBlank() }
                 .orEmpty()
-        }.replace(Regex("\\s+"), " ")
-            .trim()
-        val text = if (body.length > 50) body.take(50) + "…" else body
-        return when {
-            text.isNotEmpty() && kind.isNotEmpty() -> "[$kind] $text"
-            text.isNotEmpty() -> text
-            kind.isNotEmpty() -> "[$kind]（无文字内容）"
-            else -> "（无文字内容）"
-        }
+        }.replace(Regex("\\s+"), " ").trim()
+        return if (body.length > 60) body.take(60) + "…" else body
     }
 
     /** 取 XML 里第一个 <tag>…</tag> 的文本（含 CDATA / 常见实体反转义）。 */
@@ -1107,13 +1112,40 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             if (selected.isEmpty()) items.forEach { selected[it.snsId] = true }
 
             val selectedCount = selected.count { it.value }
+            val listBg = Color(0xFFF2F2F7)
+            val textMain = Color(0xFF1C1C1E)
+            val textSub = Color(0xFF8E8E93)
 
             AlertDialogContent(
-                title = { StyleTitle("选择要删除的朋友圈（${items.size} 条）") },
+                title = {
+                    Column {
+                        Text(
+                            text = "选择要删除的朋友圈",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textMain,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "共 ${items.size} 条 · 已选 $selectedCount 条",
+                            fontSize = 12.sp,
+                            color = textSub,
+                        )
+                    }
+                },
                 text = {
-                    Column(Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(listBg, RoundedCornerShape(18.dp))
+                            .padding(10.dp),
+                    ) {
+                        // 工具条（白色圆角卡片）
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(
@@ -1122,94 +1154,153 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                     items.forEach { selected[it.snsId] = checked }
                                 },
                             )
-                            Text("全选", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Spacer(Modifier.weight(1f))
-                            StatusPill(
-                                text = "已选 $selectedCount / ${items.size}",
-                                color = WxPalette.Primary,
-                                background = WxPalette.PrimarySoft,
+                            Text(
+                                text = "全选",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = textMain,
                             )
+                            Spacer(Modifier.weight(1f))
+                            Box(
+                                Modifier
+                                    .background(WxPalette.PrimarySoft, RoundedCornerShape(50))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "已选 $selectedCount / ${items.size}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = WxPalette.Primary,
+                                )
+                            }
                         }
-                        HorizontalDivider()
+
                         Text(
-                            text = "点任意一条可跳转到原朋友圈查看内容；左侧勾选框决定是否删除",
+                            text = "点卡片可跳转到原朋友圈查看内容，返回后会回到本列表",
                             fontSize = 11.sp,
-                            color = Color(0xFF8A8A8A),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                            color = textSub,
+                            modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 0.dp),
                         )
-                        LazyColumn(modifier = Modifier.fillMaxWidth().height(340.dp)) {
+
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().height(360.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 6.dp),
+                        ) {
                             val grouped = items.groupBy { it.yearMonth }
                             grouped.forEach { (month, monthItems) ->
-                                // 年月分组标题（如「2023年5月 · 12 条」）
                                 item(key = "header_$month") {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(top = 8.dp, bottom = 4.dp),
+                                            .padding(start = 6.dp, top = 8.dp, bottom = 2.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Text(
                                             text = month,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = WxPalette.Primary,
-                                            modifier = Modifier.weight(1f),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = textSub,
                                         )
+                                        Spacer(Modifier.width(6.dp))
                                         Text(
-                                            text = "${monthItems.size} 条",
+                                            text = "· ${monthItems.size} 条",
                                             fontSize = 11.sp,
-                                            color = Color(0xFF8A8A8A),
+                                            color = textSub.copy(alpha = 0.7f),
                                         )
                                     }
                                 }
                                 items(monthItems.size, key = { monthItems[it].snsId }) { index ->
                                     val item = monthItems[index]
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { openMomentDetail(context, item) }
-                                            .padding(vertical = 1.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Checkbox(
-                                            checked = selected[item.snsId] == true,
-                                            onCheckedChange = { checked -> selected[item.snsId] = checked },
-                                        )
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                text = item.createTimeText,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = Color(0xFF2B2B2B),
-                                            )
-                                            if (item.preview.isNotEmpty()) {
-                                                Text(
-                                                    text = item.preview,
-                                                    fontSize = 12.sp,
-                                                    color = Color(0xFF8A8A8A),
-                                                    maxLines = 1,
-                                                )
-                                            }
-                                        }
-                                    }
-                                    SoftDivider()
+                                    MomentCard(
+                                        item = item,
+                                        checked = selected[item.snsId] == true,
+                                        onCheckedChange = { selected[item.snsId] = it },
+                                        onClick = { openMomentDetail(context, item) },
+                                    )
                                 }
                             }
                         }
                     }
                 },
                 confirmButton = {
-                    Button(onClick = {
-                        val picked = items.filter { selected[it.snsId] == true }
-                        if (picked.isEmpty()) {
-                            showToast("还没有选择任何条目")
-                            return@Button
-                        }
-                        onDismiss()
-                        confirmAndDelete(context, picked, options)
-                    }) { Text("删除选中（$selectedCount）") }
+                    Button(
+                        onClick = {
+                            val picked = items.filter { selected[it.snsId] == true }
+                            if (picked.isEmpty()) {
+                                showToast("还没有选择任何条目")
+                                return@Button
+                            }
+                            onDismiss()
+                            confirmAndDelete(context, picked, options)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("删除选中（$selectedCount）") }
                 },
                 dismissButton = { TextButton(onDismiss) { Text("返回") } },
+            )
+        }
+    }
+
+    /**
+     * 单条朋友圈卡片：日期 + 类型胶囊 + 正文两行，左侧勾选、右侧箭头提示可点。
+     * 选中态用极浅的品牌色底，未选中是纯白卡片，靠灰底衬托层次。
+     */
+    @Composable
+    private fun MomentCard(
+        item: MomentItem,
+        checked: Boolean,
+        onCheckedChange: (Boolean) -> Unit,
+        onClick: () -> Unit,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (checked) WxPalette.PrimarySoft else Color.White)
+                .clickable(onClick = onClick)
+                .padding(start = 2.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.createTimeText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF1C1C1E),
+                    )
+                    if (item.kind.isNotEmpty()) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            Modifier
+                                .background(WxPalette.PrimarySoft, RoundedCornerShape(50))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = item.kind,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = WxPalette.Primary,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = item.preview.ifBlank { "（无文字内容）" },
+                    fontSize = 12.sp,
+                    color = Color(0xFF8E8E93),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Text(
+                text = "›",
+                fontSize = 18.sp,
+                color = Color(0xFFC7C7CC),
+                modifier = Modifier.padding(start = 4.dp),
             )
         }
     }
