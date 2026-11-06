@@ -282,33 +282,40 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private var cachedSnsInfoByLongMethods: List<java.lang.reflect.Method>? = null
 
     private fun snsInfoOf(dao: Any, snsId: Long): Any? {
-        // 候选方法只在「本轮真的跑过 DexKit 查找」时才有；从缓存恢复 descriptor 时
-        // candidates 是空的，但 .method 依然能反射出来 —— 所以必须优先走 .method。
-        val methods = LinkedHashMap<String, java.lang.reflect.Method>()
-        fun add(m: java.lang.reflect.Method?) {
-            if (m == null) return
-            methods[m.declaringClass.name + "#" + m.name +
-                m.parameterTypes.joinToString(",") { it.name }] = m
+        // 直接在这个 DAO 实例的类上按签名找方法，完全绕开 DexKit 委托：
+        // 委托的 candidates 只有在「本轮真的跑过查找」时才有值，从缓存恢复时是空的；
+        // 而 .method 也可能落到按 localId 查的那个方法上（传 snsId 永远查不到）。
+        // DAO 类（8.0.80 = com.tencent.mm.plugin.sns.storage.f2）上同时存在：
+        //   V1(long)   select *,rowid from SnsInfo where SnsInfo.snsId=<id> limit 1
+        //   M2(String) getByServerStrId
+        //   I2(String) getByLocalId   ← 传 snsId 查不到
+        // 按「1 个形参 + 返回 SnsInfo」筛出来，long 优先、String 次之，逐个试。
+        val methods = cachedDaoQueryMethods ?: run {
+            val found = runCatching {
+                dao.javaClass.methods.filter { m ->
+                    m.parameterCount == 1 &&
+                        m.returnType.name.endsWith("SnsInfo") &&
+                        (
+                            m.parameterTypes[0] == java.lang.Long.TYPE ||
+                                m.parameterTypes[0] == java.lang.Long::class.java ||
+                                m.parameterTypes[0] == String::class.java
+                            )
+                }.sortedBy { if (it.parameterTypes[0] == String::class.java) 1 else 0 }
+            }.getOrDefault(emptyList())
+            cachedDaoQueryMethods = found
+            WeLogger.i(
+                TAG,
+                "SnsInfo 查询方法 " + found.size + " 个：" +
+                    found.joinToString(" | ") { it.name + "(" + it.parameterTypes[0].simpleName + ")" },
+            )
+            found
         }
-        add(runCatching { methodSnsInfoBySnsId.method }.getOrNull())
-        add(runCatching { methodSnsInfoById.method }.getOrNull())
-        cachedSnsInfoByLongMethods?.forEach { add(it) }
-        cachedSnsInfoMethods?.forEach { add(it) }
         if (methods.isEmpty()) {
-            runCatching { methodSnsInfoBySnsId.candidateMethods() }.getOrDefault(emptyList())
-                .forEach { add(it) }
-            runCatching { methodSnsInfoById.candidateMethods() }.getOrDefault(emptyList())
-                .forEach { add(it) }
-            cachedSnsInfoByLongMethods = methods.values.toList()
-        }
-        if (methods.isEmpty()) {
-            WeLogger.w(TAG, "snsInfoOf: 没有任何可用的 SnsInfo 查询方法")
+            WeLogger.w(TAG, "snsInfoOf: DAO 上没有可用的 SnsInfo 查询方法")
             return null
         }
 
-        // 按形参类型挑参数：long 传数值，String 两种写法都试（无符号串 / 原值串）。
-        for (method in methods.values) {
-            if (method.parameterCount != 1) continue
+        for (method in methods) {
             val paramType = method.parameterTypes[0]
             val args: List<Any> = when {
                 paramType == java.lang.Long.TYPE || paramType == java.lang.Long::class.java ->
@@ -325,6 +332,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
         return null
     }
+
+    @Volatile
+    private var cachedDaoQueryMethods: List<java.lang.reflect.Method>? = null
 
     /** SnsInfo.getLocalid()，微信详情页用它定位；取不到时按无符号 snsId 拼。 */
     private fun snsInfoLocalId(snsInfo: Any?, snsId: Long): String {
