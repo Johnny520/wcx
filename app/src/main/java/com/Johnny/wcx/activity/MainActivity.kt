@@ -336,16 +336,24 @@ class MainActivity : ComponentActivity() {
                         title = "打开微信",
                         subtitle = "一键强行停止并启动微信",
                         onClick = {
-                            val hostPkg = prefs.getString("host_pkg_name", PackageNames.WECHAT)!!
-                            try {
-                                startActivity(com.Johnny.wcx.utils.android.Intent {
-                                    setClassName(hostPkg, "${PackageNames.WECHAT}.ui.LauncherUI")
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    putExtra(BuildConfig.TAG, "1")
-                                })
-                                isLaunchingWeChat = true
-                            } catch (e: Exception) {
-                                shortcutError = e.message ?: "无法打开微信 (包名: $hostPkg)"
+                            // 强停 + 拉起：先 am force-stop 再 am start，成功后关掉本页
+                            if (!(Shell.isAppGrantedRoot() ?: false)) {
+                                showNoRootDialog = true
+                            } else {
+                                val userId = androidUserId
+                                val hostPkg = prefs.getString("host_pkg_name", PackageNames.WECHAT)!!
+                                Shell.cmd(
+                                    "am force-stop --user $userId $hostPkg",
+                                    "am start --user $userId -n $hostPkg/${PackageNames.WECHAT}.ui.LauncherUI",
+                                ).submit { result ->
+                                    if (result.isSuccess) {
+                                        finishAndRemoveTask()
+                                    } else {
+                                        shortcutError = (result.out + result.err)
+                                            .joinToString("\n")
+                                            .ifBlank { "无法启动微信 (包名: $hostPkg)" }
+                                    }
+                                }
                             }
                         }
                     )
