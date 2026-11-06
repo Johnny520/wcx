@@ -1546,17 +1546,21 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
             if (!copyFileViaVfs(path, destFullPath)) return false
 
-            // 设置语音信息
+            // 设置语音信息（VoiceLogic.setVoice 在 8.0.7x 起已不存在，拿不到就跳过时长）
             val finalDurationMs = durationMs.coerceIn(1, 60_000)
-            val setVoiceReceiver = getReceiverForMethod(setVoiceMethod)
-            val setVoiceResult = if (setVoiceMethod.parameterCount == 4) {
-                setVoiceMethod.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null)
+            val setVoice = runCatching { setVoiceMethod }.getOrNull()
+            if (setVoice == null) {
+                WeLogger.w(TAG, "VoiceLogic 没有 setVoice(String,int,int)，跳过时长设置：fileName=$fileName duration=${finalDurationMs}ms")
             } else {
-                setVoiceMethod.invoke(setVoiceReceiver, fileName, finalDurationMs, 0)
-            } as? Boolean ?: false
-
-            if (!setVoiceResult) {
-                WeLogger.w(TAG, "VoiceLogic.setVoice returned false, still starting voice service: fileName=$fileName, target=$toUser")
+                val setVoiceReceiver = getReceiverForMethod(setVoice)
+                val setVoiceResult = if (setVoice.parameterCount == 4) {
+                    setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null)
+                } else {
+                    setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0)
+                } as? Boolean ?: false
+                if (!setVoiceResult) {
+                    WeLogger.w(TAG, "VoiceLogic.setVoice returned false, still starting voice service: fileName=$fileName, target=$toUser")
+                }
             }
 
             startVoiceService()
@@ -1577,14 +1581,21 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
             val actualDuration = if (durationMs > 60000) 60000 else durationMs
 
-            val target = classVoiceLogic.clazz.reflekt()
-                .firstMethod {
-                    parameters {
-                        it[0] == BString && it[1] == BInt && it[2] == BInt
-                    }
-                    returnType = BBool
-                }.self
-            if (target.parameterCount == 4) {
+            // 注意：8.0.7x 起 VoiceLogic 里没有 setVoice(String,int,int)，
+            // 原来这里直接 firstMethod 会抛异常，把整条发送链路打断，
+            // 表现就是「语音复读/转发发不出去」。时长只是展示字段，找不到就跳过。
+            val target = runCatching {
+                classVoiceLogic.clazz.reflekt()
+                    .firstMethod {
+                        parameters {
+                            it[0] == BString && it[1] == BInt && it[2] == BInt
+                        }
+                        returnType = BBool
+                    }.self
+            }.getOrNull()
+            if (target == null) {
+                WeLogger.w(TAG, "VoiceLogic 没有 setVoice(String,int,int)，跳过时长设置：duration=${actualDuration}ms")
+            } else if (target.parameterCount == 4) {
                 target.invoke(null, partialPath, actualDuration, 0, null)
             } else {
                 target.invoke(null, partialPath, actualDuration, 0)
