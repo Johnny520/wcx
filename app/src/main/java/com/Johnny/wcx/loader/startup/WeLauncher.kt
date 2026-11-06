@@ -21,6 +21,7 @@ import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.crash.ExitReasonRecorder
 import com.Johnny.wcx.utils.crash.JavaCrashHandler
+import com.Johnny.wcx.utils.crash.NativeCrashHandler
 import com.Johnny.wcx.utils.crash.ProcessTimeline
 import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.Johnny.wcx.utils.invokeOriginal
@@ -34,6 +35,12 @@ object WeLauncher {
         // 尽早接管未捕获异常：模块后台线程/协程抛异常时只记录、不结束宿主进程，
         // 否则 Android 会直接杀掉整个微信进程（用户感知就是「微信被强行停止」）。
         runCatching { JavaCrashHandler.install() }
+
+        // 原生崩溃（SIGSEGV/SIGABRT/SIGBUS…）Java 层完全抓不到，而它正是「微信莫名其妙
+        // 被杀、日志里什么都没有」最常见的成因。Rust 侧 crash_handler 早已实现（且会链式
+        // 调用微信自己注册的旧 handler，不会吞掉宿主处理），只是一直没被安装 —— 这里补上。
+        runCatching { NativeCrashHandler.install() }
+            .onFailure { WeLogger.w(TAG, "native crash handler install failed: ${it.message}") }
 
         // 记录上次进程退出原因（内存回收 / 崩溃 / ANR / 用户强行停止），供诊断页区分责任方。
         runCatching {

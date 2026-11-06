@@ -604,7 +604,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }
         }
 
-        methodImageSendEntry.find(dexKit) {
+        methodImageSendEntry.find(dexKit, allowFailure = true) {
             matcher {
                 declaredClass(classImageSender.clazz)
                 modifiers = Modifier.PUBLIC or Modifier.STATIC or Modifier.FINAL
@@ -613,13 +613,26 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }
         }
 
-        val taskClassName = methodImageSendEntry.method.parameterTypes[1]
-        classImageTask.setDescriptor(taskClassName.name)
+        if (!methodImageSendEntry.isPlaceholder) {
+            val taskClassName = methodImageSendEntry.method.parameterTypes[1]
+            classImageTask.setDescriptor(taskClassName.name)
+        } else {
+            WeLogger.w(TAG, "methodImageSendEntry 定位失败，图片发送链路降级")
+        }
 
         if (HostInfo.versionCode >= WeChatVersions.MM_8_0_67 && !HostInfo.isHostGooglePlay ||
             HostInfo.versionCode >= WeChatVersions.MM_8_0_66_PLAY && HostInfo.isHostGooglePlay
         ) {
-            methodImgUploadFeatureServiceSendImage.find(dexKit) {
+            // 8.0.80+ 同一类里存在多个「1 参 + 用到 params 串」的方法（实测 xa0.w::Uj 与 xa0.w::a），
+            // 只靠 'params' 区分不出来。命中多个时旧代码直接抛 IllegalStateException，
+            // 整个 WeMessageApi 解析失败 → 语音/图片/复读等全部发送能力一起不可用。
+            // 这里允许多候选：真正的 sendImage 是协程入口，返回 kotlinx.coroutines.flow.*，
+            // 按这个特征择优；挑不到就退回第一个候选，绝不抛异常。
+            methodImgUploadFeatureServiceSendImage.find(
+                dexKit,
+                allowMultiple = true,
+                allowFailure = true,
+            ) {
                 matcher {
                     declaredClass {
                         usingEqStrings("MicroMsg.ImgUpload.MsgImgFeatureService", "taskListener", "params")
@@ -629,8 +642,26 @@ object WeMessageApi : ApiFeature(), IResolveDex {
                     usingEqStrings("params")
                 }
             }
+            runCatching {
+                val picked = methodImgUploadFeatureServiceSendImage.candidates.firstOrNull {
+                    it.paramTypeNames.size == 1 &&
+                        it.returnTypeName.startsWith("kotlinx.coroutines.flow.")
+                } ?: methodImgUploadFeatureServiceSendImage.candidates.firstOrNull()
+                if (picked != null) {
+                    methodImgUploadFeatureServiceSendImage.setDescriptor(
+                        picked.className,
+                        picked.methodName,
+                        picked.methodSign,
+                    )
+                    WeLogger.i(
+                        TAG,
+                        "sendImage 定位到 ${picked.className}::${picked.methodName}" +
+                            " (候选 ${methodImgUploadFeatureServiceSendImage.candidates.size} 个)",
+                    )
+                }
+            }.onFailure { WeLogger.w(TAG, "sendImage 择优失败: ${it.message}") }
 
-            methodAppInfoSetAppId.find(dexKit) {
+            methodAppInfoSetAppId.find(dexKit, allowFailure = true) {
                 matcher {
                     declaredClass {
                         usingEqStrings("appinfo", "appid", "version", "appname", "isforceupdate", "messageaction", "messageext", "mediatagname")
@@ -647,7 +678,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
             methodAppInfoSetAppId.setPlaceholderDescriptor()
 
-            ctorNetSceneUploadMsgImg.find(dexKit) {
+            ctorNetSceneUploadMsgImg.find(dexKit, allowFailure = true) {
                 searchPackages("com.tencent.mm.modelimage")
                 matcher {
                     name = "<init>"

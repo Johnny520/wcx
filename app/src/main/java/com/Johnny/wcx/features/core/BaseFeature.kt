@@ -89,7 +89,14 @@ abstract class BaseFeature {
     }
 
     internal fun resolveInlineDex(dexKit: DexKitBridge) {
-        dexDelegates.forEach { it.findInline(dexKit) }
+        // 每个委托独立容错：某个锚点命中多个候选、或解析时抛异常，只让这一个委托降级，
+        // 绝不能把整个 API 拖下水。典型事故：8.0.80 的 img feature service 有一个方法
+        // 命中 2 个候选，IllegalStateException 直接把 WeMessageApi 的解析整体打断，
+        // 连带语音/图片/复读等所有发送能力一起不可用。
+        dexDelegates.forEach { delegate ->
+            runCatching { delegate.findInline(dexKit) }
+                .onFailure { WeLogger.e(TAG, "dex delegate resolve failed (${delegate.key})", it) }
+        }
     }
 
     internal val unhooks = mutableListOf<XC_MethodHook.Unhook>()
