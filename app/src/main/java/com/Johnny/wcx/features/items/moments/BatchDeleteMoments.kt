@@ -282,23 +282,41 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private var cachedSnsInfoByLongMethods: List<java.lang.reflect.Method>? = null
 
     private fun snsInfoOf(dao: Any, snsId: Long): Any? {
-        // ① 首选按 long 直接查（f2.V1），命中率最高
-        val longMethods = cachedSnsInfoByLongMethods ?: runCatching {
-            methodSnsInfoBySnsId.candidateMethods()
-        }.getOrDefault(emptyList()).also { if (it.isNotEmpty()) cachedSnsInfoByLongMethods = it }
-        for (method in longMethods) {
-            runCatching { method.isAccessible = true }
-            val result = runCatching { method.invoke(dao, snsId) }.getOrNull()
-            if (result != null) return result
+        // 候选方法只在「本轮真的跑过 DexKit 查找」时才有；从缓存恢复 descriptor 时
+        // candidates 是空的，但 .method 依然能反射出来 —— 所以必须优先走 .method。
+        val methods = LinkedHashMap<String, java.lang.reflect.Method>()
+        fun add(m: java.lang.reflect.Method?) {
+            if (m == null) return
+            methods[m.declaringClass.name + "#" + m.name +
+                m.parameterTypes.joinToString(",") { it.name }] = m
+        }
+        add(runCatching { methodSnsInfoBySnsId.method }.getOrNull())
+        add(runCatching { methodSnsInfoById.method }.getOrNull())
+        cachedSnsInfoByLongMethods?.forEach { add(it) }
+        cachedSnsInfoMethods?.forEach { add(it) }
+        if (methods.isEmpty()) {
+            runCatching { methodSnsInfoBySnsId.candidateMethods() }.getOrDefault(emptyList())
+                .forEach { add(it) }
+            runCatching { methodSnsInfoById.candidateMethods() }.getOrDefault(emptyList())
+                .forEach { add(it) }
+            cachedSnsInfoByLongMethods = methods.values.toList()
+        }
+        if (methods.isEmpty()) {
+            WeLogger.w(TAG, "snsInfoOf: 没有任何可用的 SnsInfo 查询方法")
+            return null
         }
 
-        // ② 退回 (String)->SnsInfo 的全部候选
-        val methods = cachedSnsInfoMethods ?: runCatching { methodSnsInfoById.candidateMethods() }
-            .getOrDefault(emptyList())
-            .also { if (it.isNotEmpty()) cachedSnsInfoMethods = it }
-        if (methods.isEmpty()) return null
-        val args = arrayOf(java.lang.Long.toUnsignedString(snsId), snsId.toString())
-        for (method in methods) {
+        // 按形参类型挑参数：long 传数值，String 两种写法都试（无符号串 / 原值串）。
+        for (method in methods.values) {
+            if (method.parameterCount != 1) continue
+            val paramType = method.parameterTypes[0]
+            val args: List<Any> = when {
+                paramType == java.lang.Long.TYPE || paramType == java.lang.Long::class.java ->
+                    listOf(snsId)
+                paramType == String::class.java ->
+                    listOf(java.lang.Long.toUnsignedString(snsId), snsId.toString())
+                else -> continue
+            }
             runCatching { method.isAccessible = true }
             for (arg in args) {
                 val result = runCatching { method.invoke(dao, arg) }.getOrNull()
@@ -736,6 +754,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val dao = storageObj?.let { resolveSnsDao(it) }
 
         val result = mutableListOf<MomentItem>()
+        var sampleLogged = false
         runCatching {
             querySns(sql, args)?.use { c ->
                 val iSnsId = c.getColumnIndex("snsId")
@@ -756,6 +775,14 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     // 正文只能靠 SnsInfo 解密后的 TimeLineObject 拿到
                     val snsInfo = dao?.let { runCatching { snsInfoOf(it, snsId) }.getOrNull() }
                     val bodyText = runCatching { snsInfoText(snsInfo) }.getOrDefault("")
+                    if (!sampleLogged) {
+                        sampleLogged = true
+                        WeLogger.i(
+                            TAG,
+                            "样本诊断：snsId=$snsId, snsInfo=${snsInfo != null}, " +
+                                "bodyLen=${bodyText.length}, type=$type",
+                        )
+                    }
                     val images = runCatching { snsInfoImages(snsInfo) }.getOrDefault(emptyList())
                     val localId = snsInfoLocalId(snsInfo, snsId)
 
