@@ -199,13 +199,31 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
     }
 
+    /**
+     * 按 snsId(long) 直接查 SnsInfo 的方法。
+     *
+     * 8.0.80 = com.tencent.mm.plugin.sns.storage.f2.V1，内部 SQL 就是
+     * `select *,rowid from SnsInfo where SnsInfo.snsId=<id> limit 1`，
+     * 比「把 snsId 转成字符串再查」稳得多（后者极易挑到按 localId 查的那个方法）。
+     */
+    private val methodSnsInfoBySnsId by dexMethod(allowMultiple = true, allowFailure = true) {
+        searchPackages("com.tencent.mm.plugin.sns.storage")
+        matcher {
+            paramTypes("long")
+            returnType("com.tencent.mm.plugin.sns.storage.SnsInfo")
+        }
+    }
+
     @Volatile
     private var cachedSnsDao: Any? = null
 
     /** 用 SnsInfoStorage 构造 DAO 实例（DAO 构造器只接受 storage）。 */
     private fun resolveSnsDao(storage: Any): Any? {
         cachedSnsDao?.let { return it }
-        val cls = runCatching { methodSnsInfoById.method.declaringClass }.getOrNull() ?: return null
+        val clsName = methodSnsInfoBySnsId.candidates.firstOrNull()?.className
+            ?: methodSnsInfoById.candidates.firstOrNull()?.className
+            ?: return null
+        val cls = runCatching { ClassLoaders.HOST.loadClass(clsName) }.getOrNull() ?: return null
         val dao = runCatching {
             cls.getDeclaredConstructor(storage.javaClass).apply { isAccessible = true }
                 .newInstance(storage)
@@ -215,13 +233,42 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         return dao
     }
 
-    /** 按 snsId 取 SnsInfo 对象（DAO 的参数既可能是无符号串也可能是原值，两个都试）。 */
+    /**
+     * 按 snsId 取 SnsInfo 对象。
+     *
+     * 「(String)->SnsInfo」在这个包里不止一个方法（按 serverId 查的 getByServerStrId、按本地 id 查的
+     * getByLocalId 等），只取第一个候选很容易拿到按本地 id 查的那个 —— 传 snsId 永远返回 null，
+     * 表现就是列表里「有日期、没正文、没图」。这里把全部候选和两种参数写法都试一遍，谁非空用谁。
+     */
+    @Volatile
+    private var cachedSnsInfoMethods: List<java.lang.reflect.Method>? = null
+
+    @Volatile
+    private var cachedSnsInfoByLongMethods: List<java.lang.reflect.Method>? = null
+
     private fun snsInfoOf(dao: Any, snsId: Long): Any? {
-        val m = runCatching { methodSnsInfoById.method }.getOrNull() ?: return null
-        m.isAccessible = true
-        for (arg in listOf(java.lang.Long.toUnsignedString(snsId), snsId.toString())) {
-            val r = runCatching { m.invoke(dao, arg) }.getOrNull()
-            if (r != null) return r
+        // ① 首选按 long 直接查（f2.V1），命中率最高
+        val longMethods = cachedSnsInfoByLongMethods ?: runCatching {
+            methodSnsInfoBySnsId.candidateMethods()
+        }.getOrDefault(emptyList()).also { if (it.isNotEmpty()) cachedSnsInfoByLongMethods = it }
+        for (method in longMethods) {
+            runCatching { method.isAccessible = true }
+            val result = runCatching { method.invoke(dao, snsId) }.getOrNull()
+            if (result != null) return result
+        }
+
+        // ② 退回 (String)->SnsInfo 的全部候选
+        val methods = cachedSnsInfoMethods ?: runCatching { methodSnsInfoById.candidateMethods() }
+            .getOrDefault(emptyList())
+            .also { if (it.isNotEmpty()) cachedSnsInfoMethods = it }
+        if (methods.isEmpty()) return null
+        val args = arrayOf(java.lang.Long.toUnsignedString(snsId), snsId.toString())
+        for (method in methods) {
+            runCatching { method.isAccessible = true }
+            for (arg in args) {
+                val result = runCatching { method.invoke(dao, arg) }.getOrNull()
+                if (result != null) return result
+            }
         }
         return null
     }
@@ -694,7 +741,12 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             }
         }.onFailure { WeLogger.e(TAG, "枚举朋友圈失败", it) }
 
-        WeLogger.i(TAG, "枚举到 ${result.size} 条待删朋友圈（self=$self）")
+        WeLogger.i(
+            TAG,
+            "枚举到 ${result.size} 条待删朋友圈（self=$self, storage=${storageObj != null}, " +
+                "dao=${dao != null}, 有正文=${result.count { it.preview.isNotBlank() }}, " +
+                "有图=${result.count { it.images.isNotEmpty() }}）",
+        )
         return result
     }
 
@@ -1223,7 +1275,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         }
 
                         Text(
-                            text = "点卡片可跳转到原朋友圈查看内容，返回后会回到本列表",
+                            text = "点卡片可切换勾选；列表里已展示正文与缩略图，确认后直接删除即可",
                             fontSize = 11.sp,
                             color = textSub,
                             modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 0.dp),
@@ -1263,7 +1315,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                         item = item,
                                         checked = selected[item.snsId] == true,
                                         onCheckedChange = { selected[item.snsId] = it },
-                                        onClick = { openMomentDetail(context, item) },
+                                        onClick = { selected[item.snsId] = selected[item.snsId] != true },
                                     )
                                 }
                             }
