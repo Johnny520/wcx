@@ -678,7 +678,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
             methodAppInfoSetAppId.setPlaceholderDescriptor()
 
-            ctorNetSceneUploadMsgImg.find(dexKit, allowFailure = true) {
+            ctorNetSceneUploadMsgImg.find(dexKit, throwOnFailure = false) {
                 searchPackages("com.tencent.mm.modelimage")
                 matcher {
                     name = "<init>"
