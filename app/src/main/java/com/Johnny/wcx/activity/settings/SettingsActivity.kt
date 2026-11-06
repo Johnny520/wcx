@@ -379,7 +379,9 @@ fun MiuixListScaffold(
     // layer through drawBackdrop and paints itself transparent, so scrolled content shows
     // through blurred behind the collapsed bar (InstallerX's useBlur pattern, on miuix-blur glass).
     val barBackdrop = rememberLayerBackdrop()
-    val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.67f)
+    // 原来是 0.67 透明的毛玻璃：在 #F2F2F7 灰底上滚动时会变成一块灰糊，
+    // 压在文字上很难看。改成 0.94 近乎不透明，保留一点模糊质感但不糊字。
+    val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.94f)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -416,22 +418,7 @@ fun MiuixListScaffold(
                 .padding(horizontal = horizontalPadding),
             contentPadding = innerPadding,
             overscrollEffect = null,
-            content = {
-                // iOS 大标题：标题不是空的页面在内容顶部放一个 30sp 近黑粗体，
-                // 顶栏的小标题只在滚动/返回时提供上下文。
-                if (title.isNotEmpty()) {
-                    item(key = "page_big_title") {
-                        Text(
-                            text = title,
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = WxPalette.textPrimary(),
-                            modifier = Modifier.padding(start = 6.dp, top = 4.dp, bottom = 10.dp),
-                        )
-                    }
-                }
-                content()
-            },
+            content = content,
         )
     }
 }

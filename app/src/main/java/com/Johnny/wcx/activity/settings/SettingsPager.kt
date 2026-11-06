@@ -444,23 +444,28 @@ private fun ProfileCard() {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = identity.nickname.ifEmpty { wxId.ifEmpty { "—" } },
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = WxPalette.textPrimary(),
                 )
                 if (wxId.isNotEmpty()) {
                     Text(
                         text = wxId,
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 12.sp,
+                        color = WxPalette.TextSecondary,
                         modifier = Modifier.padding(top = 2.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
+            com.Johnny.wcx.ui.style.StatusPill(
+                text = BuildConfig.VERSION_NAME,
+                color = WxPalette.Primary,
+                background = WxPalette.PrimarySoft,
+            )
         }
     }
 }
