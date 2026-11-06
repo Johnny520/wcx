@@ -471,10 +471,22 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             val value = runCatching { field.get(node) }.getOrNull() ?: continue
             if (value is List<*>) {
                 val first = value.firstOrNull { it != null } ?: continue
-                val looksLikeMedia = first.javaClass.name.contains("Media", ignoreCase = true) ||
-                    pickMediaUrl(first) != null
+                val elemName = first.javaClass.name
+                val looksLikeMedia = elemName.contains("Media", ignoreCase = true) ||
+                    elemName.contains("Img", ignoreCase = true) ||
+                    (
+                        !elemName.contains("Comment", ignoreCase = true) &&
+                            !elemName.contains("User", ignoreCase = true) &&
+                            pickMediaUrl(first) != null
+                        )
                 if (looksLikeMedia) return value
-            } else if (!field.type.isPrimitive && field.type.name.startsWith("com.tencent.mm.")) {
+            } else if (!field.type.isPrimitive &&
+                !field.type.name.startsWith("java.") &&
+                !field.type.name.startsWith("android.") &&
+                !field.type.name.startsWith("kotlin.")
+            ) {
+                // 不能只认 com.tencent.mm.* —— 8.0.80 里 TimeLineObject.ContentObj 的类型
+                // 被微信重打包成 gd5.na0（媒体容器整个搬到短包名），按包名过滤会整棵子树跳过。
                 findMediaListIn(value, depth + 1)?.let { return it }
             }
         }
@@ -489,6 +501,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             if (field.type != String::class.java) continue
             val v = runCatching { field.get(media) as? String }.getOrNull() ?: continue
             if (!v.startsWith("http")) continue
+            // 评论/点赞列表里也有 http 字段（头像），别把头像当配图
+            if (v.contains("headimg", ignoreCase = true) || v.contains("avatar", ignoreCase = true)) continue
             candidates.add(v)
         }
         if (candidates.isEmpty()) return null
