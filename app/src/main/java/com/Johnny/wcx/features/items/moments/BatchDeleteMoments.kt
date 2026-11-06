@@ -366,24 +366,76 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 缩略图优先（体积小，列表里够用）。
      */
     private fun snsInfoImages(snsInfo: Any?, max: Int = 3): List<String> {
-        val mediaList = snsInfoMediaList(snsInfo) ?: return emptyList()
-        return mediaList.asSequence()
-            .mapNotNull { pickMediaUrl2(it) }
+        val mediaList = snsInfoMediaList(snsInfo)
+        if (mediaList != null) {
+            val urls = mediaList.asSequence()
+                .mapNotNull { pickMediaUrl2(it) }
+                .distinct()
+                .take(max)
+                .toList()
+            if (urls.isNotEmpty()) return urls
+        }
+        return snsInfoImagesFromToString(snsInfo, max)
+    }
+
+    /**
+     * 兜底：直接从 TimeLineObject 的 toString() 里抓 http 地址。
+     *
+     * protobuf 生成类一般都重写了 toString，会把 url / thumbUrl 这类字段打出来。
+     * 万一字段层级和我们预期的完全不一样（真机上 media=0 就是这种情况），
+     * 这条路径还能救回一批图，总比整条都没有强。
+     */
+    private fun snsInfoImagesFromToString(snsInfo: Any?, max: Int = 3): List<String> {
+        if (snsInfo == null) return emptyList()
+        val timeLine = runCatching {
+            snsInfo.javaClass.getDeclaredMethod("getTimeLine").apply { isAccessible = true }
+                .invoke(snsInfo)
+        }.getOrNull() ?: return emptyList()
+        val dump = runCatching { timeLine.toString() }.getOrNull() ?: return emptyList()
+        if (dump.length < 20) return emptyList()
+        return Regex("https?://[^ '"<>]+")
+            .findAll(dump)
+            .map { it.value }
+            .filter { it.startsWith("http") }
             .distinct()
             .take(max)
             .toList()
     }
 
-    private fun pickMediaUrl2(media: Any?): String? =
-        if (media == null) null else pickMediaUrl(media)
+    /** 兜底二：SnsInfo.content 那列 XML 里也带 media 信息，抓其中的图片地址。 */
+    private fun extractImageUrlsFromXml(xml: String?, max: Int = 3): List<String> {
+        if (xml.isNullOrBlank()) return emptyList()
+        return Regex("https?://[^ '"<>]+")
+            .findAll(xml)
+            .map { it.value }
+            .filter {
+                it.contains("qpic") || it.contains("mmsns") ||
+                    it.contains("/sns/") || it.contains("snsvideodownload")
+            }
+            .distinct()
+            .take(max)
+            .toList()
+    }
+
+    /** 含 private 在内的全部字段（含父类）。protobuf 字段未必是 public，必须这样取。 */
+    private fun allFields(cls: Class<*>): List<java.lang.reflect.Field> {
+        val out = ArrayList<java.lang.reflect.Field>()
+        var current: Class<*>? = cls
+        var guard = 0
+        while (current != null && current != Any::class.java && guard < 8) {
+            runCatching { out.addAll(current.declaredFields) }
+            current = current.superclass
+            guard++
+        }
+        return out
+    }
 
     /**
      * 从 SnsInfo 里找出媒体列表。
      *
-     * 注意层级是**两层**：TimeLineObject.ContentObj（SnsObject）→ .ContentObj（SnsContentObj）
-     * → .MediaList。只取一层永远拿不到，这正是「有正文没图」的原因。
-     * 这里按「元素类型名含 SnsMedia / 元素里能找到 http 字段」递归找 List，
-     * 不再写死中间那几层字段名，protobuf 换版本也还能用。
+     * 层级通常是 TimeLineObject.ContentObj(SnsObject) → .ContentObj(SnsContentObj) → .MediaList，
+     * 但真机日志显示按 public 字段递归找不到（media=0），所以这里改用 declaredFields + setAccessible
+     * 全量遍历，并且放宽识别条件（元素类型名含 Media / 元素里能取到 http 地址）。
      */
     private fun snsInfoMediaList(snsInfo: Any?): List<*>? {
         if (snsInfo == null) return null
@@ -391,19 +443,35 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             snsInfo.javaClass.getDeclaredMethod("getTimeLine").apply { isAccessible = true }
                 .invoke(snsInfo)
         }.getOrNull() ?: return null
+        if (!structureLogged) {
+            structureLogged = true
+            runCatching {
+                WeLogger.i(
+                    TAG,
+                    "TimeLineObject 字段：" + allFields(timeLine.javaClass).joinToString(" | ") {
+                        it.name + ":" + it.type.simpleName
+                    },
+                )
+            }
+        }
         return findMediaListIn(timeLine, 0)
     }
 
-    private fun findMediaListIn(node: Any?, depth: Int): List<*>? {
-        if (node == null || depth > 4) return null
-        val cls = node.javaClass
-        if (cls.isPrimitive || node is String || node is Number || node is Boolean) return null
+    @Volatile
+    private var structureLogged = false
 
-        for (field in runCatching { cls.fields }.getOrDefault(emptyArray())) {
+    private fun findMediaListIn(node: Any?, depth: Int): List<*>? {
+        if (node == null || depth > 5) return null
+        if (node is String || node is Number || node is Boolean || node is Collection<*>) return null
+        val cls = node.javaClass
+        if (cls.isPrimitive || cls.name.startsWith("java.") || cls.name.startsWith("kotlin.")) return null
+
+        for (field in allFields(cls)) {
+            runCatching { field.isAccessible = true }
             val value = runCatching { field.get(node) }.getOrNull() ?: continue
             if (value is List<*>) {
                 val first = value.firstOrNull { it != null } ?: continue
-                val looksLikeMedia = first.javaClass.name.contains("SnsMedia", ignoreCase = true) ||
+                val looksLikeMedia = first.javaClass.name.contains("Media", ignoreCase = true) ||
                     pickMediaUrl(first) != null
                 if (looksLikeMedia) return value
             } else if (!field.type.isPrimitive && field.type.name.startsWith("com.tencent.mm.")) {
@@ -416,17 +484,20 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     /** 在媒体对象上找一个可直接加载的图片地址：优先缩略图，其次原图；只认 http(s)。 */
     private fun pickMediaUrl(media: Any): String? {
         val candidates = ArrayList<String>(4)
-        for (field in runCatching { media.javaClass.fields }.getOrDefault(emptyArray())) {
+        for (field in allFields(media.javaClass)) {
+            runCatching { field.isAccessible = true }
             if (field.type != String::class.java) continue
             val v = runCatching { field.get(media) as? String }.getOrNull() ?: continue
             if (!v.startsWith("http")) continue
             candidates.add(v)
         }
         if (candidates.isEmpty()) return null
-        // 缩略图优先：字段名含 thumb / 地址里带 /0 或 s 尺寸的更小
         return candidates.firstOrNull { it.contains("thumb", ignoreCase = true) }
             ?: candidates.first()
     }
+
+    private fun pickMediaUrl2(media: Any?): String? =
+        if (media == null) null else pickMediaUrl(media)
 
     /** 类里是否有「静态 0 参且返回朋友圈库对象」的方法。 */
     private fun isSnsCoreLike(name: String): Boolean {
@@ -831,13 +902,17 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                 .toList()
                         }.getOrDefault(emptyList())
                     }.orEmpty()
+                    // 兜底二：protobuf 结构拿不到图时，从 content 列 XML 里抓图片地址
+                    val finalImages = if (images.isEmpty()) {
+                        runCatching { extractImageUrlsFromXml(rawXml) }.getOrDefault(emptyList())
+                    } else images
                     if (!sampleLogged) {
                         sampleLogged = true
                         WeLogger.i(
                             TAG,
                             "样本诊断：snsId=$snsId, snsInfo=${snsInfo != null}, " +
                                 "bodyLen=${bodyText.length}, type=$type, " +
-                                "media=$imageCount, urls=${images.size}",
+                                "media=$imageCount, urls=${images.size}, xmlUrls=${finalImages.size}",
                         )
                     }
                     val localId = snsInfoLocalId(snsInfo, snsId)
@@ -852,7 +927,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             kind = summarizeKind(rawXml),
                             preview = summarizeText(rawXml, bodyText),
                             localId = localId,
-                            images = images,
+                            images = finalImages,
                             imageCount = imageCount,
                         )
                     )
