@@ -366,34 +366,66 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 缩略图优先（体积小，列表里够用）。
      */
     private fun snsInfoImages(snsInfo: Any?, max: Int = 3): List<String> {
-        if (snsInfo == null) return emptyList()
+        val mediaList = snsInfoMediaList(snsInfo) ?: return emptyList()
+        return mediaList.asSequence()
+            .mapNotNull { pickMediaUrl2(it) }
+            .distinct()
+            .take(max)
+            .toList()
+    }
+
+    private fun pickMediaUrl2(media: Any?): String? =
+        if (media == null) null else pickMediaUrl(media)
+
+    /**
+     * 从 SnsInfo 里找出媒体列表。
+     *
+     * 注意层级是**两层**：TimeLineObject.ContentObj（SnsObject）→ .ContentObj（SnsContentObj）
+     * → .MediaList。只取一层永远拿不到，这正是「有正文没图」的原因。
+     * 这里按「元素类型名含 SnsMedia / 元素里能找到 http 字段」递归找 List，
+     * 不再写死中间那几层字段名，protobuf 换版本也还能用。
+     */
+    private fun snsInfoMediaList(snsInfo: Any?): List<*>? {
+        if (snsInfo == null) return null
         val timeLine = runCatching {
             snsInfo.javaClass.getDeclaredMethod("getTimeLine").apply { isAccessible = true }
                 .invoke(snsInfo)
-        }.getOrNull() ?: return emptyList()
-        val contentObj = runCatching { timeLine.javaClass.getField("ContentObj").get(timeLine) }
-            .getOrNull() ?: return emptyList()
-        val mediaList = runCatching {
-            contentObj.javaClass.getField("MediaList").get(contentObj) as? List<*>
-        }.getOrNull() ?: return emptyList()
-
-        val out = ArrayList<String>(max)
-        for (media in mediaList) {
-            if (media == null) continue
-            val url = pickMediaUrl(media) ?: continue
-            if (!out.contains(url)) out.add(url)
-            if (out.size >= max) break
-        }
-        return out
+        }.getOrNull() ?: return null
+        return findMediaListIn(timeLine, 0)
     }
 
-    private fun pickMediaUrl(media: Any): String? {
-        for (name in arrayOf("ThumbUrl", "thumbUrl", "Url", "url")) {
-            val value = runCatching { media.javaClass.getField(name).get(media) as? String }
-                .getOrNull()
-            if (!value.isNullOrBlank() && value.startsWith("http")) return value
+    private fun findMediaListIn(node: Any?, depth: Int): List<*>? {
+        if (node == null || depth > 4) return null
+        val cls = node.javaClass
+        if (cls.isPrimitive || node is String || node is Number || node is Boolean) return null
+
+        for (field in runCatching { cls.fields }.getOrDefault(emptyArray())) {
+            val value = runCatching { field.get(node) }.getOrNull() ?: continue
+            if (value is List<*>) {
+                val first = value.firstOrNull { it != null } ?: continue
+                val looksLikeMedia = first.javaClass.name.contains("SnsMedia", ignoreCase = true) ||
+                    pickMediaUrl(first) != null
+                if (looksLikeMedia) return value
+            } else if (!field.type.isPrimitive && field.type.name.startsWith("com.tencent.mm.")) {
+                findMediaListIn(value, depth + 1)?.let { return it }
+            }
         }
         return null
+    }
+
+    /** 在媒体对象上找一个可直接加载的图片地址：优先缩略图，其次原图；只认 http(s)。 */
+    private fun pickMediaUrl(media: Any): String? {
+        val candidates = ArrayList<String>(4)
+        for (field in runCatching { media.javaClass.fields }.getOrDefault(emptyArray())) {
+            if (field.type != String::class.java) continue
+            val v = runCatching { field.get(media) as? String }.getOrNull() ?: continue
+            if (!v.startsWith("http")) continue
+            candidates.add(v)
+        }
+        if (candidates.isEmpty()) return null
+        // 缩略图优先：字段名含 thumb / 地址里带 /0 或 s 尺寸的更小
+        return candidates.firstOrNull { it.contains("thumb", ignoreCase = true) }
+            ?: candidates.first()
     }
 
     /** 类里是否有「静态 0 参且返回朋友圈库对象」的方法。 */
@@ -617,8 +649,10 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val preview: String,
         /** 微信内部本地 id（形如 `sns_table_xxx`），详情页靠它定位这条朋友圈。 */
         val localId: String,
-        /** 缩略图地址（最多 3 张，来自 TimeLineObject.ContentObj.MediaList）。 */
+        /** 缩略图地址（最多 3 张，来自 TimeLineObject 里的 MediaList）。 */
         val images: List<String> = emptyList(),
+        /** 这条朋友圈实际含有的媒体数量（即使拿不到 URL，也能据此提示「含 N 张图/视频」）。 */
+        val imageCount: Int = 0,
     )
 
     enum class FilterMode { BY_YEAR, BY_COUNT }
@@ -785,15 +819,27 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     // 正文只能靠 SnsInfo 解密后的 TimeLineObject 拿到
                     val snsInfo = dao?.let { runCatching { snsInfoOf(it, snsId) }.getOrNull() }
                     val bodyText = runCatching { snsInfoText(snsInfo) }.getOrDefault("")
+                    // 只解析一次媒体列表：同一条既要用 URL 又要数量，重复递归没必要。
+                    val mediaList = runCatching { snsInfoMediaList(snsInfo) }.getOrNull()
+                    val imageCount = mediaList?.size ?: 0
+                    val images = mediaList?.let { list ->
+                        runCatching {
+                            list.asSequence()
+                                .mapNotNull { pickMediaUrl2(it) }
+                                .distinct()
+                                .take(3)
+                                .toList()
+                        }.getOrDefault(emptyList())
+                    }.orEmpty()
                     if (!sampleLogged) {
                         sampleLogged = true
                         WeLogger.i(
                             TAG,
                             "样本诊断：snsId=$snsId, snsInfo=${snsInfo != null}, " +
-                                "bodyLen=${bodyText.length}, type=$type",
+                                "bodyLen=${bodyText.length}, type=$type, " +
+                                "media=$imageCount, urls=${images.size}",
                         )
                     }
-                    val images = runCatching { snsInfoImages(snsInfo) }.getOrDefault(emptyList())
                     val localId = snsInfoLocalId(snsInfo, snsId)
 
                     result.add(
@@ -807,6 +853,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             preview = summarizeText(rawXml, bodyText),
                             localId = localId,
                             images = images,
+                            imageCount = imageCount,
                         )
                     )
                 }
@@ -1486,7 +1533,13 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             }
 
             if (item.images.isEmpty()) {
-                Text("（没有可预览的图片）", fontSize = 13.sp, color = Color(0xFF8E8E93))
+                Text(
+                    text = if (item.imageCount > 0) {
+                        "这条含 ${item.imageCount} 张图片/视频，但没能取到可预览的地址"
+                    } else "（没有可预览的图片）",
+                    fontSize = 13.sp,
+                    color = Color(0xFF8E8E93),
+                )
             } else {
                 item.images.forEach { url ->
                     AsyncImage(
@@ -1561,11 +1614,26 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     )
                 } else if (item.images.isEmpty()) {
                     Text(
-                        text = "（无文字内容）",
+                        text = if (item.imageCount > 0) {
+                            "（含 ${item.imageCount} 张图片/视频，暂无预览）"
+                        } else "（无文字内容）",
                         fontSize = 12.sp,
                         color = Color(0xFF8E8E93),
                         modifier = Modifier.padding(top = 2.dp),
                     )
+                }
+
+                if (item.images.isEmpty() && item.imageCount > 0) {
+                    Spacer(Modifier.height(5.dp))
+                    Box(
+                        Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFFE5E5EA)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("图×${item.imageCount}", fontSize = 10.sp, color = Color(0xFF8E8E93))
+                    }
                 }
                 // 缩略图：直接复用微信自己的 CDN 地址，Coil 走 OkHttp 拉取并做内存/磁盘缓存。
                 // 加载失败时保持浅灰底色块，不影响勾选与删除。
