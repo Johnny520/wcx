@@ -221,14 +221,48 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     /** 用 SnsInfoStorage 构造 DAO 实例（DAO 构造器只接受 storage）。 */
     private fun resolveSnsDao(storage: Any): Any? {
         cachedSnsDao?.let { return it }
-        val clsName = methodSnsInfoBySnsId.candidates.firstOrNull()?.className
-            ?: methodSnsInfoById.candidates.firstOrNull()?.className
-            ?: return null
-        val cls = runCatching { ClassLoaders.HOST.loadClass(clsName) }.getOrNull() ?: return null
+        // 优先用委托自己解析出来的 Method 反查声明类（这条路径一定通）；
+        // loadClass 只在两者都拿不到时兜底，且要兼容 descriptor / 点分两种写法。
+        val cls = runCatching { methodSnsInfoById.method.declaringClass }.getOrNull()
+            ?: runCatching { methodSnsInfoBySnsId.method.declaringClass }.getOrNull()
+            ?: runCatching {
+                val raw = methodSnsInfoById.candidates.firstOrNull()?.className
+                    ?: methodSnsInfoBySnsId.candidates.firstOrNull()?.className
+                    ?: return@runCatching null
+                val dotted = if (raw.startsWith("L") && raw.endsWith(";")) {
+                    raw.substring(1, raw.length - 1).replace('/', '.')
+                } else raw.replace('/', '.')
+                ClassLoaders.HOST.loadClass(dotted)
+            }.getOrNull()
+        if (cls == null) {
+            WeLogger.w(TAG, "SnsInfo DAO 类定位失败（method 与 candidates 均为空）")
+            return null
+        }
+
+        // 构造器参数类型不一定和 storage 的运行时类型完全相等（storage 可能是模型的包装对象），
+        // 所以按 isAssignableFrom 挑，而不是要求精确类型。
+        val ctor = runCatching {
+            cls.declaredConstructors.firstOrNull {
+                it.parameterCount == 1 && it.parameterTypes[0].isAssignableFrom(storage.javaClass)
+            } ?: cls.getDeclaredConstructor(storage.javaClass)
+        }.getOrNull()
+        if (ctor == null) {
+            WeLogger.w(
+                TAG,
+                "SnsInfo DAO 构造器未找到：${cls.name} <- ${storage.javaClass.name}，候选=" +
+                    cls.declaredConstructors.joinToString(" | ") {
+                        it.parameterTypes.joinToString(",") { p -> p.name }
+                    },
+            )
+            return null
+        }
+
         val dao = runCatching {
-            cls.getDeclaredConstructor(storage.javaClass).apply { isAccessible = true }
-                .newInstance(storage)
-        }.onFailure { WeLogger.w(TAG, "构造 SnsInfo DAO 失败：${it.message}") }.getOrNull()
+            ctor.isAccessible = true
+            ctor.newInstance(storage)
+        }.onFailure {
+            WeLogger.w(TAG, "构造 SnsInfo DAO 失败（${cls.name} <- ${storage.javaClass.name}）：${it.message}")
+        }.getOrNull()
         if (dao != null) WeLogger.i(TAG, "SnsInfo DAO 已就绪：${cls.name}")
         cachedSnsDao = dao
         return dao
