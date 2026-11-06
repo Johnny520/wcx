@@ -542,9 +542,20 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             returnType = String::class
         }.self
     }
+    /**
+     * VoiceLogic.finishRecord —— 写入 voiceinfo（文件名 / 时长 / 场景），上传前必须调用，
+     * 少了这步微信找不到 voiceinfo，语音发不出去。
+     *
+     * 8.0.7x 起签名从 3 参扩到 5 参：
+     * `(String fileName, int duration, int scene, MsgInfo info, String msgSource)`（8.0.80 实测
+     * `q71.e1.u`）。原来只按 3/4 参匹配，新版直接匹配不到 → 语音链路中断。
+     * 这里按「静态 + 3..5 参 + 前三位 (String,int,int)」匹配，调用时按实际参数个数补 null
+     * （微信自己转发语音时也是传 null）。
+     */
     private val setVoiceMethod: Method by lazy {
         classVoiceNameGen.reflekt().firstMethod {
-            parameterCount { it == 3 || it == 4 }
+            modifiers(Modifiers.STATIC)
+            parameterCount { it in 3..5 }
             parameters {
                 it[0] == BString && it[1].typeMatches(int) && it[2].typeMatches(int)
             }
@@ -1553,10 +1564,10 @@ object WeMessageApi : ApiFeature(), IResolveDex {
                 WeLogger.w(TAG, "VoiceLogic 没有 setVoice(String,int,int)，跳过时长设置：fileName=$fileName duration=${finalDurationMs}ms")
             } else {
                 val setVoiceReceiver = getReceiverForMethod(setVoice)
-                val setVoiceResult = if (setVoice.parameterCount == 4) {
-                    setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null)
-                } else {
-                    setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0)
+                val setVoiceResult = when (setVoice.parameterCount) {
+                    3 -> setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0)
+                    4 -> setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null)
+                    else -> setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null, null)
                 } as? Boolean ?: false
                 if (!setVoiceResult) {
                     WeLogger.w(TAG, "VoiceLogic.setVoice returned false, still starting voice service: fileName=$fileName, target=$toUser")
@@ -1587,6 +1598,8 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             val target = runCatching {
                 classVoiceLogic.clazz.reflekt()
                     .firstMethod {
+                        modifiers(Modifiers.STATIC)
+                        parameterCount { it in 3..5 }
                         parameters {
                             it[0] == BString && it[1] == BInt && it[2] == BInt
                         }
@@ -1595,10 +1608,15 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }.getOrNull()
             if (target == null) {
                 WeLogger.w(TAG, "VoiceLogic 没有 setVoice(String,int,int)，跳过时长设置：duration=${actualDuration}ms")
-            } else if (target.parameterCount == 4) {
-                target.invoke(null, partialPath, actualDuration, 0, null)
             } else {
-                target.invoke(null, partialPath, actualDuration, 0)
+                val r = when (target.parameterCount) {
+                    3 -> target.invoke(null, partialPath, actualDuration, 0)
+                    4 -> target.invoke(null, partialPath, actualDuration, 0, null)
+                    else -> target.invoke(null, partialPath, actualDuration, 0, null, null)
+                }
+                if (r == false) {
+                    WeLogger.w(TAG, "VoiceLogic.finishRecord 返回 false（duration=${actualDuration}ms），继续尝试发送")
+                }
             }
 
             val service = classSceneVoiceService.clazz.reflekt()
