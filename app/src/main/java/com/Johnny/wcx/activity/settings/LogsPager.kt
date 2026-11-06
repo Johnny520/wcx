@@ -598,16 +598,16 @@ private fun RunLogCard(entry: RunLogEntry) {
         contentPadding = 0,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 entry.level?.let { level ->
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(levelColor(level))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
                     ) {
-                        Text(level.toString(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(level.toString(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                     Spacer(Modifier.width(8.dp))
                 }
@@ -616,8 +616,8 @@ private fun RunLogCard(entry: RunLogEntry) {
                         Text(
                             text = it,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MiuixTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            color = WxPalette.textPrimary(),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
