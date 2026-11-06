@@ -81,7 +81,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
@@ -242,6 +245,45 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }.getOrNull() ?: return ""
         return runCatching { tl.javaClass.getField("ContentDesc").get(tl) as? String }
             .getOrNull().orEmpty().trim()
+    }
+
+    /**
+     * 取这条朋友圈的图片缩略图地址。
+     *
+     * 正文在 TimeLineObject.ContentDesc，图片在 TimeLineObject.ContentObj.MediaList ——
+     * SnsInfo.content 里那坨 XML 只有 id/username 等基础字段，图是拿不到的，必须走解密后的
+     * TimeLineObject。protobuf 字段大小写在不同版本里有差异，这里逐个别名试，取到 http 地址为止，
+     * 缩略图优先（体积小，列表里够用）。
+     */
+    private fun snsInfoImages(snsInfo: Any?, max: Int = 3): List<String> {
+        if (snsInfo == null) return emptyList()
+        val timeLine = runCatching {
+            snsInfo.javaClass.getDeclaredMethod("getTimeLine").apply { isAccessible = true }
+                .invoke(snsInfo)
+        }.getOrNull() ?: return emptyList()
+        val contentObj = runCatching { timeLine.javaClass.getField("ContentObj").get(timeLine) }
+            .getOrNull() ?: return emptyList()
+        val mediaList = runCatching {
+            contentObj.javaClass.getField("MediaList").get(contentObj) as? List<*>
+        }.getOrNull() ?: return emptyList()
+
+        val out = ArrayList<String>(max)
+        for (media in mediaList) {
+            if (media == null) continue
+            val url = pickMediaUrl(media) ?: continue
+            if (!out.contains(url)) out.add(url)
+            if (out.size >= max) break
+        }
+        return out
+    }
+
+    private fun pickMediaUrl(media: Any): String? {
+        for (name in arrayOf("ThumbUrl", "thumbUrl", "Url", "url")) {
+            val value = runCatching { media.javaClass.getField(name).get(media) as? String }
+                .getOrNull()
+            if (!value.isNullOrBlank() && value.startsWith("http")) return value
+        }
+        return null
     }
 
     /** 类里是否有「静态 0 参且返回朋友圈库对象」的方法。 */
@@ -465,6 +507,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val preview: String,
         /** 微信内部本地 id（形如 `sns_table_xxx`），详情页靠它定位这条朋友圈。 */
         val localId: String,
+        /** 缩略图地址（最多 3 张，来自 TimeLineObject.ContentObj.MediaList）。 */
+        val images: List<String> = emptyList(),
     )
 
     enum class FilterMode { BY_YEAR, BY_COUNT }
@@ -630,6 +674,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     // 正文只能靠 SnsInfo 解密后的 TimeLineObject 拿到
                     val snsInfo = dao?.let { runCatching { snsInfoOf(it, snsId) }.getOrNull() }
                     val bodyText = runCatching { snsInfoText(snsInfo) }.getOrDefault("")
+                    val images = runCatching { snsInfoImages(snsInfo) }.getOrDefault(emptyList())
                     val localId = snsInfoLocalId(snsInfo, snsId)
 
                     result.add(
@@ -642,6 +687,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             kind = summarizeKind(rawXml),
                             preview = summarizeText(rawXml, bodyText),
                             localId = localId,
+                            images = images,
                         )
                     )
                 }
@@ -1288,14 +1334,41 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         }
                     }
                 }
-                Text(
-                    text = item.preview.ifBlank { "（无文字内容）" },
-                    fontSize = 12.sp,
-                    color = Color(0xFF8E8E93),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+                if (item.preview.isNotBlank()) {
+                    Text(
+                        text = item.preview,
+                        fontSize = 12.sp,
+                        color = Color(0xFF3A3A3C),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                } else if (item.images.isEmpty()) {
+                    Text(
+                        text = "（无文字内容）",
+                        fontSize = 12.sp,
+                        color = Color(0xFF8E8E93),
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                // 缩略图：直接复用微信自己的 CDN 地址，Coil 走 OkHttp 拉取并做内存/磁盘缓存。
+                // 加载失败时保持浅灰底色块，不影响勾选与删除。
+                if (item.images.isNotEmpty()) {
+                    Spacer(Modifier.height(5.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        item.images.forEach { url ->
+                            AsyncImage(
+                                model = url,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFFE5E5EA)),
+                            )
+                        }
+                    }
+                }
             }
             Text(
                 text = "›",
