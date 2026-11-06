@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Checkbox
@@ -1316,6 +1317,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                         checked = selected[item.snsId] == true,
                                         onCheckedChange = { selected[item.snsId] = it },
                                         onClick = { selected[item.snsId] = selected[item.snsId] != true },
+                                        onOpenDetail = { openLocalMomentDetail(context, item) },
                                     )
                                 }
                             }
@@ -1342,6 +1344,96 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     }
 
     /**
+     * 本地朋友圈详情。
+     *
+     * 不跳转微信：把这条朋友圈的正文和图片直接搬到一个浮层里看，点左上角「‹」
+     * 或系统返回即可回到列表（外层列表浮层不受影响，勾选状态全部保留）。
+     */
+    private fun openLocalMomentDetail(context: Context, item: MomentItem) {
+        showComposeDialog(context) {
+            AlertDialogContent(
+                title = {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "‹",
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = WxPalette.Primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onDismiss() }
+                                    .padding(end = 8.dp, bottom = 2.dp),
+                            )
+                            Text(
+                                text = "朋友圈详情",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1C1C1E),
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = item.createTimeText +
+                                (if (item.kind.isNotEmpty()) " · ${item.kind}" else ""),
+                            fontSize = 12.sp,
+                            color = Color(0xFF8E8E93),
+                        )
+                    }
+                },
+                text = { MomentDetailBody(item) },
+                confirmButton = {
+                    Button(
+                        onClick = { onDismiss() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("返回列表") }
+                },
+                dismissButton = {},
+            )
+        }
+    }
+
+    /** 详情正文区：文字全文 + 竖排大图，整块可滚动。 */
+    @Composable
+    private fun MomentDetailBody(item: MomentItem) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (item.preview.isBlank()) {
+                Text("（这条朋友圈没有文字）", fontSize = 13.sp, color = Color(0xFF8E8E93))
+            } else {
+                Text(
+                    text = item.preview,
+                    fontSize = 15.sp,
+                    lineHeight = 23.sp,
+                    color = Color(0xFF1C1C1E),
+                )
+            }
+
+            if (item.images.isEmpty()) {
+                Text("（没有可预览的图片）", fontSize = 13.sp, color = Color(0xFF8E8E93))
+            } else {
+                item.images.forEach { url ->
+                    AsyncImage(
+                        model = url,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFFF2F2F7)),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
      * 单条朋友圈卡片：日期 + 类型胶囊 + 正文两行，左侧勾选、右侧箭头提示可点。
      * 选中态用极浅的品牌色底，未选中是纯白卡片，靠灰底衬托层次。
      */
@@ -1351,6 +1443,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         checked: Boolean,
         onCheckedChange: (Boolean) -> Unit,
         onClick: () -> Unit,
+        onOpenDetail: () -> Unit,
     ) {
         Row(
             modifier = Modifier
@@ -1422,11 +1515,16 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     }
                 }
             }
+            // 点这个箭头看详情（本地浮层，不跳转微信）。
             Text(
                 text = "›",
                 fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
                 color = Color(0xFFC7C7CC),
-                modifier = Modifier.padding(start = 4.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onOpenDetail)
+                    .padding(start = 12.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
             )
         }
     }
