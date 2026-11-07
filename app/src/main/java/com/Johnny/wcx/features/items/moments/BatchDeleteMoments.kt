@@ -1690,8 +1690,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private suspend fun loadBitmap(
         cacheKey: String,
         url: String,
-    ): android.graphics.Bitmap? {
-        thumbCache.get(cacheKey)?.let { return it }
+    ): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        thumbCache.get(cacheKey)?.let { return@withContext it }
         val isVideo = url.contains("snsvideodownload", ignoreCase = true)
         // 微信 CDN 有 http-only 的老域名，也有只认 https 的；强制升级会整批失败，
         // 所以两种协议都试一遍，哪个能出图用哪个。
@@ -1712,14 +1712,14 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     )
                 }
                 runCatching { thumbCache.put(cacheKey, bmp) }
-                return bmp
+                return@withContext bmp
             }
         }
         WeLogger.w(
             TAG,
             (if (isVideo) "视频封面" else "图片") + "加载全部失败（http/https 都试过）：$url",
         )
-        return null
+        null
     }
 
     /** 网络类失败重试 2 次（间隔 300/600ms）；解码失败不重试，重试也没用。 */
