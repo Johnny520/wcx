@@ -936,6 +936,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val result = mutableListOf<MomentItem>()
         var sampleLogged = false
         var urlLogged = false
+        var droppedLogged = false
         runCatching {
             querySns(sql, args)?.use { c ->
                 val iSnsId = c.getColumnIndex("snsId")
@@ -974,10 +975,30 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     val rawCandidates = if (images.isEmpty()) {
                         runCatching { extractImageUrlsFromXml(rawXml) }.getOrDefault(emptyList())
                     } else images
-                    val finalImages = rawCandidates
-                        .filter { isMomentImageUrl(it) }
+                    // 小程序卡片的缩略图（wxappthumb）/公众号封面（mmbiz）也放进预览，
+                    // 否则整屏都是「含 N 张图片/视频，暂无预览」灰字；真图（mmsns/视频号）
+                    // 排在前面，避免被卡片图挤掉。
+                    val candidateUrls = rawCandidates
+                        .filter {
+                            isMomentImageUrl(it) ||
+                                it.contains("wxappthumb") ||
+                                it.contains("mmbiz.")
+                        }
                         .distinct()
+                    val finalImages = candidateUrls
+                        .sortedByDescending { url ->
+                            url.contains("mmsns") || url.contains("snsvideodownload")
+                        }
                         .take(3)
+                    val droppedUrls = rawCandidates.filter { url -> candidateUrls.none { it == url } }
+                    if (!droppedLogged && droppedUrls.isNotEmpty()) {
+                        droppedLogged = true
+                        WeLogger.i(
+                            TAG,
+                            "未进预览的媒体地址（样本）：" +
+                                droppedUrls.take(3).joinToString(" | ") { u -> u.take(140) },
+                        )
+                    }
                     if (!sampleLogged) {
                         sampleLogged = true
                         WeLogger.i(
@@ -1776,7 +1797,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     WeLogger.w(TAG, "图片 HTTP ${response.code}：$url")
                     return@withContext null
                 }
-                val bytes = response.body?.bytes()
+                val bytes = readLimited(response.body, url)
                 if (bytes == null || bytes.isEmpty()) {
                     WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
                     return@withContext null
@@ -1790,10 +1811,40 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             }
         }
 
+    /**
+     * 流式读取响应体并限制大小。小程序缩略图域名（wxappthumb）直连时会返回
+     * 超大二进制（实测 79MB），直接 bytes() 会把内存打爆；超过上限视为垃圾数据放弃。
+     */
+    private fun readLimited(body: okhttp3.ResponseBody?, url: String): ByteArray? {
+        if (body == null) return null
+        val input = body.byteStream()
+        val out = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        try {
+            var total = 0
+            while (total < MAX_IMAGE_BYTES) {
+                val n = input.read(chunk)
+                if (n < 0) break
+                out.write(chunk, 0, n)
+                total += n
+            }
+            if (total >= MAX_IMAGE_BYTES) {
+                WeLogger.w(TAG, "图片响应过大（≥${MAX_IMAGE_BYTES / 1024 / 1024}MB），放弃：$url")
+                return null
+            }
+            return out.toByteArray()
+        } finally {
+            runCatching { input.close() }
+        }
+    }
+
     @Volatile
     private var threadLogged = false
 
     private const val MAX_IMAGE_RETRY = 3
+
+    /** 单张图片最大字节数，超过视为垃圾响应放弃解码。 */
+    private const val MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
     private val imageClient: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
