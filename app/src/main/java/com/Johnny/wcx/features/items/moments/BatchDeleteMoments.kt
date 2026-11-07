@@ -1755,35 +1755,43 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      * 会把 "The coroutine scope left the composition" 当成网络失败抛出来，
      * 再被重试逻辑放大，结果每张图都失败。
      */
-    private fun fetchBitmap(url: String): android.graphics.Bitmap? {
-        val request = okhttp3.Request.Builder()
-            .url(url)
-            .header("Referer", "https://servicewechat.com/")
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
-            )
-            .build()
+    private suspend fun fetchBitmap(url: String): android.graphics.Bitmap? =
+        withContext(Dispatchers.IO) {
+            if (!threadLogged) {
+                threadLogged = true
+                WeLogger.i(TAG, "图片请求线程：${Thread.currentThread().name}")
+            }
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .header("Referer", "https://servicewechat.com/")
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
+                )
+                .build()
 
-        imageClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                WeLogger.w(TAG, "图片 HTTP ${response.code}：$url")
-                return null
+            imageClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    WeLogger.w(TAG, "图片 HTTP ${response.code}：$url")
+                    return@withContext null
+                }
+                val bytes = response.body?.bytes()
+                if (bytes == null || bytes.isEmpty()) {
+                    WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
+                    return@withContext null
+                }
+                val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (bitmap == null) {
+                    val head = bytes.take(16).joinToString("") { "%02X".format(it) }
+                    WeLogger.w(TAG, "图片解码失败（${bytes.size} 字节，头 $head）：$url")
+                }
+                bitmap
             }
-            val bytes = response.body?.bytes()
-            if (bytes == null || bytes.isEmpty()) {
-                WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
-                return null
-            }
-            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            if (bitmap == null) {
-                val head = bytes.take(16).joinToString("") { "%02X".format(it) }
-                WeLogger.w(TAG, "图片解码失败（${bytes.size} 字节，头 $head）：$url")
-            }
-            return bitmap
         }
-    }
+
+    @Volatile
+    private var threadLogged = false
 
     private const val MAX_IMAGE_RETRY = 3
 
