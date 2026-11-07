@@ -436,7 +436,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val out = LinkedHashSet<String>()
         // 优先取媒体标签里的地址（朋友圈 XML 里图片是 <url>/<cdnurl>/<thumburl>）
         Regex(
-            """<(?:url|cdnurl|thumburl)>\s*(?:<!\[CDATA\[)?\s*(https?://[^\]<\s]+)""",
+            """<(?:url|cdnurl|thumburl|thumb)>\s*(?:<!\[CDATA\[)?\s*(https?://[^\]<\s]+)""",
             RegexOption.IGNORE_CASE,
         ).findAll(xml).forEach { m ->
             val v = m.groupValues.getOrNull(1).orEmpty().trim()
@@ -1035,6 +1035,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
         val style = xmlTag(xml, "contentStyle").toIntOrNull()
         val mediaCount = runCatching { Regex("<media>").findAll(xml).count() }.getOrDefault(0)
+        if (xml.contains("<videoid", ignoreCase = true) || xml.contains("<videourl", ignoreCase = true)) {
+            return "视频"
+        }
         return when (style) {
             1 -> "文字"
             2 -> if (mediaCount > 1) "图片×$mediaCount" else "图片"
