@@ -534,17 +534,31 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val candidates = ArrayList<String>(4)
         for (field in allFields(media.javaClass)) {
             runCatching { field.isAccessible = true }
-            if (field.type != String::class.java) continue
-            val v = runCatching { field.get(media) as? String }.getOrNull() ?: continue
-            if (!v.startsWith("http")) continue
-            // 评论/点赞列表里也有 http 字段（头像），别把头像当配图
-            if (v.contains("headimg", ignoreCase = true) || v.contains("avatar", ignoreCase = true)) continue
-            candidates.add(v)
+            val value = runCatching { field.get(media) }.getOrNull() ?: continue
+            when (value) {
+                // URL 字段可能是 String，也可能是 List<String>（多分辨率），两种都收
+                is String -> {
+                    if (isLoadableImageUrl(value)) candidates.add(value)
+                }
+                is List<*> -> {
+                    for (item in value) {
+                        if (item is String && isLoadableImageUrl(item)) candidates.add(item)
+                    }
+                }
+            }
         }
         if (candidates.isEmpty()) return null
         val picked = candidates.firstOrNull { it.contains("thumb", ignoreCase = true) }
             ?: candidates.first()
         return normalizeImageUrl(picked)
+    }
+
+    private fun isLoadableImageUrl(value: String): Boolean {
+        if (!value.startsWith("http")) return false
+        if (value.contains("headimg", ignoreCase = true) ||
+            value.contains("avatar", ignoreCase = true)
+        ) return false
+        return true
     }
 
     private fun pickMediaUrl2(media: Any?): String? =
