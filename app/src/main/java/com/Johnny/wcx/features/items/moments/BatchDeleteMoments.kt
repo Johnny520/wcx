@@ -413,7 +413,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
      */
     private fun normalizeImageUrl(url: String): String {
         var v = url.trim().replace("&amp;", "&")
-        if (v.startsWith("http://")) v = "https://" + v.removePrefix("http://")
         if (v.startsWith("//")) v = "https:$v"
         return v
     }
@@ -421,17 +420,26 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     /** 兜底二：SnsInfo.content 那列 XML 里也带 media 信息，抓其中的图片地址。 */
     private fun extractImageUrlsFromXml(xml: String?, max: Int = 3): List<String> {
         if (xml.isNullOrBlank()) return emptyList()
-        return Regex("https?://[^ \u0022\u0027<>]+")
-            .findAll(xml)
-            .map { it.value }
-            .filter {
-                it.contains("qpic") || it.contains("mmsns") ||
-                    it.contains("/sns/") || it.contains("snsvideodownload")
-            }
-            .map { normalizeImageUrl(it) }
-            .distinct()
-            .take(max)
-            .toList()
+        val out = LinkedHashSet<String>()
+        // 优先取媒体标签里的地址（朋友圈 XML 里图片是 <url>/<cdnurl>/<thumburl>）
+        Regex(
+            """<(?:url|cdnurl|thumburl)>\s*(?:<!\[CDATA\[)?\s*(https?://[^\]<\s]+)""",
+            RegexOption.IGNORE_CASE,
+        ).findAll(xml).forEach { m ->
+            val v = m.groupValues.getOrNull(1).orEmpty().trim()
+            if (v.startsWith("http")) out.add(v)
+        }
+        // 标签没命中时再按域名兜底
+        if (out.isEmpty()) {
+            Regex("""https?://[^ "<>]+""").findAll(xml)
+                .map { it.value }
+                .filter {
+                    it.contains("qpic") || it.contains("mmsns") ||
+                        it.contains("/sns/") || it.contains("snsvideodownload")
+                }
+                .forEach { out.add(it) }
+        }
+        return out.map { normalizeImageUrl(it) }.take(max)
     }
 
     /** 含 private 在内的全部字段（含父类）。protobuf 字段未必是 public，必须这样取。 */
@@ -1604,28 +1612,39 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     }
 
     private suspend fun loadBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
-        runCatching {
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
-            conn.instanceFollowRedirects = true
-            conn.setRequestProperty(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
-            )
-            conn.setRequestProperty("Referer", "https://servicewechat.com/")
-            val code = conn.responseCode
-            if (code != 200) {
-                WeLogger.w(TAG, "图片 HTTP $code：$url")
-                return@runCatching null
-            }
-            conn.inputStream.use { stream ->
-                android.graphics.BitmapFactory.decodeStream(stream)
-            }
-        }.onFailure {
-            WeLogger.w(TAG, "图片解码失败：$url → ${it.message}")
-        }.getOrNull()
+        // 微信 CDN 有 http-only 的老域名，也有只认 https 的；强制升级会整批失败，
+        // 所以两种协议都试一遍，哪个能出图用哪个。
+        val variants = LinkedHashSet<String>()
+        variants.add(url)
+        if (url.startsWith("https://")) variants.add("http://" + url.removePrefix("https://"))
+        if (url.startsWith("http://")) variants.add("https://" + url.removePrefix("http://"))
+        for (candidate in variants) {
+            val bmp = runCatching { fetchBitmap(candidate) }.getOrNull()
+            if (bmp != null) return@withContext bmp
+        }
+        WeLogger.w(TAG, "图片加载全部失败（http/https 都试过）：$url")
+        null
+    }
+
+    private fun fetchBitmap(url: String): android.graphics.Bitmap? {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.connectTimeout = 8000
+        conn.readTimeout = 8000
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty(
+            "User-Agent",
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
+        )
+        conn.setRequestProperty("Referer", "https://servicewechat.com/")
+        val code = conn.responseCode
+        if (code != 200) {
+            WeLogger.w(TAG, "图片 HTTP $code：$url")
+            return null
+        }
+        return conn.inputStream.use { stream ->
+            android.graphics.BitmapFactory.decodeStream(stream)
+        }
     }
 
     /**
