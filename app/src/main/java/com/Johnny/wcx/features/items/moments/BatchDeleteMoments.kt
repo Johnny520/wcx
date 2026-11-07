@@ -1028,6 +1028,11 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     /** 类型标签：从 content XML 的 contentStyle / media 数量推断。 */
     private fun summarizeKind(raw: String?): String {
         val xml = raw ?: ""
+        // 小程序 / 公众号分享卡片：图片来自 wxappthumb（微信自己的解密缩略图，外部拿不到），
+        // 这里单独标出来，避免整条看起来「什么内容都没有」。
+        if (xml.contains("<appInfo", ignoreCase = true) || xml.contains("appname", ignoreCase = true)) {
+            return "小程序"
+        }
         val style = xmlTag(xml, "contentStyle").toIntOrNull()
         val mediaCount = runCatching { Regex("<media>").findAll(xml).count() }.getOrDefault(0)
         return when (style) {
@@ -1831,9 +1836,12 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     )
                 } else if (item.images.isEmpty()) {
                     Text(
-                        text = if (item.imageCount > 0) {
-                            "（含 ${item.imageCount} 张图片/视频，暂无预览）"
-                        } else "（无文字内容）",
+                        text = when {
+                            item.imageCount > 0 -> "（含 ${item.imageCount} 张图片/视频，暂无预览）"
+                            item.kind == "小程序" -> "（小程序卡片，暂不支持预览）"
+                            item.kind.isNotEmpty() -> "（${item.kind}，暂无预览）"
+                            else -> "（无文字内容）"
+                        },
                         fontSize = 12.sp,
                         color = Color(0xFF8E8E93),
                         modifier = Modifier.padding(top = 2.dp),
