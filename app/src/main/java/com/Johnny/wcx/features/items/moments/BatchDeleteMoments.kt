@@ -1729,7 +1729,10 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             if (attempt > 0) kotlinx.coroutines.delay(300L * attempt)
             val result = runCatching { fetchBitmap(url) }
             if (result.isSuccess) return result.getOrNull()
-            lastError = result.exceptionOrNull()
+            val error = result.exceptionOrNull()
+            // 协程被取消（界面关闭 / item 复用）不是网络问题，直接抛出去终止重试
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            lastError = error
             WeLogger.w(
                 TAG,
                 "图片请求异常(第 ${attempt + 1} 次)：$url → " +
@@ -1740,65 +1743,47 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     }
 
     /**
-     * 真正下载一张图（可取消）。
+     * 真正下载一张图。
      *
      * 用 OkHttp 而不是 HttpURLConnection：朋友圈图片 CDN（szmmsns.qpic.cn）**校验 Referer**，
      * 不带 Referer 直接返回 HTTP 400 / 0 字节；而 Android 的 HttpURLConnection 对 Referer
      * 这类受限头不可靠（跟随重定向时会被丢），表现就是「图片暂时无法查看」。
      * 实测：带 Referer → 200 + image/png；不带 → 400 + 空 body。
      *
-     * 用 enqueue + invokeOnCancellation：Dialog 关闭 / item 滚出屏幕时协程取消，
-     * 请求会被立刻 cancel，不会留着回调打到已释放的 Composable 上。
+     * 这里刻意用同步 execute（跑在 Dispatchers.IO 的 withContext 里）而不是 enqueue +
+     * suspendCancellableCoroutine：后者在 LazyColumn 复用、弹窗关闭导致协程取消时，
+     * 会把 "The coroutine scope left the composition" 当成网络失败抛出来，
+     * 再被重试逻辑放大，结果每张图都失败。
      */
-    private suspend fun fetchBitmap(url: String): android.graphics.Bitmap? =
-        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            val request = okhttp3.Request.Builder()
-                .url(url)
-                .header("Referer", "https://servicewechat.com/")
-                .header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                        "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
-                )
-                .build()
+    private fun fetchBitmap(url: String): android.graphics.Bitmap? {
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .header("Referer", "https://servicewechat.com/")
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                    "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
+            )
+            .build()
 
-            val call = imageClient.newCall(request)
-            cont.invokeOnCancellation { runCatching { call.cancel() } }
-
-            call.enqueue(object : okhttp3.Callback {
-                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                    if (cont.isActive) cont.resumeWith(Result.failure(e))
-                }
-
-                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                    val bitmap = runCatching {
-                        response.use { resp ->
-                            if (!resp.isSuccessful) {
-                                WeLogger.w(TAG, "图片 HTTP ${resp.code}：$url")
-                                return@use null
-                            }
-                            val bytes = resp.body?.bytes()
-                            if (bytes == null || bytes.isEmpty()) {
-                                WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
-                                return@use null
-                            }
-                            val decoded = android.graphics.BitmapFactory
-                                .decodeByteArray(bytes, 0, bytes.size)
-                            if (decoded == null) {
-                                val head = bytes.take(16).joinToString("") { "%02X".format(it) }
-                                WeLogger.w(
-                                    TAG,
-                                    "图片解码失败（${bytes.size} 字节，头 $head）：$url",
-                                )
-                            }
-                            decoded
-                        }
-                    }.getOrNull()
-
-                    if (cont.isActive) cont.resumeWith(Result.success(bitmap))
-                }
-            })
+        imageClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                WeLogger.w(TAG, "图片 HTTP ${response.code}：$url")
+                return null
+            }
+            val bytes = response.body?.bytes()
+            if (bytes == null || bytes.isEmpty()) {
+                WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
+                return null
+            }
+            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            if (bitmap == null) {
+                val head = bytes.take(16).joinToString("") { "%02X".format(it) }
+                WeLogger.w(TAG, "图片解码失败（${bytes.size} 字节，头 $head）：$url")
+            }
+            return bitmap
         }
+    }
 
     private const val MAX_IMAGE_RETRY = 3
 
