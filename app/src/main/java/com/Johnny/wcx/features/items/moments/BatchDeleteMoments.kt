@@ -393,7 +393,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }.getOrNull() ?: return emptyList()
         val dump = runCatching { timeLine.toString() }.getOrNull() ?: return emptyList()
         if (dump.length < 20) return emptyList()
-        return Regex("https?://[^ '"<>]+")
+        return Regex("https?://[^ \u0022\u0027<>]+")
             .findAll(dump)
             .map { it.value }
             .filter { it.startsWith("http") }
@@ -405,7 +405,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     /** 兜底二：SnsInfo.content 那列 XML 里也带 media 信息，抓其中的图片地址。 */
     private fun extractImageUrlsFromXml(xml: String?, max: Int = 3): List<String> {
         if (xml.isNullOrBlank()) return emptyList()
-        return Regex("https?://[^ '"<>]+")
+        return Regex("https?://[^ \u0022\u0027<>]+")
             .findAll(xml)
             .map { it.value }
             .filter {
