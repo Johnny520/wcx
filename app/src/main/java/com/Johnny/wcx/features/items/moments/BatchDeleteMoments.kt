@@ -418,6 +418,19 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     }
 
     /** 兜底二：SnsInfo.content 那列 XML 里也带 media 信息，抓其中的图片地址。 */
+    /**
+     * 是否是「朋友圈自己的媒体图」。
+     *
+     * 朋友圈 XML 里不止有配图，还夹着小程序卡片缩略图（wxappthumb.tc.qq.com）、
+     * 头像（qlogo / headimg）等。这些地址必然加载失败，会占满 take(3) 的名额，
+     * 导致真正能显示的 mmsns 图片被挤掉——表现就是整片灰框。
+     */
+    private fun isMomentImageUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        if (lower.contains("wxappthumb") || lower.contains("qlogo") || lower.contains("headimg")) return false
+        return lower.contains("mmsns") || lower.contains("snsvideodownload")
+    }
+
     private fun extractImageUrlsFromXml(xml: String?, max: Int = 3): List<String> {
         if (xml.isNullOrBlank()) return emptyList()
         val out = LinkedHashSet<String>()
@@ -427,16 +440,13 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             RegexOption.IGNORE_CASE,
         ).findAll(xml).forEach { m ->
             val v = m.groupValues.getOrNull(1).orEmpty().trim()
-            if (v.startsWith("http")) out.add(v)
+            if (v.startsWith("http") && isMomentImageUrl(v)) out.add(v)
         }
         // 标签没命中时再按域名兜底
         if (out.isEmpty()) {
             Regex("""https?://[^ "<>]+""").findAll(xml)
                 .map { it.value }
-                .filter {
-                    it.contains("qpic") || it.contains("mmsns") ||
-                        it.contains("/sns/") || it.contains("snsvideodownload")
-                }
+                .filter { isMomentImageUrl(it) }
                 .forEach { out.add(it) }
         }
         return out.map { normalizeImageUrl(it) }.take(max)
