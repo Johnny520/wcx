@@ -32,6 +32,7 @@ import com.Johnny.wcx.features.api.net.WeNetSceneApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -1637,19 +1638,31 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         contentScale: ContentScale = ContentScale.Crop,
     ) {
         var bitmap by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
+        var failed by remember(url) { mutableStateOf(false) }
         LaunchedEffect(url) {
-            bitmap = loadBitmap(url)
+            val loaded = loadBitmap(url)
+            bitmap = loaded
+            failed = loaded == null
         }
-        val bmp = bitmap
-        if (bmp != null) {
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = null,
-                contentScale = contentScale,
-                modifier = modifier,
-            )
+        // 加载中显示「…」，失败显示「×」，成功才画图。
+        // 这样界面上不会出现「什么都没有」的灰块，也便于区分「没下载到」和「没渲染」。
+        Box(modifier, contentAlignment = Alignment.Center) {
+            val bmp = bitmap
+            when {
+                bmp != null -> Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                failed -> Text("×", fontSize = 16.sp, color = Color(0xFF8E8E93))
+                else -> Text("…", fontSize = 12.sp, color = Color(0xFF8E8E93))
+            }
         }
     }
+
+    @Volatile
+    private var bitmapSuccessLogged = false
 
     private suspend fun loadBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
         // 微信 CDN 有 http-only 的老域名，也有只认 https 的；强制升级会整批失败，
@@ -1667,7 +1680,13 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     )
                 }
                 .getOrNull()
-            if (bmp != null) return@withContext bmp
+            if (bmp != null) {
+                if (!bitmapSuccessLogged) {
+                    bitmapSuccessLogged = true
+                    WeLogger.i(TAG, "图片加载成功 ${bmp.width}x${bmp.height}：$candidate")
+                }
+                return@withContext bmp
+            }
         }
         WeLogger.w(TAG, "图片加载全部失败（http/https 都试过）：$url")
         null
