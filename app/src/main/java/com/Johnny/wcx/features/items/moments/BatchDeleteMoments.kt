@@ -1652,9 +1652,18 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             WeLogger.w(TAG, "图片 HTTP $code：$url")
             return null
         }
-        return conn.inputStream.use { stream ->
-            android.graphics.BitmapFactory.decodeStream(stream)
+        val bytes = conn.inputStream.use { stream -> stream.readBytes() }
+        if (bytes.isEmpty()) {
+            WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
+            return null
         }
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        if (bitmap == null) {
+            // 有字节但解不出来：多半不是图片（错误页 / 需要鉴权 / 不支持的格式）
+            val head = bytes.take(16).joinToString("") { "%02X".format(it) }
+            WeLogger.w(TAG, "图片解码失败（${bytes.size} 字节，头 $head）：$url")
+        }
+        return bitmap
     }
 
     /**
