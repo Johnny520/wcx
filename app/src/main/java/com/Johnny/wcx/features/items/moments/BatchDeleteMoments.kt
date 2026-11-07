@@ -84,6 +84,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -900,6 +902,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
         val result = mutableListOf<MomentItem>()
         var sampleLogged = false
+        var urlLogged = false
         runCatching {
             querySns(sql, args)?.use { c ->
                 val iSnsId = c.getColumnIndex("snsId")
@@ -942,9 +945,14 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             TAG,
                             "样本诊断：snsId=$snsId, snsInfo=${snsInfo != null}, " +
                                 "bodyLen=${bodyText.length}, type=$type, " +
-                                "media=$imageCount, urls=${images.size}, xmlUrls=${finalImages.size}, " +
-                                "firstUrl=${finalImages.firstOrNull()?.take(90) ?: "-"}",
+                                "media=$imageCount, urls=${images.size}, xmlUrls=${finalImages.size}",
                         )
+                    }
+                    // 单独打印「第一条真正带图的」地址：样本那条很可能本来就纯文字，
+                    // 只有这条才能看出真实图片地址长什么样。
+                    if (!urlLogged && finalImages.isNotEmpty()) {
+                        urlLogged = true
+                        WeLogger.i(TAG, "首条图片地址：${finalImages.first().take(160)}")
                     }
                     val localId = snsInfoLocalId(snsInfo, snsId)
 
@@ -1568,6 +1576,59 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     }
 
     /**
+     * 图片缩略图：自己下载 + BitmapFactory 解码。
+     *
+     * 不用 Coil 的原因：模块跑在微信进程里，Coil3 的 singleton ImageLoader 依赖
+     * Application/网络组件初始化，失败时 AsyncImage 只会静默留一个灰框，没有任何日志，
+     * 排查成本极高。这里直接用 HttpURLConnection，失败写日志，行为完全可控。
+     */
+    @Composable
+    private fun MomentThumb(
+        url: String,
+        modifier: Modifier = Modifier,
+        contentScale: ContentScale = ContentScale.Crop,
+    ) {
+        var bitmap by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
+        LaunchedEffect(url) {
+            bitmap = loadBitmap(url)
+        }
+        val bmp = bitmap
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                contentScale = contentScale,
+                modifier = modifier,
+            )
+        }
+    }
+
+    private suspend fun loadBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                    "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
+            )
+            conn.setRequestProperty("Referer", "https://servicewechat.com/")
+            val code = conn.responseCode
+            if (code != 200) {
+                WeLogger.w(TAG, "图片 HTTP $code：$url")
+                return@runCatching null
+            }
+            conn.inputStream.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream)
+            }
+        }.onFailure {
+            WeLogger.w(TAG, "图片解码失败：$url → ${it.message}")
+        }.getOrNull()
+    }
+
+    /**
      * 本地朋友圈详情。
      *
      * 不跳转微信：把这条朋友圈的正文和图片直接搬到一个浮层里看，点左上角「‹」
@@ -1648,9 +1709,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                 )
             } else {
                 item.images.forEach { url ->
-                    AsyncImage(
-                        model = url,
-                        contentDescription = null,
+                    MomentThumb(
+                        url = url,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1747,10 +1807,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     Spacer(Modifier.height(5.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         item.images.forEach { url ->
-                            AsyncImage(
-                                model = url,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
+                            MomentThumb(
+                                url = url,
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clip(RoundedCornerShape(8.dp))
