@@ -953,10 +953,16 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                 .toList()
                         }.getOrDefault(emptyList())
                     }.orEmpty()
-                    // 兜底二：protobuf 结构拿不到图时，从 content 列 XML 里抓图片地址
-                    val finalImages = if (images.isEmpty()) {
+                    // 兜底二：protobuf 结构拿不到图时，从 content 列 XML 里抓图片地址。
+                    // 注意 images 也可能来自 toString() 兜底，里面会混进小程序卡片图，
+                    // 所以出口统一再过一遍 isMomentImageUrl，避免整片灰框。
+                    val rawCandidates = if (images.isEmpty()) {
                         runCatching { extractImageUrlsFromXml(rawXml) }.getOrDefault(emptyList())
                     } else images
+                    val finalImages = rawCandidates
+                        .filter { isMomentImageUrl(it) }
+                        .distinct()
+                        .take(3)
                     if (!sampleLogged) {
                         sampleLogged = true
                         WeLogger.i(
@@ -1629,7 +1635,14 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         if (url.startsWith("https://")) variants.add("http://" + url.removePrefix("https://"))
         if (url.startsWith("http://")) variants.add("https://" + url.removePrefix("http://"))
         for (candidate in variants) {
-            val bmp = runCatching { fetchBitmap(candidate) }.getOrNull()
+            val bmp = runCatching { fetchBitmap(candidate) }
+                .onFailure {
+                    WeLogger.w(
+                        TAG,
+                        "图片请求异常：$candidate → ${it.javaClass.simpleName}: ${it.message}",
+                    )
+                }
+                .getOrNull()
             if (bmp != null) return@withContext bmp
         }
         WeLogger.w(TAG, "图片加载全部失败（http/https 都试过）：$url")
