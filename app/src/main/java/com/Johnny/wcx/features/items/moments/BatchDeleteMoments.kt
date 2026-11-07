@@ -1026,35 +1026,51 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         runCatching { yearMonthFormat.format(Date(seconds * 1000)) }.getOrDefault("未知时间")
 
     /** 类型标签：从 content XML 的 contentStyle / media 数量推断。 */
+    /**
+     * 判断这条朋友圈「是什么」。
+     *
+     * 按内容类型自动切换，不写死：视频号 / 小程序 / 视频 / 音乐 / 图片 / 链接 / 纯文字。
+     * 判断依据都取 XML 里的真实标签，越具体的类型越先判断。
+     */
     private fun summarizeKind(raw: String?): String {
         val xml = raw ?: ""
-        // 小程序 / 公众号分享卡片：图片来自 wxappthumb（微信自己的解密缩略图，外部拿不到），
-        // 这里单独标出来，避免整条看起来「什么内容都没有」。
-        if (xml.contains("<appInfo", ignoreCase = true) || xml.contains("appname", ignoreCase = true)) {
+        val lower = xml.lowercase()
+
+        // 视频号分享（finderFeed / finderUsername / objectid + objectnonceid）
+        if (lower.contains("finderfeed") || lower.contains("finderusername") ||
+            (lower.contains("objectid") && lower.contains("objectnonceid"))
+        ) {
+            return "视频号"
+        }
+        // 小程序 / 公众号卡片
+        if (lower.contains("<appinfo") || lower.contains("appname")) {
             return "小程序"
         }
-        val style = xmlTag(xml, "contentStyle").toIntOrNull()
-        val mediaCount = runCatching { Regex("<media>").findAll(xml).count() }.getOrDefault(0)
-        if (xml.contains("<videoid", ignoreCase = true) || xml.contains("<videourl", ignoreCase = true)) {
+        // 视频（视频朋友圈既有 videoid，也有 thumb/url）
+        if (lower.contains("<videoid") || lower.contains("<videourl")) {
             return "视频"
         }
+        // 音乐分享
+        if (lower.contains("<musicurl") || lower.contains("<musictitle")) {
+            return "音乐"
+        }
+
+        val style = xmlTag(xml, "contentStyle").toIntOrNull()
+        val mediaCount = runCatching { Regex("<media>").findAll(xml).count() }.getOrDefault(0)
         return when (style) {
             1 -> "文字"
             2 -> if (mediaCount > 1) "图片×$mediaCount" else "图片"
             3 -> "视频"
             4 -> "音乐"
             5 -> "链接"
-            else -> if (mediaCount > 0) (if (mediaCount > 1) "图片×$mediaCount" else "图片") else ""
+            else -> when {
+                mediaCount > 0 -> if (mediaCount > 1) "图片×$mediaCount" else "图片"
+                lower.contains("<url") -> "链接"
+                else -> ""
+            }
         }
     }
 
-    /**
-     * 正文摘要。
-     *
-     * 朋友圈正文不在 SnsInfo 表的 content 列（那里只有 id/username/contentStyle），
-     * 正文走 attrBuf 加密，必须由 SnsInfo 解密后经 getTimeLine().ContentDesc 取出；
-     * bodyText 为空时才回落到 XML 标签。
-     */
     private fun summarizeText(raw: String?, bodyText: String = ""): String {
         val xml = raw ?: ""
         val body = bodyText.ifBlank {
