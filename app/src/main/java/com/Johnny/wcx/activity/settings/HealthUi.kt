@@ -24,9 +24,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.Johnny.wcx.ui.style.WxPalette
 
 /**
  * 模块自检页用的三个小组件。
@@ -66,7 +68,7 @@ internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                color = MiuixTheme.colorScheme.onSurface,
+                color = WxPalette.textPrimary(),
                 fontWeight = FontWeight.Medium,
             )
             if (summary.isNotBlank()) {
@@ -86,7 +88,7 @@ internal fun InsetDivider(start: Dp = 16.dp) {
             .fillMaxWidth()
             .padding(start = start)
             .height(1.dp)
-            .background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.2f))
+            .background(WxPalette.cardBorder())
     )
 }
 
@@ -104,7 +106,7 @@ internal fun PageScaffold(
     onBack: (() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().background(WxPalette.pageBackground())) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -123,8 +125,9 @@ internal fun PageScaffold(
             }
             Text(
                 text = title,
-                color = MiuixTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold,
+                color = WxPalette.textPrimary(),
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
                 modifier = Modifier.padding(start = 4.dp),
             )
         }

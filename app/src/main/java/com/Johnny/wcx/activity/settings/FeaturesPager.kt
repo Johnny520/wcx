@@ -2,6 +2,11 @@ package com.Johnny.wcx.activity.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.graphics.Color
+import com.Johnny.wcx.ui.style.RoundIconBox
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,11 +50,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.constants.Preferences
 import top.yukonga.miuix.kmp.basic.Switch
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.Johnny.wcx.ui.style.SoftDivider
 
 
 // ---------------------------------------------------------------------------
 //  Page 1 — Features (search bar + category list)
 // ---------------------------------------------------------------------------
+
+private val CATEGORY_GRADIENTS = listOf(
+    WxPalette.GradBlue,
+    WxPalette.GradMint,
+    WxPalette.GradPurple,
+    WxPalette.GradPink,
+)
 
 @Composable
 fun FeaturesPager(onOpenCategory: (String) -> Unit) {
@@ -74,6 +95,14 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
         }
     }
     val switchStates = remember { mutableStateMapOf<String, Boolean>() }
+
+    // 每个分类的启用概况（已启用 / 总数），用于分类卡片副标题
+    val categoryStat = remember {
+        FEATURE_CATEGORIES.associate { entry ->
+            val all = FeaturesProvider.ALL_HOOK_ITEMS.filter { entry.first in it.categories }
+            entry.first to (all.count { WePrefs.getBoolOrFalse(it.name) } to all.size)
+        }
+    }
 
     // A back press while searching clears the query first (after the IME's own
     // back has dismissed the keyboard) rather than exiting the module settings.
@@ -160,25 +189,31 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                 }
             }
 
+            // 分类列表：一张白卡内多行 + 细分隔线（iOS 分组列表）
             item {
-                Card(
+                val shape = RoundedCornerShape(18.dp)
+                Column(
                     modifier = Modifier
-                        .padding(top = 12.dp)
+                        .padding(top = 10.dp)
                         .fillMaxWidth()
+                        .clip(shape)
+                        .background(WxPalette.cardBackground())
+                        .border(1.dp, WxPalette.cardBorder(), shape),
                 ) {
-                    FEATURE_CATEGORIES.forEach { (name, icon) ->
-                        ArrowPreference(
+                    FEATURE_CATEGORIES.forEachIndexed { index, entry ->
+                        val name = entry.first
+                        val stat = categoryStat[name]
+                        CategoryRow(
+                            icon = entry.second,
                             title = name,
-                            startAction = {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    tint = MiuixTheme.colorScheme.onBackground,
-                                )
+                            subtitle = if (stat != null && stat.second > 0) {
+                                "已启用 ${stat.first}/${stat.second}"
+                            } else {
+                                "暂无功能"
                             },
                             onClick = { onOpenCategory(name) },
                         )
+                        if (index != FEATURE_CATEGORIES.lastIndex) SoftDivider()
                     }
                 }
             }
@@ -191,6 +226,57 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
 // ---------------------------------------------------------------------------
 //  Category detail (replaces CategorySettingsScreen)
 // ---------------------------------------------------------------------------
+
+/** 分类行：圆角图标 + 分类名 + 启用概况 + 右箭头。 */
+@Composable
+private fun CategoryRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(WxPalette.PrimarySoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = WxPalette.Primary,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.textPrimary(),
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = WxPalette.TextSecondary,
+            )
+        }
+        Text(
+            text = "\u203A",
+            fontSize = 20.sp,
+            color = WxPalette.TextTertiary,
+        )
+    }
+}
 
 @Composable
 fun CategoryDetailScreen(
@@ -272,16 +358,23 @@ fun CategoryDetailScreen(
 
         if (isMasterSwitchCategory) {
             item {
-                Card(
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .fillMaxWidth(),
-                ) {
-                    ArrowPreference(
-                        title = "密友功能诊断",
-                        startAction = {},
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    SoftCard(
+                        gradient = WxPalette.GradPink,
                         onClick = { onOpenHiddenContactsDiagnostics() },
-                    )
+                    ) {
+                        Text(
+                            text = "密友功能诊断",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF1F2A24),
+                        )
+                        Text(
+                            text = "检查隐藏面开关与关键锚点状态",
+                            fontSize = 12.sp,
+                            color = Color(0xFF5F6B64),
+                        )
+                    }
                 }
             }
         }

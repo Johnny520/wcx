@@ -91,6 +91,7 @@ import com.Johnny.wcx.ui.content.FloatingBottomBarItem
 import com.Johnny.wcx.ui.content.MiuixStackNavigator
 import com.Johnny.wcx.ui.content.liquid.vibrancy
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
+import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
@@ -258,7 +259,7 @@ private fun MainPagerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MiuixTheme.colorScheme.background),
+            .background(WxPalette.pageBackground()),
     ) {
         Box(
             modifier = Modifier
@@ -378,7 +379,9 @@ fun MiuixListScaffold(
     // layer through drawBackdrop and paints itself transparent, so scrolled content shows
     // through blurred behind the collapsed bar (InstallerX's useBlur pattern, on miuix-blur glass).
     val barBackdrop = rememberLayerBackdrop()
-    val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.67f)
+    // 原来是 0.67 透明的毛玻璃：在 #F2F2F7 灰底上滚动时会变成一块灰糊，
+    // 压在文字上很难看。改成 0.94 近乎不透明，保留一点模糊质感但不糊字。
+    val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.94f)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -439,7 +442,7 @@ fun Modifier.groupedCardItem(index: Int, count: Int): Modifier {
     val bottom = index == count - 1
     return fillMaxWidth()
         .squircleSurface(
-            color = MiuixTheme.colorScheme.surfaceContainer,
+            color = WxPalette.cardBackground(),
             topStart = if (top) r else z,
             topEnd = if (top) r else z,
             bottomEnd = if (bottom) r else z,

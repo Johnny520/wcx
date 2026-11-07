@@ -1,0 +1,214 @@
+package com.Johnny.wcx.features.items.scripting_js
+
+import com.Johnny.wcx.utils.WeLogger
+import org.json.JSONObject
+import org.mozilla.javascript.Context
+import org.mozilla.javascript.Function
+import org.mozilla.javascript.NativeObject
+import org.mozilla.javascript.ScriptableObject
+
+object JsEngine {
+
+    private const val TAG = "JsEngine"
+
+    fun executeAllOnLoad(scripts: Map<String, String>) {
+        for (script in scripts) {
+            WeLogger.d(TAG, "executing onLoad for script name='${script.key}'")
+            try {
+                executeOnLoad(script.value)
+            } catch (e: Exception) {
+                WeLogger.e(TAG, "script name='${script.key}' threw during onLoad", e)
+            }
+        }
+    }
+
+    private fun executeOnLoad(script: String) {
+        val cx: Context = Context.enter()
+        try {
+            val scope = cx.init()
+
+            cx.evaluateString(scope, script, "JsScript", 1, null)
+
+            val fn = scope.get("onLoad", scope)
+            if (fn == ScriptableObject.NOT_FOUND || fn !is Function) {
+                WeLogger.d(TAG, "JS script does not define onLoad()")
+                return
+            }
+
+            fn.call(cx, scope, scope, arrayOf<Any?>())
+        } finally {
+            Context.exit()
+        }
+    }
+
+    fun executeAllOnMessage(
+        scripts: Map<String, String>,
+        talker: String,
+        content: String,
+        type: Int,
+        isSend: Int,
+    ) {
+        if (content.isBlank()) {
+            WeLogger.i(TAG, "message is blank")
+            return
+        }
+
+        for (script in scripts) {
+            WeLogger.d(TAG, "evaluating script name='${script.key}'")
+
+            try {
+                executeOnMessage(script.value, talker, content, type, isSend)
+            } catch (e: Exception) {
+                WeLogger.e(TAG, "script name='${script.key}' threw during onMessage", e)
+            }
+        }
+    }
+
+    private fun executeOnMessage(
+        script: String,
+        talker: String,
+        content: String,
+        type: Int,
+        isSend: Int,
+    ) {
+        val cx: Context = Context.enter()
+        try {
+            val scope = cx.init()
+
+            cx.evaluateString(scope, script, "JsScript", 1, null)
+
+            val fn = scope.get("onMessage", scope)
+            if (fn == ScriptableObject.NOT_FOUND || fn !is Function) {
+                WeLogger.w(TAG, "JS script does not define onMessage()")
+                return
+            }
+
+            fn.call(cx, scope, scope, arrayOf<Any?>(talker, content, type, isSend))
+        } finally {
+            Context.exit()
+        }
+    }
+
+    fun executeAllOnRequest(
+        uri: String,
+        cgiId: Int,
+        json: JSONObject,
+    ): JSONObject {
+        var modifiedJson = json
+
+        for (script in JsScriptingHook.scripts) {
+            try {
+                val result = executeOnRequest(script.value, uri, cgiId, modifiedJson)
+                if (result != null) {
+                    modifiedJson = result
+                }
+            } catch (e: Exception) {
+                WeLogger.e(TAG, "script name='${script.key}' threw during onRequest", e)
+            }
+        }
+
+        return modifiedJson
+    }
+
+
+    private fun executeOnRequest(
+        script: String,
+        uri: String,
+        cgiId: Int,
+        json: JSONObject,
+    ): JSONObject? {
+        val cx: Context = Context.enter()
+        try {
+            val scope = cx.init()
+
+            val jsonStr = json.toString()
+            val jsonObj = cx.evaluateString(scope, "($jsonStr)", "json", 1, null)
+
+            cx.evaluateString(scope, script, "JsScript", 1, null)
+
+            val fn = scope.get("onRequest", scope)
+            if (fn == ScriptableObject.NOT_FOUND || fn !is Function) {
+                return null
+            }
+
+            val result = fn.call(cx, scope, scope, arrayOf<Any?>(uri, cgiId, jsonObj))
+                ?: return null
+
+            val resultStr = when (result) {
+                is NativeObject -> {
+                    val stringify = scope.get("JSON", scope) as NativeObject
+                    val stringifyFn = stringify.get("stringify", stringify) as Function
+                    stringifyFn.call(cx, scope, stringify, arrayOf(result)) as String
+                }
+
+                is String -> result
+                else -> return null
+            }
+
+            return JSONObject(resultStr)
+        } finally {
+            Context.exit()
+        }
+    }
+
+    fun executeAllOnResponse(
+        uri: String,
+        cgiId: Int,
+        json: JSONObject,
+    ): JSONObject {
+        var modifiedJson = json
+
+        for (script in JsScriptingHook.scripts) {
+            try {
+                val result = executeOnResponse(script.value, uri, cgiId, modifiedJson)
+                if (result != null) {
+                    modifiedJson = result
+                }
+            } catch (e: Exception) {
+                WeLogger.e(TAG, "script name='${script.key}' threw during onResponse", e)
+            }
+        }
+
+        return modifiedJson
+    }
+
+    private fun executeOnResponse(
+        script: String,
+        uri: String,
+        cgiId: Int,
+        json: JSONObject,
+    ): JSONObject? {
+        val cx: Context = Context.enter()
+        try {
+            val scope = cx.init()
+
+            val jsonStr = json.toString()
+            val jsonObj = cx.evaluateString(scope, "($jsonStr)", "json", 1, null)
+
+            cx.evaluateString(scope, script, "JsScript", 1, null)
+
+            val fn = scope.get("onResponse", scope)
+            if (fn == ScriptableObject.NOT_FOUND || fn !is Function) {
+                return null
+            }
+
+            val result = fn.call(cx, scope, scope, arrayOf<Any?>(uri, cgiId, jsonObj))
+                ?: return null
+
+            val resultStr = when (result) {
+                is NativeObject -> {
+                    val stringify = scope.get("JSON", scope) as NativeObject
+                    val stringifyFn = stringify.get("stringify", stringify) as Function
+                    stringifyFn.call(cx, scope, stringify, arrayOf(result)) as String
+                }
+
+                is String -> result
+                else -> return null
+            }
+
+            return JSONObject(resultStr)
+        } finally {
+            Context.exit()
+        }
+    }
+}

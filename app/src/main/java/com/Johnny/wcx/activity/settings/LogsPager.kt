@@ -68,6 +68,8 @@ import com.Johnny.wcx.utils.android.showToastSuspend
 import com.Johnny.wcx.utils.crash.CrashLogsManager
 import com.Johnny.wcx.utils.formatBytesSize
 import com.Johnny.wcx.utils.formatEpoch
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -559,7 +561,10 @@ private fun FileSelector(
     val labels = remember(files) {
         files.map { "${it.name}  ·  ${formatBytesSize(runCatching { it.fileSize() }.getOrDefault(0))}" }
     }
-    Card(modifier = modifier.fillMaxWidth()) {
+    SoftCard(
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         WindowDropdownPreference(
             title = "选择日志文件",
             summary = files.getOrNull(selectedIndex)?.let {
@@ -589,17 +594,20 @@ private fun RunLogCard(entry: RunLogEntry) {
         label = "chevron",
     )
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
+    SoftCard(
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 entry.level?.let { level ->
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(levelColor(level))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
                     ) {
-                        Text(level.toString(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(level.toString(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                     Spacer(Modifier.width(8.dp))
                 }
@@ -608,8 +616,8 @@ private fun RunLogCard(entry: RunLogEntry) {
                         Text(
                             text = it,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MiuixTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            color = WxPalette.textPrimary(),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -667,7 +675,10 @@ private fun RunLogCard(entry: RunLogEntry) {
 
 @Composable
 private fun CrashSectionCard(section: CrashSection) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    SoftCard(
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Column(Modifier.padding(14.dp)) {
             if (section.title.isNotEmpty()) {
                 Text(

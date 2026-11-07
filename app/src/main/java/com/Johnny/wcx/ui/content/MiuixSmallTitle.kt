@@ -13,8 +13,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun MiuixSmallTitle(
     text: String,
     modifier: Modifier = Modifier,
-    textColor: Color = MiuixTheme.colorScheme.onBackgroundVariant,
-    insideMargin: PaddingValues = PaddingValues(14.dp, 8.dp)
+    textColor: Color = com.Johnny.wcx.ui.style.WxPalette.TextSecondary,
+    insideMargin: PaddingValues = PaddingValues(start = 6.dp, top = 12.dp, bottom = 4.dp)
 ) {
     Text(
         modifier = modifier.padding(insideMargin),
