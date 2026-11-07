@@ -1800,9 +1800,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             })
         }
 
-    private companion object {
-        private const val MAX_IMAGE_RETRY = 3
-    }
+    private const val MAX_IMAGE_RETRY = 3
 
     private val imageClient: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
