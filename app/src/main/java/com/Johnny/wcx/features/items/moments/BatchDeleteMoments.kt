@@ -1648,13 +1648,15 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     @Composable
     private fun MomentThumb(
         url: String,
+        cacheKey: String,
         modifier: Modifier = Modifier,
         contentScale: ContentScale = ContentScale.Crop,
     ) {
-        var bitmap by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
-        var failed by remember(url) { mutableStateOf(false) }
-        LaunchedEffect(url) {
-            val loaded = loadBitmap(url)
+        var bitmap by remember(cacheKey) { mutableStateOf(thumbCache.get(cacheKey)) }
+        var failed by remember(cacheKey) { mutableStateOf(false) }
+        LaunchedEffect(cacheKey, url) {
+            if (bitmap != null) return@LaunchedEffect
+            val loaded = loadBitmap(cacheKey, url)
             bitmap = loaded
             failed = loaded == null
         }
@@ -1685,71 +1687,121 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         override fun sizeOf(key: String, value: android.graphics.Bitmap): Int = value.byteCount
     }
 
-    private suspend fun loadBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
-        thumbCache.get(url)?.let { return@withContext it }
+    private suspend fun loadBitmap(
+        cacheKey: String,
+        url: String,
+    ): android.graphics.Bitmap? {
+        thumbCache.get(cacheKey)?.let { return it }
+        val isVideo = url.contains("snsvideodownload", ignoreCase = true)
         // 微信 CDN 有 http-only 的老域名，也有只认 https 的；强制升级会整批失败，
         // 所以两种协议都试一遍，哪个能出图用哪个。
         val variants = LinkedHashSet<String>()
         variants.add(url)
         if (url.startsWith("https://")) variants.add("http://" + url.removePrefix("https://"))
         if (url.startsWith("http://")) variants.add("https://" + url.removePrefix("http://"))
+
         for (candidate in variants) {
-            val bmp = runCatching { fetchBitmap(candidate) }
-                .onFailure {
-                    WeLogger.w(
-                        TAG,
-                        "图片请求异常：$candidate → ${it.javaClass.simpleName}: ${it.message}",
-                    )
-                }
-                .getOrNull()
+            val bmp = fetchBitmapWithRetry(candidate)
             if (bmp != null) {
                 if (!bitmapSuccessLogged) {
                     bitmapSuccessLogged = true
-                    WeLogger.i(TAG, "图片加载成功 ${bmp.width}x${bmp.height}：$candidate")
+                    WeLogger.i(
+                        TAG,
+                        (if (isVideo) "视频封面加载成功 " else "图片加载成功 ") +
+                            "${bmp.width}x${bmp.height}：$candidate",
+                    )
                 }
-                runCatching { thumbCache.put(url, bmp) }
-                return@withContext bmp
+                runCatching { thumbCache.put(cacheKey, bmp) }
+                return bmp
             }
         }
-        WeLogger.w(TAG, "图片加载全部失败（http/https 都试过）：$url")
-        null
+        WeLogger.w(
+            TAG,
+            (if (isVideo) "视频封面" else "图片") + "加载全部失败（http/https 都试过）：$url",
+        )
+        return null
+    }
+
+    /** 网络类失败重试 2 次（间隔 300/600ms）；解码失败不重试，重试也没用。 */
+    private suspend fun fetchBitmapWithRetry(url: String): android.graphics.Bitmap? {
+        var lastError: Throwable? = null
+        repeat(MAX_IMAGE_RETRY) { attempt ->
+            if (attempt > 0) kotlinx.coroutines.delay(300L * attempt)
+            val result = runCatching { fetchBitmap(url) }
+            if (result.isSuccess) return result.getOrNull()
+            lastError = result.exceptionOrNull()
+            WeLogger.w(
+                TAG,
+                "图片请求异常(第 ${attempt + 1} 次)：$url → " +
+                    "${lastError?.javaClass?.simpleName}: ${lastError?.message}",
+            )
+        }
+        return null
     }
 
     /**
-     * 真正下载一张图。
+     * 真正下载一张图（可取消）。
      *
      * 用 OkHttp 而不是 HttpURLConnection：朋友圈图片 CDN（szmmsns.qpic.cn）**校验 Referer**，
      * 不带 Referer 直接返回 HTTP 400 / 0 字节；而 Android 的 HttpURLConnection 对 Referer
      * 这类受限头不可靠（跟随重定向时会被丢），表现就是「图片暂时无法查看」。
      * 实测：带 Referer → 200 + image/png；不带 → 400 + 空 body。
+     *
+     * 用 enqueue + invokeOnCancellation：Dialog 关闭 / item 滚出屏幕时协程取消，
+     * 请求会被立刻 cancel，不会留着回调打到已释放的 Composable 上。
      */
-    private fun fetchBitmap(url: String): android.graphics.Bitmap? {
-        val request = okhttp3.Request.Builder()
-            .url(url)
-            .header("Referer", "https://servicewechat.com/")
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
-            )
-            .build()
-        imageClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                WeLogger.w(TAG, "图片 HTTP ${response.code}：$url")
-                return null
-            }
-            val bytes = response.body?.bytes()
-            if (bytes == null || bytes.isEmpty()) {
-                WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
-                return null
-            }
-            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            if (bitmap == null) {
-                val head = bytes.take(16).joinToString("") { "%02X".format(it) }
-                WeLogger.w(TAG, "图片解码失败（${bytes.size} 字节，头 $head）：$url")
-            }
-            return bitmap
+    private suspend fun fetchBitmap(url: String): android.graphics.Bitmap? =
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .header("Referer", "https://servicewechat.com/")
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
+                )
+                .build()
+
+            val call = imageClient.newCall(request)
+            cont.invokeOnCancellation { runCatching { call.cancel() } }
+
+            call.enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    val bitmap = runCatching {
+                        response.use { resp ->
+                            if (!resp.isSuccessful) {
+                                WeLogger.w(TAG, "图片 HTTP ${resp.code}：$url")
+                                return@use null
+                            }
+                            val bytes = resp.body?.bytes()
+                            if (bytes == null || bytes.isEmpty()) {
+                                WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
+                                return@use null
+                            }
+                            val decoded = android.graphics.BitmapFactory
+                                .decodeByteArray(bytes, 0, bytes.size)
+                            if (decoded == null) {
+                                val head = bytes.take(16).joinToString("") { "%02X".format(it) }
+                                WeLogger.w(
+                                    TAG,
+                                    "图片解码失败（${bytes.size} 字节，头 $head）：$url",
+                                )
+                            }
+                            decoded
+                        }
+                    }.getOrNull()
+
+                    if (cont.isActive) cont.resumeWith(Result.success(bitmap))
+                }
+            })
         }
+
+    private companion object {
+        private const val MAX_IMAGE_RETRY = 3
     }
 
     private val imageClient: okhttp3.OkHttpClient by lazy {
@@ -1844,6 +1896,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                 item.images.forEach { url ->
                     MomentThumb(
                         url = url,
+                        cacheKey = "${item.snsId}_$url",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1945,6 +1998,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         item.images.forEach { url ->
                             MomentThumb(
                                 url = url,
+                                cacheKey = "${item.snsId}_$url",
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clip(RoundedCornerShape(8.dp))
