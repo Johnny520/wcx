@@ -1571,7 +1571,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         }
 
                         Text(
-                            text = "点卡片可切换勾选；列表里已展示正文与缩略图，确认后直接删除即可",
+                            text = "点卡片可切换勾选；缩略图若加载失败请以微信原朋友圈为准",
                             fontSize = 11.sp,
                             color = textSub,
                             modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 0.dp),
@@ -1678,7 +1678,15 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     @Volatile
     private var bitmapSuccessLogged = false
 
+    /** 已加载成功的缩略图（按字节数计量），避免同一张图滚动时反复下载。 */
+    private val thumbCache = object : android.util.LruCache<String, android.graphics.Bitmap>(
+        (Runtime.getRuntime().maxMemory() / 8).toInt().coerceAtMost(32 * 1024 * 1024),
+    ) {
+        override fun sizeOf(key: String, value: android.graphics.Bitmap): Int = value.byteCount
+    }
+
     private suspend fun loadBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        thumbCache.get(url)?.let { return@withContext it }
         // 微信 CDN 有 http-only 的老域名，也有只认 https 的；强制升级会整批失败，
         // 所以两种协议都试一遍，哪个能出图用哪个。
         val variants = LinkedHashSet<String>()
@@ -1699,6 +1707,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     bitmapSuccessLogged = true
                     WeLogger.i(TAG, "图片加载成功 ${bmp.width}x${bmp.height}：$candidate")
                 }
+                runCatching { thumbCache.put(url, bmp) }
                 return@withContext bmp
             }
         }
