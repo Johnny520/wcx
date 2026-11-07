@@ -402,6 +402,20 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             .toList()
     }
 
+    /**
+     * 把抓到的地址整理成能直接加载的形式。
+     *
+     * 微信朋友圈 CDN 给的常常是 http://mmsns.qpic.cn/...，而模块没有开明文流量，
+     * Android 9+ 会直接拦掉（表现就是有灰框、图不出来）。这里统一升到 https，
+     * 顺便把 XML 里的 &amp; 还原成 &，否则带了查询串的地址也会 404。
+     */
+    private fun normalizeImageUrl(url: String): String {
+        var v = url.trim().replace("&amp;", "&")
+        if (v.startsWith("http://")) v = "https://" + v.removePrefix("http://")
+        if (v.startsWith("//")) v = "https:$v"
+        return v
+    }
+
     /** 兜底二：SnsInfo.content 那列 XML 里也带 media 信息，抓其中的图片地址。 */
     private fun extractImageUrlsFromXml(xml: String?, max: Int = 3): List<String> {
         if (xml.isNullOrBlank()) return emptyList()
@@ -412,6 +426,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                 it.contains("qpic") || it.contains("mmsns") ||
                     it.contains("/sns/") || it.contains("snsvideodownload")
             }
+            .map { normalizeImageUrl(it) }
             .distinct()
             .take(max)
             .toList()
@@ -506,8 +521,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             candidates.add(v)
         }
         if (candidates.isEmpty()) return null
-        return candidates.firstOrNull { it.contains("thumb", ignoreCase = true) }
+        val picked = candidates.firstOrNull { it.contains("thumb", ignoreCase = true) }
             ?: candidates.first()
+        return normalizeImageUrl(picked)
     }
 
     private fun pickMediaUrl2(media: Any?): String? =
@@ -926,7 +942,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             TAG,
                             "样本诊断：snsId=$snsId, snsInfo=${snsInfo != null}, " +
                                 "bodyLen=${bodyText.length}, type=$type, " +
-                                "media=$imageCount, urls=${images.size}, xmlUrls=${finalImages.size}",
+                                "media=$imageCount, urls=${images.size}, xmlUrls=${finalImages.size}, " +
+                                "firstUrl=${finalImages.firstOrNull()?.take(90) ?: "-"}",
                         )
                     }
                     val localId = snsInfoLocalId(snsInfo, snsId)
