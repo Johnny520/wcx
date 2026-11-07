@@ -1673,34 +1673,50 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         null
     }
 
+    /**
+     * 真正下载一张图。
+     *
+     * 用 OkHttp 而不是 HttpURLConnection：朋友圈图片 CDN（szmmsns.qpic.cn）**校验 Referer**，
+     * 不带 Referer 直接返回 HTTP 400 / 0 字节；而 Android 的 HttpURLConnection 对 Referer
+     * 这类受限头不可靠（跟随重定向时会被丢），表现就是「图片暂时无法查看」。
+     * 实测：带 Referer → 200 + image/png；不带 → 400 + 空 body。
+     */
     private fun fetchBitmap(url: String): android.graphics.Bitmap? {
-        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-        conn.instanceFollowRedirects = true
-        conn.setRequestProperty(
-            "User-Agent",
-            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
-        )
-        conn.setRequestProperty("Referer", "https://servicewechat.com/")
-        val code = conn.responseCode
-        if (code != 200) {
-            WeLogger.w(TAG, "图片 HTTP $code：$url")
-            return null
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .header("Referer", "https://servicewechat.com/")
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                    "Version/4.0 Chrome/100.0.4896.58 Mobile Safari/537.36 MicroMessenger/8.0.80",
+            )
+            .build()
+        imageClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                WeLogger.w(TAG, "图片 HTTP ${response.code}：$url")
+                return null
+            }
+            val bytes = response.body?.bytes()
+            if (bytes == null || bytes.isEmpty()) {
+                WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
+                return null
+            }
+            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            if (bitmap == null) {
+                val head = bytes.take(16).joinToString("") { "%02X".format(it) }
+                WeLogger.w(TAG, "图片解码失败（${bytes.size} 字节，头 $head）：$url")
+            }
+            return bitmap
         }
-        val bytes = conn.inputStream.use { stream -> stream.readBytes() }
-        if (bytes.isEmpty()) {
-            WeLogger.w(TAG, "图片响应为空（0 字节）：$url")
-            return null
-        }
-        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        if (bitmap == null) {
-            // 有字节但解不出来：多半不是图片（错误页 / 需要鉴权 / 不支持的格式）
-            val head = bytes.take(16).joinToString("") { "%02X".format(it) }
-            WeLogger.w(TAG, "图片解码失败（${bytes.size} 字节，头 $head）：$url")
-        }
-        return bitmap
+    }
+
+    private val imageClient: okhttp3.OkHttpClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
     }
 
     /**
