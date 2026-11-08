@@ -139,6 +139,24 @@ object WxPalette {
     /** 强调渐变画刷。 */
     fun accentBrush(): Brush = Brush.linearGradient(listOf(AccentStart, AccentEnd))
 
+    /**
+     * 把浅色的强调渐变映射成深色版本。
+     *
+     * 这些 Grad* 原本是给白卡配的极浅色；深色模式下直接用会「亮瞎」，
+     * 这里统一降为同色系的暗调，调用方不需要自己判断深浅色。
+     */
+    @Composable
+    fun darkenGradient(gradient: List<Color>): List<Color> {
+        if (!isSystemInDarkTheme()) return gradient
+        return when (gradient) {
+            GradBlue -> listOf(Color(0xFF16233A), Color(0xFF121C2C))
+            GradMint -> listOf(Color(0xFF122A24), Color(0xFF0F2019))
+            GradPurple -> listOf(Color(0xFF1E1733), Color(0xFF171129))
+            GradPink -> listOf(Color(0xFF2A1620), Color(0xFF1F1117))
+            else -> gradient
+        }
+    }
+
     /** 卡片描边：浅色下几乎不可见，深色下一层极淡白边 */
     @Composable
     fun cardBorder(): Color =
@@ -187,7 +205,11 @@ fun SoftCard(
     ) {
         Column(
             modifier = Modifier
-                .background(if (plain) WxPalette.cardBrush() else Brush.linearGradient(gradient), shape)
+                .background(
+                    if (plain) WxPalette.cardBrush()
+                    else Brush.linearGradient(WxPalette.darkenGradient(gradient)),
+                    shape,
+                )
                 .border(if (glow) 1.2.dp else 1.dp, if (glow) WxPalette.accentBrush() else WxPalette.cardBorderBrush(), shape)
                 .padding(contentPadding.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),

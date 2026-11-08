@@ -29,6 +29,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -405,9 +410,19 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
 
 @Composable
 private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking: Boolean) {
-    val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
-    val accentColor = if (isDark) Color(0xFF4A90FF) else Color(0xFF2563EB)
+    val accentColor = WxPalette.AccentEnd
+    // 检查中时状态胶囊做呼吸脉冲，静止时保持低透明度——一眼看出「正在动」。
+    val pulseTransition = rememberInfiniteTransition(label = "statusPulse")
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.34f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "statusPulseAlpha",
+    )
     val statusText = when {
         isChecking -> "检查中"
         isLatest -> "已是最新"
@@ -420,8 +435,8 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(WxPalette.cardBackground())
-            .border(1.dp, WxPalette.cardBorder(), shape)
+            .background(WxPalette.cardBrush())
+            .border(1.dp, WxPalette.cardBorderBrush(), shape)
             .clickable { openLsposedManager(context) }
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -437,7 +452,10 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
             Spacer(Modifier.weight(1f))
             Box(
                 modifier = Modifier
-                    .background(accentColor.copy(alpha = 0.12f), RoundedCornerShape(50))
+                    .background(
+                        accentColor.copy(alpha = if (isChecking) pulseAlpha * 0.45f else 0.12f),
+                        RoundedCornerShape(50),
+                    )
                     .padding(horizontal = 10.dp, vertical = 3.dp),
             ) {
                 Text(
@@ -484,9 +502,7 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(listOf(Color(0xFF5AA9FF), Color(0xFF2563EB)))
-                    ),
+                    .background(WxPalette.accentBrush()),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(

@@ -367,12 +367,12 @@ fun CategoryDetailScreen(
                             text = "密友功能诊断",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF1F2A24),
+                            color = WxPalette.textPrimary(),
                         )
                         Text(
                             text = "检查隐藏面开关与关键锚点状态",
                             fontSize = 12.sp,
-                            color = Color(0xFF5F6B64),
+                            color = WxPalette.textSecondary(),
                         )
                     }
                 }
