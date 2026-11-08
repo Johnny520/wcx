@@ -455,7 +455,7 @@ fun HomePager(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     QuickTile(
-                        icon = MaterialSymbols.Outlined.Settings,
+                        icon = MaterialSymbols.Outlined.Tune,
                         title = "设置",
                         subtitle = "界面 · 更新 · 备份恢复",
                         tint = Color(0xFF8B5CF6),
