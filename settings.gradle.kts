@@ -39,6 +39,5 @@ include(
     ":app",
     ":libs:common:annotation-scanner",
     ":libs:common:stubs",
-    ":libs:common:bsh",
     ":libs:common:reflekt"
 )

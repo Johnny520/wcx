@@ -337,8 +337,6 @@ dependencies {
     implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.1")
 
-    implementation(project(":libs:common:bsh"))
-
     // 内置 Xposed API 82：Maven Central / 腾讯镜像都没有该构件，只能从 api.xposed.info 拉，
     // 而该源在 CI 上偶发超时会导致整个 master 构建失败（缓存丢失时必现）。内置后构建可复现。
     compileOnly(files("libs/xposed-api-82.jar"))
