@@ -76,13 +76,32 @@ internal object ModuleDiagnostics {
     // ===================== 2. 冲突模块 =====================
 
     /** 已知会 Hook / 增强微信的模块包名 → 展示名。 */
+    /**
+     * 已知模块包名 → 展示名。
+     *
+     * 分三类：
+     * 1. Xposed 框架/管理器（多框架共存会互相抢 Hook）；
+     * 2. 微信 Hook / 增强模块（同进程 Hook 同一批方法，最容易直接冲突）；
+     * 3. WCX 自身与其同源二改（同时装两个会让配置与 Hook 互相覆盖）。
+     *
+     * 只收录能确认存在的包名，不猜。新增条目必须同步 AndroidManifest 的 <queries>，
+     * 否则 Android 11+ 查不到、永远显示「未安装」。
+     */
     private val KNOWN_WECHAT_MODULES = linkedMapOf(
+        // —— 框架 / 管理器 ——
+        "io.github.lsposed.manager" to "LSPosed",
+        "org.lsposed.manager" to "LSPosed（旧包名）",
+        "org.meowcat.edxposed.manager" to "EdXposed",
+        "com.solohsu.android.edxp.manager" to "EdXposed（旧管理器）",
+        "de.robv.android.xposed.installer" to "Xposed Installer",
+        // —— 微信 Hook / 增强模块 ——
         "com.fkzhang.wechatxposed" to "微X模块",
         "com.fkzhang.wechatxposed.pro" to "微X模块 Pro",
         "me.hd.wauxv" to "WAuxv",
         "com.tencent.mm.wechatx" to "WeChatX",
-        "com.wcxlc.kimjaejiang" to "WCXLC（同源二改）",
         "top.mmjz.floatingclouds" to "浮云",
+        // —— WCX 自身 / 同源 ——
+        "com.wcxlc.kimjaejiang" to "WCXLC（同源二改）",
         "com.johnny.wcx" to "WCX（当前模块）",
     )
 

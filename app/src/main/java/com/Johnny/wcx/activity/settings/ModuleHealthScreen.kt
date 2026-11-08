@@ -21,6 +21,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import com.Johnny.wcx.ui.style.WxPalette
+import com.Johnny.wcx.ui.style.SoftCard
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +59,8 @@ import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.crash.ExitReasonRecorder
 import com.Johnny.wcx.utils.MainThreadWatchdog
+import com.Johnny.wcx.utils.TargetProcesses
+import android.os.Build
 import com.Johnny.wcx.utils.crash.ProcessTimeline
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.utils.reflection.ClassLoaders
@@ -199,49 +216,44 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val failItems = items.filter { !it.ok && !it.inactive }
+        val offItems = items.filter { !it.ok && it.inactive }
+        val passItems = items.filter { it.ok }
+        val segments = buildSegments(items)
+
         PageScaffold(
             title = "模块自检",
             largeTitle = "模块自检",
             scrollBehavior = scrollBehavior,
             onBack = onBack,
+            subtitle = "最后检测 " + lastScan +
+                if (scanDurationMs > 0L) " · 耗时 " + formatDuration(scanDurationMs) else "",
         ) { padding ->
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
-                    top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp,
+                    start = 14.dp,
+                    end = 14.dp,
+                    top = padding.calculateTopPadding() + 2.dp,
+                    bottom = padding.calculateBottomPadding() + 96.dp,
                 ),
+                verticalArrangement = Arrangement.spacedBy(13.dp),
             ) {
                 item {
-                    Text(
-                        text = "最后检测：$lastScan　·　点击任意一项可看详情，可修复的项会带动作按钮",
-                        fontSize = 12.sp,
-                        color = BasicComponentDefaults.summaryColor().color,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    HealthHeroCard(
+                        pass = passItems.size,
+                        fail = failItems.size,
+                        off = offItems.size,
+                        total = items.size,
+                        scanning = running,
+                        lastScan = lastScan,
+                        wechatVersion = runCatching { com.Johnny.wcx.utils.HostInfo.versionName }
+                            .getOrDefault("未识别"),
+                        moduleVersion = BuildConfig.VERSION_NAME,
                     )
                 }
-
                 item {
-                    OverviewHealthCard(
-                        total = items.size,
-                        pass = items.count { it.ok },
-                        fail = items.count { !it.ok && !it.inactive },
-                        off = items.count { !it.ok && it.inactive },
-                        moduleVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                        wechatVersion = runCatching {
-                            com.Johnny.wcx.utils.HostInfo.versionName
-                        }.getOrDefault("未识别"),
-                        internalVersion = "${BuildConfig.VERSION_CODE}",
-                        lastScan = lastScan,
-                        scanDurationMs = scanDurationMs,
-                        onShowList = { kind ->
-                            when (kind) {
-                                "pass" -> showFilteredList("通过项", items.filter { it.ok })
-                                "fail" -> showFilteredList("异常项", items.filter { !it.ok && !it.inactive })
-                                "off" -> showFilteredList("未启用项", items.filter { !it.ok && it.inactive })
-                                else -> showFilteredList("全部检测项", items)
-                            }
-                        },
+                    HealthActionPanel(
                         onRescan = { rescan() },
                         onRepair = {
                             launchRun(
@@ -253,59 +265,74 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                                 afterRun = { rescan() },
                             )
                         },
-                    )
-                }
-
-                val grouped = items.groupBy { it.section }
-                grouped.forEach { (section, list) ->
-                    item { SmallTitle(modifier = Modifier.padding(top = 6.dp), text = section) }
-                    item {
-                        SettingsCard {
-                            list.forEachIndexed { index, item ->
-                                if (index > 0) InsetDivider()
-                                HealthRow(item) { openDetail(item) }
-                            }
-                        }
-                    }
-                }
-
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "一键修复") }
-                item {
-                    SettingsCard {
-                        ActionRow("一键修复", "修复前体检 → 补目录 / 开总开关 / 重建引导 / 推进阶段 / 重排 Hook / 重载插件 / 刷新隐藏联系人 → 复检 → 给出前后对比") {
-                            launchRun("一键修复", { moduleRepairSteps(context) }, showOverlay = true, reportTitle = "一键修复结果", replaceItems = false, afterRun = { rescan() })
-                        }
-                        InsetDivider()
-                        ActionRow("刷新检测结果", "重新逐项扫描并刷新上面的列表（不改动任何配置）") {
-                            rescan()
-                            showToast("已重新检测")
-                        }
-                        InsetDivider()
-                        ActionRow("复制检测结果", "复制到剪贴板，便于反馈") {
+                        onCopy = {
                             val text = if (items.isEmpty()) "（尚无检测结果）"
-                            else items.joinToString("\n") { "${it.label}：${it.value}" }
+                            else items.joinToString("\n") { it.label + "：" + it.value }
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                             clipboard?.setPrimaryClip(ClipData.newPlainText("WCX 模块自检", text))
                             showToast("检测结果已复制")
+                        },
+                    )
+                }
+                if (segments.isNotEmpty()) {
+                    item {
+                        HealthSegmentGrid(segments) { seg ->
+                            showFilteredList(
+                                "检测段·" + seg.name,
+                                items.filter { it.section == seg.name },
+                            )
                         }
                     }
                 }
-
-                item {
-                    Text(
-                        text = "定位过程与失败原因已写入运行日志（日志 → 运行日志），反馈问题时导出该日志发给开发者即可。",
-                        fontSize = 12.sp,
-                        color = BasicComponentDefaults.summaryColor().color,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                    )
+                if (items.isEmpty()) {
+                    item {
+                        SoftCard(contentPadding = 18) {
+                            Text("尚未检测", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = WxPalette.textPrimary())
+                            Text(
+                                "点击上方「重新检测」开始。全部检测在后台线程执行，不会卡界面。",
+                                fontSize = 12.sp, color = WxPalette.textSecondary(),
+                            )
+                        }
+                    }
+                } else {
+                    item {
+                        HealthFoldSection(
+                            title = "异常项",
+                            list = failItems,
+                            defaultCollapsed = false,
+                            accent = Color(0xFFFF5B5B),
+                            onOpenAll = { showFilteredList("异常项", failItems) },
+                            onOpenItem = { openDetail(it) },
+                        )
+                    }
+                    item {
+                        HealthFoldSection(
+                            title = "未启用",
+                            list = offItems,
+                            defaultCollapsed = true,
+                            accent = Color(0xFFFFB020),
+                            onOpenAll = { showFilteredList("未启用项", offItems) },
+                            onOpenItem = { openDetail(it) },
+                        )
+                    }
+                    item {
+                        HealthFoldSection(
+                            title = "通过项",
+                            list = passItems,
+                            defaultCollapsed = true,
+                            accent = Color(0xFF12D18E),
+                            onOpenAll = { showFilteredList("通过项", passItems) },
+                            onOpenItem = { openDetail(it) },
+                        )
+                    }
                 }
                 item {
                     Text(
-                        text = "说明：本页是「全量自检」——覆盖微信公共 API、脚本运行时、Hook 安装任务、关键类锚点、隐藏联系人状态与各分类启用情况。" +
-                            "标红或标 ❌ 的项通常就是对应功能失效的原因；点开可看含义、恢复建议与可直接执行的动作。",
-                        fontSize = 12.sp,
-                        color = BasicComponentDefaults.summaryColor().color,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        text = "本页覆盖：功能清单 / 关键类锚点 / DexKit 锚点 / 功能活体 / 网络与 CDN / " +
+                            "模块冲突 / 隐藏联系人 / 运行状态。标红项通常就是对应功能失效的原因，点开可看含义、建议与可执行动作。",
+                        fontSize = 11.sp,
+                        color = WxPalette.textSecondary(),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     )
                 }
             }
@@ -655,6 +682,8 @@ private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能活体") { liveSection() },
     HealthStep("网络与 CDN") { networkSection() },
     HealthStep("模块冲突") { conflictSection(context) },
+    HealthStep("运行环境") { environmentSection() },
+    HealthStep("存储与缓存") { storageSection(context) },
     HealthStep("隐藏联系人") { hiddenContactsSection() },
     HealthStep("退出原因与主线程卡顿") { lastExitItems(context) },
 )
@@ -723,29 +752,56 @@ private fun repairAction(context: Context): Pair<String, () -> String> =
     }
 
 private fun featureOverview(): List<HealthItem> {
+    val section = "功能清单与分类启用概况"
     val items = FeaturesProvider.ALL_HOOK_ITEMS
     val out = mutableListOf<HealthItem>()
+    val byCategory = items.groupBy { it.categories.firstOrNull() ?: "未分类" }.toSortedMap()
+    val enabledTotal = items.count { WePrefs.getBoolOrFalse(it.name) }
+    val activeCats = byCategory.filterValues { list -> list.any { WePrefs.getBoolOrFalse(it.name) } }
+
+    // 只输出「总数 + 有启用的分类 + 其余合并一行」，
+    // 否则 300 多个功能按分类铺开会把自检页拉成十几行（用户实测反馈太长）。
     out += HealthItem(
-        "功能总数", "功能清单与分类启用概况", "${items.size} 个", true,
-        "模块共注册 ${items.size} 个功能项（含各类开关与可点击功能）。",
-    )
-    items.groupBy { it.categories.firstOrNull() ?: "未分类" }
-        .toSortedMap()
-        .forEach { (category, list) ->
-            val on = list.count { WePrefs.getBoolOrFalse(it.name) }
-            val detail = buildString {
-                append("该分类共 ${list.size} 个功能，当前已启用 $on 个。\n\n")
-                list.forEach { item ->
-                    val enabled = WePrefs.getBoolOrFalse(item.name)
-                    append(if (enabled) "✅ " else "⬜ ")
-                        .append(item.name)
-                        .append(if (enabled) "" else "（未启用）")
-                        .append("\n")
-                }
-                if (on == 0) append("\n该分类目前没有任何功能被启用——若你期望其中某功能生效，请到「功能」页对应分类手动开启。")
+        "功能总数", section, items.size.toString() + " 个",
+        true,
+        buildString {
+            append("模块共注册 ").append(items.size).append(" 个功能项，当前已启用 ")
+                .append(enabledTotal).append(" 个，分布在 ")
+                .append(activeCats.size).append(" / ").append(byCategory.size).append(" 个分类。\n\n")
+            append("各分类明细（功能数 / 已启用）：\n")
+            byCategory.forEach { (cat, list) ->
+                append("· ").append(cat).append('：').append(list.size).append(" / ")
+                    .append(list.count { WePrefs.getBoolOrFalse(it.name) }).append('\n')
             }
-            out += HealthItem("分类·$category", "功能清单与分类启用概况", "${list.size} 个，已启用 $on", true, detail)
-        }
+        },
+    )
+
+    activeCats.forEach { (category, list) ->
+        val on = list.count { WePrefs.getBoolOrFalse(it.name) }
+        out += HealthItem(
+            "分类·" + category, section,
+            list.size.toString() + " 个，已启用 " + on,
+            true,
+            buildString {
+                append("该分类共 ").append(list.size).append(" 个功能，已启用 ").append(on).append(" 个。\n\n")
+                list.forEach { item ->
+                    val e = WePrefs.getBoolOrFalse(item.name)
+                    append(if (e) "✅ " else "⬜ ").append(item.name)
+                    if (!e) append("（未启用）")
+                    append('\n')
+                }
+            },
+        )
+    }
+
+    val silent = byCategory.keys - activeCats.keys
+    if (silent.isNotEmpty()) {
+        out += HealthItem(
+            "其余 " + silent.size + " 个分类", section, "全部未启用", true,
+            "以下分类当前没有任何功能被启用（只统计，不算异常）：\n" + silent.joinToString("、"),
+            inactive = true,
+        )
+    }
     return out
 }
 
@@ -849,6 +905,70 @@ private fun networkSection(): List<HealthItem> {
             inactive = r.expectFail,
         )
     }
+}
+
+/**
+ * 运行环境：系统版本 / CPU 架构 / 当前进程。
+ *
+ * 这三项决定了「模块能不能装得上」——低版本系统缺 API、x86 设备没有对应 native 库、
+ * 子进程里大部分 Hook 本来就不安装。区分清楚可以避免把环境限制误判成功能失效。
+ */
+private fun environmentSection(): List<HealthItem> {
+    val section = "运行环境"
+    val out = mutableListOf<HealthItem>()
+
+    val sdk = Build.VERSION.SDK_INT
+    out += HealthItem(
+        "Android 版本", section, "API " + sdk, sdk >= 26,
+        "当前系统 API " + sdk + "。\n" +
+            if (sdk >= 26) "满足模块最低要求（API 26 / Android 8.0）。"
+            else "低于模块最低要求（API 26 / Android 8.0），部分能力不可用。",
+    )
+
+    val abis = runCatching { Build.SUPPORTED_ABIS.joinToString(", ") }.getOrDefault("未知")
+    val abiOk = abis.contains("arm64") || abis.contains("armeabi")
+    out += HealthItem(
+        "CPU 架构", section, abis, abiOk,
+        "设备支持的 ABI：" + abis + "\n" +
+            if (abiOk) "模块的 native 组件（arm64-v8a / armeabi-v7a）可正常加载。"
+            else "没有 arm ABI（x86 模拟器或纯 x86 设备），native 组件无法加载，依赖它的功能会失败。",
+    )
+
+    val main = runCatching { TargetProcesses.isInMain }.getOrDefault(false)
+    out += HealthItem(
+        "当前进程", section, if (main) "微信主进程" else "子进程", main,
+        "进程名：" + runCatching { TargetProcesses.currentName }.getOrDefault("未知") + "\n" +
+            if (main) "主进程里模块会安装全部 Hook。"
+            else "子进程里只做最小初始化，看到「未解析 / 未安装」属正常现象，不代表功能坏了。",
+        inactive = !main,
+    )
+    return out
+}
+
+/** 存储与缓存：数据目录可写性 + 缓存体积。写不进去会导致配置保存失败、日志缺失。 */
+private fun storageSection(context: Context): List<HealthItem> {
+    val section = "存储与缓存"
+    val out = mutableListOf<HealthItem>()
+
+    val files = runCatching { context.filesDir }.getOrNull()
+    val writable = files?.let { dir -> runCatching { dir.canWrite() }.getOrDefault(false) } ?: false
+    out += HealthItem(
+        "模块数据目录", section, if (writable) "可写" else "不可写", writable,
+        "路径：" + (files?.absolutePath ?: "未知") + "\n" +
+            if (writable) "配置、日志可正常落盘。" else "无法写入：配置保存失败、日志缺失都会由此引起。",
+    )
+
+    val cacheMb = runCatching {
+        val dir = context.cacheDir
+        dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } / 1024L / 1024L
+    }.getOrDefault(0L)
+    out += HealthItem(
+        "缓存占用", section, cacheMb.toString() + "MB", cacheMb < 200,
+        "模块缓存目录当前 " + cacheMb + "MB。\n" +
+            if (cacheMb < 200) "在正常范围内。"
+            else "偏大，建议到系统设置里清理应用缓存（只删缓存，不影响配置与功能）。",
+    )
+    return out
 }
 
 /** 模块冲突：同机是否还装了其它会 Hook 微信的模块。 */
@@ -998,4 +1118,344 @@ private fun moduleRepairSteps(context: Context): List<HealthStep> {
             )
         },
     )
+}
+
+// ---------------------------------------------------------------------------
+//  自检页 v2 组件：环形总览 / 操作条 / 彩色段网格 / 可折叠明细
+// ---------------------------------------------------------------------------
+
+/** 一个检测段的汇总（对应「检测范围」网格里的一格）。 */
+private data class HealthSegment(
+    val name: String,
+    val ok: Int,
+    val fail: Int,
+    val off: Int,
+) {
+    val total: Int get() = ok + fail + off
+    /** 0 = 全通过，1 = 有异常，2 = 全未启用 */
+    val state: Int get() = when {
+        fail > 0 -> 1
+        total > 0 && ok == total -> 0
+        else -> 2
+    }
+}
+
+private fun buildSegments(items: List<HealthItem>): List<HealthSegment> =
+    items.groupBy { it.section }.map { (name, list) ->
+        HealthSegment(
+            name = name,
+            ok = list.count { it.ok },
+            fail = list.count { !it.ok && !it.inactive },
+            off = list.count { !it.ok && it.inactive },
+        )
+    }
+
+private fun segmentColor(seg: HealthSegment): Color = when (seg.state) {
+    1 -> Color(0xFFFF5B5B)
+    0 -> Color(0xFF12D18E)
+    else -> Color(0xFFFFB020)
+}
+
+@Composable
+private fun MiniPill(text: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.14f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Text(text = text, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = color)
+    }
+}
+
+/** 环形进度 + 大百分比的模块总览卡。 */
+@Composable
+private fun HealthHeroCard(
+    pass: Int,
+    fail: Int,
+    off: Int,
+    total: Int,
+    scanning: Boolean,
+    lastScan: String,
+    wechatVersion: String,
+    moduleVersion: String,
+) {
+    val ratio = if (total > 0) pass.toFloat() / total else 0f
+    val animated by animateFloatAsState(
+        targetValue = ratio,
+        animationSpec = tween(700, easing = FastOutSlowInEasing),
+        label = "heroRatio",
+    )
+    val statusText = when {
+        total == 0 -> "尚未检测"
+        fail > 0 -> "存在 " + fail + " 项异常"
+        else -> "全部通过"
+    }
+    val statusColor = when {
+        total == 0 -> WxPalette.textSecondary()
+        fail > 0 -> Color(0xFFFF5B5B)
+        else -> Color(0xFF12D18E)
+    }
+    SoftCard(contentPadding = 18, glow = total > 0 && fail == 0) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(104.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val stroke = 10.dp.toPx()
+                    val inset = stroke / 2f
+                    val arcSize = Size(size.width - stroke, size.height - stroke)
+                    drawArc(
+                        color = Color(0x1A808080),
+                        startAngle = -90f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = arcSize,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                    if (animated > 0f) {
+                        drawArc(
+                            brush = Brush.sweepGradient(
+                                listOf(WxPalette.AccentStart, WxPalette.AccentEnd, WxPalette.AccentStart)
+                            ),
+                            startAngle = -90f,
+                            sweepAngle = 360f * animated,
+                            useCenter = false,
+                            topLeft = Offset(inset, inset),
+                            size = arcSize,
+                            style = Stroke(width = stroke, cap = StrokeCap.Round),
+                        )
+                    }
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = (animated * 100).toInt().toString() + "%",
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = WxPalette.textPrimary(),
+                    )
+                    Text(
+                        text = pass.toString() + "/" + total,
+                        fontSize = 11.sp,
+                        color = WxPalette.textSecondary(),
+                    )
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Text("模块自检", fontSize = 12.sp, color = WxPalette.textSecondary())
+                Text(statusText, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = statusColor)
+                Text(
+                    text = if (scanning) "正在检测…" else "最后检测 " + lastScan,
+                    fontSize = 12.sp,
+                    color = WxPalette.textSecondary(),
+                    maxLines = 1,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (fail > 0) MiniPill("异常 " + fail, Color(0xFFFF5B5B))
+                    if (off > 0) MiniPill("未启用 " + off, Color(0xFFFFB020))
+                    if (fail == 0 && total > 0) MiniPill("无异常", Color(0xFF12D18E))
+                }
+            }
+        }
+        Text(
+            text = "微信 " + wechatVersion + " · 模块 " + moduleVersion,
+            fontSize = 11.sp,
+            color = WxPalette.textSecondary(),
+        )
+    }
+}
+
+/** 一行三个操作：主按钮（重新检测 / 渐变）、次按钮（一键修复）、复制。 */
+@Composable
+private fun HealthActionPanel(onRescan: () -> Unit, onRepair: () -> Unit, onCopy: () -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(46.dp)
+                .clip(shape)
+                .background(WxPalette.accentBrush())
+                .clickable(onClick = onRescan),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("重新检测", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(46.dp)
+                .clip(shape)
+                .background(WxPalette.cardBrush())
+                .border(1.dp, WxPalette.cardBorderBrush(), shape)
+                .clickable(onClick = onRepair),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("一键修复", color = WxPalette.textPrimary(), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        }
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(shape)
+                .background(WxPalette.cardBrush())
+                .border(1.dp, WxPalette.cardBorderBrush(), shape)
+                .clickable(onClick = onCopy),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("复制", fontSize = 11.sp, color = WxPalette.textSecondary())
+        }
+    }
+}
+
+/** 4 列彩色段网格：一眼看出哪个检测段是红的。 */
+@Composable
+private fun HealthSegmentGrid(segments: List<HealthSegment>, onOpen: (HealthSegment) -> Unit) {
+    SoftCard(contentPadding = 14) {
+        Text("检测范围", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = WxPalette.textSecondary())
+        segments.chunked(4).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                row.forEach { seg ->
+                    val color = segmentColor(seg)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onOpen(seg) }
+                            .padding(vertical = 7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(color.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = if (seg.fail > 0) seg.fail.toString() else seg.ok.toString(),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = color,
+                            )
+                        }
+                        Text(
+                            text = seg.name,
+                            fontSize = 10.sp,
+                            color = WxPalette.textSecondary(),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/** 可折叠明细分组：默认只露标题 + 数量，点开才铺明细。 */
+@Composable
+private fun HealthFoldSection(
+    title: String,
+    list: List<HealthItem>,
+    defaultCollapsed: Boolean,
+    accent: Color,
+    onOpenAll: () -> Unit,
+    onOpenItem: (HealthItem) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(!defaultCollapsed) }
+    SoftCard(contentPadding = 0, glow = false) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(accent),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.textPrimary(),
+                modifier = Modifier.weight(1f),
+            )
+            Text(text = list.size.toString(), fontSize = 13.sp, color = WxPalette.textSecondary())
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = if (expanded) "收起" else "展开",
+                fontSize = 12.sp,
+                color = WxPalette.AccentEnd,
+            )
+        }
+        if (expanded) {
+            if (list.isEmpty()) {
+                InsetDivider()
+                Text(
+                    text = "（无）",
+                    fontSize = 12.sp,
+                    color = WxPalette.textSecondary(),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            } else {
+                val shown = if (list.size > 12) list.take(12) else list
+                shown.forEach { item ->
+                    InsetDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenItem(item) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            text = if (item.ok) "✓" else if (item.inactive) "○" else "✕",
+                            fontSize = 12.sp,
+                            color = when {
+                                item.ok -> Color(0xFF12D18E)
+                                item.inactive -> Color(0xFFFFB020)
+                                else -> Color(0xFFFF5B5B)
+                            },
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.label, fontSize = 13.sp, color = WxPalette.textPrimary())
+                            Text(
+                                text = item.value,
+                                fontSize = 11.sp,
+                                color = WxPalette.textSecondary(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                if (list.size > 12) {
+                    InsetDivider()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onOpenAll)
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("查看全部 " + list.size + " 项", fontSize = 12.sp, color = WxPalette.AccentEnd)
+                    }
+                }
+            }
+        }
+    }
 }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -104,13 +105,20 @@ internal fun PageScaffold(
     @Suppress("UNUSED_PARAMETER") largeTitle: String,
     @Suppress("UNUSED_PARAMETER") scrollBehavior: Any? = null,
     onBack: (() -> Unit)? = null,
+    subtitle: String? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize().background(WxPalette.pageBackground())) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(WxPalette.pageBackgroundBrush())
+            // 关键：之前没有状态栏内边距，标题直接顶进状态栏，被时间/信号图标压住。
+            .statusBarsPadding(),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onBack != null) {
@@ -120,16 +128,25 @@ internal fun PageScaffold(
                         .clickable(onClick = onBack)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
-                    Text(text = "返回", color = MiuixTheme.colorScheme.primary)
+                    Text(text = "返回", color = MiuixTheme.colorScheme.primary, fontSize = 15.sp)
                 }
             }
-            Text(
-                text = title,
-                color = WxPalette.textPrimary(),
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
-                modifier = Modifier.padding(start = 4.dp),
-            )
+            Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(
+                    text = title,
+                    color = WxPalette.textPrimary(),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        color = WxPalette.textSecondary(),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
         content(PaddingValues(0.dp))
     }
