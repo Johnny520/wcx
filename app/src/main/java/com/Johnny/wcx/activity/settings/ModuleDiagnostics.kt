@@ -89,6 +89,7 @@ internal object ModuleDiagnostics {
         "org.meowcat.edxposed.manager" to "EdXposed",
         "com.solohsu.android.edxp.manager" to "EdXposed（旧管理器）",
         "de.robv.android.xposed.installer" to "Xposed Installer",
+        "org.lsposed.lspatch" to "LSPatch（免 Root）",
     )
 
     private val MODULE_PACKAGES = linkedMapOf(
@@ -258,7 +259,7 @@ internal object ModuleDiagnostics {
 
     // ===================== 4. 功能活体 =====================
 
-    data class Live(val label: String, val ok: Boolean, val detail: String)
+    data class Live(val label: String, val ok: Boolean, val detail: String, val inactive: Boolean = false)
 
     /**
      * 功能活体检测：不看开关状态，看这套能力在当前微信版本上是否真的能跑。
@@ -288,7 +289,9 @@ internal object ModuleDiagnostics {
         out += Live(
             "朋友圈解析",
             stats != null,
-            stats ?: "尚未采集：进入一次「批量删除朋友圈」即会自动记录解析结果",
+            stats ?: "尚未采集（不是故障）：本次微信进程还没打开过「批量删除朋友圈」，" +
+                "打开一次列表就会自动采集解析结果并更新此状态",
+            inactive = stats == null,
         )
 
         val recall = runCatching { AntiMessageRecall.isActive }.getOrDefault(false)

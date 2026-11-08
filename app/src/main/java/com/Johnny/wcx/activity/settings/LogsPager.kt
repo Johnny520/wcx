@@ -527,6 +527,33 @@ private fun LogTabContent(
                     if (runEntries.isEmpty() && !loading) {
                         item(key = "empty-run") { LogsEmpty("此日志文件为空") }
                     }
+                    if (runEntries.isNotEmpty()) {
+                        // 文件级统计：错误/警告一眼可见，不用滚动逐条找红黄标
+                        item(key = "run-stats") {
+                            val errCount = runEntries.count { it.level == 'E' }
+                            val warnCount = runEntries.count { it.level == 'W' }
+                            SoftCard(contentPadding = 14, glow = errCount == 0) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "本文件共 " + runEntries.size + " 条",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = WxPalette.textPrimary(),
+                                        )
+                                        Text(
+                                            text = "下拉刷新 · 点条目展开长日志",
+                                            fontSize = 11.sp,
+                                            color = WxPalette.textSecondary(),
+                                        )
+                                    }
+                                    MiniStat("错误", errCount, Color(0xFFFF5B5B))
+                                    Spacer(Modifier.width(8.dp))
+                                    MiniStat("警告", warnCount, Color(0xFFFFB020))
+                                }
+                            }
+                        }
+                    }
                     items(runEntries.size, key = { "run-$it" }) { i -> RunLogCard(runEntries[i]) }
                 }
 
@@ -714,6 +741,22 @@ private fun LogsEmpty(text: String) {
 }
 
 /** Log-level chip background color, matching the run-log level chars WeLogger emits. */
+/** 日志统计小格：数量 + 标签，颜色随严重度。 */
+@Composable
+private fun MiniStat(label: String, count: Int, color: Color) {
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.13f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = count.toString(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = color)
+            Text(text = label, fontSize = 10.sp, color = WxPalette.textSecondary())
+        }
+    }
+}
+
 private fun levelColor(level: Char): Color = when (level) {
     'E', 'F', 'A' -> Color(0xFFD32F2F)
     'W' -> Color(0xFFF57C00)

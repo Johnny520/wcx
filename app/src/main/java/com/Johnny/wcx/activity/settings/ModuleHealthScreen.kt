@@ -691,7 +691,7 @@ private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能活体") { liveSection() },
     HealthStep("网络与 CDN") { networkSection(context) },
     HealthStep("模块冲突") { conflictSection(context) },
-    HealthStep("运行环境") { environmentSection() },
+    HealthStep("运行环境") { environmentSection(context) },
     HealthStep("存储与缓存") { storageSection(context) },
     HealthStep("隐藏联系人") { hiddenContactsSection() },
     HealthStep("退出原因与主线程卡顿") { lastExitItems(context) },
@@ -894,8 +894,13 @@ private fun liveSection(): List<HealthItem> =
     ModuleDiagnostics.featureLive().map { live ->
         HealthItem(
             live.label, "功能活体",
-            if (live.ok) "正常" else "失效",
+            when {
+                live.ok -> "正常"
+                live.inactive -> "未采集"
+                else -> "失效"
+            },
             live.ok, live.detail,
+            inactive = live.inactive,
         )
     }
 
@@ -922,7 +927,7 @@ private fun networkSection(context: Context): List<HealthItem> {
  * 这三项决定了「模块能不能装得上」——低版本系统缺 API、x86 设备没有对应 native 库、
  * 子进程里大部分 Hook 本来就不安装。区分清楚可以避免把环境限制误判成功能失效。
  */
-private fun environmentSection(): List<HealthItem> {
+private fun environmentSection(context: Context): List<HealthItem> {
     val section = "运行环境"
     val out = mutableListOf<HealthItem>()
 
@@ -951,6 +956,54 @@ private fun environmentSection(): List<HealthItem> {
             else "子进程里只做最小初始化，看到「未解析 / 未安装」属正常现象，不代表功能坏了。",
         inactive = !main,
     )
+
+    // 框架管理器类型：免 Root（LSPatch）与 Root（LSPosed/EdXposed）注入方式不同，
+    // 排查问题时先分清用户用的是哪套。
+    val frameworks = ModuleDiagnostics.installedFrameworks(context)
+    val isLspatch = frameworks.any { it.label.contains("LSPatch") }
+    out += HealthItem(
+        "框架管理器", section,
+        if (frameworks.isEmpty()) "未识别"
+        else frameworks.joinToString("、") { it.label },
+        frameworks.isNotEmpty(),
+        buildString {
+            append("设备上装过的 Xposed 框架管理器。\n")
+            append("· LSPosed / EdXposed → Root 方案\n")
+            append("· LSPatch → 免 Root 方案\n\n")
+            append(
+                when {
+                    frameworks.isEmpty() -> "未检测到任何框架管理器：模块可能未正确安装，或用的是不在识别列表里的框架。"
+                    isLspatch -> "当前是免 Root（LSPatch）方案：模块被打包进微信或经 Shizuku 注入，" +
+                        "更新模块后需要用 LSPatch 重新打包。"
+                    else -> "当前是 Root 方案：更新模块后重启微信即可生效。"
+                }
+            )
+        },
+        inactive = frameworks.isEmpty(),
+    )
+
+    // 微信通知权限：依赖系统提醒的功能需要它
+    val notifyEnabled = runCatching {
+        android.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }.getOrDefault(true)
+    out += HealthItem(
+        "微信通知权限", section, if (notifyEnabled) "已开启" else "已关闭", notifyEnabled,
+        if (notifyEnabled) "微信可以正常发系统通知。"
+        else "微信通知被系统关闭：依赖系统提醒的功能不会弹通知。" +
+            "到 系统设置 → 应用 → 微信 → 通知 里打开即可。",
+        actionLabel = if (!notifyEnabled) "去设置" else null,
+        action = if (!notifyEnabled) {
+            {
+                runCatching {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    intent.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    "已打开微信通知设置"
+                }.getOrElse { "打开失败：" + (it.message ?: it.javaClass.simpleName) }
+            }
+        } else null,
+    )
     return out
 }
 
@@ -977,6 +1030,8 @@ private fun storageSection(context: Context): List<HealthItem> {
             if (cacheMb < 200) "在正常范围内（阈值 200MB，超过才提示）。"
             else "超过 200MB 阈值。这些都是临时文件，清掉不影响任何配置与功能：" +
                 "点下方「去清理」打开系统应用信息页，选「存储」→「清除缓存」即可。",
+        // 占用大只是提示，不是功能故障，不计入异常数
+        inactive = cacheMb >= 200,
         actionLabel = if (cacheMb >= 200) "去清理" else null,
         action = if (cacheMb >= 200) {
             {
@@ -1215,14 +1270,16 @@ private fun HealthHeroCard(
     wechatVersion: String,
     moduleVersion: String,
 ) {
-    val ratio = if (total > 0) pass.toFloat() / total else 0f
+    // 口径：异常统计只看「通过 + 异常」，未启用/提示项不算故障也不占分母（用户实测反馈）。
+    val counted = pass + fail
+    val ratio = if (counted > 0) pass.toFloat() / counted else 0f
     val animated by animateFloatAsState(
         targetValue = ratio,
         animationSpec = tween(700, easing = FastOutSlowInEasing),
         label = "heroRatio",
     )
     val statusText = when {
-        total == 0 -> "尚未检测"
+        counted == 0 -> "尚未检测"
         fail > 0 -> "存在 " + fail + " 项异常"
         else -> "全部通过"
     }
@@ -1231,7 +1288,7 @@ private fun HealthHeroCard(
         fail > 0 -> Color(0xFFFF5B5B)
         else -> Color(0xFF12D18E)
     }
-    SoftCard(contentPadding = 18, glow = total > 0 && fail == 0) {
+    SoftCard(contentPadding = 18, glow = counted > 0 && fail == 0) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(104.dp), contentAlignment = Alignment.Center) {
                 Canvas(Modifier.fillMaxSize()) {
@@ -1269,7 +1326,7 @@ private fun HealthHeroCard(
                         color = WxPalette.textPrimary(),
                     )
                     Text(
-                        text = pass.toString() + "/" + total,
+                        text = pass.toString() + "/" + counted,
                         fontSize = 11.sp,
                         color = WxPalette.textSecondary(),
                     )
@@ -1290,8 +1347,14 @@ private fun HealthHeroCard(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (fail > 0) MiniPill("异常 " + fail, Color(0xFFFF5B5B))
-                    if (off > 0) MiniPill("未启用 " + off, Color(0xFFFFB020))
-                    if (fail == 0 && total > 0) MiniPill("无异常", Color(0xFF12D18E))
+                    if (fail == 0 && counted > 0) MiniPill("无异常", Color(0xFF12D18E))
+                }
+                if (off > 0) {
+                    Text(
+                        text = "另有 " + off + " 项未启用 / 提示（不计入异常）",
+                        fontSize = 11.sp,
+                        color = WxPalette.textSecondary(),
+                    )
                 }
             }
         }
@@ -1438,6 +1501,17 @@ private fun HealthFoldSection(
             )
         }
         if (expanded) {
+            if (!defaultCollapsed && title == "异常项") {
+                Text(
+                    text = "标记说明：绿标「可修复」= 点开详情能直接执行修复动作；" +
+                        "橙标「需适配」= 多为微信版本变化导致，端上无法自动修复，" +
+                        "点开详情复制内容发给开发者即可。",
+                    fontSize = 11.sp,
+                    color = WxPalette.textSecondary(),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+                InsetDivider()
+            }
             if (list.isEmpty()) {
                 InsetDivider()
                 Text(
@@ -1468,7 +1542,23 @@ private fun HealthFoldSection(
                         )
                         Spacer(Modifier.width(9.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(item.label, fontSize = 13.sp, color = WxPalette.textPrimary())
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(item.label, fontSize = 13.sp, color = WxPalette.textPrimary())
+                                if (!item.ok && !item.inactive) {
+                                    Spacer(Modifier.width(6.dp))
+                                    val fixable = item.action != null
+                                    val tagColor = if (fixable) Color(0xFF12D18E) else Color(0xFFFFB020)
+                                    Text(
+                                        text = if (fixable) "可修复" else "需适配",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = tagColor,
+                                        modifier = Modifier
+                                            .background(tagColor.copy(alpha = 0.14f), RoundedCornerShape(50))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    )
+                                }
+                            }
                             Text(
                                 text = item.value,
                                 fontSize = 11.sp,
