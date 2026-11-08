@@ -13,7 +13,7 @@ import android.os.Looper
 import android.view.ContextMenu
 import android.view.MenuItem
 import android.widget.Toast
-import h.Hchat.R
+import com.Johnny.wcx.R
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.dexkit.DexMethodCache
 import h.Hchat.event.Events

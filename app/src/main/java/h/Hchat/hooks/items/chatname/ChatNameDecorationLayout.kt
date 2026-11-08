@@ -16,7 +16,7 @@ import android.text.style.ReplacementSpan
 import android.view.View
 import android.widget.TextView
 import h.Hchat.hooks.items.membertitle.MemberTitleStore
-import h.Hchat.R
+import com.Johnny.wcx.R
 
 object ChatNameDecorationLayout {
     data class Row(val nameView: TextView) {

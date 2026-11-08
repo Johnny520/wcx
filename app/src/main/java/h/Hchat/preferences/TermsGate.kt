@@ -10,16 +10,10 @@ object TermsGate {
     private const val KEY_ACCEPTED = "terms_accepted"
     private const val KEY_VERSION = "terms_version"
 
-    fun isAccepted(context: Context): Boolean {
-        val store = ConfigStore(context)
-        return store.getGlobalBoolean(KEY_ACCEPTED, false) &&
-            store.getGlobalInt(KEY_VERSION, 0) == TERMS_VERSION
-    }
+    // WCX：模块无用户协议页，直接放行（与上游语义兼容，isAccepted 恒 true）。
+    fun isAccepted(context: Context): Boolean = true
 
-    fun isAccepted(store: ConfigStore): Boolean {
-        return store.getGlobalBoolean(KEY_ACCEPTED, false) &&
-            store.getGlobalInt(KEY_VERSION, 0) == TERMS_VERSION
-    }
+    fun isAccepted(store: ConfigStore): Boolean = true
 
     fun accept(context: Context): Boolean {
         val store = ConfigStore(context)

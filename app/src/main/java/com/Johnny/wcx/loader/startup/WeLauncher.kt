@@ -80,6 +80,12 @@ object WeLauncher {
             FeaturesLoader.loadFeatures()
         }.onFailure { WeLogger.e(TAG, "failed to load hooks", it) }
 
+        // Hchat 脚本子系统（可插拔）：独立后台引导，失败不影响 WCX 既有功能。
+        // 移除本调用即完全下线脚本子系统。
+        runCatching {
+            com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
+        }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
+
     }
 
     /**

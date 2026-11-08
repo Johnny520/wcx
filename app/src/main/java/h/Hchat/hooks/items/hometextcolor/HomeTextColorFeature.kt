@@ -21,7 +21,7 @@ import android.widget.EditText
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.callbacks.XCallback
-import h.Hchat.R
+import com.Johnny.wcx.R
 import h.Hchat.dexkit.DexMethodCache
 import h.Hchat.event.Events
 import h.Hchat.hooks.core.BaseFeature

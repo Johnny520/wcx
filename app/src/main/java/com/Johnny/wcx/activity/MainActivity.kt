@@ -83,7 +83,6 @@ import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.formatEpoch
 import com.Johnny.wcx.utils.hook_status.HookStatus
 import com.Johnny.wcx.utils.openInSystem
-import com.Johnny.wcx.utils.registerBshSnapshotDecompileLaunchers
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.WxPalette
 import androidx.compose.ui.text.TextStyle
@@ -128,8 +127,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val selectFileLauncher = registerBshSnapshotDecompileLaunchers()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -143,7 +140,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             ModuleTheme {
                 AppContent(
-                    selectFileLauncher,
                     onUrlClick = { url ->
                         url.toUri().openInSystem(this, true)
                     }
@@ -160,7 +156,7 @@ class MainActivity : ComponentActivity() {
     )
 
     @Composable
-    private fun AppContent(resultLauncher: ActivityResultLauncher<String>, onUrlClick: (String) -> Unit) {
+    private fun AppContent(onUrlClick: (String) -> Unit) {
         val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
         var showMenu by remember { mutableStateOf(false) }
@@ -281,13 +277,6 @@ class MainActivity : ComponentActivity() {
                                 onClick = {
                                     showMenu = false
                                     showConfirmDeleteModuleDataDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("反编译 BeanShell 快照") },
-                                onClick = {
-                                    showMenu = false
-                                    resultLauncher.launch("*/*")
                                 }
                             )
                             DropdownMenuItem(

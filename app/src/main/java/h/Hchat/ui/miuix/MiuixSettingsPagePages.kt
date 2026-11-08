@@ -39,7 +39,7 @@ import android.widget.TimePicker
 import android.widget.Toast
 import android.widget.VideoView
 import h.Hchat.BuildConfig
-import h.Hchat.R
+import com.Johnny.wcx.R
 import h.Hchat.crash.CrashReportRuntime
 import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider

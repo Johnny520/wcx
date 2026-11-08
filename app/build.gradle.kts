@@ -293,11 +293,15 @@ dependencies {
     implementation(libs.aboutlibraries.core)
     implementation(libs.aboutlibraries.compose.m3)
     implementation(libs.androidx.profileinstaller)
-    implementation(libs.miuix.ui)
-    implementation(libs.miuix.icons)
-    implementation(libs.miuix.preference)
-    implementation(libs.miuix.blur)
-    implementation(libs.miuix.shader)
+    // miuix 0.9.4 内置 aar（对齐 Hchat 上游 app/libs；maven 0.9.3 API 与上游代码不兼容）
+    implementation(files("libs/miuix-ui-android-0.9.4.aar"))
+    implementation(files("libs/miuix-core-android-0.9.4.aar"))
+    implementation(files("libs/miuix-squircle-android-0.9.4.aar"))
+    implementation(files("libs/miuix-preference-android-0.9.4.aar"))
+    implementation(files("libs/miuix-icons-android-0.9.4.aar"))
+    implementation(files("libs/miuix-nav-android-0.9.4.aar"))
+    implementation(files("libs/miuix-blur-android-0.9.4.aar"))
+    implementation(files("libs/miuix-shader-android-0.9.4.aar"))
     implementation(libs.materialkolor)
     implementation(libs.coil)
     implementation(libs.coil.compose)
@@ -340,7 +344,7 @@ dependencies {
     compileOnly(files("libs/xposed-api-82.jar"))
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
-    implementation(libs.dexkit)
+    implementation(files("libs/dexkit-2.2.0-76551eb-idle.aar"))
     implementation(libs.hiddenapibypass)
     implementation(project(":libs:common:reflekt"))
     implementation(libs.libsu.core)
@@ -356,8 +360,6 @@ dependencies {
 
     implementation(libs.okhttp3.okhttp)
     implementation(libs.jsoup)
-
-    implementation(files("libs/rhino-45f29f6.jar"))
 
     implementation(libs.fastjson2)
 
