@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.style.SoftCard
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Brush
