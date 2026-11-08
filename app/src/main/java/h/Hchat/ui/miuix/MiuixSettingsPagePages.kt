@@ -39,7 +39,7 @@ import android.widget.TimePicker
 import android.widget.Toast
 import android.widget.VideoView
 import h.Hchat.BuildConfig
-import com.Johnny.wcx.R
+import h.Hchat.R
 import h.Hchat.crash.CrashReportRuntime
 import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider
@@ -662,11 +662,6 @@ fun ScriptPluginSettingsContent(
                 path = pluginRootPath,
                 onClose = { showPluginRootDialog = false }
             )
-        }
-        SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
-            ActionRow("插件 Agent", "按需求生成或修改脚本插件") {
-                onOpenAgent()
-            }
         }
         SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
             ActionRow("在线插件", "浏览、安装或上传社区脚本插件") {
