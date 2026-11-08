@@ -1,15 +1,23 @@
 package com.Johnny.wcx.ui.style
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -21,11 +29,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -66,7 +78,7 @@ object WxPalette {
     val GradPlain = listOf(Color.White, Color.White)
 
     /** 卡片圆角 */
-    val CardRadius = 18.dp
+    val CardRadius = 20.dp
     val ChipRadius = 14.dp
     val PillRadius = 50.dp
 
@@ -89,33 +101,85 @@ object WxPalette {
     @Composable
     fun textSecondary(): Color = TextSecondary
 
+    // ── 高科技增强令牌 ──────────────────────────────────────────────────────
+    /** 强调渐变两端：青绿 → 电光蓝。用于选中态、进度、关键按钮。 */
+    val AccentStart = Color(0xFF00D4A0)
+    val AccentEnd = Color(0xFF3D7EFF)
+    val AccentViolet = Color(0xFF8B5CF6)
+
+    /** 深色模式底板（比纯黑略亮、带冷调，避免死黑）。 */
+    val DarkBackground = Color(0xFF0A0B0F)
+    val DarkSurface = Color(0xFF161A21)
+    val DarkSurfaceHigh = Color(0xFF1E222B)
+
+    /** 页面氛围底：深色为冷调纵向渐变，浅色为中性微渐变。 */
+    @Composable
+    fun pageBackgroundBrush(): Brush = if (isSystemInDarkTheme()) {
+        Brush.linearGradient(listOf(Color(0xFF0A0B0F), Color(0xFF11141A), Color(0xFF0A0B0F)))
+    } else {
+        Brush.linearGradient(listOf(Color(0xFFF7F8FB), Color(0xFFEFF2F7)))
+    }
+
+    /** 卡片底：深色为「上亮下暗」冷调玻璃，浅色为白到极淡灰。 */
+    @Composable
+    fun cardBrush(): Brush = if (isSystemInDarkTheme()) {
+        Brush.linearGradient(listOf(Color(0xFF1E222B), Color(0xFF161A21)))
+    } else {
+        Brush.linearGradient(listOf(Color.White, Color(0xFFFCFCFE)))
+    }
+
+    /** 卡片描边：左上亮、右下透明的渐变，勾出玻璃边缘高光。 */
+    @Composable
+    fun cardBorderBrush(): Brush = if (isSystemInDarkTheme()) {
+        Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x0AFFFFFF)))
+    } else {
+        Brush.linearGradient(listOf(Color(0x14000000), Color(0x05000000)))
+    }
+
+    /** 强调渐变画刷。 */
+    fun accentBrush(): Brush = Brush.linearGradient(listOf(AccentStart, AccentEnd))
+
     /** 卡片描边：浅色下几乎不可见，深色下一层极淡白边 */
     @Composable
     fun cardBorder(): Color =
         if (isSystemInDarkTheme()) Color(0x1AFFFFFF) else Color(0x0D000000)
 }
 
-/** 纯白圆角卡片（页面的基本容器）。传 gradient 时用作强调卡。 */
+/**
+ * 主卡片（页面的基本容器）。
+ *
+ * 视觉：冷调玻璃 —— 渐变底 + 左上高光描边 + 20dp 圆角，层次靠「底色差 + 边缘高光」，
+ * 不堆阴影。可点击时自带 0.972 按压回弹（spring），全局统一手感。
+ * [glow] = true 时叠一圈强调渐变描边，用于「当前状态/主操作」卡片。
+ */
 @Composable
 fun SoftCard(
     modifier: Modifier = Modifier,
     gradient: List<Color> = WxPalette.GradPlain,
     contentPadding: Int = 16,
+    glow: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val dark = isSystemInDarkTheme()
-    val plain = gradient.isEmpty() || gradient === WxPalette.GradPlain || gradient == WxPalette.GradPlain
-    val brush = if (plain) {
-        val c = if (dark) Color(0xFF1C1C1E) else Color.White
-        Brush.linearGradient(listOf(c, c))
+    val plain = gradient.isEmpty() || gradient == WxPalette.GradPlain
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && onClick != null) 0.972f else 1f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 620f),
+        label = "cardPress",
+    )
+    val clickModifier = if (onClick != null) {
+        Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
     } else {
-        Brush.linearGradient(gradient)
+        Modifier
     }
-    val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     val shape = RoundedCornerShape(WxPalette.CardRadius)
     Surface(
-        modifier = modifier.fillMaxWidth().then(clickModifier),
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .then(clickModifier),
         shape = shape,
         color = Color.Transparent,
         tonalElevation = 0.dp,
@@ -123,12 +187,49 @@ fun SoftCard(
     ) {
         Column(
             modifier = Modifier
-                .background(brush)
-                .border(1.dp, WxPalette.cardBorder(), shape)
+                .background(if (plain) WxPalette.cardBrush() else Brush.linearGradient(gradient), shape)
+                .border(if (glow) 1.2.dp else 1.dp, if (glow) WxPalette.accentBrush() else WxPalette.cardBorderBrush(), shape)
                 .padding(contentPadding.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             content = content,
         )
+    }
+}
+
+/**
+ * 页面氛围背景：底色渐变 + 两处极淡径向光斑（右上电光蓝、左中青绿）。
+ *
+ * 纯 Canvas 绘制，无图片资源、无模糊开销；深浅色各自一档透明度，
+ * 让整页有「纵深」而不是一块死板纯色。
+ */
+@Composable
+fun AtmosphereBackground(
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val dark = isSystemInDarkTheme()
+    val glowBlue = if (dark) Color(0x243D7EFF) else Color(0x123D7EFF)
+    val glowMint = if (dark) Color(0x1C00D4A0) else Color(0x0E00D4A0)
+    Box(modifier.fillMaxSize().background(WxPalette.pageBackgroundBrush())) {
+        Canvas(Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val c1 = Offset(w * 0.86f, h * 0.06f)
+            val r1 = w * 0.92f
+            drawCircle(
+                brush = Brush.radialGradient(listOf(glowBlue, Color.Transparent), center = c1, radius = r1),
+                radius = r1,
+                center = c1,
+            )
+            val c2 = Offset(w * 0.06f, h * 0.58f)
+            val r2 = w * 0.78f
+            drawCircle(
+                brush = Brush.radialGradient(listOf(glowMint, Color.Transparent), center = c2, radius = r2),
+                radius = r2,
+                center = c2,
+            )
+        }
+        content()
     }
 }
 

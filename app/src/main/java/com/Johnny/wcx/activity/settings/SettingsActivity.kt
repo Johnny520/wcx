@@ -91,6 +91,7 @@ import com.Johnny.wcx.ui.content.FloatingBottomBarItem
 import com.Johnny.wcx.ui.content.MiuixStackNavigator
 import com.Johnny.wcx.ui.content.liquid.vibrancy
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
+import com.Johnny.wcx.ui.style.AtmosphereBackground
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
@@ -256,11 +257,7 @@ private fun MainPagerScreen(
     val backdrop = rememberLayerBackdrop()
     val barBottomPadding = 12.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(WxPalette.pageBackground()),
-    ) {
+    AtmosphereBackground(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
