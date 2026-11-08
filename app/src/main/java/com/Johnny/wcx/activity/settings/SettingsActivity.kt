@@ -381,6 +381,12 @@ fun MiuixListScaffold(
     // 压在文字上很难看。改成 0.94 近乎不透明，保留一点模糊质感但不糊字。
     val barTint = MiuixTheme.colorScheme.surface.copy(alpha = 0.94f)
     Scaffold(
+        // 背景统一为氛围渐变底：之前用 miuix 默认白色，分类详情/设置页与主页观感割裂
+        // （用户实测反馈：点进功能页后「一堆白色背景」）。
+        modifier = Modifier
+            .fillMaxSize()
+            .background(WxPalette.pageBackgroundBrush()),
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 modifier = if (blurTopBar) {
