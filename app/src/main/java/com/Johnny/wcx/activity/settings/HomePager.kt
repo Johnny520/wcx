@@ -71,6 +71,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.border
 import com.Johnny.wcx.features.core.BaseFeature
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn

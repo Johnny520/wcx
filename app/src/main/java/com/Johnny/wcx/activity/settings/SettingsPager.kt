@@ -102,6 +102,7 @@ import com.Johnny.wcx.features.items.debug.ResetDexCache
 import com.Johnny.wcx.preferences.WePrefs
 import kotlin.io.path.writeText
 import kotlin.io.path.readText
+import kotlin.io.path.div
 import kotlin.io.path.exists
 import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.ui.style.SoftCard

@@ -101,7 +101,7 @@ internal object ModuleDiagnostics {
         "com.johnny.wcx" to "WCX（当前模块）",
     )
 
-    val knownModuleCount: Int get() = KNOWN_WECHAT_MODULES.size
+    val knownModuleCount: Int get() = FRAMEWORK_PACKAGES.size + MODULE_PACKAGES.size
 
     data class InstalledModule(val pkg: String, val label: String, val version: String)
 

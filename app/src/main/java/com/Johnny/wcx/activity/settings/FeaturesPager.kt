@@ -343,7 +343,7 @@ private fun CategoryRow(
             Text(
                 text = subtitle,
                 fontSize = 12.sp,
-                color = WxPalette.TextSecondary(),
+                color = WxPalette.TextSecondary,
             )
         }
         if (progress > 0f) {
