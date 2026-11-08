@@ -74,7 +74,8 @@ object HchatBootstrap {
                     try {
                         val apkPath = hostContext.applicationInfo.sourceDir
                         val hostClassLoader = hostContext.classLoader
-                        val lpparam = XC_LoadPackage.LoadPackageParam(PackageNames.WECHAT).apply {
+                        // 内置 xposed-api-82.jar 的 LoadPackageParam 只暴露无参构造，字段均为 public，逐个赋值等价合成。
+                        val lpparam = XC_LoadPackage.LoadPackageParam().apply {
                             packageName = PackageNames.WECHAT
                             processName = hostContext.packageName
                             classLoader = hostClassLoader
