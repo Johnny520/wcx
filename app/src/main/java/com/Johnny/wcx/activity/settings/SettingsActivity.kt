@@ -283,7 +283,7 @@ private fun MainPagerScreen(
                         },
                         onOpenLogs = { scope.launch { pagerState.animateScrollToPage(2) } },
                         onOpenSettings = { scope.launch { pagerState.animateScrollToPage(3) } },
-                        onOpenScript = { h.Hchat.ui.SettingsUI.showFeature(context, "script_plugin") },
+                        onOpenScript = { h.Hchat.ui.miuix.MiuixSettingsPage.showScriptPlugin(context) },
                     )
                     1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                     2 -> LogsPager()

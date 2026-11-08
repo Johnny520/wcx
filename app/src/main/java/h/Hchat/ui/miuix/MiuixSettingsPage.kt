@@ -39,7 +39,7 @@ import android.widget.TimePicker
 import android.widget.Toast
 import android.widget.VideoView
 import h.Hchat.BuildConfig
-import com.Johnny.wcx.R
+import h.Hchat.R
 import h.Hchat.crash.CrashReportRuntime
 import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider
@@ -1020,6 +1020,12 @@ object MiuixSettingsPage {
         show(context, DetailPage.ScriptPluginAgent(), floatingAgent = false)
     }
 
+    /** WCX：直达「脚本插件」内容页（总开关 + 本地插件 + 在线市场 + 本地插件管理）。 */
+    @JvmStatic
+    fun showScriptPlugin(context: Context) {
+        show(context, null, floatingAgent = false, initialTab = MainTab.PLUGIN)
+    }
+
     @JvmStatic
     fun showFeature(context: Context, featureId: String): Boolean {
         val provider = UIRegistry.get().getAllProviders()
@@ -1055,7 +1061,12 @@ object MiuixSettingsPage {
     }
 
     @OptIn(ExperimentalAnimationApi::class)
-    private fun show(context: Context, initialPage: DetailPage?, floatingAgent: Boolean) {
+    private fun show(
+        context: Context,
+        initialPage: DetailPage?,
+        floatingAgent: Boolean,
+        initialTab: MainTab = MainTab.PRACTICAL
+    ) {
         val activity = context as? Activity ?: return
         val decor = activity.window?.decorView as? ViewGroup ?: return
         removeExistingPage(decor)
@@ -1196,7 +1207,7 @@ object MiuixSettingsPage {
 
         owner.install(page)
         owner.attach()
-        val selectedTab = mutableStateOf(MainTab.PRACTICAL)
+        val selectedTab = mutableStateOf(initialTab)
         val termsAccepted = mutableStateOf(TermsGate.isAccepted(activity))
         val composeView = try {
             ComposeView(activity).apply {
