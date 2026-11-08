@@ -125,6 +125,22 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
     private const val TAG = "BatchDeleteMoments"
 
+    /**
+     * 最近一次枚举的解析统计，供「模块自检 → 功能活体」直接引用。
+     * 只读快照，不参与任何业务逻辑。
+     */
+    @Volatile
+    var lastParseStats: String? = null
+        private set
+
+    /**
+     * 最近一次枚举到的第一条可用媒体地址，供「模块自检 → 网络与 CDN」做 Referer 实测。
+     * 用真实地址而不是写死的测试图，结论才有意义。
+     */
+    @Volatile
+    var lastProbeUrl: String? = null
+        private set
+
     // ── 配置键 ────────────────────────────────────────────────────────────────
     private const val PREF_OP_TYPE = "sns_batch_delete_op_type"
     private const val PREF_INTERVAL = "sns_batch_delete_interval"
@@ -1034,12 +1050,14 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             }
         }.onFailure { WeLogger.e(TAG, "枚举朋友圈失败", it) }
 
-        WeLogger.i(
-            TAG,
-            "枚举到 ${result.size} 条待删朋友圈（self=$self, storage=${storageObj != null}, " +
-                "dao=${dao != null}, 有正文=${result.count { it.preview.isNotBlank() }}, " +
-                "有图=${result.count { it.images.isNotEmpty() }}）",
-        )
+        val statsLine = "共 ${result.size} 条：有正文 ${result.count { it.preview.isNotBlank() }}，" +
+            "有图 ${result.count { it.images.isNotEmpty() }}" +
+            "（self=$self, storage=${storageObj != null}, dao=${dao != null}）"
+        lastParseStats = statsLine
+        runCatching {
+            lastProbeUrl = result.firstOrNull { it.images.isNotEmpty() }?.images?.firstOrNull()
+        }
+        WeLogger.i(TAG, "枚举到 $statsLine")
         return result
     }
 

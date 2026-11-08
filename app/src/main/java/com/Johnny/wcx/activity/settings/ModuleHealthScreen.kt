@@ -39,6 +39,7 @@ import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.features.items.contacts.HideContacts
+import com.Johnny.wcx.features.items.moments.BatchDeleteMoments
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.crash.ExitReasonRecorder
@@ -650,6 +651,10 @@ private fun showReportDialog(context: Context, title: String, items: List<Health
 private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能清单与分类启用概况") { featureOverview() },
     HealthStep("关键类锚点") { anchors() },
+    HealthStep("DexKit 锚点") { dexAnchorSection() },
+    HealthStep("功能活体") { liveSection() },
+    HealthStep("网络与 CDN") { networkSection() },
+    HealthStep("模块冲突") { conflictSection(context) },
     HealthStep("隐藏联系人") { hiddenContactsSection() },
     HealthStep("退出原因与主线程卡顿") { lastExitItems(context) },
 )
@@ -765,6 +770,111 @@ private fun anchorItem(name: String, className: String): HealthItem {
             "未找到——依赖它的功能在当前微信版本可能已漂移/失效，需要适配（无法自动修复）。"
         },
     )
+}
+
+/**
+ * DexKit 锚点健康：每个功能用了哪些锚点、解析成功几个。
+ *
+ * 这是「微信更新后哪些功能要重新适配」的直接清单——功能已开启但锚点未解析，
+ * 就等于该能力在当前版本上匹配不到目标类/方法。
+ *
+ * 只读缓存的解析结果，不会触发新一轮 DexKit 扫描。
+ */
+private fun dexAnchorSection(): List<HealthItem> {
+    val section = "DexKit 锚点"
+    val anchors = ModuleDiagnostics.anchors()
+    if (anchors.isEmpty()) {
+        return listOf(
+            HealthItem(
+                "锚点清单", section, "无可检查项", false,
+                "当前没有注册任何 Dex 委托——模块可能未正常加载，或当前进程不是微信主进程。",
+            )
+        )
+    }
+    val out = mutableListOf<HealthItem>()
+    val (okCount, total) = ModuleDiagnostics.anchorStats(anchors)
+    out += HealthItem(
+        "锚点总览", section, "已解析 " + okCount + " / " + total, okCount == total,
+        "DexKit 的匹配结果会缓存复用。功能已开启但锚点未解析，说明该锚点在当前微信版本上" +
+            "匹配不到目标——依赖它的功能会局部或整体失效。",
+    )
+    anchors.groupBy { it.feature }.toSortedMap().forEach { (feature, list) ->
+        val ok = list.count { it.resolved }
+        val active = list.any { it.active }
+        val missing = list.filterNot { it.resolved }
+        val detail = buildString {
+            append("功能：").append(feature)
+            append(if (active) "（运行中）" else "（未启用或未装上）")
+            append("\n锚点 ").append(list.size).append(" 个，已解析 ").append(ok).append(" 个。\n\n")
+            list.forEach { a ->
+                append(if (a.resolved) "✅ " else "❌ ").append(a.key)
+                val desc = a.descriptor
+                if (!desc.isNullOrBlank()) append(" → ").append(desc)
+                append('\n')
+            }
+            if (missing.isNotEmpty() && active) {
+                append("\n该功能已开启但仍有锚点未解析：对应子能力会失效，需要在特征包里补匹配条件。")
+            }
+        }
+        out += HealthItem(
+            "锚点·" + feature, section, ok.toString() + "/" + list.size, ok == list.size, detail,
+            inactive = !active && ok < list.size,
+        )
+    }
+    return out
+}
+
+/** 功能活体：不看开关状态，看这项能力在当前微信版本上是否真的能跑。 */
+private fun liveSection(): List<HealthItem> =
+    ModuleDiagnostics.featureLive().map { live ->
+        HealthItem(
+            live.label, "功能活体",
+            if (live.ok) "正常" else "失效",
+            live.ok, live.detail,
+        )
+    }
+
+/**
+ * 网络与 CDN：域名连通性、是否挂代理、图片带不带 Referer 的实际返回。
+ *
+ * 测试地址取自「批量删除朋友圈」最近一次枚举到的真实图片，因此不会用假数据糊弄。
+ */
+private fun networkSection(): List<HealthItem> {
+    val url = runCatching { BatchDeleteMoments.lastProbeUrl }.getOrNull()
+    return ModuleDiagnostics.network(url).map { r ->
+        HealthItem(
+            r.label, "网络与 CDN",
+            if (r.ok) "通过" else if (r.expectFail) "提示" else "异常",
+            r.ok, r.detail,
+            inactive = r.expectFail,
+        )
+    }
+}
+
+/** 模块冲突：同机是否还装了其它会 Hook 微信的模块。 */
+private fun conflictSection(context: Context): List<HealthItem> {
+    val section = "模块冲突"
+    val self = BuildConfig.APPLICATION_ID
+    val others = ModuleDiagnostics.installedModules(context).filter { it.pkg != self }
+    if (others.isEmpty()) {
+        return listOf(
+            HealthItem(
+                "其它微信模块", section, "未发现", true,
+                "已扫描 " + ModuleDiagnostics.knownModuleCount +
+                    " 个已知的微信 Hook / 增强模块包名，均未安装。",
+            )
+        )
+    }
+    return others.map { m ->
+        HealthItem(
+            "其它模块·" + m.label, section, "已安装 v" + m.version, false,
+            "包名：" + m.pkg + "\n" +
+                "多个同时 Hook 微信的模块会覆盖同一方法、争抢同一 View，" +
+                "表现为功能时好时坏或直接失效。\n" +
+                "建议：在 LSPosed 里只给一个模块勾选微信作用域。",
+            inactive = true,
+        )
+    }
 }
 
 private fun hiddenContactsSection(): List<HealthItem> {

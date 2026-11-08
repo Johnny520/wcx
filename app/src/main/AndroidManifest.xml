@@ -7,6 +7,15 @@
     <!-- Android 11+ package visibility: allow main app to query WeChat -->
     <queries>
         <package android:name="com.tencent.mm" />
+        <!-- 模块自检「模块冲突」需要探测的已知微信 Hook / 增强模块；
+             Android 11+ 未声明的包名 getPackageInfo 会直接抛异常，因此逐个列出。 -->
+        <package android:name="com.fkzhang.wechatxposed" />
+        <package android:name="com.fkzhang.wechatxposed.pro" />
+        <package android:name="me.hd.wauxv" />
+        <package android:name="com.tencent.mm.wechatx" />
+        <package android:name="com.wcxlc.kimjaejiang" />
+        <package android:name="top.mmjz.floatingclouds" />
+        <package android:name="com.johnny.wcx" />
     </queries>
 
     <application
