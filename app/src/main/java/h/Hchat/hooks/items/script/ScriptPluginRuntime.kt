@@ -1397,7 +1397,8 @@ object ScriptPluginRuntime {
             null
         }
         val root = mediaRoot ?: File("/storage/emulated/0/Android/media/${appContext.packageName}")
-        return File(root, "Hchat/脚本插件")
+        // WCX 兼容：沿用 WCX 历史脚本目录（WCX/脚本插件），存量插件无需迁移。
+        return File(root, "WCX/脚本插件")
     }
 
     fun ensureDirs(context: Context): File {

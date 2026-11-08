@@ -15,6 +15,7 @@ import h.Hchat.hooks.items.script.ScriptPluginFeature
 import h.Hchat.loader.utils.NativeLibraryLoader
 import h.Hchat.preferences.ConfigStore
 import h.Hchat.ui.UIRegistry
+import de.robv.android.xposed.callbacks.XC_LoadPackage
 import org.luckypray.dexkit.DexKitBridge
 
 /**
@@ -67,11 +68,18 @@ object HchatBootstrap {
 
                 // 3. DexKit 解析在后台任务中完成（DexInstallScheduler 统一生成代保护）。
                 //    宿主微信的 apk 路径与 ClassLoader 直接从 hostContext 获取
-                //    （WCX 的 StartupAgent 加载链没有 XC_LoadPackage.LoadPackageParam）。
+                //    （WCX 的 StartupAgent 加载链没有 XC_LoadPackage.LoadPackageParam，
+                //    这里按上游 FeatureContext 的要求合成一个等价的 LoadPackageParam）。
                 DexInstallScheduler.runDexKitTask {
                     try {
                         val apkPath = hostContext.applicationInfo.sourceDir
                         val hostClassLoader = hostContext.classLoader
+                        val lpparam = XC_LoadPackage.LoadPackageParam(PackageNames.WECHAT).apply {
+                            packageName = PackageNames.WECHAT
+                            processName = hostContext.packageName
+                            classLoader = hostClassLoader
+                            appInfo = hostContext.applicationInfo
+                        }
                         val dexKit = DexKitBridge.create(apkPath)
                         val finder = DexFinder(dexKit, hostClassLoader, hostContext)
                         val bridgeHolder = DexBridgeHolder(dexKit, finder, hostClassLoader, apkPath)
