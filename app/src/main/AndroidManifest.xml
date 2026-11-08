@@ -11,8 +11,14 @@
         <package android:name="io.va.exposed" />
         <package android:name="io.va.exposed32" />
         <package android:name="me.weishu.exp" />
-        <package android:name="me.weishu.geppetti" />
         <package android:name="top.canyie.dreamland.manager" />
+        <package android:name="com.topjohnwu.magisk" />
+        <package android:name="io.github.huskydg.magisk" />
+        <package android:name="me.weishu.kernelsu" />
+        <package android:name="me.bmax.apatch" />
+        <package android:name="com.sukisu.ultra" />
+        <package android:name="org.sukisu.manager" />
+        <package android:name="io.va.exposed64" />
         <package android:name="io.github.lsposed.manager" />
         <package android:name="org.lsposed.manager" />
         <package android:name="org.meowcat.edxposed.manager" />

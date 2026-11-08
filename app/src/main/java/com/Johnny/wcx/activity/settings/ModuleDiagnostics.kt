@@ -4,6 +4,8 @@ import android.content.Context
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.core.FeaturesProvider
+import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.features.items.chat.AntiMessageRecall
 import com.Johnny.wcx.features.items.moments.BatchDeleteMoments
@@ -84,21 +86,37 @@ internal object ModuleDiagnostics {
      * 只收录能确认存在的包名，不猜。新增条目必须同步 AndroidManifest 的 <queries>，
      * 否则 Android 11+ 查不到、永远显示「未安装」。
      */
-    private val FRAMEWORK_PACKAGES = linkedMapOf(
-        // —— Root 系 ——
+    /** Xposed 框架管理器（Root 系）。 */
+    private val XPOSED_MANAGERS = linkedMapOf(
         "io.github.lsposed.manager" to "LSPosed",
         "org.lsposed.manager" to "LSPosed（旧包名）",
         "org.meowcat.edxposed.manager" to "EdXposed",
         "com.solohsu.android.edxp.manager" to "EdXposed（旧管理器）",
         "de.robv.android.xposed.installer" to "Xposed Installer",
         "top.canyie.dreamland.manager" to "Dreamland",
-        "me.weishu.exp" to "太极",
-        // —— 免 Root 系 ——
-        "org.lsposed.lspatch" to "LSPatch（免 Root）",
-        "io.va.exposed" to "VirtualXposed（免 Root）",
-        "io.va.exposed32" to "VirtualXposed 32 位（免 Root）",
-        "me.weishu.geppetti" to "太极·免 Root",
+        "me.weishu.exp" to "太极（Root/免 Root 双模式）",
     )
+
+    /** Root 管理器：本身不 Hook 微信，但决定了 Xposed 框架跑在哪套 Root 上。 */
+    private val ROOT_MANAGERS = linkedMapOf(
+        "com.topjohnwu.magisk" to "Magisk",
+        "io.github.huskydg.magisk" to "Magisk Delta（旧分支）",
+        "me.weishu.kernelsu" to "KernelSU",
+        "me.bmax.apatch" to "APatch",
+        "com.sukisu.ultra" to "SukiSU Ultra",
+        "org.sukisu.manager" to "SukiSU",
+    )
+
+    /** 免 Root 方案（内置注入 / 虚拟容器）。 */
+    private val ROOTLESS_SOLUTIONS = linkedMapOf(
+        "org.lsposed.lspatch" to "LSPatch",
+        "io.va.exposed" to "VirtualXposed",
+        "io.va.exposed32" to "VirtualXposed 32 位",
+        "io.va.exposed64" to "VirtualXposed 64 位",
+    )
+
+    private val FRAMEWORK_PACKAGES: Map<String, String>
+        get() = XPOSED_MANAGERS + ROOT_MANAGERS + ROOTLESS_SOLUTIONS
 
     private val MODULE_PACKAGES = linkedMapOf(
         "com.fkzhang.wechatxposed" to "微X模块",
@@ -179,10 +197,32 @@ internal object ModuleDiagnostics {
             }
             if (dataDir.contains("me.weishu")) {
                 return InjectionInfo(
-                    "太极（免 Root · 虚拟容器）", "免 Root",
-                    "微信运行在太极的免 Root 虚拟环境内（dataDir=" + dataDir + "）。",
+                    "太极（虚拟容器）", "免 Root / Root",
+                    "微信运行在太极的虚拟环境内（dataDir=" + dataDir + "）。" +
+                        "太极免 Root 模式走虚拟容器；配合 Magisk 模块则是 Root 模式。",
                 )
             }
+            // 泛化识别：类加载器链上出现已知框架关键词，即使管理器不在清单里也能认出来
+            val loaderHits = detectViaClassLoader()
+            if (loaderHits.isNotEmpty()) {
+                return InjectionInfo(
+                    "自动识别（类加载器特征）", "自动识别",
+                    "类加载器链上命中框架特征：\n" + loaderHits.joinToString("\n") +
+                        "\n\n这是清单之外的框架——把本条复制反馈给开发者，可以把它加进识别列表。",
+                )
+            }
+        }
+        // LSPosed（或兼容框架）成功注入过微信时，会把 API 版本写进跨进程缓存。
+        // 缓存有值 = 有 Root 系 LSPosed 兼容框架在工作，即使管理器包名不在清单里也能认出来。
+        val cachedApi = runCatching {
+            WePrefs.getIntOrDef(Preferences.CACHED_LSP_API_VERSION, 0)
+        }.getOrDefault(0)
+        if (cachedApi > 0) {
+            return InjectionInfo(
+                "LSPosed 兼容框架（API " + cachedApi + "）", "Root",
+                "微信进程内曾成功加载 LSPosed API " + cachedApi + "（来自跨进程缓存）。" +
+                    "该框架本身不在识别列表里——把本条复制反馈给开发者补全。",
+            )
         }
         val frameworks = installedFrameworks(context)
         return when {
@@ -211,6 +251,31 @@ internal object ModuleDiagnostics {
             zf.entries().asSequence().any { it.name.startsWith(prefix) }
         }
     }.getOrDefault(false)
+
+    /**
+     * 泛化识别关键词：覆盖已知框架与它们的底层 hook 引擎。
+     * 命中即报告具体 loader 类名 —— 清单之外的框架也能自动认出来。
+     */
+    private val LOADER_KEYWORDS = listOf(
+        "lspatch", "lsposed", "edxposed", "xposed", "taichi", "weishu",
+        "dreamland", "pine", "sandhook", "epic", "whale", "zygisk",
+    )
+
+    /** 沿类加载器父链扫描框架特征，返回命中描述。 */
+    fun detectViaClassLoader(): List<String> {
+        val out = mutableSetOf<String>()
+        var cl: ClassLoader? = runCatching { HostInfo.application.classLoader }.getOrNull()
+        var depth = 0
+        while (cl != null && depth < 8) {
+            val name = cl.javaClass.name
+            LOADER_KEYWORDS.firstOrNull { name.contains(it, ignoreCase = true) }?.let {
+                out += "loader「" + name + "」（关键词 " + it + "）"
+            }
+            cl = cl.parent
+            depth++
+        }
+        return out.toList()
+    }
 
     // ===================== 3. 网络探针 =====================
 
