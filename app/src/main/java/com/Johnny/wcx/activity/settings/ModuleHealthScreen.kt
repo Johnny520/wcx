@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,6 +95,9 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
     val scrollBehavior = MiuixScrollBehavior()
 
     var items by remember { mutableStateOf(listOf<HealthItem>()) }
+    // 「检测范围」点开的清单浮层：Compose 实现，与页面同风格（系统 AlertDialog 太丑）
+    var overlayTitle by remember { mutableStateOf<String?>(null) }
+    var overlayItems by remember { mutableStateOf(listOf<HealthItem>()) }
     var lastScan by remember { mutableStateOf("尚未检测") }
     var scanDurationMs by remember { mutableStateOf(0L) }
     var running by remember { mutableStateOf(false) }
@@ -172,23 +176,8 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
             showToast("没有符合条件的项")
             return
         }
-        val text = buildString {
-            append("共 ").append(list.size).append(" 项：\n\n")
-            list.forEach { append(if (it.ok) "✅ " else "❌ ").append(it.label)
-                .append("\t").append(it.value).append("\n") }
-        }
-        AlertDialog.Builder(context)
-            .setTitle(title)
-            .setMessage(text)
-            .setNeutralButton("复制") { _, _ ->
-                runCatching {
-                    val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    cb?.setPrimaryClip(ClipData.newPlainText(title, text))
-                }
-                showToast("已复制")
-            }
-            .setNegativeButton("关闭", null)
-            .show()
+        overlayTitle = title
+        overlayItems = list
     }
 
     fun openDetail(item: HealthItem) {
@@ -347,52 +336,112 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
             }
         }
 
+        overlayTitle?.let { title ->
+            HealthListOverlay(
+                title = title,
+                items = overlayItems,
+                onDismiss = { overlayTitle = null },
+                onOpenItem = { openDetail(it) },
+                onCopyAll = {
+                    val text = buildString {
+                        append(title).append("（共 ").append(overlayItems.size).append(" 项）\n\n")
+                        overlayItems.forEach { item ->
+                            append(if (item.ok) "✅ " else if (item.inactive) "○ " else "❌ ")
+                                .append(item.label).append('：').append(item.value).append('\n')
+                        }
+                    }
+                    runCatching {
+                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                        cb?.setPrimaryClip(ClipData.newPlainText(title, text))
+                    }
+                    showToast("已复制 " + overlayItems.size + " 项")
+                },
+            )
+        }
+
         if (running) {
+            val scrimInteraction = remember { MutableInteractionSource() }
             Box(
-                modifier = Modifier.fillMaxSize().background(Color(0xCC000000)),
-                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xB3000000))
+                    .clickable(interactionSource = scrimInteraction, indication = null) {},
             ) {
-                Box(modifier = Modifier.fillMaxWidth(0.88f).padding(16.dp)) {
-                    SettingsCard {
-                        Column(modifier = Modifier.padding(20.dp)) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                        .background(WxPalette.cardBackground())
+                        .padding(horizontal = 20.dp, vertical = 18.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = runTitle,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MiuixTheme.colorScheme.onSurface,
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = WxPalette.textPrimary(),
                             )
-                            Spacer(Modifier.height(14.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(runProgress.coerceIn(0f, 1f))
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Color(0xFF2E7DFF)),
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = runSubtitle,
+                                fontSize = 12.sp,
+                                color = WxPalette.textSecondary(),
+                                maxLines = 1,
+                            )
+                        }
+                        Text(
+                            text = (runProgress * 100).toInt().toString() + "%",
+                            style = TextStyle(
+                                brush = WxPalette.accentBrush(),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(WxPalette.cardBorder()),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(runProgress.coerceIn(0f, 1f))
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(WxPalette.accentBrush()),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(WxPalette.cardBrush())
+                            .border(1.dp, WxPalette.cardBorderBrush(), RoundedCornerShape(14.dp))
+                            .padding(10.dp),
+                    ) {
+                        Column {
+                            runLog.takeLast(5).reversed().forEach { entry ->
+                                Text(
+                                    text = (if (entry.second) "✅ " else "❌ ") + entry.first,
+                                    fontSize = 11.sp,
+                                    color = if (entry.second) WxPalette.textSecondary() else Color(0xFFFF5B5B),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(vertical = 3.dp),
                                 )
                             }
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                text = "${(runProgress * 100).toInt()}%  $runSubtitle",
-                                fontSize = 12.sp,
-                                color = BasicComponentDefaults.summaryColor().color,
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            runLog.takeLast(6).forEach { entry ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(text = if (entry.second) "✅ " else "❌ ", fontSize = 12.sp)
-                                    Text(
-                                        text = entry.first,
-                                        fontSize = 12.sp,
-                                        color = if (entry.second) BasicComponentDefaults.summaryColor().color else Color(0xFFD93025),
-                                    )
-                                }
+                            if (runLog.isEmpty()) {
+                                Text(
+                                    text = "正在准备检测项…",
+                                    fontSize = 11.sp,
+                                    color = WxPalette.textSecondary(),
+                                )
                             }
                         }
                     }
@@ -1567,6 +1616,141 @@ private fun HealthFoldSection(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text("查看全部 " + list.size + " 项", fontSize = 12.sp, color = WxPalette.AccentEnd)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 检测段清单浮层：与页面同风格的底部卡片，点条目看详情，支持一键复制全部。 */
+@Composable
+private fun HealthListOverlay(
+    title: String,
+    items: List<HealthItem>,
+    onDismiss: () -> Unit,
+    onOpenItem: (HealthItem) -> Unit,
+    onCopyAll: () -> Unit,
+) {
+    val scrimInteraction = remember { MutableInteractionSource() }
+    val sheetInteraction = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xB3000000))
+            .clickable(interactionSource = scrimInteraction, indication = null, onClick = onDismiss),
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.82f)
+                .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                .background(WxPalette.cardBackground())
+                .clickable(interactionSource = sheetInteraction, indication = null) {}
+                .padding(top = 16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = WxPalette.textPrimary(),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = items.size.toString() + " 项",
+                    fontSize = 12.sp,
+                    color = WxPalette.textSecondary(),
+                )
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onCopyAll)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text("复制全部", fontSize = 13.sp, color = WxPalette.AccentEnd)
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text("关闭", fontSize = 13.sp, color = WxPalette.AccentEnd)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(items.size, key = { items[it].label + it }) { i ->
+                    val item = items[i]
+                    val rowShape = RoundedCornerShape(14.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(rowShape)
+                            .background(WxPalette.cardBrush())
+                            .border(1.dp, WxPalette.cardBorderBrush(), rowShape)
+                            .clickable { onOpenItem(item) }
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            text = if (item.ok) "✓" else if (item.inactive) "○" else "✕",
+                            fontSize = 12.sp,
+                            color = when {
+                                item.ok -> Color(0xFF12D18E)
+                                item.inactive -> Color(0xFFFFB020)
+                                else -> Color(0xFFFF5B5B)
+                            },
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = item.label,
+                                    fontSize = 13.sp,
+                                    color = WxPalette.textPrimary(),
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                if (!item.ok && !item.inactive) {
+                                    Spacer(Modifier.width(6.dp))
+                                    val fixable = item.action != null
+                                    val tagColor = if (fixable) Color(0xFF12D18E) else Color(0xFFFFB020)
+                                    Text(
+                                        text = if (fixable) "可修复" else "需适配",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = tagColor,
+                                        modifier = Modifier
+                                            .background(tagColor.copy(alpha = 0.14f), RoundedCornerShape(50))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    )
+                                }
+                            }
+                            Text(
+                                text = item.value,
+                                fontSize = 11.sp,
+                                color = WxPalette.textSecondary(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            text = "\u203A",
+                            fontSize = 18.sp,
+                            color = WxPalette.TextTertiary,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
                     }
                 }
             }

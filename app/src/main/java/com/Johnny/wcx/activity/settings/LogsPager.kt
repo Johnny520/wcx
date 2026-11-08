@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import android.content.ClipboardManager
+import android.content.ClipData
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -442,6 +444,9 @@ private fun LogTabContent(
     // Parsed content of the selected file (type depends on kind).
     var runEntries by remember(kind) { mutableStateOf<List<RunLogEntry>>(emptyList()) }
     var crashSections by remember(kind) { mutableStateOf<List<CrashSection>>(emptyList()) }
+    // 点统计卡上的错误/警告时弹出的级别清单（可单条复制、一键复制、点条目跳转定位）
+    var levelSheet by remember(kind) { mutableStateOf<Char?>(null) }
+    val scope = rememberCoroutineScope()
     var loading by remember(kind) { mutableStateOf(true) }
     // Whether the file listing has completed at least once; keeps the spinner up on first open
     // until we actually know whether there are files (the selected file is null until then).
@@ -486,6 +491,7 @@ private fun LogTabContent(
     }
 
     val pullState = rememberPullToRefreshState()
+    Box(modifier = Modifier.fillMaxSize()) {
     PullToRefresh(
         // Show the refresh indicator both for user pulls and while a file is being read/parsed,
         // so opening or switching to a large log surfaces the same loading affordance.
@@ -542,14 +548,14 @@ private fun LogTabContent(
                                             color = WxPalette.textPrimary(),
                                         )
                                         Text(
-                                            text = "下拉刷新 · 点条目展开长日志",
+                                            text = "下拉刷新 · 点错误/警告可定位到原文",
                                             fontSize = 11.sp,
                                             color = WxPalette.textSecondary(),
                                         )
                                     }
-                                    MiniStat("错误", errCount, Color(0xFFFF5B5B))
+                                    MiniStat("错误", errCount, Color(0xFFFF5B5B), enabled = errCount > 0, onClick = { levelSheet = 'E' })
                                     Spacer(Modifier.width(8.dp))
-                                    MiniStat("警告", warnCount, Color(0xFFFFB020))
+                                    MiniStat("警告", warnCount, Color(0xFFFFB020), enabled = warnCount > 0, onClick = { levelSheet = 'W' })
                                 }
                             }
                         }
@@ -566,6 +572,169 @@ private fun LogTabContent(
             }
 
             item(key = "bottom-inset") { Spacer(Modifier.height(LOGS_BOTTOM_INSET)) }
+        }
+    }
+        val hits = levelSheet?.let { lvl -> runEntries.withIndex().filter { it.value.level == lvl } }
+        if (hits != null && hits.isNotEmpty()) {
+            LogLevelSheet(
+                level = levelSheet!!,
+                hits = hits,
+                onDismiss = { levelSheet = null },
+                onJump = { entryIdx ->
+                    levelSheet = null
+                    // run 条目在 LazyColumn 里的真实 index = 文件选择器(0) + 统计卡(1) + 条目序号
+                    scope.launch { listState.animateScrollToItem(entryIdx + 2) }
+                },
+            )
+        }
+    }
+}
+
+/** 日志级别清单浮层：单条复制 / 一键复制全部 / 点条目滚动定位到原文。 */
+@Composable
+private fun LogLevelSheet(
+    level: Char,
+    hits: List<IndexedValue<RunLogEntry>>,
+    onDismiss: () -> Unit,
+    onJump: (Int) -> Unit,
+) {
+    val context = LocalContext.current
+    val scrimInteraction = remember { MutableInteractionSource() }
+    val sheetInteraction = remember { MutableInteractionSource() }
+    val levelName = if (level == 'E') "错误" else if (level == 'W') "警告" else level.toString()
+    val levelColor = levelColor(level)
+    fun copyText(text: String) {
+        val ok = runCatching {
+            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cb?.setPrimaryClip(ClipData.newPlainText("WCX 日志 " + levelName, text))
+        }.isSuccess
+        android.widget.Toast.makeText(context, if (ok) "已复制" else "复制失败", android.widget.Toast.LENGTH_SHORT).show()
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xB3000000))
+            .clickable(interactionSource = scrimInteraction, indication = null, onClick = onDismiss),
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.8f)
+                .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                .background(WxPalette.cardBackground())
+                .clickable(interactionSource = sheetInteraction, indication = null) {}
+                .padding(top = 16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = levelName + " " + hits.size + " 条",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = levelColor,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "复制全部",
+                    fontSize = 13.sp,
+                    color = WxPalette.AccentEnd,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable {
+                            copyText(
+                                hits.joinToString("\n\n") { (idx, e) ->
+                                    "[" + idx + "] " + (e.time ?: "") + " " + (e.tag ?: "") + "\n" + e.message
+                                },
+                            )
+                        }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "关闭",
+                    fontSize = 13.sp,
+                    color = WxPalette.AccentEnd,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+            Text(
+                text = "点条目跳到日志原文位置；「复制」只复制该条完整内容",
+                fontSize = 11.sp,
+                color = WxPalette.textSecondary(),
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
+            )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(hits.size, key = { hits[it].index }) { i ->
+                    val (entryIdx, entry) = hits[i]
+                    val rowShape = RoundedCornerShape(14.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(rowShape)
+                            .background(WxPalette.cardBrush())
+                            .border(1.dp, WxPalette.cardBorderBrush(), rowShape)
+                            .clickable { onJump(entryIdx) }
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                entry.tag?.let {
+                                    Text(
+                                        text = it,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = WxPalette.textPrimary(),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                }
+                                entry.time?.let {
+                                    Text(
+                                        text = " · " + it,
+                                        fontSize = 10.sp,
+                                        color = WxPalette.textSecondary(),
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                            Text(
+                                text = entry.message,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = WxPalette.textSecondary(),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            text = "复制",
+                            fontSize = 12.sp,
+                            color = WxPalette.AccentEnd,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { copyText((entry.time ?: "") + " " + (entry.tag ?: "") + "\n" + entry.message) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                        Text(
+                            text = "\u203A",
+                            fontSize = 18.sp,
+                            color = WxPalette.TextTertiary,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -743,10 +912,17 @@ private fun LogsEmpty(text: String) {
 /** Log-level chip background color, matching the run-log level chars WeLogger emits. */
 /** 日志统计小格：数量 + 标签，颜色随严重度。 */
 @Composable
-private fun MiniStat(label: String, count: Int, color: Color) {
+private fun MiniStat(
+    label: String,
+    count: Int,
+    color: Color,
+    enabled: Boolean = false,
+    onClick: () -> Unit = {},
+) {
     Box(
         modifier = Modifier
             .background(color.copy(alpha = 0.13f), RoundedCornerShape(12.dp))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {

@@ -572,6 +572,13 @@ class MainActivity : ComponentActivity() {
                         subtitle = "Johnny520/wcx",
                         onClick = { onUrlClick("https://github.com/Johnny520/wcx") }
                     )
+                    SoftDivider()
+                    ListRow(
+                        icon = MaterialSymbols.Outlined.Favorite,
+                        title = "支持作者 · 爱发电",
+                        subtitle = "afdian.com/a/Johnny520（跳浏览器打开）",
+                        onClick = { onUrlClick("https://afdian.com/a/Johnny520") }
+                    )
                 }
             }
 

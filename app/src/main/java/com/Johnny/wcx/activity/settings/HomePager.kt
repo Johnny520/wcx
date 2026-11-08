@@ -33,6 +33,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -237,43 +239,49 @@ fun HomePager(
     val lspEnvironment = remember { detectOrReadLspEnvironment(context) }
     val lspApiVersion = remember { safeGetLspApiVersion() }
 
-    LaunchedEffect(Unit) {
-        isChecking = true
-        runCatching {
-            when (val result = AppUpdater.checkForUpdate()) {
-                is UpdateResult.UpdateAvailable -> {
-                    val tag = result.info.releaseTag.removePrefix("v").ifEmpty { null }
-                    latestVersion = tag
-                    isLatest = false
-                }
-                is UpdateResult.UpToDate -> {
-                    latestVersion = null
-                    isLatest = true
-                }
-                is UpdateResult.Error -> {
-                    // GitHub 未认证接口是 60 次/小时/IP 共享限流，返回 403 属于正常现象。
-                    // 以前这里用 ERROR + 完整堆栈刷屏，用户看日志会误以为模块出错。
-                    val cause = result.cause
-                    val message = cause?.message.orEmpty()
-                    if (message.contains("403") || message.contains("rate limit", true)) {
-                        WeLogger.w("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
-                    } else {
-                        WeLogger.w(
-                            "HomePager",
-                            "检查更新失败：" + message.ifBlank { cause?.javaClass?.simpleName ?: "未知原因" },
-                        )
+    val scope = rememberCoroutineScope()
+    // 抽成函数：首启自动检查一次；激活卡右侧的刷新按钮也能手动触发（检查中防抖）。
+    fun checkUpdateNow() {
+        if (isChecking) return
+        scope.launch {
+            isChecking = true
+            runCatching {
+                when (val result = AppUpdater.checkForUpdate()) {
+                    is UpdateResult.UpdateAvailable -> {
+                        val tag = result.info.releaseTag.removePrefix("v").ifEmpty { null }
+                        latestVersion = tag
+                        isLatest = false
                     }
-                    latestVersion = null
-                    isLatest = false
+                    is UpdateResult.UpToDate -> {
+                        latestVersion = null
+                        isLatest = true
+                    }
+                    is UpdateResult.Error -> {
+                        // GitHub 未认证接口是 60 次/小时/IP 共享限流，返回 403 属于正常现象。
+                        // 以前这里用 ERROR + 完整堆栈刷屏，用户看日志会误以为模块出错。
+                        val cause = result.cause
+                        val message = cause?.message.orEmpty()
+                        if (message.contains("403") || message.contains("rate limit", true)) {
+                            WeLogger.w("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
+                        } else {
+                            WeLogger.w(
+                                "HomePager",
+                                "检查更新失败：" + message.ifBlank { cause?.javaClass?.simpleName ?: "未知原因" },
+                            )
+                        }
+                        latestVersion = null
+                        isLatest = false
+                    }
                 }
+            }.onFailure {
+                WeLogger.e("HomePager", "Update check exception", it)
+                latestVersion = null
+                isLatest = false
             }
-        }.onFailure {
-            WeLogger.e("HomePager", "Update check exception", it)
-            latestVersion = null
-            isLatest = false
+            isChecking = false
         }
-        isChecking = false
     }
+    LaunchedEffect(Unit) { checkUpdateNow() }
 
     Box(modifier = Modifier.fillMaxSize()) {
     MiuixListScaffold(title = "") {
@@ -305,7 +313,7 @@ fun HomePager(
         // ---- 大状态卡片 ----
         item {
             Spacer(Modifier.height(8.dp))
-            ActivationCard(latestVersion, isLatest, isChecking)
+            ActivationCard(latestVersion, isLatest, isChecking, onRefresh = ::checkUpdateNow)
         }
 
         // ---- 统计卡片（白卡内两个浅灰子卡，仿「网速」双栏） ----
@@ -439,7 +447,12 @@ fun HomePager(
 }
 
 @Composable
-private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking: Boolean) {
+private fun ActivationCard(
+    latestVersion: String?,
+    isLatest: Boolean,
+    isChecking: Boolean,
+    onRefresh: () -> Unit = {},
+) {
     val context = LocalContext.current
     val accentColor = WxPalette.AccentEnd
     // 检查中时状态胶囊做呼吸脉冲，静止时保持低透明度——一眼看出「正在动」。
@@ -529,16 +542,18 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // 刷新按钮：点击手动检查更新（检查中禁用防抖）
             Box(
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
-                    .background(WxPalette.accentBrush()),
+                    .background(WxPalette.accentBrush())
+                    .clickable(enabled = !isChecking) { onRefresh() },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = MaterialSymbols.Outlined.Refresh,
-                    contentDescription = null,
+                    contentDescription = "检查更新",
                     tint = Color.White,
                     modifier = Modifier.size(24.dp),
                 )

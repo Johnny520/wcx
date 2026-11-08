@@ -233,7 +233,9 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                     ) {
                         FeatureRow(
                             item = item,
-                            checked = switchStates[item.name] ?: WePrefs.getBoolOrFalse(item.name),
+                            // 开关显示以运行时真值为准（SwitchFeature.isEnabled 即 WePrefs 的封装），
+                            // 本地 map 只缓存本次会话的点击结果，避免「显示关了实际开着」的错位。
+                            checked = switchStates[item.name] ?: item.isEnabled,
                             onCheckedChange = { switchStates[item.name] = it },
                         )
                     }
