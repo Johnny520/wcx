@@ -256,6 +256,9 @@ private fun MainPagerScreen(
     val scope = rememberCoroutineScope()
     val backdrop = rememberLayerBackdrop()
     val barBottomPadding = 12.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // 主页样式开关：false = 经典四 Tab（底部玻璃导航）；true = 单页 Dashboard（隐藏底部导航，
+    // 功能分类网格直接铺在主页，日志/设置从主页瓦片进入 —— 参照用户给的 WeChatAI 风格截图）
+    var singlePageMode by remember { mutableStateOf(WePrefs.getBoolOrFalse("home_single_page_mode")) }
 
     AtmosphereBackground(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -273,6 +276,13 @@ private fun MainPagerScreen(
                         onOpenFeatures = { scope.launch { pagerState.animateScrollToPage(1) } },
                         onOpenModuleHealth = onOpenModuleHealth,
                         onOpenCategory = onOpenCategory,
+                        singlePageMode = singlePageMode,
+                        onToggleSinglePage = {
+                            singlePageMode = it
+                            WePrefs.putBool("home_single_page_mode", it)
+                        },
+                        onOpenLogs = { scope.launch { pagerState.animateScrollToPage(2) } },
+                        onOpenSettings = { scope.launch { pagerState.animateScrollToPage(3) } },
                     )
                     1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                     2 -> LogsPager()
@@ -283,6 +293,7 @@ private fun MainPagerScreen(
 
         val haptic = LocalHapticFeedback.current
 
+        if (!singlePageMode) {
         FloatingBottomBar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -341,6 +352,7 @@ private fun MainPagerScreen(
                     )
                 }
             }
+        }
         }
     }
 }

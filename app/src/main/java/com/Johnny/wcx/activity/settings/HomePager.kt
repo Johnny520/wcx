@@ -33,6 +33,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
+import top.yukonga.miuix.kmp.basic.Switch
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
@@ -223,6 +224,10 @@ fun HomePager(
     onOpenFeatures: () -> Unit,
     onOpenModuleHealth: () -> Unit,
     onOpenCategory: (String) -> Unit = {},
+    singlePageMode: Boolean = false,
+    onToggleSinglePage: (Boolean) -> Unit = {},
+    onOpenLogs: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val allItems = FeaturesProvider.ALL_HOOK_ITEMS
@@ -314,6 +319,28 @@ fun HomePager(
             }
         }
 
+        // ---- 样式开关：经典四 Tab ⇄ 单页 Dashboard ----
+        item {
+            SoftCard(contentPadding = 12) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "单页模式",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = WxPalette.textPrimary(),
+                        )
+                        Text(
+                            text = "隐藏底部导航，功能分类直接铺在主页；关闭则回到四 Tab 导航",
+                            fontSize = 11.sp,
+                            color = WxPalette.TextSecondary,
+                        )
+                    }
+                    Switch(checked = singlePageMode, onCheckedChange = onToggleSinglePage)
+                }
+            }
+        }
+
         // ---- 大状态卡片 ----
         item {
             Spacer(Modifier.height(8.dp))
@@ -356,24 +383,40 @@ fun HomePager(
                         label = "全部功能",
                         onClick = { quickListKind = QUICK_LIST_ALL },
                     )
-                    CountTile(
-                        modifier = Modifier.weight(1f),
-                        icon = {
-                            Icon(
-                                imageVector = MaterialSymbols.Outlined.Category,
-                                contentDescription = null,
-                                tint = Color(0xFF8B5CF6),
-                                modifier = Modifier.size(20.dp),
-                            )
-                        },
-                        value = remember {
-                            allItems.mapNotNull { it.categories.firstOrNull() }.distinct().size
-                        }.toString(),
-                        label = "分类",
-                        onClick = onOpenFeatures,
-                    )
+                    if (!singlePageMode) {
+                        CountTile(
+                            modifier = Modifier.weight(1f),
+                            icon = {
+                                Icon(
+                                    imageVector = MaterialSymbols.Outlined.Category,
+                                    contentDescription = null,
+                                    tint = Color(0xFF8B5CF6),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            },
+                            value = remember {
+                                allItems.mapNotNull { it.categories.firstOrNull() }.distinct().size
+                            }.toString(),
+                            label = "分类",
+                            onClick = onOpenFeatures,
+                        )
+                    }
                 }
             }
+        }
+
+        // ---- 单页模式：功能分类网格直接铺在主页 ----
+        if (singlePageMode) {
+            item {
+                Text(
+                    text = "功能分类",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = WxPalette.TextSecondary,
+                    modifier = Modifier.padding(start = 6.dp, top = 4.dp),
+                )
+            }
+            item { CategoryGrid(onOpenCategory = onOpenCategory) }
         }
 
         // ---- 工具：两列快捷瓦片（大图标彩色方块，与整体网格语言一致） ----
@@ -396,14 +439,30 @@ fun HomePager(
                     onClick = onOpenModuleHealth,
                     modifier = Modifier.weight(1f),
                 )
-                QuickTile(
-                    icon = MaterialSymbols.Outlined.Tune,
-                    title = "功能中心",
-                    subtitle = "按分类浏览全部功能",
-                    tint = Color(0xFF3D7EFF),
-                    onClick = onOpenFeatures,
-                    modifier = Modifier.weight(1f),
-                )
+                if (singlePageMode) {
+                    QuickTile(
+                        icon = MaterialSymbols.Outlined.Article,
+                        title = "日志",
+                        subtitle = "运行日志与崩溃记录",
+                        tint = Color(0xFFFF8A3D),
+                        onClick = onOpenLogs,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+        if (singlePageMode) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    QuickTile(
+                        icon = MaterialSymbols.Outlined.Settings,
+                        title = "设置",
+                        subtitle = "界面 · 更新 · 备份恢复",
+                        tint = Color(0xFF8B5CF6),
+                        onClick = onOpenSettings,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
 
@@ -703,6 +762,66 @@ private fun TagChip(text: String, color: Color, textColor: Color = color) {
             color = textColor,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
+    }
+}
+
+/** 功能分类网格（单页模式）：4 列彩色圆图标 + 名称 + 启用比例，点进分类详情。 */
+@Composable
+private fun CategoryGrid(onOpenCategory: (String) -> Unit) {
+    SoftCard(contentPadding = 14) {
+        FEATURE_CATEGORIES.chunked(4).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                row.forEach { entry ->
+                    val colorIndex = FEATURE_CATEGORIES.indexOfFirst { it.first == entry.first }
+                    val tint = CATEGORY_COLORS[colorIndex.coerceAtLeast(0) % CATEGORY_COLORS.size]
+                    val stat = runCatching {
+                        val all = FeaturesProvider.ALL_HOOK_ITEMS.filter { entry.first in it.categories }
+                        all.count { WePrefs.getBoolOrFalse(it.name) } to all.size
+                    }.getOrDefault(0 to 0)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onOpenCategory(entry.first) }
+                            .padding(vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(tint.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = entry.second,
+                                contentDescription = null,
+                                tint = tint,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = entry.first,
+                            fontSize = 10.sp,
+                            color = WxPalette.textPrimary(),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = stat.first.toString() + "/" + stat.second,
+                            fontSize = 9.sp,
+                            color = WxPalette.TextSecondary,
+                        )
+                    }
+                }
+                repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+            }
+        }
     }
 }
 

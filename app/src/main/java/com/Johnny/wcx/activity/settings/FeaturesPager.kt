@@ -74,7 +74,7 @@ private val CATEGORY_GRADIENTS = listOf(
 )
 
 /** 分类专属色：让每个分类在列表里一眼可辨（不是靠文字读出来的）。 */
-private val CATEGORY_COLORS = listOf(
+internal val CATEGORY_COLORS = listOf(
     Color(0xFF3D7EFF),
     Color(0xFF00D4A0),
     Color(0xFF8B5CF6),
