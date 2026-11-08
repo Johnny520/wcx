@@ -77,30 +77,26 @@ internal object ModuleDiagnostics {
 
     /** 已知会 Hook / 增强微信的模块包名 → 展示名。 */
     /**
-     * 已知模块包名 → 展示名。
-     *
-     * 分三类：
-     * 1. Xposed 框架/管理器（多框架共存会互相抢 Hook）；
-     * 2. 微信 Hook / 增强模块（同进程 Hook 同一批方法，最容易直接冲突）；
-     * 3. WCX 自身与其同源二改（同时装两个会让配置与 Hook 互相覆盖）。
+     * 包名分两组：框架管理器只是「环境信息」，不算冲突；
+     * 其它会 Hook 微信的模块才可能和 WCX 抢同一批方法。
      *
      * 只收录能确认存在的包名，不猜。新增条目必须同步 AndroidManifest 的 <queries>，
      * 否则 Android 11+ 查不到、永远显示「未安装」。
      */
-    private val KNOWN_WECHAT_MODULES = linkedMapOf(
-        // —— 框架 / 管理器 ——
+    private val FRAMEWORK_PACKAGES = linkedMapOf(
         "io.github.lsposed.manager" to "LSPosed",
         "org.lsposed.manager" to "LSPosed（旧包名）",
         "org.meowcat.edxposed.manager" to "EdXposed",
         "com.solohsu.android.edxp.manager" to "EdXposed（旧管理器）",
         "de.robv.android.xposed.installer" to "Xposed Installer",
-        // —— 微信 Hook / 增强模块 ——
+    )
+
+    private val MODULE_PACKAGES = linkedMapOf(
         "com.fkzhang.wechatxposed" to "微X模块",
         "com.fkzhang.wechatxposed.pro" to "微X模块 Pro",
         "me.hd.wauxv" to "WAuxv",
         "com.tencent.mm.wechatx" to "WeChatX",
         "top.mmjz.floatingclouds" to "浮云",
-        // —— WCX 自身 / 同源 ——
         "com.wcxlc.kimjaejiang" to "WCXLC（同源二改）",
         "com.johnny.wcx" to "WCX（当前模块）",
     )
@@ -109,27 +105,31 @@ internal object ModuleDiagnostics {
 
     data class InstalledModule(val pkg: String, val label: String, val version: String)
 
-    /**
-     * 扫描已知模块的安装情况。
-     *
-     * Android 11 起需要 AndroidManifest 的 `<queries>` 声明包名才能看到；
-     * 未声明时 getPackageInfo 抛 NameNotFoundException，这里直接视为「未安装」，
-     * 不会误报。manifest 已声明全部已知包名。
-     */
-    fun installedModules(context: Context): List<InstalledModule> = runCatching {
+    private fun scan(context: Context, table: Map<String, String>): List<InstalledModule> = runCatching {
         val pm = context.packageManager
-        KNOWN_WECHAT_MODULES.mapNotNull { (pkg, label) ->
+        table.mapNotNull { (pkg, label) ->
             runCatching {
                 val info = pm.getPackageInfo(pkg, 0)
                 InstalledModule(pkg, label, info.versionName ?: "?")
             }.getOrNull()
         }
     }.getOrElse {
-        WeLogger.w(TAG, "扫描已装模块失败：" + (it.message ?: it.javaClass.simpleName))
+        WeLogger.w(TAG, "扫描包信息失败：" + (it.message ?: it.javaClass.simpleName))
         emptyList()
     }
 
-    // ===================== 3. 网络探针 =====================
+    /** 已安装的 Xposed 框架管理器（环境信息，不是冲突）。 */
+    fun installedFrameworks(context: Context): List<InstalledModule> = scan(context, FRAMEWORK_PACKAGES)
+
+    /**
+     * 已安装的其它微信 Hook 模块（排除 WCX 自身）。
+     * Android 11 起需要 AndroidManifest 的 <queries> 声明包名才能看到；
+     * 未声明时 getPackageInfo 抛 NameNotFoundException，这里直接视为「未安装」，不会误报。
+     */
+    fun installedModules(context: Context): List<InstalledModule> =
+        scan(context, MODULE_PACKAGES).filter { it.pkg != "com.johnny.wcx" }
+
+        // ===================== 3. 网络探针 =====================
 
     /**
      * 一条网络探针结论。
@@ -165,8 +165,29 @@ internal object ModuleDiagnostics {
      * [imageUrl] 建议传朋友圈实际枚举到的图片地址；为空时会明确提示「没有可用的测试地址」，
      * 不会伪造结论。
      */
-    fun network(imageUrl: String?): List<NetResult> {
+    /**
+     * [withVpnCheck] 传 true 时额外检测 VPN 网络（ConnectivityManager 的 TRANSPORT_VPN）。
+     * VPN / 全局代理是「图片 403」最常见的环境原因，这里直接给出对应解释，
+     * 而不是只丢一句「异常」让用户猜。
+     */
+    fun network(context: Context, imageUrl: String?): List<NetResult> {
         val out = mutableListOf<NetResult>()
+
+        val vpnOn = runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            cm.allNetworks.any { net ->
+                val caps = cm.getNetworkCapabilities(net)
+                caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+            }
+        }.getOrDefault(false)
+        out += NetResult(
+            "VPN 网络",
+            true,
+            if (vpnOn) "检测到 VPN 正在运行。VPN 会接管全部流量，微信图片 CDN 在部分线路下会 403 / 超时；" +
+                "如果图片显示不出来，先关掉 VPN，或把微信加进 VPN 的「分应用排除」名单。"
+            else "未检测到 VPN",
+            expectFail = vpnOn,
+        )
 
         val proxyHost = System.getProperty("http.proxyHost")
         val proxyPort = System.getProperty("http.proxyPort")
@@ -175,9 +196,11 @@ internal object ModuleDiagnostics {
         } else {
             NetResult(
                 "系统代理",
-                false,
-                "已启用 " + proxyHost + ":" + (proxyPort ?: "?") +
-                    " —— 部分 VPN/代理会让图片 403 或超时，排查图片问题时建议先关掉代理",
+                true,
+                "检测到系统级 HTTP 代理 " + proxyHost + ":" + (proxyPort ?: "?") +
+                    "。全局代理会把微信请求也带进代理通道，CDN 可能返回 403；" +
+                    "如果是 VPN 应用设置的代理，把微信加入「分应用排除」名单即可。属提示，不算故障。",
+                expectFail = true,
             )
         }
 

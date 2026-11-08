@@ -100,6 +100,10 @@ import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.items.debug.ResetDexCache
 import com.Johnny.wcx.preferences.WePrefs
+import kotlin.io.path.writeText
+import kotlin.io.path.readText
+import kotlin.io.path.exists
+import com.Johnny.wcx.utils.fs.KnownPaths
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.content.MiuixSmallTitle
@@ -733,6 +737,16 @@ private fun exportConfig(context: Context) {
                                 null -> put(key, JsonNull)
                             }
                         }
+                        // 数据文件不属于 WePrefs：聊天分组存在 moduleData/conversation_groups.json，
+                        // 之前导出只打包偏好，恢复后分组全部失效（用户实测反馈）。这里一并打包。
+                        runCatching {
+                            val groupsFile = KnownPaths.moduleData / "conversation_groups.json"
+                            if (groupsFile.exists()) {
+                                put("__file__conversation_groups.json", groupsFile.readText())
+                            }
+                        }.onFailure {
+                            WeLogger.e("WePrefs", "failed to bundle conversation groups", it)
+                        }
                     }
                     DefaultJson.encodeToString(jsonObject)
                 }
@@ -767,6 +781,24 @@ private fun importConfig(context: Context) {
                     } ?: return@launch
                     val jsonObject = DefaultJson.parseToJsonElement(jsonString).jsonObject
                     for ((key, element) in jsonObject) {
+                        // 数据文件还原：__file__<name> 是导出时打包的 moduleData 下文件。
+                        // 只接受安全的文件名（防路径穿越），且必须是 .json。
+                        if (key.startsWith("__file__") && element is JsonPrimitive && element.isString) {
+                            val fileName = key.removePrefix("__file__")
+                            val safeName = fileName.matches(Regex("[A-Za-z0-9._-]+")) && fileName.endsWith(".json")
+                            if (!safeName) {
+                                WeLogger.w("WePrefs", "skip unsafe restore file name: " + fileName)
+                                continue
+                            }
+                            runCatching {
+                                val target = KnownPaths.moduleData / fileName
+                                target.parent?.toFile()?.mkdirs()
+                                target.writeText(element.content)
+                            }.onFailure {
+                                WeLogger.e("WePrefs", "failed to restore data file " + fileName, it)
+                            }
+                            continue
+                        }
                         when (element) {
                             is JsonNull -> WePrefs.default.remove(key)
                             is JsonPrimitive -> when {
@@ -792,7 +824,7 @@ private fun importConfig(context: Context) {
                 }.onFailure {
                     showToastSuspend("导入失败!")
                     WeLogger.e("WePrefs", "failed to import", it)
-                }.onSuccess { showToastSuspend("导入成功") }
+                }.onSuccess { showToastSuspend("导入成功：聊天分组等数据文件已还原，其余设置重启微信后生效") }
                 withContext(Dispatchers.Main) { finish() }
             }
         }

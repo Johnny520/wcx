@@ -85,6 +85,8 @@ import com.Johnny.wcx.utils.openInSystem
 import com.Johnny.wcx.utils.registerBshSnapshotDecompileLaunchers
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.WxPalette
+import androidx.compose.ui.text.TextStyle
+import com.Johnny.wcx.features.core.FeaturesProvider
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -222,8 +224,10 @@ class MainActivity : ComponentActivity() {
         }
 
         Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = WxPalette.pageBackground(),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(WxPalette.pageBackgroundBrush()),
+            containerColor = Color.Transparent,
             topBar = {
                 TopAppBar(
                     title = {
@@ -326,6 +330,79 @@ class MainActivity : ComponentActivity() {
                         state = activationState,
                         buildTime = formatEpoch(BuildConfig.BUILD_TIMESTAMP, true),
                     )
+                }
+
+                // ①.5 功能统计：与功能页/自检页同一套视觉语言（渐变大数字 + 占比条）
+                SectionTitle("功能统计")
+                WhiteCard {
+                    val featureTotal = remember {
+                        runCatching { FeaturesProvider.ALL_HOOK_ITEMS.size }.getOrDefault(0)
+                    }
+                    val featureEnabled = remember {
+                        runCatching {
+                            FeaturesProvider.ALL_HOOK_ITEMS.count { WePrefs.getBoolOrFalse(it.name) }
+                        }.getOrDefault(0)
+                    }
+                    val categoryCount = remember {
+                        runCatching {
+                            FeaturesProvider.ALL_HOOK_ITEMS
+                                .mapNotNull { it.categories.firstOrNull() }
+                                .distinct()
+                                .size
+                        }.getOrDefault(0)
+                    }
+                    val ratio = if (featureTotal > 0) {
+                        featureEnabled.toFloat() / featureTotal
+                    } else 0f
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("已启用", fontSize = 12.sp, color = WxPalette.TextSecondary)
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(
+                                    text = featureEnabled.toString(),
+                                    style = TextStyle(
+                                        brush = WxPalette.accentBrush(),
+                                        fontSize = 30.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    ),
+                                )
+                                Text(
+                                    text = " / " + featureTotal,
+                                    fontSize = 13.sp,
+                                    color = WxPalette.TextSecondary,
+                                    modifier = Modifier.padding(bottom = 5.dp, start = 2.dp),
+                                )
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("分类", fontSize = 12.sp, color = WxPalette.TextSecondary)
+                            Text(
+                                text = categoryCount.toString() + " 个",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = WxPalette.textPrimary(),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(WxPalette.cardBorder()),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(ratio.coerceIn(0f, 1f))
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(WxPalette.accentBrush()),
+                        )
+                    }
                 }
 
                 // ② 快捷操作
@@ -606,22 +683,18 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** 纯白圆角卡片容器（iOS 分组列表的基本单元）。 */
+    /** 分组卡片容器：冷调玻璃底 + 渐变高光描边，与设置页/自检页同一套视觉。 */
     @Composable
     private fun WhiteCard(content: @Composable ColumnScope.() -> Unit) {
-        val shape = RoundedCornerShape(18.dp)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = shape,
-            color = WxPalette.cardBackground(),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-        ) {
-            Column(
-                modifier = Modifier.border(1.dp, WxPalette.cardBorder(), shape),
-                content = content,
-            )
-        }
+        val shape = RoundedCornerShape(WxPalette.CardRadius)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(WxPalette.cardBrush())
+                .border(1.dp, WxPalette.cardBorderBrush(), shape),
+            content = content,
+        )
     }
 
     /** 卡片内一行：圆角图标 + 标题/副标题 + 右箭头。 */
@@ -681,20 +754,16 @@ class MainActivity : ComponentActivity() {
     /** 主状态卡：仿「仪表盘」顶部大卡 —— 状态胶囊 + 图标 + 主标题 + 底部分栏。 */
     @Composable
     private fun StatusCard(state: ActivationState, buildTime: String) {
-        val shape = RoundedCornerShape(20.dp)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = shape,
-            color = WxPalette.cardBackground(),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+        val shape = RoundedCornerShape(WxPalette.CardRadius)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(WxPalette.cardBrush())
+                .border(1.dp, WxPalette.cardBorderBrush(), shape)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .border(1.dp, WxPalette.cardBorder(), shape)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "状态",
@@ -778,7 +847,6 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
-            }
         }
     }
 

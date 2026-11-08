@@ -141,7 +141,10 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                 }
                 collected += outcome
                 if (verbose) {
-                    outcome.forEach { item -> SelfCheckLog.step(item.ok, item.label, item.value) }
+                    outcome.forEach { item ->
+                        // 未启用/提示类不是故障：日志统一记「通过」，避免导出日志满屏红叉误导排查
+                        SelfCheckLog.step(item.ok || item.inactive, item.label, item.value)
+                    }
                 }
                 if (showOverlay) {
                     runLog = runLog + (step.title to outcome.all { it.ok })
@@ -686,7 +689,7 @@ private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("关键类锚点") { anchors() },
     HealthStep("DexKit 锚点") { dexAnchorSection() },
     HealthStep("功能活体") { liveSection() },
-    HealthStep("网络与 CDN") { networkSection() },
+    HealthStep("网络与 CDN") { networkSection(context) },
     HealthStep("模块冲突") { conflictSection(context) },
     HealthStep("运行环境") { environmentSection() },
     HealthStep("存储与缓存") { storageSection(context) },
@@ -901,9 +904,9 @@ private fun liveSection(): List<HealthItem> =
  *
  * 测试地址取自「批量删除朋友圈」最近一次枚举到的真实图片，因此不会用假数据糊弄。
  */
-private fun networkSection(): List<HealthItem> {
+private fun networkSection(context: Context): List<HealthItem> {
     val url = runCatching { BatchDeleteMoments.lastProbeUrl }.getOrNull()
-    return ModuleDiagnostics.network(url).map { r ->
+    return ModuleDiagnostics.network(context, url).map { r ->
         HealthItem(
             r.label, "网络与 CDN",
             if (r.ok) "通过" else if (r.expectFail) "提示" else "异常",
@@ -971,36 +974,63 @@ private fun storageSection(context: Context): List<HealthItem> {
     out += HealthItem(
         "缓存占用", section, cacheMb.toString() + "MB", cacheMb < 200,
         "模块缓存目录当前 " + cacheMb + "MB。\n" +
-            if (cacheMb < 200) "在正常范围内。"
-            else "偏大，建议到系统设置里清理应用缓存（只删缓存，不影响配置与功能）。",
+            if (cacheMb < 200) "在正常范围内（阈值 200MB，超过才提示）。"
+            else "超过 200MB 阈值。这些都是临时文件，清掉不影响任何配置与功能：" +
+                "点下方「去清理」打开系统应用信息页，选「存储」→「清除缓存」即可。",
+        actionLabel = if (cacheMb >= 200) "去清理" else null,
+        action = if (cacheMb >= 200) {
+            {
+                runCatching {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    intent.data = android.net.Uri.fromParts("package", BuildConfig.APPLICATION_ID, null)
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    "已打开系统应用信息页：选「存储」→「清除缓存」"
+                }.getOrElse { "打开失败：" + (it.message ?: it.javaClass.simpleName) }
+            }
+        } else null,
     )
     return out
 }
 
-/** 模块冲突：同机是否还装了其它会 Hook 微信的模块。 */
+/**
+ * 冲突检测分两层：
+ * 1. 「Xposed 框架」——装的是哪个框架管理器，只是环境信息，不算冲突；
+ * 2. 「其它模块」——会 Hook 微信的模块，才可能和 WCX 抢同一批方法。
+ * 用户实测反馈过：装着 LSPosed 也被标成「冲突模块」，属误报，已拆开。
+ */
 private fun conflictSection(context: Context): List<HealthItem> {
-    val section = "模块冲突"
-    val self = BuildConfig.APPLICATION_ID
-    val others = ModuleDiagnostics.installedModules(context).filter { it.pkg != self }
+    val out = mutableListOf<HealthItem>()
+
+    val frameworks = ModuleDiagnostics.installedFrameworks(context)
+    out += HealthItem(
+        "Xposed 框架", "模块冲突",
+        if (frameworks.isEmpty()) "未识别"
+        else frameworks.joinToString("、") { it.label + " v" + it.version },
+        true,
+        "当前设备上装过的 Xposed 框架管理器。这只说明模块跑在哪个框架上，不是冲突；" +
+            "如果同时显示多个框架（如 LSPosed 和 EdXposed 都在），才建议只保留一个。",
+        inactive = frameworks.isEmpty(),
+    )
+
+    val others = ModuleDiagnostics.installedModules(context)
     if (others.isEmpty()) {
-        return listOf(
-            HealthItem(
-                "其它微信模块", section, "未发现", true,
-                "已扫描 " + ModuleDiagnostics.knownModuleCount +
-                    " 个已知的微信 Hook / 增强模块包名，均未安装。",
+        out += HealthItem(
+            "其它微信模块", "模块冲突", "未发现", true,
+            "已扫描微信 Hook / 增强类模块的常见包名（微X、WAuxv、WeChatX、浮云、WCXLC），均未安装。",
+        )
+    } else {
+        others.forEach { m ->
+            out += HealthItem(
+                "其它模块·" + m.label, "模块冲突", "已安装 v" + m.version, false,
+                "包名：" + m.pkg + "\n" +
+                    "同时 Hook 微信的模块会覆盖同一方法、争抢同一 View，表现为功能时好时坏或直接失效。" +
+                    "如与 WCX 功能重叠，建议在 LSPosed 里只给一个模块勾选微信作用域。",
+                inactive = true,
             )
-        )
+        }
     }
-    return others.map { m ->
-        HealthItem(
-            "其它模块·" + m.label, section, "已安装 v" + m.version, false,
-            "包名：" + m.pkg + "\n" +
-                "多个同时 Hook 微信的模块会覆盖同一方法、争抢同一 View，" +
-                "表现为功能时好时坏或直接失效。\n" +
-                "建议：在 LSPosed 里只给一个模块勾选微信作用域。",
-            inactive = true,
-        )
-    }
+    return out
 }
 
 private fun hiddenContactsSection(): List<HealthItem> {
