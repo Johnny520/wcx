@@ -23,6 +23,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -527,13 +533,13 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
 /** 纯白圆角卡片（首页分组列表容器）。 */
 @Composable
 private fun HomeCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(WxPalette.CardRadius)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(WxPalette.cardBackground())
-            .border(1.dp, WxPalette.cardBorder(), shape),
+            .background(WxPalette.cardBrush())
+            .border(1.dp, WxPalette.cardBorderBrush(), shape),
         content = content,
     )
 }
@@ -616,11 +622,21 @@ private fun CountTile(
     label: String,
     onClick: () -> Unit,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 620f),
+        label = "tilePress",
+    )
+    val tileShape = RoundedCornerShape(16.dp)
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color(0xFFF2F3F5))
-            .clickable(onClick = onClick)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(tileShape)
+            .background(WxPalette.cardBrush())
+            .border(1.dp, WxPalette.cardBorderBrush(), tileShape)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(12.dp),
     ) {
         Box(modifier = Modifier.size(22.dp), contentAlignment = Alignment.CenterStart) {
@@ -629,9 +645,11 @@ private fun CountTile(
         Spacer(Modifier.height(8.dp))
         Text(
             text = value,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Bold,
-            color = WxPalette.textPrimary(),
+            style = TextStyle(
+                brush = WxPalette.accentBrush(),
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
+            ),
         )
         Text(
             text = label,

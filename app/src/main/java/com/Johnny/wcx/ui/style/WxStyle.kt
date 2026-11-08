@@ -82,15 +82,15 @@ object WxPalette {
     val ChipRadius = 14.dp
     val PillRadius = 50.dp
 
-    /** 页面底色（跟随深浅色） */
+    /** 页面底色（跟随深浅色）。深色用冷调近黑，不用死黑。 */
     @Composable
     fun pageBackground(): Color =
-        if (isSystemInDarkTheme()) Color(0xFF000000) else Background
+        if (isSystemInDarkTheme()) DarkBackground else Background
 
-    /** 卡片底色（跟随深浅色） */
+    /** 卡片底色（跟随深浅色）。深色比底板亮一档，靠明度差拉出层次。 */
     @Composable
     fun cardBackground(): Color =
-        if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color.White
+        if (isSystemInDarkTheme()) Color(0xFF1A1D24) else Color.White
 
     /** 主文字色（跟随深浅色） */
     @Composable
