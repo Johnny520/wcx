@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -30,9 +31,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -413,16 +411,17 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
     val context = LocalContext.current
     val accentColor = WxPalette.AccentEnd
     // 检查中时状态胶囊做呼吸脉冲，静止时保持低透明度——一眼看出「正在动」。
-    val pulseTransition = rememberInfiniteTransition(label = "statusPulse")
-    val pulseAlpha by pulseTransition.animateFloat(
-        initialValue = 0.34f,
-        targetValue = 0.9f,
-        animationSpec = infiniteRepeatable(
-            animation = tween<Float>(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "statusPulseAlpha",
-    )
+    val pulseAnim = remember { Animatable(0.34f) }
+    LaunchedEffect(isChecking) {
+        if (!isChecking) {
+            pulseAnim.snapTo(0.34f)
+            return@LaunchedEffect
+        }
+        while (true) {
+            pulseAnim.animateTo(0.9f, tween(1200, easing = FastOutSlowInEasing))
+            pulseAnim.animateTo(0.34f, tween(1200, easing = FastOutSlowInEasing))
+        }
+    }
     val statusText = when {
         isChecking -> "检查中"
         isLatest -> "已是最新"
@@ -453,7 +452,7 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
             Box(
                 modifier = Modifier
                     .background(
-                        accentColor.copy(alpha = if (isChecking) pulseAlpha * 0.45f else 0.12f),
+                        accentColor.copy(alpha = if (isChecking) pulseAnim.value * 0.45f else 0.12f),
                         RoundedCornerShape(50),
                     )
                     .padding(horizontal = 10.dp, vertical = 3.dp),
