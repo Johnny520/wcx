@@ -48,6 +48,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Build_circle
+import com.composables.icons.materialsymbols.outlined.Tune
+import com.composables.icons.materialsymbols.outlined.Category
+import com.composables.icons.materialsymbols.outlined.Apps
+import com.composables.icons.materialsymbols.outlined.Bolt
 import com.composables.icons.materialsymbols.outlined.Check_circle
 import com.composables.icons.materialsymbols.outlined.Phone_android
 import com.composables.icons.materialsymbols.outlined.Smartphone
@@ -316,7 +320,7 @@ fun HomePager(
             ActivationCard(latestVersion, isLatest, isChecking, onRefresh = ::checkUpdateNow)
         }
 
-        // ---- 统计卡片（白卡内两个浅灰子卡，仿「网速」双栏） ----
+        // ---- 统计：三格彩灯（已启用 / 全部 / 分类），前两格点击弹清单，第三格跳功能页 ----
         item {
             Spacer(Modifier.height(8.dp))
             SoftCard {
@@ -328,23 +332,23 @@ fun HomePager(
                         modifier = Modifier.weight(1f),
                         icon = {
                             Icon(
-                                imageVector = MaterialSymbols.Outlined.Sports_esports,
+                                imageVector = MaterialSymbols.Outlined.Bolt,
                                 contentDescription = null,
-                                tint = WxPalette.Primary,
+                                tint = Color(0xFF12D18E),
                                 modifier = Modifier.size(20.dp),
                             )
                         },
                         value = enabledCount.toString(),
-                        label = "已启用功能",
+                        label = "已启用",
                         onClick = { quickListKind = QUICK_LIST_ENABLED },
                     )
                     CountTile(
                         modifier = Modifier.weight(1f),
                         icon = {
                             Icon(
-                                imageVector = MaterialSymbols.Outlined.Smartphone,
+                                imageVector = MaterialSymbols.Outlined.Apps,
                                 contentDescription = null,
-                                tint = WxPalette.Primary,
+                                tint = Color(0xFF3D7EFF),
                                 modifier = Modifier.size(20.dp),
                             )
                         },
@@ -352,11 +356,27 @@ fun HomePager(
                         label = "全部功能",
                         onClick = { quickListKind = QUICK_LIST_ALL },
                     )
+                    CountTile(
+                        modifier = Modifier.weight(1f),
+                        icon = {
+                            Icon(
+                                imageVector = MaterialSymbols.Outlined.Category,
+                                contentDescription = null,
+                                tint = Color(0xFF8B5CF6),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        },
+                        value = remember {
+                            allItems.mapNotNull { it.categories.firstOrNull() }.distinct().size
+                        }.toString(),
+                        label = "分类",
+                        onClick = onOpenFeatures,
+                    )
                 }
             }
         }
 
-        // ---- 工具 ----
+        // ---- 工具：两列快捷瓦片（大图标彩色方块，与整体网格语言一致） ----
         item {
             Text(
                 text = "工具",
@@ -367,12 +387,22 @@ fun HomePager(
             )
         }
         item {
-            HomeCard {
-                HomeRow(
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                QuickTile(
                     icon = MaterialSymbols.Outlined.Build_circle,
                     title = "模块自检",
-                    subtitle = "检测公共依赖与锚点，快速定位失效功能",
+                    subtitle = "体检 · 定位失效功能",
+                    tint = Color(0xFF12D18E),
                     onClick = onOpenModuleHealth,
+                    modifier = Modifier.weight(1f),
+                )
+                QuickTile(
+                    icon = MaterialSymbols.Outlined.Tune,
+                    title = "功能中心",
+                    subtitle = "按分类浏览全部功能",
+                    tint = Color(0xFF3D7EFF),
+                    onClick = onOpenFeatures,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -672,6 +702,64 @@ private fun TagChip(text: String, color: Color, textColor: Color = color) {
             fontWeight = FontWeight.Medium,
             color = textColor,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
+}
+
+/** 工具瓦片：彩色圆角图标 + 标题/副标题，按压回弹，2 列网格用。 */
+@Composable
+private fun QuickTile(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    tint: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 620f),
+        label = "quickTile",
+    )
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier = modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(shape)
+            .background(WxPalette.cardBrush())
+            .border(1.dp, WxPalette.cardBorderBrush(), shape)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(tint.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.height(9.dp))
+        Text(
+            text = title,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = WxPalette.textPrimary(),
+        )
+        Text(
+            text = subtitle,
+            fontSize = 11.sp,
+            color = WxPalette.TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
