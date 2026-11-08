@@ -248,8 +248,10 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                         total = items.size,
                         scanning = running,
                         lastScan = lastScan,
-                        wechatVersion = runCatching { com.Johnny.wcx.utils.HostInfo.versionName }
-                            .getOrDefault("未识别"),
+                        wechatVersion = runCatching {
+                            com.Johnny.wcx.utils.HostInfo.versionName +
+                                "(" + com.Johnny.wcx.utils.HostInfo.versionCode + ")"
+                        }.getOrDefault("未识别"),
                         moduleVersion = BuildConfig.VERSION_NAME,
                     )
                 }
@@ -308,16 +310,6 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                     }
                     item {
                         HealthFoldSection(
-                            title = "未启用",
-                            list = offItems,
-                            defaultCollapsed = true,
-                            accent = Color(0xFFFFB020),
-                            onOpenAll = { showFilteredList("未启用项", offItems) },
-                            onOpenItem = { openDetail(it) },
-                        )
-                    }
-                    item {
-                        HealthFoldSection(
                             title = "通过项",
                             list = passItems,
                             defaultCollapsed = true,
@@ -325,6 +317,19 @@ fun ModuleHealthScreen(onBack: () -> Unit) {
                             onOpenAll = { showFilteredList("通过项", passItems) },
                             onOpenItem = { openDetail(it) },
                         )
+                    }
+                    if (offItems.isNotEmpty()) {
+                        item {
+                            // 「未启用」不是故障：既不需要处理、也不是问题，放最下面避免干扰判断。
+                            HealthFoldSection(
+                                title = "未启用（不是故障）",
+                                list = offItems,
+                                defaultCollapsed = true,
+                                accent = Color(0xFFFFB020),
+                                onOpenAll = { showFilteredList("未启用项", offItems) },
+                                onOpenItem = { openDetail(it) },
+                            )
+                        }
                     }
                 }
                 item {

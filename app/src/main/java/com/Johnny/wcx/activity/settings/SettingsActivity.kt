@@ -272,6 +272,7 @@ private fun MainPagerScreen(
                     0 -> HomePager(
                         onOpenFeatures = { scope.launch { pagerState.animateScrollToPage(1) } },
                         onOpenModuleHealth = onOpenModuleHealth,
+                        onOpenCategory = onOpenCategory,
                     )
                     1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                     2 -> LogsPager()

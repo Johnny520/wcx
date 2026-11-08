@@ -69,6 +69,11 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.border
+import com.Johnny.wcx.features.core.BaseFeature
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextOverflow
@@ -207,12 +212,20 @@ private fun safeOpenUrl(context: Context, url: String) {
 }
 
 @Composable
-fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
+fun HomePager(
+    onOpenFeatures: () -> Unit,
+    onOpenModuleHealth: () -> Unit,
+    onOpenCategory: (String) -> Unit = {},
+) {
     val context = LocalContext.current
+    val allItems = FeaturesProvider.ALL_HOOK_ITEMS
     val enabledCount = remember {
-        FeaturesProvider.ALL_HOOK_ITEMS.count { WePrefs.getBoolOrFalse(it.name) }
+        allItems.count { WePrefs.getBoolOrFalse(it.name) }
     }
-    val totalCount = remember { FeaturesProvider.ALL_HOOK_ITEMS.size }
+    val totalCount = remember { allItems.size }
+
+    // 点「已启用 / 全部功能」时弹出的清单（就地展示，不跳功能页）
+    var quickListKind by remember { mutableStateOf<String?>(null) }
 
     var latestVersion by remember { mutableStateOf<String?>(null) }
     var isLatest by remember { mutableStateOf(false) }
@@ -261,6 +274,7 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
         isChecking = false
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     MiuixListScaffold(title = "") {
         // ---- 标题区域 ----
         // fillMaxWidth + wrapContentHeight 防止无限高度约束导致灰色渲染
@@ -313,7 +327,7 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
                         },
                         value = enabledCount.toString(),
                         label = "已启用功能",
-                        onClick = onOpenFeatures,
+                        onClick = { quickListKind = QUICK_LIST_ENABLED },
                     )
                     CountTile(
                         modifier = Modifier.weight(1f),
@@ -327,7 +341,7 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
                         },
                         value = totalCount.toString(),
                         label = "全部功能",
-                        onClick = onOpenFeatures,
+                        onClick = { quickListKind = QUICK_LIST_ALL },
                     )
                 }
             }
@@ -402,6 +416,23 @@ fun HomePager(onOpenFeatures: () -> Unit, onOpenModuleHealth: () -> Unit) {
         // ---- 底部留白 ----
         item {
             Spacer(Modifier.height(CONTENT_BOTTOM_INSET))
+        }
+    }
+        val kind = quickListKind
+        if (kind != null) {
+            FeatureQuickListOverlay(
+                title = if (kind == QUICK_LIST_ENABLED) "已启用功能" else "全部功能",
+                items = if (kind == QUICK_LIST_ENABLED) {
+                    allItems.filter { WePrefs.getBoolOrFalse(it.name) }
+                } else {
+                    allItems
+                },
+                onDismiss = { quickListKind = null },
+                onPick = { feature ->
+                    quickListKind = null
+                    onOpenCategory(feature.categories.firstOrNull() ?: "未分类")
+                },
+            )
         }
     }
 }
@@ -826,6 +857,123 @@ private fun InfoRow(
                     .height(0.5.dp)
                     .background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.15f)),
             )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  功能清单浮层：点「已启用 / 全部功能」原地展开，再点某项直接跳到该分类页
+// ---------------------------------------------------------------------------
+
+private const val QUICK_LIST_ENABLED = "enabled"
+private const val QUICK_LIST_ALL = "all"
+
+@Composable
+private fun FeatureQuickListOverlay(
+    title: String,
+    items: List<BaseFeature>,
+    onDismiss: () -> Unit,
+    onPick: (BaseFeature) -> Unit,
+) {
+    val scrimInteraction = remember { MutableInteractionSource() }
+    val sheetInteraction = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xB3000000))
+            .clickable(interactionSource = scrimInteraction, indication = null, onClick = onDismiss),
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.8f)
+                .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                .background(WxPalette.cardBackground())
+                .clickable(interactionSource = sheetInteraction, indication = null) {}
+                .padding(top = 16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = WxPalette.textPrimary(),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = items.size.toString() + " 项",
+                    fontSize = 12.sp,
+                    color = WxPalette.textSecondary(),
+                )
+                Spacer(Modifier.width(12.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text("关闭", fontSize = 13.sp, color = WxPalette.AccentEnd)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(items, key = { it.name }) { feature ->
+                    val on = WePrefs.getBoolOrFalse(feature.name)
+                    val rowShape = RoundedCornerShape(14.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(rowShape)
+                            .background(WxPalette.cardBrush())
+                            .border(1.dp, WxPalette.cardBorderBrush(), rowShape)
+                            .clickable { onPick(feature) }
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (on) Color(0xFF12D18E) else Color(0x33999999)),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = feature.name,
+                                fontSize = 14.sp,
+                                color = WxPalette.textPrimary(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = feature.categories.firstOrNull() ?: "未分类",
+                                fontSize = 11.sp,
+                                color = WxPalette.textSecondary(),
+                                maxLines = 1,
+                            )
+                        }
+                        Text(
+                            text = if (on) "已启用" else "关闭",
+                            fontSize = 11.sp,
+                            color = if (on) Color(0xFF12D18E) else WxPalette.textSecondary(),
+                        )
+                        Text(
+                            text = "\u203A",
+                            fontSize = 18.sp,
+                            color = WxPalette.TextTertiary,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

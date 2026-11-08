@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Arrow_back
@@ -70,6 +71,18 @@ private val CATEGORY_GRADIENTS = listOf(
     WxPalette.GradMint,
     WxPalette.GradPurple,
     WxPalette.GradPink,
+)
+
+/** 分类专属色：让每个分类在列表里一眼可辨（不是靠文字读出来的）。 */
+private val CATEGORY_COLORS = listOf(
+    Color(0xFF3D7EFF),
+    Color(0xFF00D4A0),
+    Color(0xFF8B5CF6),
+    Color(0xFFFF8A3D),
+    Color(0xFF00B8D9),
+    Color(0xFFFF5B8A),
+    Color(0xFF12D18E),
+    Color(0xFFFFB020),
 )
 
 @Composable
@@ -138,6 +151,63 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
             )
         }
 
+        if (!searching) {
+            item {
+                val total = FeaturesProvider.ALL_HOOK_ITEMS.size
+                val enabled = FeaturesProvider.ALL_HOOK_ITEMS.count { WePrefs.getBoolOrFalse(it.name) }
+                val ratio = if (total > 0) enabled.toFloat() / total else 0f
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    SoftCard(contentPadding = 16, glow = true) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("已启用功能", fontSize = 12.sp, color = WxPalette.textSecondary())
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    Text(
+                                        text = enabled.toString(),
+                                        style = TextStyle(
+                                            brush = WxPalette.accentBrush(),
+                                            fontSize = 30.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        ),
+                                    )
+                                    Text(
+                                        text = " / " + total,
+                                        fontSize = 13.sp,
+                                        color = WxPalette.textSecondary(),
+                                        modifier = Modifier.padding(bottom = 5.dp, start = 2.dp),
+                                    )
+                                }
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("分类", fontSize = 12.sp, color = WxPalette.textSecondary())
+                                Text(
+                                    text = FEATURE_CATEGORIES.size.toString() + " 个",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = WxPalette.textPrimary(),
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(WxPalette.cardBorder()),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(ratio.coerceIn(0f, 1f))
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(WxPalette.accentBrush()),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         if (searching) {
             // Search results replace the category list while a query is active
             if (filteredItems.isEmpty()) {
@@ -191,26 +261,30 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
 
             // 分类列表：一张白卡内多行 + 细分隔线（iOS 分组列表）
             item {
-                val shape = RoundedCornerShape(18.dp)
+                val shape = RoundedCornerShape(WxPalette.CardRadius)
                 Column(
                     modifier = Modifier
                         .padding(top = 10.dp)
                         .fillMaxWidth()
                         .clip(shape)
-                        .background(WxPalette.cardBackground())
-                        .border(1.dp, WxPalette.cardBorder(), shape),
+                        .background(WxPalette.cardBrush())
+                        .border(1.dp, WxPalette.cardBorderBrush(), shape),
                 ) {
                     FEATURE_CATEGORIES.forEachIndexed { index, entry ->
                         val name = entry.first
                         val stat = categoryStat[name]
+                        val enabledCount = stat?.first ?: 0
+                        val totalCount = stat?.second ?: 0
                         CategoryRow(
                             icon = entry.second,
                             title = name,
-                            subtitle = if (stat != null && stat.second > 0) {
-                                "已启用 ${stat.first}/${stat.second}"
+                            subtitle = if (totalCount > 0) {
+                                "已启用 " + enabledCount + "/" + totalCount
                             } else {
                                 "暂无功能"
                             },
+                            tint = CATEGORY_COLORS[index % CATEGORY_COLORS.size],
+                            progress = if (totalCount > 0) enabledCount.toFloat() / totalCount else 0f,
                             onClick = { onOpenCategory(name) },
                         )
                         if (index != FEATURE_CATEGORIES.lastIndex) SoftDivider()
@@ -233,6 +307,8 @@ private fun CategoryRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
+    tint: Color = WxPalette.Primary,
+    progress: Float = 0f,
     onClick: () -> Unit,
 ) {
     Row(
@@ -244,15 +320,15 @@ private fun CategoryRow(
     ) {
         Box(
             modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(WxPalette.PrimarySoft),
+                .size(36.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(tint.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = WxPalette.Primary,
+                tint = tint,
                 modifier = Modifier.size(19.dp),
             )
         }
@@ -267,8 +343,27 @@ private fun CategoryRow(
             Text(
                 text = subtitle,
                 fontSize = 12.sp,
-                color = WxPalette.TextSecondary,
+                color = WxPalette.TextSecondary(),
             )
+        }
+        if (progress > 0f) {
+            // 小进度条：不用读数字也能看出这个分类开了多少
+            Box(
+                modifier = Modifier
+                    .width(46.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(WxPalette.cardBorder()),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(tint),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
         }
         Text(
             text = "\u203A",
