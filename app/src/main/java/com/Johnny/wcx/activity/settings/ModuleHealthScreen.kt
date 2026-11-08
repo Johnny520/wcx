@@ -957,29 +957,17 @@ private fun environmentSection(context: Context): List<HealthItem> {
         inactive = !main,
     )
 
-    // 框架管理器类型：免 Root（LSPatch）与 Root（LSPosed/EdXposed）注入方式不同，
-    // 排查问题时先分清用户用的是哪套。
+    // 注入方式：运行时识别（比扫管理器包名准），覆盖 LSPatch 内置 / 免 Root 虚拟容器 / Root 框架
     val frameworks = ModuleDiagnostics.installedFrameworks(context)
-    val isLspatch = frameworks.any { it.label.contains("LSPatch") }
+    val injection = ModuleDiagnostics.detectInjection(context)
     out += HealthItem(
-        "框架管理器", section,
-        if (frameworks.isEmpty()) "未识别"
-        else frameworks.joinToString("、") { it.label },
-        frameworks.isNotEmpty(),
-        buildString {
-            append("设备上装过的 Xposed 框架管理器。\n")
-            append("· LSPosed / EdXposed → Root 方案\n")
-            append("· LSPatch → 免 Root 方案\n\n")
-            append(
-                when {
-                    frameworks.isEmpty() -> "未检测到任何框架管理器：模块可能未正确安装，或用的是不在识别列表里的框架。"
-                    isLspatch -> "当前是免 Root（LSPatch）方案：模块被打包进微信或经 Shizuku 注入，" +
-                        "更新模块后需要用 LSPatch 重新打包。"
-                    else -> "当前是 Root 方案：更新模块后重启微信即可生效。"
-                }
-            )
-        },
-        inactive = frameworks.isEmpty(),
+        "注入方式", section, injection.method, injection.kind != "未知",
+        injection.detail + "\n\n已装的框架管理器：" +
+            (if (frameworks.isEmpty()) "无"
+            else frameworks.joinToString("、") { it.label + " v" + it.version }) +
+            "\n\n识别列表之外的方案（比如修改版安装包自带的注入器）功能却正常时，" +
+            "把本条详情复制反馈给开发者补全识别。",
+        inactive = injection.kind == "未知",
     )
 
     // 微信通知权限：依赖系统提醒的功能需要它

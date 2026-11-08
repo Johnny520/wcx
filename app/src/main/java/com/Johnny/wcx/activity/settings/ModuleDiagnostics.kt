@@ -4,6 +4,7 @@ import android.content.Context
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.core.FeaturesProvider
+import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.features.items.chat.AntiMessageRecall
 import com.Johnny.wcx.features.items.moments.BatchDeleteMoments
 import com.Johnny.wcx.utils.WeLogger
@@ -84,12 +85,19 @@ internal object ModuleDiagnostics {
      * 否则 Android 11+ 查不到、永远显示「未安装」。
      */
     private val FRAMEWORK_PACKAGES = linkedMapOf(
+        // —— Root 系 ——
         "io.github.lsposed.manager" to "LSPosed",
         "org.lsposed.manager" to "LSPosed（旧包名）",
         "org.meowcat.edxposed.manager" to "EdXposed",
         "com.solohsu.android.edxp.manager" to "EdXposed（旧管理器）",
         "de.robv.android.xposed.installer" to "Xposed Installer",
+        "top.canyie.dreamland.manager" to "Dreamland",
+        "me.weishu.exp" to "太极",
+        // —— 免 Root 系 ——
         "org.lsposed.lspatch" to "LSPatch（免 Root）",
+        "io.va.exposed" to "VirtualXposed（免 Root）",
+        "io.va.exposed32" to "VirtualXposed 32 位（免 Root）",
+        "me.weishu.geppetti" to "太极·免 Root",
     )
 
     private val MODULE_PACKAGES = linkedMapOf(
@@ -130,7 +138,81 @@ internal object ModuleDiagnostics {
     fun installedModules(context: Context): List<InstalledModule> =
         scan(context, MODULE_PACKAGES).filter { it.pkg != "com.johnny.wcx" }
 
-        // ===================== 3. 网络探针 =====================
+        // ===================== 2.5 注入方式识别 =====================
+
+    data class InjectionInfo(val method: String, val kind: String, val detail: String)
+
+    /**
+     * 运行时识别当前注入方式 —— 模块自己就跑在注入环境里，直接感知比扫管理器包名准：
+     * 1. LSPatch：宿主 APK 内嵌 assets/lspatch/ 目录，或类加载器链里有 LSPatch Loader；
+     * 2. 免 Root 虚拟容器（VirtualXposed / 太极免 Root）：微信的 dataDir 落在容器的沙箱路径里；
+     * 3. 回退：按已装管理器推断 Root 系。
+     */
+    fun detectInjection(context: Context): InjectionInfo {
+        val app = runCatching { HostInfo.application }.getOrNull()
+        if (app != null) {
+            val source = runCatching { app.applicationInfo.sourceDir }.getOrNull()
+            if (source != null && zipHasEntryPrefix(source, "assets/lspatch/")) {
+                return InjectionInfo(
+                    "LSPatch（免 Root · APK 内置）", "免 Root",
+                    "宿主 APK 内嵌了 LSPatch 注入文件：模块被直接打进微信安装包。" +
+                        "更新模块后必须用 LSPatch 重新打包安装，直接装普通 APK 不会生效。",
+                )
+            }
+            var cl: ClassLoader? = runCatching { app.classLoader }.getOrNull()
+            while (cl != null) {
+                if (cl.javaClass.name.contains("lspatch", ignoreCase = true)) {
+                    return InjectionInfo(
+                        "LSPatch（免 Root · APK 内置）", "免 Root",
+                        "类加载器链中发现 LSPatch Loader。更新模块后必须用 LSPatch 重新打包安装。",
+                    )
+                }
+                cl = cl.parent
+            }
+            val dataDir = runCatching { app.applicationInfo.dataDir }.getOrNull() ?: ""
+            if (dataDir.contains("io.va.exposed")) {
+                return InjectionInfo(
+                    "VirtualXposed（免 Root · 虚拟容器）", "免 Root",
+                    "微信运行在 VirtualXposed 虚拟容器内（dataDir=" + dataDir + "）。" +
+                        "虚拟容器对 Xposed API 的兼容有限，功能异常时优先怀疑容器环境。",
+                )
+            }
+            if (dataDir.contains("me.weishu")) {
+                return InjectionInfo(
+                    "太极（免 Root · 虚拟容器）", "免 Root",
+                    "微信运行在太极的免 Root 虚拟环境内（dataDir=" + dataDir + "）。",
+                )
+            }
+        }
+        val frameworks = installedFrameworks(context)
+        return when {
+            frameworks.any { it.label.contains("LSPatch") } ->
+                InjectionInfo("LSPatch（免 Root）", "免 Root", "检测到已安装 LSPatch 管理器。")
+            frameworks.any { it.label.contains("太极") } ->
+                InjectionInfo("太极", "Root / 免 Root", "检测到已安装太极（Root 与免 Root 双版本共用此包名集合）。")
+            frameworks.isNotEmpty() ->
+                InjectionInfo(
+                    frameworks.first().label + "（Root）", "Root",
+                    "检测到 " + frameworks.joinToString("、") { it.label } +
+                        "，模块经 Root 框架注入，更新模块后重启微信即可生效。",
+                )
+            else -> InjectionInfo(
+                "未识别", "未知",
+                "运行时未发现免 Root 注入特征，也没检测到已知框架管理器。" +
+                    "如果模块功能一切正常，说明用的是识别列表之外的方案（如修改版安装包自带的注入器），" +
+                    "欢迎把这段复制反馈给开发者补全识别列表。",
+            )
+        }
+    }
+
+    /** 只遍历 zip 条目名（读中央目录），不读内容，对大 APK 成本可忽略。 */
+    private fun zipHasEntryPrefix(archivePath: String, prefix: String): Boolean = runCatching {
+        java.util.zip.ZipFile(archivePath).use { zf ->
+            zf.entries().asSequence().any { it.name.startsWith(prefix) }
+        }
+    }.getOrDefault(false)
+
+    // ===================== 3. 网络探针 =====================
 
     /**
      * 一条网络探针结论。

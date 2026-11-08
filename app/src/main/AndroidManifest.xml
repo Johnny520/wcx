@@ -8,6 +8,11 @@
     <queries>
         <package android:name="com.tencent.mm" />
         <package android:name="org.lsposed.lspatch" />
+        <package android:name="io.va.exposed" />
+        <package android:name="io.va.exposed32" />
+        <package android:name="me.weishu.exp" />
+        <package android:name="me.weishu.geppetti" />
+        <package android:name="top.canyie.dreamland.manager" />
         <package android:name="io.github.lsposed.manager" />
         <package android:name="org.lsposed.manager" />
         <package android:name="org.meowcat.edxposed.manager" />
