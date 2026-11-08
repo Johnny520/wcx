@@ -104,22 +104,44 @@ fn download_libvpx(archive: &Path) {
     if archive.is_file() && file_sha256(archive) == LIBVPX_ARCHIVE_SHA256 {
         return;
     }
-    let _ = fs::remove_file(archive);
     let url =
         format!("https://github.com/webmproject/libvpx/archive/refs/tags/v{LIBVPX_VERSION}.tar.gz");
-    let status = Command::new("curl")
-        .args(["--fail", "--location", "--silent", "--show-error"])
-        .arg(&url)
-        .arg("--output")
-        .arg(archive)
-        .status()
-        .expect("failed to run curl while downloading libvpx");
-    assert!(status.success(), "failed to download libvpx");
-    assert_eq!(
-        file_sha256(archive),
-        LIBVPX_ARCHIVE_SHA256,
-        "libvpx archive checksum mismatch",
-    );
+    // GitHub 的源码包端点（codeload）偶发 503/504，无重试时一次抖动就挂掉整个构建；
+    // curl 层先自带重试，外层再按「下载成功且校验通过」整体重试 3 轮。
+    let mut last_error = String::from("no attempt made");
+    for attempt in 1..=3 {
+        let _ = fs::remove_file(archive);
+        let status = Command::new("curl")
+            .args([
+                "--fail",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--retry",
+                "10",
+                "--retry-all-errors",
+                "--retry-delay",
+                "5",
+                "--connect-timeout",
+                "20",
+            ])
+            .arg(&url)
+            .arg("--output")
+            .arg(archive)
+            .status()
+            .expect("failed to run curl while downloading libvpx");
+        let curl_ok = status.success();
+        let checksum_ok = archive.is_file() && file_sha256(archive) == LIBVPX_ARCHIVE_SHA256;
+        if curl_ok && checksum_ok {
+            return;
+        }
+        last_error = format!(
+            "attempt {attempt}: curl ok={curl_ok}, checksum ok={checksum_ok}"
+        );
+        eprintln!("libvpx download retry: {last_error}");
+        std::thread::sleep(std::time::Duration::from_secs(5 * attempt));
+    }
+    panic!("failed to download libvpx after retries: {last_error}");
 }
 
 fn configure_android_libvpx(source: &Path, build: &Path) {
