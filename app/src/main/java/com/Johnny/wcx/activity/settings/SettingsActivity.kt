@@ -251,6 +251,7 @@ private fun MainPagerScreen(
     onOpenModuleHealth: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 4 })
+    val context = LocalContext.current
     val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
     val scope = rememberCoroutineScope()
     val backdrop = rememberLayerBackdrop()
@@ -282,6 +283,7 @@ private fun MainPagerScreen(
                         },
                         onOpenLogs = { scope.launch { pagerState.animateScrollToPage(2) } },
                         onOpenSettings = { scope.launch { pagerState.animateScrollToPage(3) } },
+                        onOpenScript = { h.Hchat.ui.SettingsUI.showFeature(context, "script_plugin") },
                     )
                     1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                     2 -> LogsPager()
