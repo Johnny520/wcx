@@ -418,7 +418,7 @@ private fun ActivationCard(latestVersion: String?, isLatest: Boolean, isChecking
         initialValue = 0.34f,
         targetValue = 0.9f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
+            animation = tween<Float>(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "statusPulseAlpha",
