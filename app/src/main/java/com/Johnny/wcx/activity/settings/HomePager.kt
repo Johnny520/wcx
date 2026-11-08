@@ -709,7 +709,7 @@ private fun TagChip(text: String, color: Color, textColor: Color = color) {
 /** 工具瓦片：彩色圆角图标 + 标题/副标题，按压回弹，2 列网格用。 */
 @Composable
 private fun QuickTile(
-    icon: ImageVector,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
     tint: Color,
