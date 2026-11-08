@@ -74,8 +74,15 @@ object HchatBootstrap {
                     try {
                         val apkPath = hostContext.applicationInfo.sourceDir
                         val hostClassLoader = hostContext.classLoader
-                        // 内置 xposed-api-82.jar 的 LoadPackageParam 只暴露无参构造，字段均为 public，逐个赋值等价合成。
-                        val lpparam = XC_LoadPackage.LoadPackageParam().apply {
+                        // 内置 xposed-api-82.jar 的 LoadPackageParam 构造器 package-private，反射构造（字段均 public）。
+                        val lpparam = runCatching {
+                            XC_LoadPackage.LoadPackageParam::class.java.getDeclaredConstructor()
+                                .apply { isAccessible = true }.newInstance()
+                        }.getOrElse {
+                            XC_LoadPackage.LoadPackageParam::class.java
+                                .getDeclaredConstructor(String::class.java)
+                                .apply { isAccessible = true }.newInstance(PackageNames.WECHAT)
+                        }.apply {
                             packageName = PackageNames.WECHAT
                             processName = hostContext.packageName
                             classLoader = hostClassLoader
