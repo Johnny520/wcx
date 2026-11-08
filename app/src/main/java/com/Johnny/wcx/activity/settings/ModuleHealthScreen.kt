@@ -984,7 +984,7 @@ private fun environmentSection(context: Context): List<HealthItem> {
 
     // 微信通知权限：依赖系统提醒的功能需要它
     val notifyEnabled = runCatching {
-        android.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+        androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
     }.getOrDefault(true)
     out += HealthItem(
         "微信通知权限", section, if (notifyEnabled) "已开启" else "已关闭", notifyEnabled,
