@@ -441,7 +441,7 @@ fun HomePager(
                 )
                 if (singlePageMode) {
                     QuickTile(
-                        icon = MaterialSymbols.Outlined.Article,
+                        icon = MaterialSymbols.Outlined.Code,
                         title = "日志",
                         subtitle = "运行日志与崩溃记录",
                         tint = Color(0xFFFF8A3D),
