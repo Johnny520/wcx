@@ -273,6 +273,12 @@ val generateMethodHashes = tasks.register<GenerateMethodHashesTask>("generateMet
 // --- end tasks ---
 
 
+ksp {
+    // Room schema export for migration diffing
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.generateKotlin", "true")
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.core.ktx)
@@ -307,6 +313,8 @@ dependencies {
 
     implementation(libs.composablehorizons.material.symbols.filled)
     implementation(libs.composablehorizons.material.symbols.outlined)
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
 
     implementation(libs.google.protobuf.javalite)
     implementation(libs.kotlinx.serialization.json)
