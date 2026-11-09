@@ -161,8 +161,10 @@ android {
     }
 
     packaging {
-        // 体积优化：SO 解压安装（压缩存进 APK，省 2~3MB；兼容性更稳）
-        jniLibs.useLegacyPackaging = true
+        // 严禁开启 jniLibs.useLegacyPackaging：LSPosed 在微信进程内通过 System.loadLibrary
+        // 从模块 APK 直接 mmap 加载 .so，该机制只对 STORED(未压缩) 生效。开启后 .so 变
+        // DEFLATED，System.loadLibrary 抛 UnsatisfiedLinkError → NativeLoader 类初始化失败
+        // → 整个模块在初始化阶段崩溃，微信里看不到任何模块痕迹，LSPosed 日志也无记录。
         resources.excludes += listOf(
             "kotlin/**",
             "**.bin",
