@@ -12950,6 +12950,13 @@ internal fun ProtobufPacketMiuixPage(
 }
 
 @Composable
+/**
+ * 脚本插件页（以合作仓库 WCXLC-WeChatAI 的脚本实现为准）。
+ *
+ * 页面内容整体改用 h.Hchat.ui.miuix.script.ScriptPluginMiuixTabContent：
+ * 总开关 / 本地插件列表 / 在线插件市场 / 本地插件管理 / 脚本诊断 / 常见问题 / README，
+ * 结构与文案与该仓库一致；外观通过 ScriptUiStyle 兼容层跟随 WCX 现有风格。
+ */
 internal fun ScriptPluginMiuixPage(
     context: Context,
     provider: FeatureSettingsProvider,
@@ -12959,6 +12966,9 @@ internal fun ScriptPluginMiuixPage(
 ) {
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
+    var readmePlugin by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null)
+    }
 
     PageScaffold(
         title = provider.title(),
@@ -12976,16 +12986,22 @@ internal fun ScriptPluginMiuixPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "脚本插件") }
             item {
-                ScriptPluginSettingsMiuixContent.ScriptPluginSettingsContent(
-                    context,
-                    {},
-                    onOpenMarket,
-                    onOpenManager
+                h.Hchat.ui.miuix.script.ScriptPluginMiuixTabContent(
+                    context = context,
+                    onOpenManager = onOpenManager,
+                    onOpenMarket = onOpenMarket,
+                    onOpenReadme = { readmePlugin = it },
                 )
             }
         }
+    }
+    readmePlugin?.let { plugin ->
+        h.Hchat.ui.miuix.script.ScriptPluginReadmeTabDialog(
+            context = context,
+            plugin = plugin,
+            onClose = { readmePlugin = null },
+        )
     }
 }
 

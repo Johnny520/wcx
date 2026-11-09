@@ -7,7 +7,7 @@ import java.util.UUID
 
 object PluginMarketSettings {
     const val DEFAULT_SERVICE_URL = "https://hchat.103.97.179.142.sslip.io"
-    private const val LEGACY_SERVICE_URL = "https://hchat.103.189.141.120.sslip.io"
+    const val BACKUP_SERVICE_URL = "https://hchat.103.189.141.120.sslip.io"
     const val PREFS_NAME = "Hchat_script_plugin_market"
 
     private const val KEY_SERVICE_URL = "service_url"
@@ -16,16 +16,22 @@ object PluginMarketSettings {
 
     private val lock = Any()
 
+    /** 内置可选服务器列表（第一个为默认），供市场设置页切换。 */
+    fun presetServiceUrls(): List<String> = listOf(DEFAULT_SERVICE_URL, BACKUP_SERVICE_URL)
+
+    /** 预设服务器对应的展示名；非预设地址原样返回。 */
+    fun presetLabel(url: String): String = when (url) {
+        DEFAULT_SERVICE_URL -> "官方服务器（默认）"
+        BACKUP_SERVICE_URL -> "备用服务器"
+        else -> url
+    }
+
     fun serviceUrl(context: Context): String {
         val configured = preferences(context).getString(KEY_SERVICE_URL, DEFAULT_SERVICE_URL)
             ?.trim()
             ?.trimEnd('/')
             .orEmpty()
-        return when {
-            configured.isBlank() -> DEFAULT_SERVICE_URL
-            configured == LEGACY_SERVICE_URL -> DEFAULT_SERVICE_URL
-            else -> configured
-        }
+        return configured.ifBlank { DEFAULT_SERVICE_URL }
     }
 
     fun saveServiceUrl(context: Context, value: String) {

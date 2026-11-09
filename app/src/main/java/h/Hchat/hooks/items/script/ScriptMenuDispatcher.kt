@@ -49,6 +49,8 @@ object ScriptMenuDispatcher {
     private val plusItemIds = AtomicInteger(PLUS_ITEM_ID_START)
     private val messageItemIds = AtomicInteger(MESSAGE_ITEM_ID_START)
     private val knownPlusItemIds = ConcurrentHashMap.newKeySet<Int>()
+    @Volatile private var featureContext: FeatureContext? = null
+    @Volatile private var messageHooksInstalled = false
     private val plusEntries = ConcurrentHashMap<String, PlusEntry>()
     private val messageEntries = ConcurrentHashMap<String, MessageEntry>()
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
@@ -62,6 +64,7 @@ object ScriptMenuDispatcher {
         WeakHashMap<MenuItem, MessageMenuTarget>()
     )
     private val messageBindingsById = ConcurrentHashMap<Int, MessageMenuTarget>()
+    private val assignedMessageEntries = ConcurrentHashMap<Int, MessageEntry>()
     @Volatile
     private var lastPlusClickId = Int.MIN_VALUE
     @Volatile
@@ -75,7 +78,7 @@ object ScriptMenuDispatcher {
     @Volatile
     private var logger: ((String, Throwable?) -> Unit)? = null
 
-    data class ScriptMenuHandle internal constructor(
+    class ScriptMenuHandle internal constructor(
         private val token: String,
         private val removeAction: (String) -> Unit
     ) {
@@ -88,6 +91,12 @@ object ScriptMenuDispatcher {
         fun unregister() = remove()
 
         fun isRegistered(): Boolean = !removed.get() && ScriptMenuDispatcher.isRegisteredToken(token)
+
+        override fun toString(): String = "ScriptMenuHandle($token)"
+
+        override fun equals(other: Any?): Boolean = other is ScriptMenuHandle && other.token == token
+
+        override fun hashCode(): Int = token.hashCode()
     }
 
     private data class PlusEntry(
@@ -126,16 +135,17 @@ object ScriptMenuDispatcher {
     ): Boolean {
         settingsDexFinder = finder
         logger = log
+        featureContext = context
         val plusInstalled = installPlusMenuHooks(finder)
-        val messageInstalled = installMessageMenuHooks(context, log)
+        messageHooksInstalled = installMessageMenuHooks(context, log)
         if (!plusInstalled && plusEntries.isNotEmpty()) {
             log("脚本右上角加号菜单Hook未安装", null)
         }
-        if (!messageInstalled && messageEntries.isNotEmpty()) {
+        if (!messageHooksInstalled) {
             log("脚本长按消息菜单Hook未安装", null)
         }
         refreshPlusMenus()
-        return plusInstalled && messageInstalled
+        return plusInstalled && messageHooksInstalled
     }
 
     fun registerPlusMenu(
@@ -192,6 +202,7 @@ object ScriptMenuDispatcher {
             sequence = order,
             onClick = onClick
         )
+        ensureMessageMenuHooks()
         return ScriptMenuHandle(token, ::unregister)
     }
 
@@ -270,6 +281,16 @@ object ScriptMenuDispatcher {
         return adapterInstalled && clickInstalled
     }
 
+    private fun ensureMessageMenuHooks() {
+        if (messageHooksInstalled) return
+        val context = featureContext ?: return
+        val log = logger ?: return
+        messageHooksInstalled = installMessageMenuHooks(context, log)
+        if (!messageHooksInstalled) {
+            log("脚本长按消息菜单Hook未安装", null)
+        }
+    }
+
     private fun installMessageMenuHooks(
         context: FeatureContext,
         log: (String, Throwable?) -> Unit
@@ -290,7 +311,7 @@ object ScriptMenuDispatcher {
                 }
             }) || clickHooked
         }
-        return createHooked && clickHooked
+        return createHooked
     }
 
     private fun hookOnce(method: Method, callback: XC_MethodHook): Boolean {
@@ -405,43 +426,93 @@ object ScriptMenuDispatcher {
         if (active.isEmpty()) return
         val menu = param.args?.getOrNull(0) ?: return
         val view = param.args?.getOrNull(1) as? View ?: return
-        val target = resolveMessageTarget(view, param.args) ?: return
+        val target = resolveMessageTarget(view, param.args)
+        if (target == null) {
+            logError(
+                "脚本长按消息菜单未解析到消息 tag=${view.tag?.javaClass?.name}",
+                null
+            )
+            return
+        }
         val frontItems = ArrayList<MenuItem>()
         active.forEach { entry ->
             val item = addMessageMenuItem(menu, view, entry) ?: return@forEach
             messageBindings[item] = target
             messageBindingsById[item.itemId] = target
+            assignedMessageEntries[item.itemId] = entry
             if (entry.front) frontItems += item
         }
         moveMessageItemsToFront(menu, frontItems)
+        ensureRuntimeMenuClickHook(menu)
     }
 
     private fun handleMessageMenuClick(param: XC_MethodHook.MethodHookParam) {
         val item = param.args?.firstNotNullOfOrNull { it as? MenuItem } ?: return
-        val entry = messageEntries.values.firstOrNull { it.itemId == item.itemId } ?: return
-        param.result = null
+        if (dispatchMessageMenuClickById(item.itemId, item)) {
+            param.result = null
+        }
+    }
+
+    private fun ensureRuntimeMenuClickHook(menu: Any) {
+        var current: Class<*>? = menu.javaClass
+        while (current != null && current != Any::class.java) {
+            val method = current.declaredMethods.firstOrNull { candidate ->
+                candidate.name == "performIdentifierAction" &&
+                    candidate.parameterTypes.contentEquals(
+                        arrayOf(Integer.TYPE, Integer.TYPE)
+                    )
+            }
+            if (method != null) {
+                hookOnce(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val itemId = (param.args?.getOrNull(0) as? Number)?.toInt() ?: return
+                        if (dispatchMessageMenuClickById(itemId, null)) {
+                            param.result = true
+                        }
+                    }
+                })
+                return
+            }
+            current = current.superclass
+        }
+    }
+
+    private fun dispatchMessageMenuClick(item: MenuItem): Boolean {
+        return dispatchMessageMenuClickById(item.itemId, item)
+    }
+
+    private fun dispatchMessageMenuClickById(itemId: Int, item: MenuItem?): Boolean {
+        val title = item?.title?.toString()
+        val entry = messageEntries.values.firstOrNull { it.itemId == itemId }
+            ?: assignedMessageEntries[itemId]
+            ?: messageEntries.values.firstOrNull { title != null && it.title == title }
+            ?: return false
         val now = System.currentTimeMillis()
-        if (lastMessageClickId == item.itemId && now - lastMessageClickAt < CLICK_DEDUP_MS) return
-        lastMessageClickId = item.itemId
+        if (lastMessageClickId == itemId && now - lastMessageClickAt < CLICK_DEDUP_MS) return true
+        lastMessageClickId = itemId
         lastMessageClickAt = now
-        val target = messageBindings.remove(item)
-            ?: messageBindingsById.remove(item.itemId)
+        val target = item?.let { messageBindings.remove(it) }
+            ?: messageBindingsById.remove(itemId)
+            ?: messageBindingsById.remove(entry.itemId)
         clearMessageBindings()
         if (target == null) {
             logError("脚本长按消息菜单缺少消息绑定: ${entry.title}", null)
-            return
+            return true
         }
         runCatching { entry.onClick(target.message) }
             .onFailure { logError("脚本长按消息菜单回调失败: ${entry.title}", it) }
+        return true
     }
 
     private fun resolveMessageTarget(view: View, args: Array<Any?>?): MessageMenuTarget? {
-        val native = resolveNativeMessage(view.tag)
+        val native = messageFromViewTag(view.tag)
+            ?: resolveNativeMessage(view.tag)
             ?: resolveNativeMessage(args)
             ?: return null
         val id = nativeMessageId(native)
         if (id <= 0L) return null
         val message = runCatching { WeChatApis.messageStore()?.getMessageById(id) }.getOrNull()
+            ?: weChatMessageFromNative(native, id)
             ?: return null
         return MessageMenuTarget(ScriptMessageBean(message))
     }
@@ -673,6 +744,7 @@ object ScriptMenuDispatcher {
     private fun clearMessageBindings() {
         messageBindings.clear()
         messageBindingsById.clear()
+        assignedMessageEntries.clear()
     }
 
     private fun resolveNativeMessage(source: Any?): Any? {
@@ -680,9 +752,58 @@ object ScriptMenuDispatcher {
         return resolveNativeMessage(source, visited, 0)
     }
 
+    private fun messageFromViewTag(tag: Any?): Any? {
+        if (tag == null) return null
+        runCatching {
+            com.Johnny.wcx.features.api.core.WeMessageApi.getMsgInfoFromTag(tag)
+        }.getOrNull()?.takeIf { nativeMessageId(it) > 0L }?.let { return it }
+        var current: Class<*>? = tag.javaClass
+        while (current != null && current != Any::class.java) {
+            if (current.name.startsWith("com.tencent.mm.ui.chatting.viewitems.")) {
+                for (method in KavaReflector.declaredMethods(current)) {
+                    if (method.parameterCount != 0 || Modifier.isStatic(method.modifiers)) continue
+                    if (method.returnType == Void.TYPE || method.returnType.isPrimitive) continue
+                    val value = runCatching { KavaReflector.invoke(method, tag) }.getOrNull() ?: continue
+                    if (isNativeMessage(value) && nativeMessageId(value) > 0L) return value
+                    val inner = (value as? java.lang.ref.Reference<*>)?.get() ?: continue
+                    if (isNativeMessage(inner) && nativeMessageId(inner) > 0L) return inner
+                }
+            }
+            current = current.superclass
+        }
+        return null
+    }
+
+    private fun weChatMessageFromNative(native: Any, id: Long): h.Hchat.hooks.api.model.WeChatMessage? {
+        if (id <= 0L) return null
+        fun num(name: String): Long =
+            (KavaReflector.readField(native, name) as? Number)?.toLong() ?: 0L
+        fun int(name: String): Int =
+            (KavaReflector.readField(native, name) as? Number)?.toInt() ?: 0
+        fun str(name: String): String =
+            (KavaReflector.readField(native, name) as? String).orEmpty()
+        return h.Hchat.hooks.api.model.WeChatMessage(
+            id,
+            num("field_msgSvrId"),
+            int("field_type"),
+            int("field_status"),
+            int("field_isSend"),
+            num("field_createTime"),
+            str("field_talker"),
+            str("field_content"),
+            str("field_imgPath"),
+            str("field_reserved"),
+            str("field_transContent"),
+            int("field_flag")
+        )
+    }
+
     private fun resolveNativeMessage(source: Any?, visited: MutableSet<Any>, depth: Int): Any? {
         if (source == null || depth > 5 || !visited.add(source)) return null
         if (isNativeMessage(source) && nativeMessageId(source) > 0L) return source
+        if (source is java.lang.ref.Reference<*>) {
+            return resolveNativeMessage(source.get(), visited, depth + 1)
+        }
         if (source is View) return resolveNativeMessage(source.tag, visited, depth + 1)
         if (source is Array<*>) {
             source.forEach { item ->
@@ -692,6 +813,12 @@ object ScriptMenuDispatcher {
         }
         if (source is Collection<*>) {
             source.forEach { item ->
+                resolveNativeMessage(item, visited, depth + 1)?.let { return it }
+            }
+            return null
+        }
+        if (source is Map<*, *>) {
+            source.values.forEach { item ->
                 resolveNativeMessage(item, visited, depth + 1)?.let { return it }
             }
             return null
@@ -712,18 +839,35 @@ object ScriptMenuDispatcher {
         return null
     }
 
-    private fun isNativeMessage(value: Any): Boolean = isNativeMessageClass(value.javaClass)
+    private fun isNativeMessage(value: Any): Boolean {
+        if (isNativeMessageClass(value.javaClass)) return true
+        return hasMsgInfoShape(value.javaClass) && nativeMessageId(value) > 0L
+    }
 
     private fun isNativeMessageClass(clazz: Class<*>): Boolean =
         clazz.name.startsWith("com.tencent.mm.storage.")
 
+    private fun hasMsgInfoShape(clazz: Class<*>): Boolean {
+        val names = HashSet<String>()
+        var current: Class<*>? = clazz
+        while (current != null && current != Any::class.java) {
+            KavaReflector.declaredFields(current).forEach { names += it.name }
+            current = current.superclass
+        }
+        return "field_msgId" in names && ("field_talker" in names || "field_content" in names)
+    }
+
     private fun nativeMessageId(message: Any): Long {
-        KavaReflector.declaredMethods(message.javaClass).firstOrNull { method ->
-            method.parameterCount == 0 &&
-                (method.name == "getMsgId" || method.name == "getMsgID" || method.name == "getId") &&
-                (method.returnType == Long::class.javaPrimitiveType || method.returnType == Long::class.java)
-        }?.let { method ->
-            (KavaReflector.invoke(method, message) as? Number)?.toLong()?.let { return it }
+        var current: Class<*>? = message.javaClass
+        while (current != null && current != Any::class.java) {
+            KavaReflector.declaredMethods(current).firstOrNull { method ->
+                method.parameterCount == 0 &&
+                    (method.name == "getMsgId" || method.name == "getMsgID" || method.name == "getId") &&
+                    (method.returnType == Long::class.javaPrimitiveType || method.returnType == Long::class.java)
+            }?.let { method ->
+                (KavaReflector.invoke(method, message) as? Number)?.toLong()?.takeIf { it > 0L }?.let { return it }
+            }
+            current = current.superclass
         }
         return listOf("field_msgId", "msgId", "msgID", "id")
             .firstNotNullOfOrNull { name ->
