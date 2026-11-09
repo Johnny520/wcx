@@ -123,6 +123,12 @@ import androidx.compose.ui.text.style.TextOverflow
 )
 object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
+    /**
+     * 纯操作型功能：点进去直接扫描/删除，不需要外层开关（用户反馈）。
+     * noSwitchWidget=true 后分类页/功能页只显示条目与齿轮，不显示开关。
+     */
+    override val noSwitchWidget = true
+
     private const val TAG = "BatchDeleteMoments"
 
     /**

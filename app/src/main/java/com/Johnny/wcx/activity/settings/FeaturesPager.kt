@@ -66,6 +66,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import com.Johnny.wcx.ui.style.SectionLabel
 import com.composables.icons.materialsymbols.outlined.Category
+import com.Johnny.wcx.features.core.ClickableFeature
 
 
 // ---------------------------------------------------------------------------
