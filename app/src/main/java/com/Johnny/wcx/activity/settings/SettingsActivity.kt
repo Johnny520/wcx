@@ -212,9 +212,9 @@ private fun SettingsRoot(onFinish: () -> Unit) {
     // 1) Hchat 脚本设置浮层开着 → 先关浮层；
     // 2) 停在子页面（分类详情/自检/日志等）→ 逐级 pop；
     // 3) 已在主页 → 交给 MainPagerScreen 内层的 BackHandler（先回 pager 第 0 页再退出）。
+    val rootActivity = LocalComponentActivity.current
     androidx.activity.compose.BackHandler {
-        val act = LocalComponentActivity.current
-        if (runCatching { h.Hchat.ui.miuix.MiuixSettingsPage.closeIfOpen(act) }.getOrDefault(false)) {
+        if (runCatching { h.Hchat.ui.miuix.MiuixSettingsPage.closeIfOpen(rootActivity) }.getOrDefault(false)) {
             return@BackHandler
         }
         if (stack.size > 1) {
