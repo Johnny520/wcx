@@ -548,16 +548,127 @@ fun CategoryDetailScreen(
                 SectionLabel("功能", modifier = Modifier.padding(start = 6.dp, top = 16.dp, bottom = 6.dp))
             }
 
-            itemsIndexed(items, key = { _, item -> item.name }) { index, item ->
-                SoftCard(modifier = Modifier.padding(top = if (index == 0) 0.dp else 2.dp)) {
-                    FeatureRow(
-                        item = item,
-                        checked = switchStates[item.name] ?: ((item as? SwitchFeature)?.isEnabled == true),
-                        onCheckedChange = { switchStates[item.name] = it },
-                    )
-                    item.Ui()
+            // 功能列表：一张白卡分组（iOS 风格），行间用细分隔线，行高紧凑
+            item {
+                SoftCard(contentPadding = 0) {
+                    Column {
+                        items.forEachIndexed { index, item ->
+                            CatRow(
+                                item = item,
+                                checked = switchStates[item.name] ?: ((item as? SwitchFeature)?.isEnabled == true),
+                                onCheckedChange = { switchStates[item.name] = it },
+                            )
+                            if (index != items.lastIndex) {
+                                SoftDivider(modifier = Modifier.padding(start = 14.dp))
+                            } else {
+                                Spacer(Modifier.height(4.dp))
+                            }
+                        }
+                    }
                 }
             }
+            // 部分功能带内嵌设置面板（item.Ui()），单独渲染在列表下方
+            items.forEach { item -> item.Ui() }
+        }
+    }
+}
+
+/**
+ * 分类详情页的紧凑功能行（自绘，替代 miuix BasicComponent/SwitchPreference 的高行）：
+ * 标题 + 描述两行内完成，开关右贴齐；带配置面板的功能显示齿轮图标。
+ * 开关逻辑与 SettingsActivity.FeatureRow 完全一致（unavailable 拦截 / onBeforeToggle / ClickableFeature）。
+ */
+@Composable
+private fun CatRow(
+    item: com.Johnny.wcx.features.core.BaseFeature,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val context = LocalComponentActivity.current
+    val configKey = item.name
+
+    // 非 SwitchFeature：纯信息行（API 服务/常驻项），无开关
+    if (item !is SwitchFeature) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp)) {
+            Text(
+                text = item.name,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = WxPalette.textPrimary(),
+            )
+            if (item.description.isNotBlank()) {
+                Text(
+                    text = item.description,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = WxPalette.textSecondary(),
+                )
+            }
+        }
+        return
+    }
+
+    androidx.compose.runtime.DisposableEffect(configKey) {
+        item.setToggleCompletionCallback { onCheckedChange(item.isEnabled) }
+        onDispose { }
+    }
+
+    fun toggle(requested: Boolean) {
+        val unavailable = if (requested) item.unavailableReason else null
+        if (unavailable != null) {
+            com.Johnny.wcx.utils.WeLogger.w("CatRow", "拒绝开启 ${item.name}：$unavailable")
+            com.Johnny.wcx.utils.android.showToast(unavailable)
+            return
+        }
+        if (item.onBeforeToggle(requested, context)) {
+            com.Johnny.wcx.preferences.WePrefs.putBool(configKey, requested)
+            item.isEnabled = requested
+            onCheckedChange(requested)
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                if (item is ClickableFeature) {
+                    runCatching { item.onClick(context) }
+                        .onFailure { com.Johnny.wcx.utils.WeLogger.e("CatRow", "onClick failed: ${item.name}", it) }
+                }
+            }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = item.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = WxPalette.textPrimary(),
+                )
+                if (item is ClickableFeature) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = MaterialSymbols.Outlined.Settings,
+                        contentDescription = "可配置",
+                        modifier = Modifier.size(15.dp),
+                        tint = WxPalette.textSecondary(),
+                    )
+                }
+            }
+            if (item.description.isNotBlank()) {
+                Text(
+                    text = item.description,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = WxPalette.textSecondary(),
+                )
+            }
+        }
+        if (!(item is ClickableFeature && item.noSwitchWidget)) {
+            Spacer(Modifier.width(10.dp))
+            Switch(checked = checked, onCheckedChange = { toggle(it) })
         }
     }
 }

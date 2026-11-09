@@ -79,6 +79,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.Johnny.wcx.features.hchat.HchatBootstrap
 
 /**
  * 模块自检（最外层 / 全量）：把整个模块的公共依赖逐项扫描出来；「一键修复」= 体检 → 修复 → 复检 → 前后对比。
@@ -736,6 +737,8 @@ private fun showReportDialog(context: Context, title: String, items: List<Health
 
 private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能清单与分类启用概况") { featureOverview() },
+    HealthStep("脚本子系统") { scriptSubsystemSection(context) },
+    HealthStep("功能实测") { unavailableFeaturesSection() },
     HealthStep("关键类锚点") { anchors() },
     HealthStep("DexKit 锚点") { dexAnchorSection() },
     HealthStep("功能活体") { liveSection() },
@@ -1123,6 +1126,130 @@ private fun conflictSection(context: Context): List<HealthItem> {
             )
         }
     }
+    return out
+}
+
+/** 脚本子系统（Hchat 回归）：引导/设置页注册/总开关/目录/插件加载状态/公共 API，逐项实测。 */
+private fun scriptSubsystemSection(context: Context): List<HealthItem> {
+    val section = "脚本子系统"
+    val out = mutableListOf<HealthItem>()
+
+    val bootstrapped = runCatching { HchatBootstrap.bootstrapped }.getOrDefault(false)
+    out += HealthItem(
+        "Hchat 引导", section, if (bootstrapped) "已完成" else "未完成", bootstrapped,
+        if (bootstrapped) "WechatApiFeature 与 ScriptPluginFeature 均已安装，脚本运行时可用。"
+        else "脚本子系统引导未完成：微信重启后约 10 秒会在后台自动重试；多次失败请把日志发给开发者（tag: WCX:HchatBootstrap）。",
+    )
+
+    val providerReady = runCatching {
+        h.Hchat.ui.UIRegistry.get().getAllProviders().any { it.featureId() == "script_plugin" }
+    }.getOrDefault(false)
+    out += HealthItem(
+        "脚本设置页注册", section, if (providerReady) "已注册" else "未注册", providerReady,
+        if (providerReady) "脚本内容页（总开关/本地插件/在线市场/管理器）可正常打开。"
+        else "设置 provider 未注册 → 主页点「脚本插件」会没有反应。请重启微信让引导重跑，仍不行请导出日志。",
+    )
+
+    val globalEnabled = runCatching {
+        h.Hchat.preferences.HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME)
+            .getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE)
+    }.getOrDefault(false)
+    out += HealthItem(
+        "脚本总开关", section, if (globalEnabled) "开启" else "关闭", true,
+        if (globalEnabled) "已开启，启用中的插件会随微信启动自动加载。"
+        else "总开关关闭：所有脚本插件都不会加载。",
+        actionLabel = if (globalEnabled) null else "开启",
+        action = if (globalEnabled) null else {
+            {
+                runCatching { ScriptPluginRuntime.setGlobalEnabled(context, true) }
+                "脚本总开关已开启；到「脚本插件」内容页逐个启用插件。"
+            }
+        },
+        inactive = !globalEnabled,
+    )
+
+    val dirInfo = runCatching {
+        val dir = ScriptPluginRuntime.scriptDir(context)
+        Triple(dir.absolutePath, dir.isDirectory, dir.isDirectory && dir.canWrite())
+    }.getOrElse { e -> Triple("读取失败: ${e.message}", false, false) }
+    out += HealthItem(
+        "脚本目录", section,
+        if (dirInfo.second) if (dirInfo.third) "可写" else "不可写" else "缺失",
+        dirInfo.second && dirInfo.third,
+        "路径：${dirInfo.first}\n目录缺失或不可写时插件无法加载；可在「脚本插件 → 插件目录」查看同一信息。",
+    )
+
+    val plugins = runCatching { ScriptPluginManager.listForDisplay(context) }.getOrDefault(emptyList())
+    out += HealthItem(
+        "已装插件", section, "${plugins.size} 个", true,
+        if (plugins.isEmpty())
+            "脚本目录里还没有插件。把插件文件夹放进脚本目录后，在「脚本插件 → 本地插件管理」里刷新。"
+        else
+            plugins.joinToString("\n") { mp ->
+                val v = mp.plugin.version
+                "· " + (mp.plugin.displayName?.takeIf { it.isNotBlank() } ?: mp.plugin.name) + (if (v.isNotBlank()) "  v$v" else "")
+            },
+        inactive = plugins.isEmpty(),
+    )
+
+    if (plugins.isNotEmpty() && globalEnabled) {
+        val states = plugins.map { mp ->
+            val snap = runCatching { ScriptPluginRuntime.pluginRuntimeSnapshot(mp.plugin.id) }.getOrNull()
+            val enabled = runCatching { ScriptPluginRuntime.isPluginEnabled(context, mp.plugin.id) }.getOrDefault(false)
+            Triple(mp.plugin.id, enabled, snap)
+        }
+        val loadedCount = states.count { it.third?.loaded == true }
+        val allDisabled = states.all { !it.second }
+        out += HealthItem(
+            "插件加载状态", section, "$loadedCount/${states.size} 已加载",
+            states.all { !it.second || (it.third?.loaded == true) },
+            states.joinToString("\n") { (id, enabled, snap) ->
+                val st = when {
+                    !enabled -> "未启用"
+                    snap == null -> "状态读取失败"
+                    snap.loaded -> "已加载（运行中）"
+                    else -> "已启用但未加载——可能加载时抛错，看日志 tag: Hchat:ScriptPlugin"
+                }
+                "· $id：$st"
+            } + (if (allDisabled) "\n\n还没有任何插件被启用；启用后这里应变为「已加载」。" else ""),
+            inactive = allDisabled,
+        )
+    }
+
+    val apis = runCatching {
+        listOf(
+            "database" to (h.Hchat.hooks.api.core.WeChatApis.database() != null),
+            "contacts" to (h.Hchat.hooks.api.core.WeChatApis.contacts() != null),
+            "account" to (h.Hchat.hooks.api.core.WeChatApis.account() != null),
+        )
+    }.getOrDefault(listOf("读取失败" to false))
+    val okApis = apis.count { it.second }
+    out += HealthItem(
+        "脚本公共 API", section, "$okApis/${apis.size} 就绪", okApis == apis.size,
+        apis.joinToString("\n") { (name, ok) -> (if (ok) "✅ " else "❌ ") + name } +
+            (if (okApis < apis.size) "\n\n公共 API 未就绪：依赖它的脚本能力（发消息/联系人/数据库读写）会失败。" else ""),
+    )
+    return out
+}
+
+/** 功能实测：所有「当前微信版本已不支持」的开关型功能逐一列出——这就是真正用不了的清单。 */
+private fun unavailableFeaturesSection(): List<HealthItem> {
+    val section = "功能实测"
+    val out = mutableListOf<HealthItem>()
+    val unavailable = FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<SwitchFeature>()
+        .filter { it.unavailableReason != null }
+    if (unavailable.isEmpty()) {
+        out += HealthItem(
+            "失效功能", section, "无", true,
+            "当前微信版本上，所有开关型功能均通过各自的可用性判定（unavailableReason 为空）。",
+        )
+        return out
+    }
+    out += HealthItem(
+        "失效功能", section, "${unavailable.size} 项不可用", false,
+        unavailable.joinToString("\n") { "· ${it.name}：${it.unavailableReason}" } +
+            "\n\n这些功能在当前微信版本上已被微信改动，开启也不会生效，需要等特征适配。",
+    )
     return out
 }
 

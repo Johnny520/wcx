@@ -569,6 +569,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
+import com.Johnny.wcx.utils.WeLogger
 
 internal const val UI_PREFS_NAME = "Hchat_miuix_ui"
 internal const val KEY_FLOATING_NAV = "floating_nav"
@@ -1033,6 +1034,8 @@ object MiuixSettingsPage {
         show(context, DetailPage.ScriptPluginAgent(), floatingAgent = false)
     }
 
+    private const val TAG_WCX = "WCX-HchatUI"
+
     /**
      * WCX：若脚本设置浮层正处于打开状态则关闭它，并返回是否真的关闭了一个浮层。
      * 供宿主 Activity 的返回键处理兜底（防止 Xposed 层 back hook 在模块自身 Activity 上失效时浮层关不掉）。
@@ -1097,8 +1100,17 @@ object MiuixSettingsPage {
         floatingAgent: Boolean,
         initialTab: MainTab = MainTab.PRACTICAL
     ) {
-        val activity = context.findHostActivity() ?: return
-        val decor = activity.window?.decorView as? ViewGroup ?: return
+        val activity = context.findHostActivity()
+        if (activity == null) {
+            WeLogger.e(TAG_WCX, "showScriptPlugin: 拿不到宿主 Activity（context=" + context.javaClass.name + "），浮层不显示")
+            return
+        }
+        val decor = activity.window?.decorView as? ViewGroup
+        if (decor == null) {
+            WeLogger.e(TAG_WCX, "showScriptPlugin: 拿不到 decorView，浮层不显示")
+            return
+        }
+        WeLogger.i(TAG_WCX, "showScriptPlugin: 打开浮层 activity=" + activity.javaClass.simpleName + " initialTab=" + initialTab)
         removeExistingPage(decor)
 
         val hostTag = SettingsPageHostTag(floatingAgent)
@@ -1374,6 +1386,10 @@ object MiuixSettingsPage {
                 "[Hchat:MiuixSettings] 创建页面 ComposeView 失败: ${throwable.message}",
                 throwable
             )
+            WeLogger.e(TAG_WCX, "创建脚本设置浮层失败(ComposeView): ${throwable}", throwable)
+            runCatching {
+                android.widget.Toast.makeText(activity, "脚本页打开失败: ${throwable.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
             return
         }
 
@@ -1393,8 +1409,13 @@ object MiuixSettingsPage {
                 "[Hchat:MiuixSettings] 创建页面 Composition 失败: ${throwable.message}",
                 throwable
             )
+            WeLogger.e(TAG_WCX, "脚本设置浮层渲染失败(Composition): ${throwable}", throwable)
+            runCatching {
+                android.widget.Toast.makeText(activity, "脚本页渲染失败: ${throwable.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
             return
         }
+        WeLogger.i(TAG_WCX, "showScriptPlugin: 浮层已挂载")
         installActivityBackHooks()
         page.requestFocus()
     }
