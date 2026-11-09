@@ -591,7 +591,7 @@ private fun CatRow(
     val configKey = item.name
 
     // 非 SwitchFeature：纯信息行（API 服务/常驻项），无开关
-    if (item !is SwitchFeature) {
+    if (item !is com.Johnny.wcx.features.core.SwitchFeature) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp)) {
             Text(
                 text = item.name,
