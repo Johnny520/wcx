@@ -161,6 +161,8 @@ android {
     }
 
     packaging {
+        // 体积优化：SO 解压安装（压缩存进 APK，省 2~3MB；兼容性更稳）
+        jniLibs.useLegacyPackaging = true
         resources.excludes += listOf(
             "kotlin/**",
             "**.bin",
@@ -302,6 +304,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
     implementation(libs.coil.network.okhttp)
+
+    implementation(libs.composablehorizons.material.symbols.filled)
+    implementation(libs.composablehorizons.material.symbols.outlined)
 
     implementation(libs.google.protobuf.javalite)
     implementation(libs.kotlinx.serialization.json)
