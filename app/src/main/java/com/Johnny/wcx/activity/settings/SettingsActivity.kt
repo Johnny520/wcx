@@ -208,6 +208,22 @@ private fun SettingsRoot(onFinish: () -> Unit) {
         }
     }
 
+    // 全局返回链（用户要求：任何子页面按返回都逐级回退，而不是直接退到微信主界面）：
+    // 1) Hchat 脚本设置浮层开着 → 先关浮层；
+    // 2) 停在子页面（分类详情/自检/日志等）→ 逐级 pop；
+    // 3) 已在主页 → 交给 MainPagerScreen 内层的 BackHandler（先回 pager 第 0 页再退出）。
+    androidx.activity.compose.BackHandler {
+        val act = LocalComponentActivity.current
+        if (runCatching { h.Hchat.ui.miuix.MiuixSettingsPage.closeIfOpen(act) }.getOrDefault(false)) {
+            return@BackHandler
+        }
+        if (stack.size > 1) {
+            stack.removeAt(stack.lastIndex)
+        } else {
+            onFinish()
+        }
+    }
+
     MiuixStackNavigator(stack = stack, onExitRoot = onFinish) { screen, push, pop ->
         when (screen) {
             SettingsNavTarget.Main -> MainPagerScreen(

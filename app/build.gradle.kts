@@ -315,10 +315,14 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.serialization.protobuf)
     implementation(libs.mmkv)
-    // Termux 终端（GPLv3）：terminal-view 依赖 terminal-emulator
+    // Termux 终端（GPLv3）：agent/ProotTerminalView 编译期依赖 terminal-view/emulator
     implementation(files("libs/terminal-emulator-0.118.0.aar"))
     implementation(files("libs/terminal-view-0.118.0.aar"))
     // Hchat 脚本子系统依赖（迁移）
+    // Hchat 设置浮层渲染依赖 lifecycle-viewmodel-compose（LocalViewModelStoreOwner），
+    // 缺了会 NoClassDefFoundError 导致脚本页打不开（上游 build.gradle 里有这两项）
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.savedstate:savedstate:1.2.1")
     implementation("io.github.billywei01:fastkv:3.0.1")
     implementation("com.google.flatbuffers:flatbuffers-java:23.5.26")
     implementation("dev.rikka.ndk.thirdparty:cxx:1.2.0")
