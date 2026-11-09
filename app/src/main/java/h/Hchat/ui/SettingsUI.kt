@@ -10,11 +10,6 @@ object SettingsUI {
     }
 
     @JvmStatic
-    fun showScriptPluginAgent(context: Context) {
-        MiuixSettingsPage.showScriptPluginAgent(context)
-    }
-
-    @JvmStatic
     fun showFeature(context: Context, featureId: String): Boolean {
         return MiuixSettingsPage.showFeature(context, featureId)
     }

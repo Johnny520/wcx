@@ -21,9 +21,6 @@ import h.Hchat.hooks.items.miniprogramsplashad.SkipGlobalMiniProgramSplashAdsFea
 import h.Hchat.hooks.items.miniprogramvideoad.SkipMiniProgramVideoAdsFeature;
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutRuntime;
 import h.Hchat.hooks.items.script.ScriptPluginRuntime;
-import h.Hchat.hooks.items.script.agent.CodexWebGuard;
-import h.Hchat.hooks.items.script.agent.ModuleResourceMenuFallback;
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentLocalReverseTools;
 import h.Hchat.hooks.items.tablet.WeChatTabletFeature;
 import h.Hchat.loader.utils.NativeLibraryLoader;
 import h.Hchat.preferences.ConfigStore;
@@ -416,7 +413,6 @@ public class ModuleEntry implements IXposedHookLoadPackage {
             Context moduleContext = createModuleContext(hostContext);
             ConfigStore configStore = new ConfigStore(hostContext);
 
-            ModuleResourceMenuFallback.INSTANCE.install(resolveHostClassLoader(hostContext, lpparam));
 
             DexInstallScheduler.runDexKitTask(() -> {
                 // 3. 初始化 DexKit。优先使用 Tinker 之后的运行时 ClassLoader。
@@ -431,7 +427,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                 // 4. 创建共享 DexKit 服务
                 DexBridgeHolder dexBridgeHolder = new DexBridgeHolder(
                         dexKit, finder, hostClassLoader, apkPath);
-                ScriptPluginAgentLocalReverseTools.install(dexBridgeHolder, hostContext);
+                // Agent 已移除：本地逆向工具不再安装
 
                 // 5. 创建统一上下文
                 featureContext = new FeatureContext(
@@ -452,7 +448,6 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                 featureManager.installAll(featureContext);
 
                 // codex 网页版保活：微信进程重启后把上次开着的服务自动拉回来
-                CodexWebGuard.INSTANCE.restore(hostContext);
 
                 // 7. 防崩兜底：微信 8.0.76 消息描述文本方法对 null 调 isEmpty() 崩溃（收到特殊小程序电商卡片消息触发）
                 installMsgDescTextFallback(finder);

@@ -3,7 +3,7 @@ package h.Hchat.hooks.items.script
 import android.content.Context
 import android.content.SharedPreferences
 import android.system.Os
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceTools
+import h.Hchat.hooks.items.script.ScriptWorkspaceAccess
 import h.Hchat.preferences.HchatStorage
 import h.Hchat.utils.HLog
 import org.json.JSONArray
@@ -339,7 +339,7 @@ object ScriptPluginManager {
             }
             val root = securePluginRoot(context)
             val target = requirePluginDirectory(root, pluginId)
-            ScriptPluginAgentWorkspaceTools.ensureLegacyWriteAccess(root, target)
+            ScriptWorkspaceAccess.ensureLegacyWriteAccess(root, target)
             val info = File(target, "info.prop")
             require(!isSymbolicLink(info)) { "info.prop 不能是符号链接" }
             if (info.exists()) {
@@ -375,7 +375,7 @@ object ScriptPluginManager {
                 val root = securePluginRoot(context)
                 val targets = ids.associateWith { id -> requirePluginDirectory(root, id) }
                 targets.values.forEach { target ->
-                    ScriptPluginAgentWorkspaceTools.ensureLegacyWriteAccess(root, target)
+                    ScriptWorkspaceAccess.ensureLegacyWriteAccess(root, target)
                 }
                 val enabledBefore = capturePluginEnableStates(context, ids, ids.toSet())
                 val displayStateBefore = readDisplayStateRaw(context)

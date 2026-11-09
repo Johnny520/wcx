@@ -68,8 +68,6 @@ public class SettingsInjector {
     private static final String QUICK_READ_PLUS_MENU_TITLE = "全部已读";
     private static final int QUICK_TERMINATE_PLUS_MENU_ID = -1212373072;
     private static final String QUICK_TERMINATE_PLUS_MENU_TITLE = "快捷终止";
-    private static final int PLUGIN_AGENT_PLUS_MENU_ID = -1212373071;
-    private static final String PLUGIN_AGENT_PLUS_MENU_TITLE = "插件 Agent";
 
     private final Context hostContext;
     private final ClassLoader classLoader;
@@ -122,13 +120,8 @@ public class SettingsInjector {
         return QuickTerminateRuntime.isEnabled(hostContext);
     }
 
-    private boolean isPluginAgentPlusMenuEnabled() {
-        return entrySettings != null && entrySettings.pluginAgentPlusMenuEnabled();
-    }
-
     private boolean isPlusMenuHookRequired() {
         return isPlusMenuEnabled()
-                || isPluginAgentPlusMenuEnabled()
                 || isQuickReadPlusMenuEnabled()
                 || isQuickTerminatePlusMenuEnabled();
     }
@@ -868,8 +861,6 @@ public class SettingsInjector {
                         if (context == null) return;
                         if (itemId == HCHAT_PLUS_MENU_ID) {
                             showModuleSettingsPage(context);
-                        } else if (itemId == PLUGIN_AGENT_PLUS_MENU_ID) {
-                            showScriptPluginAgentPage(context);
                         } else if (itemId == QUICK_READ_PLUS_MENU_ID) {
                             QuickMarkReadRuntime.markAllRead(context, true);
                         }
@@ -903,19 +894,12 @@ public class SettingsInjector {
                     QUICK_TERMINATE_PLUS_MENU_ID,
                     QUICK_TERMINATE_PLUS_MENU_TITLE);
         }
-        if (!isPluginAgentPlusMenuEnabled()) {
-            changed |= removePlusMenuItem(
-                    items,
-                    PLUGIN_AGENT_PLUS_MENU_ID,
-                    PLUGIN_AGENT_PLUS_MENU_TITLE);
-        }
         if (!isPlusMenuHookRequired()) {
             if (changed && adapter != null) adapter.notifyDataSetChanged();
             return;
         }
         if (containsPlusMenuItem(items, HCHAT_PLUS_MENU_ID, PREFS_TITLE)
                 && containsPlusMenuItem(items, QUICK_READ_PLUS_MENU_ID, QUICK_READ_PLUS_MENU_TITLE)
-                && containsPlusMenuItem(items, PLUGIN_AGENT_PLUS_MENU_ID, PLUGIN_AGENT_PLUS_MENU_TITLE)
                 && containsPlusMenuItem(
                         items,
                         QUICK_TERMINATE_PLUS_MENU_ID,
@@ -937,18 +921,6 @@ public class SettingsInjector {
         if (isPlusMenuEnabled()
                 && !containsPlusMenuItem(items, HCHAT_PLUS_MENU_ID, PREFS_TITLE)) {
             changed |= appendPlusMenuItem(items, sampleWrapper.getClass(), sampleItem, HCHAT_PLUS_MENU_ID, PREFS_TITLE);
-        }
-        if (isPluginAgentPlusMenuEnabled()
-                && !containsPlusMenuItem(
-                        items,
-                        PLUGIN_AGENT_PLUS_MENU_ID,
-                        PLUGIN_AGENT_PLUS_MENU_TITLE)) {
-            changed |= appendPlusMenuItem(
-                    items,
-                    sampleWrapper.getClass(),
-                    sampleItem,
-                    PLUGIN_AGENT_PLUS_MENU_ID,
-                    PLUGIN_AGENT_PLUS_MENU_TITLE);
         }
         if (isQuickReadPlusMenuEnabled()
                 && !containsPlusMenuItem(items, QUICK_READ_PLUS_MENU_ID, QUICK_READ_PLUS_MENU_TITLE)) {
@@ -1079,12 +1051,6 @@ public class SettingsInjector {
                 QUICK_TERMINATE_PLUS_MENU_ID,
                 QUICK_TERMINATE_PLUS_MENU_TITLE)) {
             return QUICK_TERMINATE_PLUS_MENU_ID;
-        }
-        if (isPlusMenuWrapper(
-                wrapper,
-                PLUGIN_AGENT_PLUS_MENU_ID,
-                PLUGIN_AGENT_PLUS_MENU_TITLE)) {
-            return PLUGIN_AGENT_PLUS_MENU_ID;
         }
         return Integer.MIN_VALUE;
     }
@@ -1421,10 +1387,6 @@ public class SettingsInjector {
 
     private void showModuleSettingsPage(Context context) {
         SettingsUI.show(context);
-    }
-
-    private void showScriptPluginAgentPage(Context context) {
-        SettingsUI.showScriptPluginAgent(context);
     }
 
     private void logDetail(String message) {

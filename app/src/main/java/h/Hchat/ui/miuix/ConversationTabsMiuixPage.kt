@@ -65,7 +65,7 @@ internal fun ConversationTabsMiuixPage(context: Context, onBack: () -> Unit) {
     }
 
     fun pickIcon() {
-        val activity = ScriptPluginAgentUi.findAgentActivity(context) ?: return
+        val activity = context.findHostActivity() ?: return
         val id = draft.id
         ConversationTabsIconPicker.launch(activity, id) { result ->
             when (result) {

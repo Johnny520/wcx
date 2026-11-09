@@ -51,7 +51,6 @@ object FloatingShortcutSettings {
     const val EXPAND_RIGHT = "right"
     const val ACTION_ACTIVITY = "activity"
     const val ACTION_MODULE_SETTINGS = "module_settings"
-    const val ACTION_PLUGIN_AGENT = "plugin_agent"
 
     const val DEFAULT_ENABLE = false
     const val DEFAULT_SCOPE = SCOPE_HOME
@@ -89,8 +88,7 @@ object FloatingShortcutSettings {
                     val target = if (type == ACTION_ACTIVITY) obj.optString("target").trim() else ""
                     if (id.isEmpty() || title.isEmpty()) continue
                     if (type != ACTION_ACTIVITY &&
-                        type != ACTION_MODULE_SETTINGS &&
-                        type != ACTION_PLUGIN_AGENT
+                        type != ACTION_MODULE_SETTINGS
                     ) continue
                     if (type == ACTION_ACTIVITY && target.isEmpty()) continue
                     add(
@@ -107,18 +105,7 @@ object FloatingShortcutSettings {
                 }
             }
         }.getOrDefault(defaultItems())
-        if (preferences.getBoolean(KEY_AGENT_ITEM_MIGRATED, false)) return items
-
-        val migrated = if (items.any { it.actionType == ACTION_PLUGIN_AGENT }) {
-            items
-        } else {
-            listOf(defaultAgentItem()) + items
-        }
-        preferences.edit()
-            .putString(KEY_ITEMS, encodeItems(migrated).toString())
-            .putBoolean(KEY_AGENT_ITEM_MIGRATED, true)
-            .apply()
-        return migrated
+        return items
     }
 
     private fun migrateLegacyAgentSettings(context: Context, preferences: SharedPreferences) {
@@ -183,7 +170,4 @@ object FloatingShortcutSettings {
         FloatingShortcutItem("favorite", "收藏", ACTION_ACTIVITY, "com.tencent.mm.plugin.fav.ui.FavoriteIndexUI"),
         FloatingShortcutItem("wallet", "钱包", ACTION_ACTIVITY, "com.tencent.mm.plugin.mall.ui.MallIndexUIv2")
     )
-
-    private fun defaultAgentItem(): FloatingShortcutItem =
-        FloatingShortcutItem("plugin_agent", "插件 Agent", ACTION_PLUGIN_AGENT, "")
 }

@@ -43,7 +43,6 @@ import com.Johnny.wcx.R
 import h.Hchat.crash.CrashReportRuntime
 import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider
-import h.Hchat.hooks.api.ui.HchatAgentIconDrawable
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutFeature
 import h.Hchat.hooks.items.script.market.PluginMarketClient
 import h.Hchat.hooks.items.script.market.PluginMarketSettings
@@ -426,36 +425,6 @@ import h.Hchat.hooks.items.script.market.PluginMarketPlugin
 import h.Hchat.hooks.items.script.market.PluginMarketRepository
 import h.Hchat.hooks.items.script.market.PluginMarketReviewStatus
 import h.Hchat.hooks.items.script.market.PluginMarketUserIdentity
-import h.Hchat.hooks.items.script.agent.CodexSettings
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentClient
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentAttachment
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentChatMessage
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentConfig
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentCancellation
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentContext
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentDiff
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentDraft
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentEventIds
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentLocalFiles
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentMcpServer
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentReasoning
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentRequest
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentResumeState
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSession
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSessionStore
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSettings
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentProfile
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentQuotedMessage
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSpeech
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentTextMerge
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentToolEvent
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentToolResultStore
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentValidator
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceChange
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceToolConfirmation
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceWriteDecision
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceTools
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWriter
 import h.Hchat.hooks.items.scheduledtask.ScheduledTaskContentItem
 import h.Hchat.hooks.items.scheduledtask.ScheduledTaskFeature
 import h.Hchat.hooks.items.scheduledtask.ScheduledTaskItem
@@ -591,7 +560,6 @@ fun ScriptPluginSettingsContent(
     context: Context,
     onOpenReadme: (ScriptPluginRuntime.ScriptPlugin) -> Unit,
     onOpenMarket: () -> Unit,
-    onOpenAgent: () -> Unit,
     onOpenManager: () -> Unit
 ) {
     val scope = rememberCoroutineScope()

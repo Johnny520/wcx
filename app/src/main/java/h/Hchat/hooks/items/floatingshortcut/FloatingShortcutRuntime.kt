@@ -31,7 +31,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import h.Hchat.hooks.api.core.WeChatApis
-import h.Hchat.hooks.api.ui.HchatAgentIconDrawable
 import h.Hchat.preferences.HchatStorage
 import h.Hchat.ui.SettingsUI
 import h.Hchat.ui.miuix.MiuixSettingsPage
@@ -174,7 +173,6 @@ object FloatingShortcutRuntime {
         if (!installed || currentScope() != FloatingShortcutSettings.SCOPE_HOME) return
         runOnMain {
             if (inChatPage) {
-                currentActivity.get()?.let(MiuixSettingsPage::collapseFloatingScriptPluginAgent)
                 detachNow(null)
                 return@runOnMain
             }
@@ -191,14 +189,12 @@ object FloatingShortcutRuntime {
         runOnMain {
             if (!installed || !enabled || !shouldShow(activity)) {
                 if (currentActivity.get() !== activity || !shouldShow(activity)) {
-                    currentActivity.get()?.let(MiuixSettingsPage::collapseFloatingScriptPluginAgent)
                     detachNow(null)
                 }
                 return@runOnMain
             }
             val previous = currentActivity.get()
             if (previous != null && previous !== activity) {
-                MiuixSettingsPage.collapseFloatingScriptPluginAgent(previous)
                 detachNow(previous)
             }
             attachNow(activity)
@@ -220,7 +216,6 @@ object FloatingShortcutRuntime {
             cancelPendingAction()
             FloatingShortcutIconLoader.clear()
             resumedActivity.clear()
-            currentActivity.get()?.let(MiuixSettingsPage::collapseFloatingScriptPluginAgent)
             detachNow(null)
         }
     }
@@ -241,7 +236,6 @@ object FloatingShortcutRuntime {
                 cancelAttachRetries()
                 cancelPendingAction()
                 FloatingShortcutIconLoader.clear()
-                currentActivity.get()?.let(MiuixSettingsPage::collapseFloatingScriptPluginAgent)
                 detachNow(null)
                 return@runOnMain
             }
@@ -261,7 +255,6 @@ object FloatingShortcutRuntime {
             val shouldReattach = activity != null && enabled && shouldShow(activity)
             val previous = currentActivity.get()
             if (previous != null && (!shouldReattach || previous !== activity)) {
-                MiuixSettingsPage.collapseFloatingScriptPluginAgent(previous)
             }
             detachNow(null)
             if (shouldReattach && activity != null) attachNow(activity)
@@ -271,7 +264,6 @@ object FloatingShortcutRuntime {
     private fun detach(activity: Activity) {
         runOnMain {
             if (currentActivity.get() === activity) {
-                MiuixSettingsPage.collapseFloatingScriptPluginAgent(activity)
                 detachNow(activity)
             }
         }
@@ -591,13 +583,6 @@ object FloatingShortcutRuntime {
                 FloatingShortcutSettings.ACTION_MODULE_SETTINGS -> {
                     SettingsUI.show(activity)
                     true
-                }
-                FloatingShortcutSettings.ACTION_PLUGIN_AGENT -> {
-                    val toggled = MiuixSettingsPage.toggleFloatingScriptPluginAgent(activity)
-                    (activity.window?.decorView as? ViewGroup)?.post {
-                        currentBubble.get()?.bringToFront()
-                    }
-                    toggled
                 }
                 FloatingShortcutSettings.ACTION_ACTIVITY -> {
                     val className = normalizeActivityClass(activity, item.target)
@@ -1034,11 +1019,7 @@ object FloatingShortcutRuntime {
         } else {
             item.iconPath
         }
-        val fallback = if (item.actionType == FloatingShortcutSettings.ACTION_PLUGIN_AGENT) {
-            HchatAgentIconDrawable(tint, HchatAgentIconDrawable.Frame.CIRCLE)
-        } else {
-            FloatingShortcutGlyphDrawable(FloatingShortcutGlyphs.forItem(item), tint)
-        }
+        val fallback = FloatingShortcutGlyphDrawable(FloatingShortcutGlyphs.forItem(item), tint)
         FloatingShortcutIconLoader.bind(view, path, fallback)
     }
 

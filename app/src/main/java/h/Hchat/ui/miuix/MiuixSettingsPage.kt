@@ -430,36 +430,6 @@ import h.Hchat.hooks.items.script.market.PluginMarketPlugin
 import h.Hchat.hooks.items.script.market.PluginMarketRepository
 import h.Hchat.hooks.items.script.market.PluginMarketReviewStatus
 import h.Hchat.hooks.items.script.market.PluginMarketUserIdentity
-import h.Hchat.hooks.items.script.agent.CodexSettings
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentClient
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentAttachment
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentChatMessage
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentConfig
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentCancellation
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentContext
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentDiff
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentDraft
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentEventIds
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentLocalFiles
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentMcpServer
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentReasoning
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentRequest
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentResumeState
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSession
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSessionStore
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSettings
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentProfile
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentQuotedMessage
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentSpeech
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentTextMerge
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentToolEvent
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentToolResultStore
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentValidator
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceChange
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceToolConfirmation
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceWriteDecision
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWorkspaceTools
-import h.Hchat.hooks.items.script.agent.ScriptPluginAgentWriter
 import h.Hchat.hooks.items.scheduledtask.ScheduledTaskContentItem
 import h.Hchat.hooks.items.scheduledtask.ScheduledTaskFeature
 import h.Hchat.hooks.items.scheduledtask.ScheduledTaskItem
@@ -1028,11 +998,6 @@ object MiuixSettingsPage {
         show(context, null, floatingAgent = false)
     }
 
-    @OptIn(ExperimentalAnimationApi::class)
-    @JvmStatic
-    fun showScriptPluginAgent(context: Context) {
-        show(context, DetailPage.ScriptPluginAgent(), floatingAgent = false)
-    }
 
     private const val TAG_WCX = "WCX-HchatUI"
 
@@ -1072,30 +1037,6 @@ object MiuixSettingsPage {
         return true
     }
 
-    @JvmStatic
-    fun toggleFloatingScriptPluginAgent(context: Context): Boolean {
-        val activity = context as? Activity ?: return false
-        val decor = activity.window?.decorView as? ViewGroup ?: return false
-        val existing = findExistingPage(decor)
-        val tag = existing?.getTag(R.id.hchat_settings_page_host) as? SettingsPageHostTag
-        if (tag?.floatingAgent == true) {
-            (tag.collapseAgent ?: tag.close)?.invoke()
-            return true
-        }
-        show(activity, DetailPage.ScriptPluginAgent(), floatingAgent = true)
-        return true
-    }
-
-    @JvmStatic
-    fun collapseFloatingScriptPluginAgent(context: Context): Boolean {
-        val activity = context as? Activity ?: return false
-        val decor = activity.window?.decorView as? ViewGroup ?: return false
-        val page = findExistingPage(decor) ?: return false
-        val tag = page.getTag(R.id.hchat_settings_page_host) as? SettingsPageHostTag ?: return false
-        if (!tag.floatingAgent) return false
-        (tag.collapseAgent ?: tag.close)?.invoke()
-        return true
-    }
 
     @OptIn(ExperimentalAnimationApi::class)
     private fun show(
@@ -1135,7 +1076,6 @@ object MiuixSettingsPage {
         val activityBackHooks = ArrayList<XC_MethodHook.Unhook>()
         var consumingBack = false
         var closed = false
-        var agentExitHandler: (() -> Unit)? = null
         fun unhookActivityBack() {
             activityBackHooks.forEach {
                 try {
@@ -1150,7 +1090,6 @@ object MiuixSettingsPage {
             closed = true
             hostTag.close = null
             hostTag.collapseAgent = null
-            agentExitHandler = null
             settingsBackHandlers.clear()
             unhookActivityBack()
             runCatching {
@@ -1171,9 +1110,7 @@ object MiuixSettingsPage {
             if (consumingBack) return
             consumingBack = true
             val selected = currentDetail()
-            if (selected is DetailPage.ScriptPluginAgent && agentExitHandler != null) {
-                agentExitHandler?.invoke()
-            } else if (settingsBackHandlers.handle()) {
+            if (settingsBackHandlers.handle()) {
                 // The current nested settings route owns this back event.
             } else if (selected == null) {
                 closePage()
@@ -1310,7 +1247,6 @@ object MiuixSettingsPage {
                                     onOpenProvider = { openDetail(DetailPage.Feature(it)) },
                                     onOpenGroup = { openDetail(DetailPage.FeatureGroup(it)) },
                                     onOpenScriptPluginReadme = { readmeDialogPlugin.value = it },
-                                    onOpenScriptPluginAgent = { openDetail(DetailPage.ScriptPluginAgent()) },
                                     onOpenScriptPluginMarket = { openDetail(DetailPage.ScriptPluginMarket()) },
                                     onOpenScriptPluginManager = { openDetail(DetailPage.ScriptPluginManager()) },
                                     onConfigImported = { configVersion.value += 1 }
@@ -1345,28 +1281,11 @@ object MiuixSettingsPage {
                                     onBack = {
                                         popDetail()
                                     },
-                                    onOpenScriptPluginAgent = {
-                                        openDetail(DetailPage.ScriptPluginAgent(targetPage))
-                                    },
                                     onOpenScriptPluginMarket = {
                                         openDetail(DetailPage.ScriptPluginMarket(targetPage))
                                     },
                                     onOpenScriptPluginManager = {
                                         openDetail(DetailPage.ScriptPluginManager(targetPage))
-                                    }
-                                )
-                            } else if (targetPage is DetailPage.ScriptPluginAgent) {
-                                ScriptPluginAgentUi.ScriptPluginAgentWorkspacePage(
-                                    context = activity,
-                                    onBack = {
-                                        if (floatingAgent) closePage()
-                                        else popDetail()
-                                    },
-                                    onExitHandlerChanged = { handler ->
-                                        agentExitHandler = handler
-                                        if (floatingAgent) {
-                                            hostTag.collapseAgent = handler ?: { closePage() }
-                                        }
                                     }
                                 )
                             } else if (targetPage is DetailPage.ScriptPluginMarket) {
@@ -1709,175 +1628,6 @@ internal object RingtonePickerBridge {
         } catch (_: Throwable) {
         }
     }
-}
-
-internal object ScriptPluginAgentAttachmentPickerBridge {
-    private val hookedClasses = HashSet<Class<*>>()
-    private var pending: PendingResult? = null
-
-    @Synchronized
-    fun launch(
-        activity: Activity,
-        directory: File,
-        onResult: (List<ScriptPluginAgentAttachment>) -> Unit
-    ) {
-        pending = PendingResult(activity, directory.apply { mkdirs() }, onResult)
-        hookActivityResult(activity.javaClass)
-        hookActivityResult(Activity::class.java)
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        }.preferSystemDocumentsUi(activity)
-        try {
-            activity.startActivityForResult(intent, SCRIPT_AGENT_ATTACHMENT_REQUEST_CODE)
-        } catch (_: Throwable) {
-            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "*/*"
-                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            activity.startActivityForResult(
-                Intent.createChooser(fallback, "选择文件或图片"),
-                SCRIPT_AGENT_ATTACHMENT_REQUEST_CODE
-            )
-        }
-    }
-
-    @Synchronized
-    private fun hookActivityResult(clazz: Class<*>) {
-        if (hookedClasses.contains(clazz)) return
-        try {
-            XposedBridge.hookAllMethods(clazz, "onActivityResult", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val requestCode = param.args.getOrNull(0) as? Int ?: return
-                    if (requestCode != SCRIPT_AGENT_ATTACHMENT_REQUEST_CODE) return
-                    val pending = takePending() ?: return
-                    val resultCode = param.args.getOrNull(1) as? Int ?: return
-                    if (resultCode != Activity.RESULT_OK) return
-                    val data = param.args.getOrNull(2) as? Intent ?: return
-                    val activity = pending.activity
-                    val directory = pending.directory
-                    val uris = pickedUris(data)
-                    val persistentUris = uris.filter { uri ->
-                        takeReadPermission(activity, data, uri)
-                    }.mapTo(HashSet()) { it.toString() }
-                    Thread({
-                        val attachments = uris.mapNotNull { uri ->
-                            copyAttachment(
-                                activity,
-                                directory,
-                                uri,
-                                uri.toString() in persistentUris
-                            )
-                        }.distinctBy { it.sourceUri.ifBlank { it.path } }
-                        if (attachments.isNotEmpty()) {
-                            Handler(Looper.getMainLooper()).post { pending.callback(attachments) }
-                        }
-                    }, "Hchat-Agent-Attachment-Copy").start()
-                }
-            })
-            hookedClasses.add(clazz)
-        } catch (_: Throwable) {
-        }
-    }
-
-    private fun pickedUris(data: Intent): List<Uri> {
-        val result = ArrayList<Uri>()
-        data.data?.let(result::add)
-        val clip = data.clipData
-        if (clip != null) {
-            for (index in 0 until clip.itemCount) {
-                runCatching { clip.getItemAt(index)?.uri }.getOrNull()?.let(result::add)
-            }
-        }
-        return result.distinct()
-    }
-
-    private fun takeReadPermission(activity: Activity, data: Intent, uri: Uri): Boolean {
-        if (uri.scheme != "content") return false
-        val resolver = activity.contentResolver
-        if (runCatching {
-                resolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
-            }.getOrDefault(false)
-        ) {
-            return true
-        }
-        val flags = data.flags and
-            (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        if ((flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0 ||
-            (flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) == 0
-        ) {
-            return false
-        }
-        return runCatching {
-            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            resolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
-        }.getOrDefault(false)
-    }
-
-    private fun copyAttachment(
-        context: Context,
-        directory: File,
-        uri: Uri,
-        persistentAccess: Boolean
-    ): ScriptPluginAgentAttachment? {
-        var target: File? = null
-        return runCatching {
-            val displayName = queryDisplayName(context, uri)
-                ?: uri.lastPathSegment
-                ?: "attachment"
-            val safeName = displayName.replace(Regex("""[\\/:*?"<>|]"""), "_").ifBlank { "attachment" }
-            val copyId = java.util.UUID.randomUUID().toString().substring(0, 8)
-            val outputFile = File(directory, "${System.currentTimeMillis()}_${copyId}_$safeName")
-            target = outputFile
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                outputFile.outputStream().use { output ->
-                    val buffer = ByteArray(32 * 1024)
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                    }
-                }
-            } ?: return null
-            val attachment = ScriptPluginAgentAttachment(
-                name = displayName,
-                path = outputFile.absolutePath,
-                mimeType = context.contentResolver.getType(uri).orEmpty().ifBlank { "application/octet-stream" },
-                size = outputFile.length(),
-                sourceUri = uri.toString().takeIf { persistentAccess }.orEmpty()
-            )
-            attachment.takeIf { outputFile.isFile && outputFile.length() > 0L }
-                ?: run {
-                    outputFile.delete()
-                    null
-                }
-        }.getOrElse {
-            target?.delete()
-            Handler(Looper.getMainLooper()).post {
-                Toast.makeText(context, it.message ?: "读取附件失败", Toast.LENGTH_SHORT).show()
-            }
-            null
-        }
-    }
-
-    @Synchronized
-    private fun takePending(): PendingResult? {
-        val result = pending
-        pending = null
-        return result
-    }
-
-    private data class PendingResult(
-        val activity: Activity,
-        val directory: File,
-        val callback: (List<ScriptPluginAgentAttachment>) -> Unit
-    )
-
 }
 
 internal object PluginMarketExtraFilePickerBridge {
@@ -2964,7 +2714,6 @@ internal fun MainSettingsPage(
     onOpenProvider: (FeatureSettingsProvider) -> Unit,
     onOpenGroup: (FeatureGroupEntry) -> Unit,
     onOpenScriptPluginReadme: (ScriptPluginRuntime.ScriptPlugin) -> Unit,
-    onOpenScriptPluginAgent: () -> Unit,
     onOpenScriptPluginMarket: () -> Unit,
     onOpenScriptPluginManager: () -> Unit,
     onConfigImported: () -> Unit
@@ -3103,7 +2852,6 @@ internal fun MainSettingsPage(
                                 context,
                                 onOpenScriptPluginReadme,
                                 onOpenScriptPluginMarket,
-                                onOpenScriptPluginAgent,
                                 onOpenScriptPluginManager
                             )
                         }
@@ -3802,7 +3550,6 @@ internal sealed class DetailPage {
         val sourceGroup: FeatureGroupEntry? = null,
         val returnToSearch: Boolean = false
     ) : DetailPage()
-    data class ScriptPluginAgent(val parentFeature: Feature? = null) : DetailPage()
     data class ScriptPluginMarket(val parentFeature: Feature? = null) : DetailPage()
     data class ScriptPluginManager(val parentFeature: Feature? = null) : DetailPage()
 }
@@ -4686,7 +4433,6 @@ internal fun FeatureSettingsPage(
     context: Context,
     provider: FeatureSettingsProvider,
     onBack: () -> Unit,
-    onOpenScriptPluginAgent: () -> Unit = {},
     onOpenScriptPluginMarket: () -> Unit = {},
     onOpenScriptPluginManager: () -> Unit = {}
 ) {
@@ -4817,7 +4563,6 @@ internal fun FeatureSettingsPage(
             provider,
             onBack,
             onOpenScriptPluginMarket,
-            onOpenScriptPluginAgent,
             onOpenScriptPluginManager
         )
         WeChatTabletFeature.ID -> WeChatTabletMiuixPage(context, provider, onBack)
