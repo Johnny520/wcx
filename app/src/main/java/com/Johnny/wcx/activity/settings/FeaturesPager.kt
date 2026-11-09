@@ -569,7 +569,9 @@ fun CategoryDetailScreen(
                 }
             }
             // 部分功能带内嵌设置面板（item.Ui()），单独渲染在列表下方
-            items.forEach { item -> item.Ui() }
+            items.forEach { f ->
+                item(key = f.name + "#ui") { f.Ui() }
+            }
         }
     }
 }

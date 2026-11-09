@@ -80,6 +80,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.Johnny.wcx.features.hchat.HchatBootstrap
+import h.Hchat.hooks.items.script.ScriptPluginSettings
+import h.Hchat.hooks.items.script.ScriptPluginRuntime
+import h.Hchat.hooks.items.script.ScriptPluginManager
 
 /**
  * 模块自检（最外层 / 全量）：把整个模块的公共依赖逐项扫描出来；「一键修复」= 体检 → 修复 → 复检 → 前后对比。
