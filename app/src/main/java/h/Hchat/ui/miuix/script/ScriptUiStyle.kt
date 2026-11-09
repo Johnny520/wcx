@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,7 +26,6 @@ import com.Johnny.wcx.ui.style.WxPalette
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
@@ -45,25 +43,28 @@ internal object ColorosTheme {
 
     object Tokens {
         val textPrimary: Color
-            @Composable @ReadOnlyComposable get() = WxPalette.textPrimary()
+            @Composable get() = WxPalette.textPrimary()
 
         val textSecondary: Color
-            @Composable @ReadOnlyComposable get() = WxPalette.textSecondary()
+            @Composable get() = WxPalette.textSecondary()
 
         val accent: Color
-            @Composable @ReadOnlyComposable get() = WxPalette.Primary
+            @Composable get() = WxPalette.Primary
 
         val bgSearchbar: Color
-            @Composable @ReadOnlyComposable get() = WxPalette.cardBackground()
+            @Composable get() = WxPalette.cardBackground()
 
         val bgPage: Color
-            @Composable @ReadOnlyComposable get() = WxPalette.pageBackground()
+            @Composable get() = WxPalette.pageBackground()
 
         val dividerHair: Color
-            @Composable @ReadOnlyComposable get() = WxPalette.cardBorder()
+            @Composable get() = WxPalette.cardBorder()
 
         val accentSoft: Color
-            @Composable @ReadOnlyComposable get() = WxPalette.PrimarySoft
+            @Composable get() = WxPalette.PrimarySoft
+
+        val textTertiary: Color
+            @Composable get() = WxPalette.TextSecondary
     }
 }
 
