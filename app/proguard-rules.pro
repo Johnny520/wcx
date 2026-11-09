@@ -44,11 +44,6 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
-# ─── Room ───────────────────────────────────────────────────────────
--keep class * extends androidx.room.RoomDatabase
--keep @androidx.room.Entity class *
--dontwarn androidx.room.paging.**
-
 # ─── Compose ────────────────────────────────────────────────────────
 # 不要全量 keep androidx.compose：Compose 依赖自带 consumer rules，
 # 全量 keep 会阻止 R8 删除未使用的 UI/运行时实现，显著增大 release APK。

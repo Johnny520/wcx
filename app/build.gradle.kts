@@ -270,11 +270,6 @@ val generateMethodHashes = tasks.register<GenerateMethodHashesTask>("generateMet
 
 // --- end tasks ---
 
-ksp {
-    // Room schema export for migration diffing
-    arg("room.schemaLocation", "$projectDir/schemas")
-    arg("room.generateKotlin", "true")
-}
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
@@ -308,16 +303,10 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.coil.network.okhttp)
 
-    implementation(libs.composablehorizons.material.symbols.filled)
-    implementation(libs.composablehorizons.material.symbols.outlined)
-
     implementation(libs.google.protobuf.javalite)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.serialization.protobuf)
     implementation(libs.mmkv)
-    // Termux 终端（GPLv3）：agent/ProotTerminalView 编译期依赖 terminal-view/emulator
-    implementation(files("libs/terminal-emulator-0.118.0.aar"))
-    implementation(files("libs/terminal-view-0.118.0.aar"))
     // Hchat 脚本子系统依赖（迁移）
     // Hchat 设置浮层渲染依赖 lifecycle-viewmodel-compose（LocalViewModelStoreOwner），
     // 缺了会 NoClassDefFoundError 导致脚本页打不开（上游 build.gradle 里有这两项）
@@ -375,10 +364,7 @@ dependencies {
     implementation(libs.markwon.html)
 
     implementation(libs.mcp.server)
-    implementation(libs.mcp.client)
-    implementation(libs.androidx.room.runtime)
-    ksp(libs.androidx.room.compiler)
-    implementation(platform(libs.ktor.bom))
+    implementation(libs.mcp.client)    implementation(platform(libs.ktor.bom))
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.cors)
     implementation(libs.ktor.server.auth)

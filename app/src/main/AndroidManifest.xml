@@ -97,11 +97,6 @@
             android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
 
         <activity
-            android:name=".activity.agent.WeAgentSettingsActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
-
-        <activity
             android:name=".activity.RedPacketStatsActivity"
             android:exported="true"
             android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
