@@ -96,6 +96,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.clearText
 import com.composables.icons.materialsymbols.outlined.Search
 import top.yukonga.miuix.kmp.basic.IconButton
+import com.composables.icons.materialsymbols.outlined.Close
 
 
 // ---------------------------------------------------------------------------
