@@ -1053,10 +1053,14 @@ object MiuixSettingsPage {
         }
     }
 
-    /** WCX：直达「脚本插件」内容页（总开关 + 本地插件 + 在线市场 + 本地插件管理）。 */
+    /**
+     * WCX：直达「脚本插件」内容页（总开关 + 本地插件 + 在线市场 + 本地插件管理）。
+     * scriptOnly=true：浮层只渲染脚本内容——不显示 Hchat 的主页/功能/设置 Tab、
+     * 不做模块更新检测、标题不出现 Hchat 字样（用户只要脚本这一套）。
+     */
     @JvmStatic
     fun showScriptPlugin(context: Context) {
-        show(context, null, floatingAgent = false, initialTab = MainTab.PLUGIN)
+        show(context, null, floatingAgent = false, initialTab = MainTab.PLUGIN, scriptOnly = true)
     }
 
     @JvmStatic
@@ -1098,7 +1102,8 @@ object MiuixSettingsPage {
         context: Context,
         initialPage: DetailPage?,
         floatingAgent: Boolean,
-        initialTab: MainTab = MainTab.PRACTICAL
+        initialTab: MainTab = MainTab.PRACTICAL,
+        scriptOnly: Boolean = false,
     ) {
         val activity = context.findHostActivity()
         if (activity == null) {
@@ -1295,6 +1300,7 @@ object MiuixSettingsPage {
                             if (targetPage == null) {
                                 MainSettingsPage(
                                     context = activity,
+                                    scriptOnly = scriptOnly,
                                     providers = UIRegistry.get().getAllProviders(),
                                     listState = mainListState,
                                     selectedTab = selectedTab.value,
@@ -2948,6 +2954,7 @@ internal fun HchatMiuixTheme(context: Context, content: @Composable () -> Unit) 
 @Composable
 internal fun MainSettingsPage(
     context: Context,
+    scriptOnly: Boolean = false,
     providers: List<FeatureSettingsProvider>,
     listState: LazyListState,
     selectedTab: MainTab,
@@ -2986,7 +2993,9 @@ internal fun MainSettingsPage(
     var gateUpdate by remember { mutableStateOf<ModuleUpdateInfo?>(null) }
     var showGateUpdate by remember { mutableStateOf(false) }
     val gatePrefs = remember { HchatStorage.preferences(context, MODULE_UPDATE_PREFS) }
+    // scriptOnly（WCX 脚本入口）：不做 Hchat 模块的更新检测/更新弹窗，用户只要脚本这一套
     LaunchedEffect(Unit) {
+        if (scriptOnly) return@LaunchedEffect
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 val root = PluginMarketClient.moduleUpdate(context).getOrThrow()
@@ -3021,24 +3030,27 @@ internal fun MainSettingsPage(
     }
     val activeTab = tabs.getOrElse(pagerState.currentPage) { MainTab.PRACTICAL }
     PageScaffold(
-        title = "Hchat",
-        largeTitle = "Hchat",
+        title = if (scriptOnly) "脚本插件" else "Hchat",
+        largeTitle = if (scriptOnly) "脚本插件" else "Hchat",
         scrollBehavior = scrollBehavior,
         bottomBar = {
-            MainNavigationBar(
-                context = context,
-                selectedTab = activeTab,
-                floating = floatingNav,
-                glass = glassSupported && glassNav,
-                backdrop = it,
-                onSelected = { tab ->
-                    scope.launch { pagerState.springAnimateToPage(tab.ordinal) }
-                }
-            )
+            if (!scriptOnly) {
+                MainNavigationBar(
+                    context = context,
+                    selectedTab = activeTab,
+                    floating = floatingNav,
+                    glass = glassSupported && glassNav,
+                    backdrop = it,
+                    onSelected = { tab ->
+                        scope.launch { pagerState.springAnimateToPage(tab.ordinal) }
+                    }
+                )
+            }
         }
     ) { padding ->
         HorizontalPager(
             state = pagerState,
+            userScrollEnabled = !scriptOnly,
             modifier = Modifier
                 .fillMaxSize(),
             key = { tabs[it] }
@@ -3059,7 +3071,7 @@ internal fun MainSettingsPage(
                 )
             ) {
                 item {
-                    SettingsSearchEntry(onClick = onOpenSearch)
+                    if (!scriptOnly) SettingsSearchEntry(onClick = onOpenSearch)
                 }
                 when (tab) {
                     MainTab.PRACTICAL -> {

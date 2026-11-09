@@ -290,6 +290,12 @@ private fun MainPagerScreen(
     // 主页样式开关：false = 经典四 Tab（底部玻璃导航）；true = 单页 Dashboard（隐藏底部导航，
     // 功能分类网格直接铺在主页，日志/设置从主页瓦片进入 —— 参照用户给的 WeChatAI 风格截图）
     var singlePageMode by remember { mutableStateOf(WePrefs.getBoolOrFalse("home_single_page_mode")) }
+    // 切到单页模式时立即回到主页（第 0 页），其余 3 页在单页模式下不可滑动进入。
+    LaunchedEffect(singlePageMode) {
+        if (singlePageMode && pagerState.currentPage != 0) {
+            pagerState.scrollToPage(0)
+        }
+    }
 
     AtmosphereBackground(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -299,6 +305,8 @@ private fun MainPagerScreen(
         ) {
             HorizontalPager(
                 state = pagerState,
+                // 单页模式：只保留主页这一页，禁用左右滑手势（隐藏导航栏≠隐藏其余页面）
+                userScrollEnabled = !singlePageMode,
                 modifier = Modifier.fillMaxSize(),
                 key = { it },
             ) { page ->

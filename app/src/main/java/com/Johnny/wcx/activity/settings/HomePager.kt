@@ -97,6 +97,8 @@ import androidx.compose.foundation.text.input.clearText
 import com.composables.icons.materialsymbols.outlined.Search
 import top.yukonga.miuix.kmp.basic.IconButton
 import com.composables.icons.materialsymbols.outlined.Close
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 
 // ---------------------------------------------------------------------------
@@ -814,43 +816,76 @@ private fun TagChip(text: String, color: Color, textColor: Color = color) {
     }
 }
 
-/** 单页模式的功能搜索框（输入即过滤，无需回车）。 */
+/**
+ * 单页模式的功能搜索：默认只显示一个带放大镜的搜索条，点击才展开输入框（自动聚焦），
+ * 点右侧 × 收起并清空。避免「一条长输入框常驻 + 光标常闪」的笨重感。
+ */
 @Composable
 private fun FeatureSearchBox(
     query: String,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val state = rememberTextFieldState(query)
-    SoftCard(contentPadding = 4, modifier = modifier) {
-        TextField(
-            state = state,
-            modifier = Modifier.fillMaxWidth(),
-            label = "搜索功能（名称 / 说明）",
-            leadingIcon = {
+    var expanded by remember { mutableStateOf(query.isNotEmpty()) }
+    val focus = remember { FocusRequester() }
+    SoftCard(contentPadding = 0, modifier = modifier) {
+        if (!expanded) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = true }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Icon(
                     imageVector = MaterialSymbols.Outlined.Search,
-                    contentDescription = null,
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    contentDescription = "搜索",
+                    modifier = Modifier.size(18.dp),
                     tint = WxPalette.textSecondary(),
                 )
-            },
-            trailingIcon = {
-                if (state.text.isNotEmpty()) {
-                    IconButton(onClick = { state.clearText(); onQueryChange("") }) {
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "搜索功能（名称 / 说明）",
+                    fontSize = 13.sp,
+                    color = WxPalette.textSecondary(),
+                )
+            }
+        } else {
+            val state = rememberTextFieldState(query)
+            TextField(
+                state = state,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focus),
+                label = "搜索功能（名称 / 说明）",
+                leadingIcon = {
+                    Icon(
+                        imageVector = MaterialSymbols.Outlined.Search,
+                        contentDescription = null,
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        tint = WxPalette.textSecondary(),
+                    )
+                },
+                trailingIcon = {
+                    IconButton(onClick = {
+                        state.clearText()
+                        onQueryChange("")
+                        expanded = false
+                    }) {
                         Icon(
                             imageVector = MaterialSymbols.Outlined.Close,
-                            contentDescription = "清除",
+                            contentDescription = "收起搜索",
                             tint = WxPalette.textSecondary(),
                         )
                     }
-                }
-            },
-        )
-    }
-    // 文本变化同步到外部状态（TextField 自身不回调，用 LaunchedEffect 观察）
-    androidx.compose.runtime.LaunchedEffect(state.text.toString()) {
-        if (state.text.toString() != query) onQueryChange(state.text.toString())
+                },
+            )
+            // 文本变化同步到外部状态
+            androidx.compose.runtime.LaunchedEffect(state.text.toString()) {
+                if (state.text.toString() != query) onQueryChange(state.text.toString())
+            }
+            LaunchedEffect(expanded) { if (expanded) focus.requestFocus() }
+        }
     }
 }
 
