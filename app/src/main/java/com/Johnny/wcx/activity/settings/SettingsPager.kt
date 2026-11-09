@@ -157,6 +157,7 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
+import androidx.compose.foundation.layout.fillMaxSize
 
 // ---------------------------------------------------------------------------
 //  Page 2 — Settings
@@ -176,7 +177,15 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
     UpdateErrorDialog(message = updateError, onDismiss = { updateError = null })
     ChangelogDialog(show = showChangelog, onDismiss = { showChangelog = false }, context = context)
 
-    MiuixListScaffold(title = "设置") {
+    PageScaffold(
+        title = "设置",
+        largeTitle = "设置",
+        subtitle = "界面 · 更新 · 备份恢复",
+    ) { _ ->
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+      ) {
         // Account info card — shown at top of Settings tab.
         item {
             Spacer(Modifier.height(12.dp))
@@ -366,6 +375,7 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         }
 
         item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
+      }
     }
 }
 
@@ -1246,18 +1256,15 @@ fun LicenseScreen(onBack: () -> Unit) {
         }
     }
 
-    MiuixListScaffold(
+    PageScaffold(
         title = "开放源代码库",
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = MaterialSymbols.Outlined.Arrow_back,
-                    contentDescription = "返回",
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
-            }
-        },
-    ) {
+        largeTitle = "开放源代码库",
+        onBack = onBack,
+    ) { _ ->
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+      ) {
         item {
             TextField(
                 state = queryState,
@@ -1315,6 +1322,7 @@ fun LicenseScreen(onBack: () -> Unit) {
         }
 
         item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
+      }
     }
 }
 
@@ -1393,18 +1401,15 @@ private fun LibraryRow(library: Library, modifier: Modifier = Modifier) {
 @Composable
 fun AcknowledgementsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    MiuixListScaffold(
+    PageScaffold(
         title = "鸣谢",
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = MaterialSymbols.Outlined.Arrow_back,
-                    contentDescription = "返回",
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
-            }
-        },
-    ) {
+        largeTitle = "鸣谢",
+        onBack = onBack,
+    ) { _ ->
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+      ) {
         item {
             Column(
                 modifier = Modifier
@@ -1510,5 +1515,6 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         }
 
         item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
+      }
     }
 }
