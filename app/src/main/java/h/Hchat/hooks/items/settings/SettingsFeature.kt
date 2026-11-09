@@ -42,7 +42,6 @@ class SettingsFeature : Feature {
             val entrySettings = SettingsEntrySettings(context.hostContext())
             settingsDexFinder.resolveAll(
                 entrySettings.plusMenuEnabled() ||
-                    entrySettings.pluginAgentPlusMenuEnabled() ||
                     QuickMarkReadRuntime.isPlusMenuEnabled(context.hostContext()) ||
                     QuickTerminateRuntime.isEnabled(context.hostContext())
             )

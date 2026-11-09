@@ -162,7 +162,6 @@ object FloatingShortcutSettings {
     }
 
     fun defaultItems(): List<FloatingShortcutItem> = listOf(
-        defaultAgentItem(),
         FloatingShortcutItem("module_settings", "设置", ACTION_MODULE_SETTINGS, ""),
         FloatingShortcutItem("scan", "扫一扫", ACTION_ACTIVITY, "com.tencent.mm.plugin.scanner.ui.BaseScanUI"),
         FloatingShortcutItem("moments", "朋友圈", ACTION_ACTIVITY, "com.tencent.mm.plugin.sns.ui.improve.ImproveSnsTimelineUI"),
