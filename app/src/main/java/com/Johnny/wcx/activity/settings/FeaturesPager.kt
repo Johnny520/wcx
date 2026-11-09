@@ -552,7 +552,7 @@ fun CategoryDetailScreen(
                 SoftCard(modifier = Modifier.padding(top = if (index == 0) 0.dp else 2.dp)) {
                     FeatureRow(
                         item = item,
-                        checked = switchStates[item.name] ?: item.isEnabled,
+                        checked = switchStates[item.name] ?: ((item as? SwitchFeature)?.isEnabled == true),
                         onCheckedChange = { switchStates[item.name] = it },
                     )
                     item.Ui()
