@@ -91,6 +91,10 @@ import com.composables.icons.materialsymbols.outlined.Code
 import com.Johnny.wcx.ui.style.fxReveal
 import com.Johnny.wcx.ui.style.rememberGrowNumber
 import kotlin.math.roundToInt
+import top.yukonga.miuix.kmp.basic.TextField
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.clearText
+import com.composables.icons.materialsymbols.outlined.Search
 
 
 // ---------------------------------------------------------------------------
@@ -235,6 +239,8 @@ fun HomePager(
 ) {
     val context = LocalContext.current
     val allItems = FeaturesProvider.ALL_HOOK_ITEMS
+    // 单页模式：功能搜索（分类网格上方）——输入即过滤，点结果直达所属分类
+    var featureQuery by remember { mutableStateOf("") }
     val enabledCount = remember {
         allItems.count { WePrefs.getBoolOrFalse(it.name) }
     }
@@ -418,7 +424,7 @@ fun HomePager(
             }
         }
 
-        // ---- 单页模式：功能分类网格直接铺在主页 ----
+        // ---- 单页模式：功能搜索 + 功能分类网格 ----
         if (singlePageMode) {
             item {
                 Text(
@@ -429,7 +435,24 @@ fun HomePager(
                     modifier = Modifier.padding(start = 6.dp, top = 4.dp),
                 )
             }
-            item { CategoryGrid(onOpenCategory = onOpenCategory) }
+            item {
+                FeatureSearchBox(
+                    query = featureQuery,
+                    onQueryChange = { featureQuery = it },
+                    modifier = Modifier.fxReveal(0),
+                )
+            }
+            if (featureQuery.isBlank()) {
+                item { CategoryGrid(onOpenCategory = onOpenCategory) }
+            } else {
+                item {
+                    FeatureSearchResult(
+                        query = featureQuery,
+                        onOpenCategory = onOpenCategory,
+                        modifier = Modifier.fxReveal(1),
+                    )
+                }
+            }
         }
 
         // ---- 工具：两列快捷瓦片（大图标彩色方块，与整体网格语言一致） ----
@@ -786,6 +809,116 @@ private fun TagChip(text: String, color: Color, textColor: Color = color) {
             color = textColor,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
+    }
+}
+
+/** 单页模式的功能搜索框（输入即过滤，无需回车）。 */
+@Composable
+private fun FeatureSearchBox(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val state = rememberTextFieldState(query)
+    SoftCard(contentPadding = 4, modifier = modifier) {
+        TextField(
+            state = state,
+            modifier = Modifier.fillMaxWidth(),
+            label = "搜索功能（名称 / 说明）",
+            leadingIcon = {
+                Icon(
+                    imageVector = MaterialSymbols.Outlined.Search,
+                    contentDescription = null,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    tint = WxPalette.textSecondary(),
+                )
+            },
+            trailingIcon = {
+                if (state.text.isNotEmpty()) {
+                    IconButton(onClick = { state.clearText(); onQueryChange("") }) {
+                        Icon(
+                            imageVector = MaterialSymbols.Outlined.Close,
+                            contentDescription = "清除",
+                            tint = WxPalette.textSecondary(),
+                        )
+                    }
+                }
+            },
+        )
+    }
+    // 文本变化同步到外部状态（TextField 自身不回调，用 LaunchedEffect 观察）
+    androidx.compose.runtime.LaunchedEffect(state.text.toString()) {
+        if (state.text.toString() != query) onQueryChange(state.text.toString())
+    }
+}
+
+/** 单页模式的功能搜索结果：命中名称/说明的功能，点击直达其所属分类。 */
+@Composable
+private fun FeatureSearchResult(
+    query: String,
+    onOpenCategory: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val q = query.trim()
+    val matched = remember(q) {
+        if (q.isEmpty()) emptyList()
+        else FeaturesProvider.ALL_HOOK_ITEMS.filter {
+            it.name.contains(q, ignoreCase = true) || it.description.contains(q, ignoreCase = true)
+        }.take(60)
+    }
+    SoftCard(contentPadding = 0, modifier = modifier) {
+        Column {
+            if (matched.isEmpty()) {
+                Text(
+                    text = "没有找到匹配「" + q + "」的功能",
+                    fontSize = 13.sp,
+                    color = WxPalette.textSecondary(),
+                    modifier = Modifier.padding(18.dp),
+                )
+            } else {
+                Text(
+                    text = "找到 " + matched.size + " 个功能",
+                    fontSize = 11.sp,
+                    color = WxPalette.textSecondary(),
+                    modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 2.dp),
+                )
+                matched.forEachIndexed { index, feature ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val category = feature.categories.firstOrNull()
+                                if (category != null) onOpenCategory(category)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                    ) {
+                        Text(
+                            text = feature.name,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = WxPalette.textPrimary(),
+                        )
+                        if (feature.description.isNotBlank()) {
+                            Text(
+                                text = feature.description,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = WxPalette.textSecondary(),
+                                maxLines = 2,
+                            )
+                        }
+                        if (feature.categories.isNotEmpty()) {
+                            Text(
+                                text = feature.categories.joinToString(" · "),
+                                fontSize = 10.sp,
+                                color = WxPalette.textSecondary(),
+                            )
+                        }
+                    }
+                    if (index != matched.lastIndex) SoftDivider(modifier = Modifier.padding(start = 14.dp))
+                }
+            }
+        }
     }
 }
 
