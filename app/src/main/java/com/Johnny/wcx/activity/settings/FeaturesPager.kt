@@ -65,6 +65,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import com.Johnny.wcx.ui.style.SectionLabel
+import com.composables.icons.materialsymbols.outlined.Category
 
 
 // ---------------------------------------------------------------------------
@@ -240,7 +241,7 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                             item = item,
                             // 开关显示以运行时真值为准（SwitchFeature.isEnabled 即 WePrefs 的封装），
                             // 本地 map 只缓存本次会话的点击结果，避免「显示关了实际开着」的错位。
-                            checked = switchStates[item.name] ?: item.isEnabled,
+                            checked = switchStates[item.name] ?: ((item as? SwitchFeature)?.isEnabled == true),
                             onCheckedChange = { switchStates[item.name] = it },
                         )
                     }
@@ -402,7 +403,7 @@ fun CategoryDetailScreen(
 
     // 开关一律以运行时真值为准（读 item.isEnabled），避免配置/状态不同步导致「显示开了其实没开」。
     fun syncFromRuntime() {
-        items.forEach { switchStates[it.name] = it.isEnabled }
+        items.forEach { switchStates[it.name] = (it as? SwitchFeature)?.isEnabled == true }
     }
 
     // 总开关：切换后立即对该分类下所有开关生效（各功能自身开关状态保留）。
@@ -415,7 +416,7 @@ fun CategoryDetailScreen(
         syncFromRuntime()
     }
 
-    val enabledCount = items.count { it.isEnabled }
+    val enabledCount = items.count { (it as? SwitchFeature)?.isEnabled == true }
     val accent = CATEGORY_COLORS[
         (FEATURE_CATEGORIES.indexOfFirst { it.first == categoryName }.takeIf { it >= 0 } ?: 0) % CATEGORY_COLORS.size
     ]
@@ -437,7 +438,7 @@ fun CategoryDetailScreen(
                         RoundIconBox(
                             icon = MaterialSymbols.Outlined.Category,
                             tint = accent,
-                            size = 44.dp,
+                            size = 44,
                         )
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
