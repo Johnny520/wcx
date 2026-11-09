@@ -439,7 +439,6 @@ import h.Hchat.hooks.items.selectedmessages.SelectedMessageSnapshot
 import h.Hchat.hooks.items.selectedmessages.SelectedMessagesFeature
 import h.Hchat.hooks.items.selectedmessages.SelectedMessagesRuntimeCoordinator
 import h.Hchat.hooks.items.selectedmessages.SelectedMessagesSettings
-import h.Hchat.hooks.items.settings.PluginAgentEntryProvider
 import h.Hchat.hooks.items.settings.SettingsEntrySettings
 import h.Hchat.hooks.items.settings.SettingsFeature
 import h.Hchat.hooks.items.shortvideo.FinderMediaDownloadFeature
@@ -962,7 +961,7 @@ internal val LocalSettingsBackHandlerRegistry = staticCompositionLocalOf<Setting
  * WCX：Compose LocalContext 可能是 ContextThemeWrapper 包装，直接 as? Activity 会失败导致
  * 设置浮层静默不显示。向上遍历 ContextWrapper 找到真实 Activity。
  */
-private fun Context.findHostActivity(): Activity? {
+internal fun Context.findHostActivity(): Activity? {
     var current: Context? = this
     while (current is ContextWrapper) {
         if (current is Activity) return current
@@ -3019,7 +3018,6 @@ internal fun practicalFeatureGroups(
             title = "界面",
             providers = practicalProviders.filterByIds(
                 SettingsFeature.ID,
-                PluginAgentEntryProvider.ID,
                 FloatingShortcutFeature.ID,
                 ProfileIdFeature.ID,
                 GroupMemberHistorySettingsProvider.FEATURE_ID,
@@ -3774,7 +3772,6 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
             "启动器入口",
             "入口开关"
         )
-        PluginAgentEntryProvider.ID -> listOf("插件 Agent 入口", "插件Agent入口", "右上角加号", "AI 插件入口")
         FloatingShortcutFeature.ID -> listOf(
             "悬浮快捷菜单", "悬浮按钮", "快捷入口", "插件 Agent", "展开 Agent", "收起 Agent",
             "按钮外观", "主按钮大小", "主按钮颜色", "副按钮大小", "副按钮颜色", "按钮渐变",
@@ -4465,7 +4462,6 @@ internal fun FeatureSettingsPage(
         RemoveForwardLimitFeature.ID -> RemoveForwardLimitMiuixPage(context, provider, onBack)
         AtAllNotificationBlockFeature.ID -> AtAllNotificationBlockMiuixPage(context, provider, onBack)
         SettingsFeature.ID -> SettingsEntryMiuixPage(context, provider, onBack)
-        PluginAgentEntryProvider.ID -> PluginAgentEntryMiuixPage(context, provider, onBack)
         FloatingShortcutFeature.ID -> FloatingShortcutMiuixPage(context, provider, onBack)
         MessageDetailsSettingsProvider.FEATURE_ID -> MessageDetailsConfigPage(
             context = context,
@@ -9589,45 +9585,6 @@ internal fun SettingsEntryMiuixPage(
     }
 }
 
-@Composable
-internal fun PluginAgentEntryMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, SettingsEntrySettings.PREFS_NAME) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "加号菜单") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        SettingsEntrySettings.KEY_PLUGIN_AGENT_PLUS_MENU_ENABLE,
-                        "插件 Agent 入口",
-                        "在微信右上角加号菜单中显示插件 Agent，重启微信后生效",
-                        SettingsEntrySettings.DEFAULT_PLUGIN_AGENT_PLUS_MENU_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
 
 internal data class FloatingShortcutEditorRequest(
     val original: FloatingShortcutItem?,
@@ -9959,13 +9916,11 @@ internal fun FloatingShortcutMiuixPage(
                         title = "动作类型",
                         summary = when (draft.actionType) {
                             FloatingShortcutSettings.ACTION_MODULE_SETTINGS -> "打开 Hchat 设置"
-                            FloatingShortcutSettings.ACTION_PLUGIN_AGENT -> "展开或收起插件 Agent"
                             else -> "打开微信页面"
                         },
                         options = listOf(
                             PopupChoice("微信页面", FloatingShortcutSettings.ACTION_ACTIVITY),
                             PopupChoice("模块设置", FloatingShortcutSettings.ACTION_MODULE_SETTINGS),
-                            PopupChoice("插件 Agent", FloatingShortcutSettings.ACTION_PLUGIN_AGENT)
                         ),
                         currentValue = draft.actionType,
                         onValueChanged = { type ->
@@ -10302,7 +10257,6 @@ internal fun FloatingShortcutSettingsItemRow(
             FloatingShortcutIconPreview(
                 if (isSystemInDarkTheme() && item.darkIconPath.isNotBlank()) item.darkIconPath else item.iconPath,
                 item.title,
-                isPluginAgent = item.actionType == FloatingShortcutSettings.ACTION_PLUGIN_AGENT,
                 defaultGlyph = FloatingShortcutGlyphs.forItem(item)
             )
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
@@ -10316,7 +10270,6 @@ internal fun FloatingShortcutSettingsItemRow(
                 Text(
                     text = when (item.actionType) {
                         FloatingShortcutSettings.ACTION_MODULE_SETTINGS -> "模块设置"
-                        FloatingShortcutSettings.ACTION_PLUGIN_AGENT -> "插件 Agent"
                         else -> item.target
                     },
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -10406,7 +10359,6 @@ internal fun FloatingShortcutIconActionRow(
 internal fun FloatingShortcutIconPreview(
     path: String,
     description: String,
-    isPluginAgent: Boolean = false,
     defaultGlyph: FloatingShortcutGlyph? = null
 ) {
     val previewSizePx = with(LocalDensity.current) { 40.dp.roundToPx() }
@@ -10426,30 +10378,6 @@ internal fun FloatingShortcutIconPreview(
                 contentDescription = description,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
-            )
-        } else if (isPluginAgent) {
-            AndroidView(
-                factory = { viewContext ->
-                    ImageView(viewContext).apply { scaleType = ImageView.ScaleType.CENTER_INSIDE }
-                },
-                update = { imageView ->
-                    imageView.contentDescription = description
-                    imageView.setImageDrawable(
-                        HchatAgentIconDrawable(fallbackTint, HchatAgentIconDrawable.Frame.CIRCLE)
-                    )
-                },
-                modifier = Modifier.size(26.dp)
-            )
-        } else if (defaultGlyph != null) {
-            AndroidView(
-                factory = { viewContext ->
-                    ImageView(viewContext).apply { scaleType = ImageView.ScaleType.CENTER_INSIDE }
-                },
-                update = { imageView ->
-                    imageView.contentDescription = description
-                    imageView.setImageDrawable(FloatingShortcutGlyphDrawable(defaultGlyph, fallbackTint))
-                },
-                modifier = Modifier.size(24.dp)
             )
         } else {
             Image(
