@@ -745,6 +745,7 @@ private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能实测") { unavailableFeaturesSection() },
     HealthStep("关键类锚点") { anchors() },
     HealthStep("DexKit 锚点") { dexAnchorSection() },
+    HealthStep("锚点影响分析") { anchorImpactSection() },
     HealthStep("功能活体") { liveSection() },
     HealthStep("网络与 CDN") { networkSection(context) },
     HealthStep("模块冲突") { conflictSection(context) },
@@ -871,25 +872,128 @@ private fun featureOverview(): List<HealthItem> {
     return out
 }
 
+/**
+ * 锚点影响分析：把「功能 → 锚点」反转成「锚点 → 功能」。
+ *
+ * 回答两个问题：
+ * 1. 哪个锚点失效了？它上面挂了几个功能、具体是哪些？
+ * 2. 哪些锚点被多个功能共享（共享锚点失效 = 一串功能同时失效）。
+ *
+ * 数据全部来自 [ModuleDiagnostics.anchors] 的运行时缓存，不触发 DexKit 扫描。
+ */
+private fun anchorImpactSection(): List<HealthItem> {
+    val section = "锚点影响分析"
+    val all = ModuleDiagnostics.anchors()
+    if (all.isEmpty()) {
+        return listOf(
+            HealthItem(
+                "锚点清单", section, "无可检查项", false,
+                "当前没有注册任何 Dex 委托——模块可能未正常加载，或当前进程不是微信主进程。",
+            )
+        )
+    }
+
+    class Group {
+        val features = LinkedHashSet<String>()
+        val activeFeatures = LinkedHashSet<String>()
+        var resolvedAny = false
+        var descriptor: String? = null
+    }
+
+    val groups = linkedMapOf<String, Group>()
+    for (a in all) {
+        val g = groups.getOrPut(a.key) { Group() }
+        g.features += a.feature
+        if (a.active) g.activeFeatures += a.feature
+        if (a.resolved) {
+            g.resolvedAny = true
+            if (g.descriptor == null) g.descriptor = a.descriptor
+        }
+    }
+
+    val out = mutableListOf<HealthItem>()
+
+    val broken = groups.filter { !it.value.resolvedAny }
+    val affectedFeatures = broken.values.flatMap { it.features }.toSortedSet()
+    out += HealthItem(
+        "影响总览", section,
+        if (broken.isEmpty()) "全部锚点已解析" else "失效锚点 " + broken.size + " 个 · 影响 " + affectedFeatures.size + " 个功能",
+        broken.isEmpty(),
+        if (broken.isEmpty()) {
+            "当前微信版本下，所有已注册的 DexKit 锚点都匹配成功（按缓存结果）。\n\n" +
+                "共享锚点 " + groups.count { it.value.features.size >= 2 } + " 个：这些锚点一旦在下次微信更新中漂移，会同时影响挂在其上的多个功能。"
+        } else {
+            "失效锚点：" + broken.keys.joinToString("、") +
+                "\n\n受影响功能（去重 " + affectedFeatures.size + " 个，标★的为当前已开启）：\n" +
+                affectedFeatures.joinToString("\n") { f -> "· " + (if (broken.values.any { it.activeFeatures.contains(f) }) "★ " else "· ") + f }
+        },
+    )
+
+    broken.forEach { (key, g) ->
+        out += HealthItem(
+            "失效·" + key, section, "影响 " + g.features.size + " 个功能", false,
+            "锚点 $key 在当前微信版本未解析成功。\n\n挂载功能（" + g.features.size + " 个）：\n" +
+                g.features.joinToString("\n") { f -> "· " + f + if (g.activeFeatures.contains(f)) "（已开启，子能力实际已失效）" else "（未开启）" } +
+                "\n\n定位描述：" + (g.descriptor ?: "未知") +
+                "\n\n处理建议：等待特征包更新，或在「DexKit 锚点」检查项里核对该锚点的匹配条件（特征串/参数形状）是否需要针对当前微信版本重新适配。",
+        )
+    }
+
+    val shared = groups.filter { it.value.features.size >= 2 && it.value.resolvedAny }
+    if (shared.isNotEmpty()) {
+        out += HealthItem(
+            "共享锚点", section, shared.size.toString() + " 个 · 挂载 ≥2 功能", true,
+            "以下锚点被多个功能共用——失效时会同时影响全部挂载功能：\n\n" +
+                shared.entries.joinToString("\n\n") { (key, g) ->
+                    "· " + key + "（" + g.features.size + " 个功能）\n  " + g.features.joinToString(" / ")
+                },
+            inactive = true,
+        )
+    }
+
+    return out
+}
+
 private fun anchors(): List<HealthItem> = listOf(
-    anchorItem("聊天页 ChattingUI", "com.tencent.mm.ui.chatting.ChattingUI"),
-    anchorItem("资料页 ContactInfoUI", "com.tencent.mm.plugin.profile.ui.ContactInfoUI"),
-    anchorItem("通讯录 AddressLiveList", "com.tencent.mm.ui.contact.address.AddressLiveList"),
-    anchorItem("朋友圈评论 SnsCommentFooter", "com.tencent.mm.plugin.sns.ui.SnsCommentFooter"),
-    anchorItem("主界面 LauncherUI", "com.tencent.mm.ui.LauncherUI"),
-    anchorItem("wcdb SQLiteDatabase", "com.tencent.wcdb.database.SQLiteDatabase"),
-    anchorItem("wcdb compat SQLiteDatabase", "com.tencent.wcdb.compat.SQLiteDatabase"),
+    anchorItem(
+        "聊天页 ChattingUI", "com.tencent.mm.ui.chatting.ChattingUI",
+        listOf("密友·禁止进入聊天", "密友·禁止查看资料", "防撤回(消息视图)", "消息已读/聊天注入类功能"),
+    ),
+    anchorItem(
+        "资料页 ContactInfoUI", "com.tencent.mm.plugin.profile.ui.ContactInfoUI",
+        listOf("密友·禁止查看资料", "资料页注入类功能"),
+    ),
+    anchorItem(
+        "通讯录 AddressLiveList", "com.tencent.mm.ui.contact.address.AddressLiveList",
+        listOf("密友·通讯录隐藏", "隐藏联系人(通讯录)"),
+    ),
+    anchorItem(
+        "朋友圈评论 SnsCommentFooter", "com.tencent.mm.plugin.sns.ui.SnsCommentFooter",
+        listOf("隐藏朋友圈互动入口", "朋友圈评论相关功能"),
+    ),
+    anchorItem(
+        "主界面 LauncherUI", "com.tencent.mm.ui.LauncherUI",
+        listOf("主屏侧滑栏", "主页 Tab 美化", "主页顶部注入类功能"),
+    ),
+    anchorItem(
+        "wcdb SQLiteDatabase", "com.tencent.wcdb.database.SQLiteDatabase",
+        listOf("微信数据库 API(脚本/密友/会话归拢的公共底座)", "数据库监听服务"),
+    ),
+    anchorItem(
+        "wcdb compat SQLiteDatabase", "com.tencent.wcdb.compat.SQLiteDatabase",
+        listOf("微信数据库 API 兼容层(同上，二选一命中即可)"),
+    ),
 )
 
-private fun anchorItem(name: String, className: String): HealthItem {
+private fun anchorItem(name: String, className: String, features: List<String>): HealthItem {
     val found = runCatching { Class.forName(className, false, ClassLoaders.MODULE) }.isSuccess
     return HealthItem(
         "锚点·$name", "关键类锚点",
-        if (found) "已找到" else "未找到", found,
-        "类 $className\n" + if (found) {
+        if (found) "已找到 · 挂载 " + features.size + " 类功能" else "未找到 · 影响 " + features.size + " 类功能", found,
+        "类 $className\n\n挂载功能：\n" + features.joinToString("\n") { "· $it" } + "\n\n" + if (found) {
             "在当前微信版本中存在，依赖它的功能有锚点可用。"
         } else {
-            "未找到——依赖它的功能在当前微信版本可能已漂移/失效，需要适配（无法自动修复）。"
+            "未找到——以上功能在当前微信版本可能已漂移/失效，需要适配（无法自动修复）。"
         },
     )
 }
