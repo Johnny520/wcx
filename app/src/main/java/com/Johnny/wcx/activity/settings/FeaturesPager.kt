@@ -68,6 +68,9 @@ import com.Johnny.wcx.ui.style.SectionLabel
 import com.composables.icons.materialsymbols.outlined.Category
 import com.Johnny.wcx.features.core.ClickableFeature
 import com.composables.icons.materialsymbols.outlined.Settings
+import com.Johnny.wcx.ui.style.fxReveal
+import com.Johnny.wcx.ui.style.rememberGrowNumber
+import kotlin.math.roundToInt
 
 
 // ---------------------------------------------------------------------------
@@ -294,7 +297,10 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
                                 "暂无功能"
                             },
                             tint = CATEGORY_COLORS[index % CATEGORY_COLORS.size],
-                            progress = if (totalCount > 0) enabledCount.toFloat() / totalCount else 0f,
+                            progress = rememberGrowNumber(
+                                if (totalCount > 0) enabledCount.toFloat() / totalCount else 0f,
+                                durationMs = 600 + index * 60,
+                            ),
                             onClick = { onOpenCategory(name) },
                         )
                         if (index != FEATURE_CATEGORIES.lastIndex) SoftDivider()
@@ -435,7 +441,7 @@ fun CategoryDetailScreen(
         ) {
             // ---- 概览卡 ----
             item {
-                SoftCard(modifier = Modifier.padding(top = 6.dp)) {
+                SoftCard(modifier = Modifier.padding(top = 6.dp).fxReveal(0)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RoundIconBox(
                             icon = MaterialSymbols.Outlined.Category,
@@ -457,8 +463,9 @@ fun CategoryDetailScreen(
                             )
                         }
                         if (items.isNotEmpty()) {
+                            val growPct = rememberGrowNumber(if (items.isEmpty()) 0f else enabledCount * 100f / items.size)
                             Text(
-                                text = "${(enabledCount * 100 / items.size)}%",
+                                text = "${growPct.roundToInt()}%",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = accent,
@@ -477,8 +484,9 @@ fun CategoryDetailScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth(
-                                        if (items.isEmpty()) 0f
-                                        else enabledCount.toFloat() / items.size
+                                        rememberGrowNumber(
+                                            if (items.isEmpty()) 0f else enabledCount.toFloat() / items.size,
+                                        )
                                     )
                                     .fillMaxHeight()
                                     .clip(RoundedCornerShape(50))
@@ -552,7 +560,7 @@ fun CategoryDetailScreen(
 
             // 功能列表：一张白卡分组（iOS 风格），行间用细分隔线，行高紧凑
             item {
-                SoftCard(contentPadding = 0) {
+                SoftCard(contentPadding = 0, modifier = Modifier.fxReveal(1)) {
                     Column {
                         items.forEachIndexed { index, item ->
                             CatRow(

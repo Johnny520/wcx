@@ -158,6 +158,7 @@ import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 import androidx.compose.foundation.layout.fillMaxSize
+import com.Johnny.wcx.ui.style.fxReveal
 
 // ---------------------------------------------------------------------------
 //  Page 2 — Settings
@@ -197,9 +198,24 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
             MiuixSmallTitle(text = "界面", modifier = Modifier.padding(top = 12.dp))
             SoftCard(
                 contentPadding = 0,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().fxReveal(0),
             ) {
                 ThemeSection()
+            }
+        }
+
+        // 动效
+        item {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                PrefSwitch(
+                    key = com.Johnny.wcx.ui.style.AnimFx.KEY_UI_FX,
+                    title = "界面动效",
+                    summary = "模块设置内的卡片滚动渐显、数字滚动生长等动画效果",
+                    icon = MaterialSymbols.Outlined.Palette,
+                )
             }
         }
 

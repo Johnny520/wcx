@@ -88,6 +88,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.composables.icons.materialsymbols.outlined.Refresh
 import com.composables.icons.materialsymbols.outlined.Chat
 import com.composables.icons.materialsymbols.outlined.Code
+import com.Johnny.wcx.ui.style.fxReveal
+import com.Johnny.wcx.ui.style.rememberGrowNumber
+import kotlin.math.roundToInt
 
 
 // ---------------------------------------------------------------------------
@@ -300,6 +303,7 @@ fun HomePager(
         // background 设置与 TopAppBar 毛玻璃相同的背景色，避免滚动时出现灰色色块
         item {
             Column(
+                modifier = Modifier.fxReveal(0),
                 modifier = Modifier
                     .fillMaxWidth()
                     .wrapContentHeight()
@@ -322,7 +326,7 @@ fun HomePager(
 
         // ---- 样式开关：经典四 Tab ⇄ 单页 Dashboard ----
         item {
-            SoftCard(contentPadding = 12) {
+            SoftCard(contentPadding = 12, modifier = Modifier.fxReveal(1)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -366,7 +370,9 @@ fun HomePager(
                                 modifier = Modifier.size(20.dp),
                             )
                         },
-                        value = enabledCount.toString(),
+                        value = if (com.Johnny.wcx.ui.style.AnimFx.enabled())
+                            rememberGrowNumber(enabledCount.toFloat()).roundToInt().toString()
+                        else enabledCount.toString()
                         label = "已启用",
                         onClick = { quickListKind = QUICK_LIST_ENABLED },
                     )
@@ -380,7 +386,9 @@ fun HomePager(
                                 modifier = Modifier.size(20.dp),
                             )
                         },
-                        value = totalCount.toString(),
+                        value = if (com.Johnny.wcx.ui.style.AnimFx.enabled())
+                            rememberGrowNumber(totalCount.toFloat()).roundToInt().toString()
+                        else totalCount.toString()
                         label = "全部功能",
                         onClick = { quickListKind = QUICK_LIST_ALL },
                     )
@@ -395,7 +403,11 @@ fun HomePager(
                                     modifier = Modifier.size(20.dp),
                                 )
                             },
-                            value = remember {
+                            value = if (com.Johnny.wcx.ui.style.AnimFx.enabled())
+                                rememberGrowNumber(
+                                    allItems.mapNotNull { it.categories.firstOrNull() }.distinct().size.toFloat(),
+                                ).roundToInt().toString()
+                            else remember {
                                 allItems.mapNotNull { it.categories.firstOrNull() }.distinct().size
                             }.toString(),
                             label = "分类",
@@ -489,7 +501,7 @@ fun HomePager(
 
         // ---- 设备信息卡片 ----
         item {
-            SystemInfoCard(wechatVersion, lspEnvironment, lspApiVersion, !safeIsHost())
+            SystemInfoCard(wechatVersion, lspEnvironment, lspApiVersion, !safeIsHost(), modifier = Modifier.fxReveal(3))
         }
 
         // ---- 相关链接 ----
@@ -503,7 +515,7 @@ fun HomePager(
             )
         }
         item {
-            HomeCard {
+            HomeCard(modifier = Modifier.fxReveal(4)) {
                 HomeRow(
                     icon = MaterialSymbols.Outlined.Code,
                     title = "GitHub",
@@ -692,10 +704,13 @@ private fun ActivationCard(
 
 /** 纯白圆角卡片（首页分组列表容器）。 */
 @Composable
-private fun HomeCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+private fun HomeCard(
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
     val shape = RoundedCornerShape(WxPalette.CardRadius)
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(WxPalette.cardBrush())
@@ -939,8 +954,14 @@ private fun CountTile(
 }
 
 @Composable
-private fun SystemInfoCard(wechatVersion: String?, lspEnvironment: String, lspApiVersion: String, showLspEnvironment: Boolean) {
-    Card {
+private fun SystemInfoCard(
+    wechatVersion: String?,
+    lspEnvironment: String,
+    lspApiVersion: String,
+    showLspEnvironment: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // ① 微信版本
             InfoRow(
