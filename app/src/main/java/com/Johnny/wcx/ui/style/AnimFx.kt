@@ -29,7 +29,11 @@ object AnimFx {
     const val KEY_UI_FX = "ui_anim_fx_enabled"
 
     /** 动效总开关；开关键不存在时视为开启（默认体验）。 */
-    fun enabled(): Boolean = runCatching { WePrefs.getBoolOrDef(KEY_UI_FX, true) }.getOrDefault(true)
+    /**
+     * 动效恒为开启（用户要求：默认开启、不提供开关）。
+     * 不再读取 WePrefs —— 旧版本留下的 ui_anim_fx_enabled=false 会导致动效永久关闭。
+     */
+    fun enabled(): Boolean = true
 }
 
 /**
