@@ -16,7 +16,7 @@ class LegacyChatInputFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val loadPackageParam = context.loadPackageParam()
+        val loadPackageParam = context.loadPackageParam() ?: return
         val packageName = loadPackageParam.packageName ?: return
         if (!packageName.startsWith(WECHAT_PACKAGE_PREFIX)) return
         if (loadPackageParam.processName != null && loadPackageParam.processName != packageName) return

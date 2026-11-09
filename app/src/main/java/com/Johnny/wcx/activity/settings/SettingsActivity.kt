@@ -215,6 +215,7 @@ private fun SettingsRoot(onFinish: () -> Unit) {
                 onOpenLicense = { push(SettingsNavTarget.License) },
                 onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
                 onOpenModuleHealth = { push(SettingsNavTarget.ModuleHealth) },
+                onFinish = onFinish,
             )
 
             is SettingsNavTarget.Category -> CategoryDetailScreen(
@@ -249,12 +250,26 @@ private fun MainPagerScreen(
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
     onOpenModuleHealth: () -> Unit,
+    onFinish: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 4 })
     val context = LocalContext.current
     val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
     val scope = rememberCoroutineScope()
     val backdrop = rememberLayerBackdrop()
+    // 返回键兜底：任意 Tab/单页模式都先回到主页（第 0 页），已在主页才退出设置。
+    // 之前没有这层处理，按返回会直接 finish 掉代理 Activity，用户看到的是「退回微信主界面」。
+    androidx.activity.compose.BackHandler {
+        // Hchat 脚本设置浮层打开时，先关浮层（不依赖 Xposed 对模块 Activity 的 back hook）。
+        if (runCatching { h.Hchat.ui.miuix.MiuixSettingsPage.closeIfOpen(context) }.getOrDefault(false)) {
+            return@BackHandler
+        }
+        if (pagerState.currentPage != 0) {
+            scope.launch { pagerState.animateScrollToPage(0) }
+        } else {
+            onFinish()
+        }
+    }
     val barBottomPadding = 12.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // 主页样式开关：false = 经典四 Tab（底部玻璃导航）；true = 单页 Dashboard（隐藏底部导航，
     // 功能分类网格直接铺在主页，日志/设置从主页瓦片进入 —— 参照用户给的 WeChatAI 风格截图）

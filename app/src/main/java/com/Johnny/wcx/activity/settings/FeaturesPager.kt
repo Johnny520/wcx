@@ -60,6 +60,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.Johnny.wcx.ui.style.SoftDivider
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import com.Johnny.wcx.ui.style.SectionLabel
 
 
 // ---------------------------------------------------------------------------
@@ -395,6 +400,11 @@ fun CategoryDetailScreen(
         mutableStateOf(Preferences.hiddenContactsMasterEnabled)
     }
 
+    // 开关一律以运行时真值为准（读 item.isEnabled），避免配置/状态不同步导致「显示开了其实没开」。
+    fun syncFromRuntime() {
+        items.forEach { switchStates[it.name] = it.isEnabled }
+    }
+
     // 总开关：切换后立即对该分类下所有开关生效（各功能自身开关状态保留）。
     fun applyMasterSwitch(next: Boolean) {
         masterEnabled = next
@@ -402,61 +412,106 @@ fun CategoryDetailScreen(
         items.filterIsInstance<SwitchFeature>().forEach { feature ->
             feature.isEnabled = next && WePrefs.getBoolOrFalse(feature.name)
         }
-        switchStates.keys.forEach { key ->
-            switchStates[key] = next && WePrefs.getBoolOrFalse(key)
-        }
+        syncFromRuntime()
     }
 
-    MiuixListScaffold(
-        title = categoryName,
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = MaterialSymbols.Outlined.Arrow_back,
-                    contentDescription = "返回",
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
-            }
-        },
-    ) {
-        if (items.isEmpty()) return@MiuixListScaffold
+    val enabledCount = items.count { it.isEnabled }
+    val accent = CATEGORY_COLORS[
+        (FEATURE_CATEGORIES.indexOfFirst { it.first == categoryName }.takeIf { it >= 0 } ?: 0) % CATEGORY_COLORS.size
+    ]
 
-        if (isMasterSwitchCategory) {
+    PageScaffold(
+        title = categoryName,
+        largeTitle = categoryName,
+        subtitle = if (items.isEmpty()) "本分类暂无功能" else "$enabledCount/${items.size} 已启用",
+        onBack = onBack,
+    ) { _ ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = CONTENT_BOTTOM_INSET),
+        ) {
+            // ---- 概览卡 ----
             item {
-                Column(
-                    modifier = Modifier
-                        .padding(top = 12.dp)
-                        .groupedCardItem(0, 1),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                SoftCard(modifier = Modifier.padding(top = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RoundIconBox(
+                            icon = MaterialSymbols.Outlined.Category,
+                            tint = accent,
+                            size = 44.dp,
+                        )
+                        Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "密友功能总开关",
-                                fontSize = MiuixTheme.textStyles.headline1.fontSize,
-                                fontWeight = FontWeight.Medium,
-                                color = MiuixTheme.colorScheme.onSurface,
+                                text = categoryName,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = WxPalette.textPrimary(),
                             )
                             Text(
-                                text = "关闭后本分类下所有功能都不生效（各开关状态保留）",
-                                fontSize = MiuixTheme.textStyles.body2.fontSize,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                text = if (items.isEmpty()) "暂无功能" else "已启用 $enabledCount · 共 ${items.size} 项",
+                                fontSize = 12.sp,
+                                color = WxPalette.textSecondary(),
                             )
                         }
-                        Switch(checked = masterEnabled, onCheckedChange = ::applyMasterSwitch)
+                        if (items.isNotEmpty()) {
+                            Text(
+                                text = "${(enabledCount * 100 / items.size)}%",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = accent,
+                            )
+                        }
+                    }
+                    if (items.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(accent.copy(alpha = 0.14f)),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(
+                                        if (items.isEmpty()) 0f
+                                        else enabledCount.toFloat() / items.size
+                                    )
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(50))
+                                    .background(accent),
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        if (isMasterSwitchCategory) {
-            item {
-                Column(modifier = Modifier.padding(top = 8.dp)) {
+            // ---- 密友总开关 ----
+            if (isMasterSwitchCategory && items.isNotEmpty()) {
+                item {
+                    SoftCard(modifier = Modifier.padding(top = 10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "密友功能总开关",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = WxPalette.textPrimary(),
+                                )
+                                Text(
+                                    text = "关闭后本分类下所有功能都不生效（各开关状态保留）",
+                                    fontSize = 11.sp,
+                                    color = WxPalette.textSecondary(),
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Switch(checked = masterEnabled, onCheckedChange = ::applyMasterSwitch)
+                        }
+                    }
+                }
+                item {
                     SoftCard(
+                        modifier = Modifier.padding(top = 10.dp),
                         gradient = WxPalette.GradPink,
                         onClick = { onOpenHiddenContactsDiagnostics() },
                     ) {
@@ -474,23 +529,34 @@ fun CategoryDetailScreen(
                     }
                 }
             }
-        }
 
-        itemsIndexed(items, key = { _, item -> item.name }) { index, item ->
-            Column(
-                modifier = Modifier
-                    .then(if (index == 0) Modifier.padding(top = 12.dp) else Modifier)
-                    .groupedCardItem(index, items.size),
-            ) {
-                FeatureRow(
-                    item = item,
-                    checked = switchStates[item.name] ?: false,
-                    onCheckedChange = { switchStates[item.name] = it },
-                )
-                item.Ui()
+            if (items.isEmpty()) {
+                item {
+                    SoftCard(modifier = Modifier.padding(top = 10.dp)) {
+                        Text(
+                            text = "本分类下暂无功能",
+                            fontSize = 14.sp,
+                            color = WxPalette.textSecondary(),
+                        )
+                    }
+                }
+                return@LazyColumn
+            }
+
+            item {
+                SectionLabel("功能", modifier = Modifier.padding(start = 6.dp, top = 16.dp, bottom = 6.dp))
+            }
+
+            itemsIndexed(items, key = { _, item -> item.name }) { index, item ->
+                SoftCard(modifier = Modifier.padding(top = if (index == 0) 0.dp else 2.dp)) {
+                    FeatureRow(
+                        item = item,
+                        checked = switchStates[item.name] ?: item.isEnabled,
+                        onCheckedChange = { switchStates[item.name] = it },
+                    )
+                    item.Ui()
+                }
             }
         }
-
-        item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
     }
 }

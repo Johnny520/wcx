@@ -440,6 +440,14 @@ fun HomePager(
                     onClick = onOpenModuleHealth,
                     modifier = Modifier.weight(1f),
                 )
+                QuickTile(
+                    icon = MaterialSymbols.Outlined.Sports_esports,
+                    title = "脚本插件",
+                    subtitle = "本地插件 · 在线市场",
+                    tint = Color(0xFF00C2A8),
+                    onClick = onOpenScript,
+                    modifier = Modifier.weight(1f),
+                )
                 if (singlePageMode) {
                     QuickTile(
                         icon = MaterialSymbols.Outlined.Code,
@@ -461,14 +469,6 @@ fun HomePager(
                         subtitle = "界面 · 更新 · 备份恢复",
                         tint = Color(0xFF8B5CF6),
                         onClick = onOpenSettings,
-                        modifier = Modifier.weight(1f),
-                    )
-                    QuickTile(
-                        icon = MaterialSymbols.Outlined.Sports_esports,
-                        title = "脚本插件",
-                        subtitle = "Hchat 脚本 · 市场 · Agent",
-                        tint = Color(0xFF00C2A8),
-                        onClick = onOpenScript,
                         modifier = Modifier.weight(1f),
                     )
                 }

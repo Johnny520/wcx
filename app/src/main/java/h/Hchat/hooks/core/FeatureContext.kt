@@ -16,7 +16,7 @@ class FeatureContext(
     private val hostContext: Context,
     private val moduleContext: Context,
     private val hostClassLoader: ClassLoader,
-    private val loadPackageParam: XC_LoadPackage.LoadPackageParam,
+    private val loadPackageParam: XC_LoadPackage.LoadPackageParam?,
     private val dexKitBridge: DexKitBridge,
     private val dexFinder: DexFinder,
     private val eventBus: EventBus,
@@ -30,7 +30,7 @@ class FeatureContext(
 
     fun hostClassLoader(): ClassLoader = hostClassLoader
 
-    fun loadPackageParam(): XC_LoadPackage.LoadPackageParam = loadPackageParam
+    fun loadPackageParam(): XC_LoadPackage.LoadPackageParam? = loadPackageParam
 
     fun dexKitBridge(): DexKitBridge = dexKitBridge
 

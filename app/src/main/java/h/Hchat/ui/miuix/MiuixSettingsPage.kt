@@ -987,6 +987,19 @@ internal class SettingsBackHandlerRegistry {
 
 internal val LocalSettingsBackHandlerRegistry = staticCompositionLocalOf<SettingsBackHandlerRegistry?> { null }
 
+/**
+ * WCX：Compose LocalContext 可能是 ContextThemeWrapper 包装，直接 as? Activity 会失败导致
+ * 设置浮层静默不显示。向上遍历 ContextWrapper 找到真实 Activity。
+ */
+private fun Context.findHostActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return current as? Activity
+}
+
 @Composable
 internal fun RegisterSettingsBackHandler(onBack: (() -> Unit)?) {
     val registry = LocalSettingsBackHandlerRegistry.current
@@ -1018,6 +1031,23 @@ object MiuixSettingsPage {
     @JvmStatic
     fun showScriptPluginAgent(context: Context) {
         show(context, DetailPage.ScriptPluginAgent(), floatingAgent = false)
+    }
+
+    /**
+     * WCX：若脚本设置浮层正处于打开状态则关闭它，并返回是否真的关闭了一个浮层。
+     * 供宿主 Activity 的返回键处理兜底（防止 Xposed 层 back hook 在模块自身 Activity 上失效时浮层关不掉）。
+     */
+    @JvmStatic
+    fun closeIfOpen(context: Context): Boolean {
+        val activity = context.findHostActivity() ?: return false
+        val decor = activity.window?.decorView as? ViewGroup ?: return false
+        val existing = findExistingPage(decor) ?: return false
+        val close = (existing.getTag(R.id.hchat_settings_page_host) as? SettingsPageHostTag)?.close
+        return if (close != null) {
+            runCatching { close() }.isSuccess
+        } else {
+            runCatching { decor.removeView(existing) }.isSuccess
+        }
     }
 
     /** WCX：直达「脚本插件」内容页（总开关 + 本地插件 + 在线市场 + 本地插件管理）。 */
@@ -1067,7 +1097,7 @@ object MiuixSettingsPage {
         floatingAgent: Boolean,
         initialTab: MainTab = MainTab.PRACTICAL
     ) {
-        val activity = context as? Activity ?: return
+        val activity = context.findHostActivity() ?: return
         val decor = activity.window?.decorView as? ViewGroup ?: return
         removeExistingPage(decor)
 

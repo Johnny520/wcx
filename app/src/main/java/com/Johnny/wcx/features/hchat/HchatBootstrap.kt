@@ -74,20 +74,12 @@ object HchatBootstrap {
                     try {
                         val apkPath = hostContext.applicationInfo.sourceDir
                         val hostClassLoader = hostContext.classLoader
-                        // 内置 xposed-api-82.jar 的 LoadPackageParam 构造器 package-private，反射构造（字段均 public）。
+                        // WCX 的 libxposed 加载链没有 LoadPackageParam；api-82 jar 里该类构造器均不可用
+                        // （无参与 (String) 都不存在）。优先取 legacy 入口缓存的真实 lpparam，
+                        // 取不到就传 null（hchat 内仅 LegacyChatInputFeature 用到，且不安装）。
                         val lpparam = runCatching {
-                            XC_LoadPackage.LoadPackageParam::class.java.getDeclaredConstructor()
-                                .apply { isAccessible = true }.newInstance()
-                        }.getOrElse {
-                            XC_LoadPackage.LoadPackageParam::class.java
-                                .getDeclaredConstructor(String::class.java)
-                                .apply { isAccessible = true }.newInstance(PackageNames.WECHAT)
-                        }.apply {
-                            packageName = PackageNames.WECHAT
-                            processName = hostContext.packageName
-                            classLoader = hostClassLoader
-                            appInfo = hostContext.applicationInfo
-                        }
+                            com.Johnny.wcx.loader.entry.xp51.Xp51HookEntry.getLoadPackageParam()
+                        }.getOrNull()
                         val dexKit = DexKitBridge.create(apkPath)
                         val finder = DexFinder(dexKit, hostClassLoader, hostContext)
                         val bridgeHolder = DexBridgeHolder(dexKit, finder, hostClassLoader, apkPath)
