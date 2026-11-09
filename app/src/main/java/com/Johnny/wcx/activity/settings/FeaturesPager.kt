@@ -67,6 +67,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import com.Johnny.wcx.ui.style.SectionLabel
 import com.composables.icons.materialsymbols.outlined.Category
 import com.Johnny.wcx.features.core.ClickableFeature
+import com.composables.icons.materialsymbols.outlined.Settings
 
 
 // ---------------------------------------------------------------------------
