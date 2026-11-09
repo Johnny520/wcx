@@ -303,8 +303,8 @@ fun HomePager(
         // background 设置与 TopAppBar 毛玻璃相同的背景色，避免滚动时出现灰色色块
         item {
             Column(
-                modifier = Modifier.fxReveal(0),
                 modifier = Modifier
+                    .fxReveal(0)
                     .fillMaxWidth()
                     .wrapContentHeight()
                     .padding(top = 8.dp, start = 18.dp, end = 18.dp, bottom = 2.dp),
@@ -372,7 +372,7 @@ fun HomePager(
                         },
                         value = if (com.Johnny.wcx.ui.style.AnimFx.enabled())
                             rememberGrowNumber(enabledCount.toFloat()).roundToInt().toString()
-                        else enabledCount.toString()
+                        else enabledCount.toString(),
                         label = "已启用",
                         onClick = { quickListKind = QUICK_LIST_ENABLED },
                     )
@@ -388,7 +388,7 @@ fun HomePager(
                         },
                         value = if (com.Johnny.wcx.ui.style.AnimFx.enabled())
                             rememberGrowNumber(totalCount.toFloat()).roundToInt().toString()
-                        else totalCount.toString()
+                        else totalCount.toString(),
                         label = "全部功能",
                         onClick = { quickListKind = QUICK_LIST_ALL },
                     )
