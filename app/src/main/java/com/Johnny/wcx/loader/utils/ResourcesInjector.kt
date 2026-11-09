@@ -49,7 +49,7 @@ object ResourcesInjector {
     }
 
     private fun hasModuleRes(resources: Resources): Boolean = try {
-        resources.getValue(R.string.res_inject_success, TypedValue(), true)
+        resources.getValue(R.id.hchat_message_text_color_value, TypedValue(), true)
         true
     } catch (_: Resources.NotFoundException) {
         false
@@ -133,7 +133,7 @@ object ResourcesInjector {
         }
 
         if (!hasModuleRes(resources)) {
-            logInjectionFailure(path, Resources.NotFoundException(R.string.res_inject_success.toString()), 0)
+            logInjectionFailure(path, Resources.NotFoundException(R.id.hchat_message_text_color_value.toString()), 0)
         }
     }
 
@@ -147,7 +147,7 @@ object ResourcesInjector {
                 .apply { isAccessible = true }
             cookie = addAssetPath.invoke(resources.assets, path) as Int
             if (!hasModuleRes(resources)) {
-                logInjectionFailure(path, Resources.NotFoundException(R.string.res_inject_success.toString()), cookie)
+                logInjectionFailure(path, Resources.NotFoundException(R.id.hchat_message_text_color_value.toString()), cookie)
             }
         } catch (e: Exception) {
             logInjectionFailure(path, e, cookie)
