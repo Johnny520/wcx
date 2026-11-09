@@ -54,9 +54,20 @@ object WeLauncher {
 
         ParcelableFixer.init()
 
+        // 缓存里存的是 R8 混淆后的类/方法描述符，每次构建混淆结果都不同。
+        // key 必须带上「模块自身构建指纹」，否则升级模块后会复用上一版的名字，
+        // 导致所有微信内部定位失败、功能与设置入口全部消失（表现为「微信像没装模块」）。
+        // 注意：本文件 import 的 BuildConfig 是 com.tencent.mm.boot.BuildConfig（微信的），
+        // 模块指纹必须显式取 com.Johnny.wcx.BuildConfig。
+        val moduleBuildStamp = "${com.Johnny.wcx.BuildConfig.COMMIT_HASH}|${com.Johnny.wcx.BuildConfig.BUILD_TIMESTAMP}"
         DexCacheManager.init(
-            if (!Preferences.resetDexCacheOnHotUpdate) "${HostInfo.versionName}${HostInfo.versionCode}"
-            else "${BuildConfig.VERSION_NAME}${BuildConfig.VERSION_CODE}${BuildConfig.CLIENT_VERSION_ARM64}"
+            buildString {
+                append(HostInfo.versionName).append(HostInfo.versionCode)
+                if (Preferences.resetDexCacheOnHotUpdate) {
+                    append('|').append(BuildConfig.CLIENT_VERSION_ARM64)
+                }
+                append('|').append(moduleBuildStamp)
+            }
         )
 
         if (TargetProcesses.isInMain) {
