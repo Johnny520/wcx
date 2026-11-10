@@ -70,8 +70,14 @@ object ResourceFallbackGuard {
         }
     }
 
-    private fun Throwable.isMissingResource(): Boolean =
-        generateSequence<Throwable?>(this) { it?.cause }
-            .take(8)
-            .any { it is Resources.NotFoundException || it is FileNotFoundException }
+    private fun Throwable.isMissingResource(): Boolean {
+        var current: Throwable? = this
+        var depth = 0
+        while (current != null && depth < 8) {
+            if (current is Resources.NotFoundException || current is FileNotFoundException) return true
+            current = current.cause
+            depth++
+        }
+        return false
+    }
 }
