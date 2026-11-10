@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
 import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.LinearLayout
@@ -172,14 +171,34 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         }
     }
 
+    /**
+     * 一个原生工具项。
+     *
+     * 不再缓存微信 GridView 上的 OnItemClickListener / OnItemLongClickListener 字段：
+     * 那是反射私有字段，字段类型或名字一变就是 NPE（整轮采集直接失败、工具栏空白）。
+     * 改成记录「所在 GridView + 该项 View + 位置」，点击时走 View 的公开 API
+     * （GridView.performItemClick / View.performLongClick），与用户手指点原生图标同一条路径。
+     */
     private data class MenuItem(
         val name: String,
-        val onClickListener: AdapterView.OnItemClickListener,
-        val onLongClickListener: AdapterView.OnItemLongClickListener,
         val gridView: WeakReference<GridView>,
         val itemView: WeakReference<View>,
-        val indexInGrid: Int
-    )
+        val indexInGrid: Int,
+    ) {
+        fun click() {
+            val grid = gridView.get() ?: return
+            val item = itemView.get() ?: return
+            val id = runCatching { grid.adapter?.getItemId(indexInGrid) }.getOrNull() ?: indexInGrid.toLong()
+            runCatching { grid.performItemClick(item, indexInGrid, id) }
+                .onFailure { WeLogger.e(TAG, "触发工具项失败：$name", it) }
+        }
+
+        fun longClick() {
+            val item = itemView.get() ?: return
+            runCatching { item.performLongClick() }
+                .onFailure { WeLogger.e(TAG, "长按工具项失败：$name", it) }
+        }
+    }
 
     private data class QuickReplyDraft(
         val id: String = UUID.randomUUID().toString(),
@@ -243,10 +262,61 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         }
     }
 
+    /** 递归收集面板内所有 GridView：微信 8.x 把工具格放在自定义 MMFlipper 里，层级会随版本变。 */
+    private fun collectGrids(root: View): List<GridView> {
+        val out = mutableListOf<GridView>()
+
+        fun walk(v: View) {
+            if (v is GridView) {
+                out.add(v)
+                return
+            }
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+        }
+
+        walk(root)
+        return out
+    }
+
+    /** 工具项显示名：tag 里挂着持有名字 TextView 的对象；tag 结构变了就退回在 item 里直接找 TextView。 */
+    private fun toolNameOf(itemView: View): String? {
+        val tag = itemView.tag
+        val byTag = if (tag != null) {
+            runCatching { tag.reflekt().firstField { type = TextView::class }.get() as? TextView }
+                .getOrNull()?.text?.toString()?.takeIf { it.isNotBlank() }
+        } else null
+        if (byTag != null) return byTag
+        return runCatching {
+            (itemView as ViewGroup).findViewWhich<TextView> { it.text?.isNotBlank() == true }?.text?.toString()
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    /** 打印 View 层级（诊断「注入容器找不到」用，只在失败时调用）。 */
+    private fun describeChildren(root: ViewGroup): String {
+        val sb = StringBuilder()
+
+        fun walk(v: ViewGroup, level: Int) {
+            for (i in 0 until v.childCount) {
+                val child = v.getChildAt(i)
+                sb.append('\n').append("  ".repeat(level)).append('[').append(i).append("] ")
+                    .append(child.javaClass.simpleName)
+                if (child is ViewGroup && level < 2) walk(child, level + 1)
+            }
+        }
+
+        walk(root, 0)
+        return sb.toString()
+    }
+
     /** 真正的 hook 安装（失败要留痕，否则「工具栏失效」无从定位）。 */
     private fun registerHooks() {
         methodAppPanelInitAppGrid.apply {
             hookBefore {
+                // 尺寸预估只是为了让微信按真实高度排版；失败也必须吞掉，
+                // 否则 hookBefore 抛异常会让用户感觉「点了没反应」，且不好定位。
+                runCatching {
                 val appPanel = args[0] as LinearLayout
                 // WeChat normally lets MMFlipper.onMeasure feed the real measured size into the
                 // measurer (g.a). We have to invoke initAppGrid before the panel is laid out, so we
@@ -272,44 +342,38 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                 val height = (containerHeight - dotStrip).coerceAtLeast(1)
                 val measurer = methodAppPanelOnMeasure.method.declaringClass.createInstance(appPanel)
                 methodAppPanelOnMeasure.method.invoke(measurer, width, height)
+                }.onFailure { WeLogger.w(TAG, "AppPanel 尺寸预估失败（不影响工具栏显示）：${it.message}") }
             }
 
             hookAfter {
                 val now = now()
                 if (now - lastToolListUpdateTime < 2.seconds) return@hookAfter
 
-                val tools = mutableListOf<Pair<String, MenuItem>>()
+                // 采集失败必须留痕：工具栏「什么都不显示」时要能从日志看出是没找到 GridView、
+                // adapter 拿不到项，还是取不到工具名——而不是一律静默成空白。
+                runCatching {
+                    val tools = mutableListOf<Pair<String, MenuItem>>()
 
-                val appPanel = args[0] as LinearLayout
-                val grids = appPanel.findViewByChildIndexes<ViewGroup>(0, 0, 0)!!
-                    .children.map { view -> view as GridView }
-
-                grids.forEach { grid ->
-                    val onClickListener = grid.reflekt()
-                        .firstField { type = AdapterView.OnItemClickListener::class }.get()!! as AdapterView.OnItemClickListener
-                    val onLongClickListener = grid.reflekt()
-                        .firstField { type = AdapterView.OnItemLongClickListener::class }.get()!! as AdapterView.OnItemLongClickListener
-                    val listAdapter = grid.adapter
-
-                    listAdapter.iterable(grid).forEachIndexed { index, itemView ->
-                        val name = (itemView.tag.reflekt()
-                            .firstField { type = TextView::class }
-                            .get()!! as TextView).text.toString()
-                        tools.add(
-                            name to MenuItem(
-                                name,
-                                onClickListener,
-                                onLongClickListener,
-                                WeakReference(grid),
-                                WeakReference(itemView),
-                                index
+                    // 不再依赖 AppPanel 内部固定的 child 索引链（0,0,0）：微信每个版本都可能挪层级，
+                    // 递归找出面板里所有 GridView，只要能拿到 adapter 就能枚举工具项。
+                    val appPanel = args[0] as? View ?: return@runCatching
+                    collectGrids(appPanel).forEach { grid ->
+                        val adapter = grid.adapter ?: return@forEach
+                        for (index in 0 until adapter.count) {
+                            val itemView = runCatching { adapter.getView(index, null, grid) }.getOrNull()
+                                ?: continue
+                            val name = toolNameOf(itemView) ?: continue
+                            tools.add(
+                                name to MenuItem(name, WeakReference(grid), WeakReference(itemView), index)
                             )
-                        )
+                        }
                     }
-                }
 
-                WeLogger.d(TAG, "populated tool list with ${tools.size} items")
-                toolsState.value = tools
+                    WeLogger.i(TAG, "采集到 ${tools.size} 个原生工具项")
+                    toolsState.value = tools
+                }.onFailure {
+                    WeLogger.e(TAG, "采集聊天工具项失败（工具栏可能为空）：${it.message}", it)
+                }
 
                 // rate limit this since this method is called REALLY frequently
                 lastToolListUpdateTime = now()
@@ -323,10 +387,15 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(activity)
 
             chatFooter.setLifecycleOwner(lifecycleOwner)
+            // 主路径：ChatFooter 第 0 个子节点的第 1 层容器；失败再退化到「直接子节点里的第一个 LinearLayout」。
             val linearLayout = chatFooter.findViewByChildIndexes<LinearLayout>(0, 1)
+                ?: (0 until chatFooter.childCount).firstNotNullOfOrNull { chatFooter.getChildAt(it) as? LinearLayout }
             if (linearLayout == null) {
-                // 微信调整了 ChatFooter 内部层级：跳过本次注入（不再 NPE 中断整个 hook）
-                WeLogger.w(TAG, "ChatFooter 层级变化，找不到注入容器（子节点数=${chatFooter.childCount}），本次跳过")
+                // 微信调整了 ChatFooter 内部层级：跳过本次注入（不再 NPE 中断整个 hook），并打印层级便于适配
+                WeLogger.w(
+                    TAG,
+                    "ChatFooter 层级变化，找不到注入容器（子节点数=${chatFooter.childCount}）：${describeChildren(chatFooter)}"
+                )
                 return@hookAfter
             }
             linearLayout.setLifecycleOwner(lifecycleOwner)
@@ -354,25 +423,12 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                                 showQuickReplyPicker(activity)
                             })
 
-                            list.add("相册" to {
-                                firstTool.onClickListener.onItemClick(firstTool.gridView.get()!!, firstTool.itemView.get()!!, 0, 0)
-                            })
-                            list.add("系统拍摄" to {
-                                firstTool.onLongClickListener.onItemLongClick(null, null, 0, 0)
-                            })
+                            list.add("相册" to { firstTool.click() })
+                            list.add("系统拍摄" to { firstTool.longClick() })
 
                             tools.forEach { (name, menuItem) ->
                                 if (name in NAME_TO_ICON_MAP && name != "相册" && name != "系统拍摄") {
-                                    val gridView = menuItem.gridView.get() ?: return@forEach
-                                    val itemView = menuItem.itemView.get() ?: return@forEach
-                                    list.add(name to {
-                                        menuItem.onClickListener.onItemClick(
-                                            gridView,
-                                            itemView,
-                                            menuItem.indexInGrid + 1,
-                                            0
-                                        )
-                                    })
+                                    list.add(name to { menuItem.click() })
                                 }
                             }
 
