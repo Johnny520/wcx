@@ -39,6 +39,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -889,20 +890,44 @@ private fun FeatureSearchBox(
     }
 }
 
-/** 单页模式的功能搜索结果：命中名称/说明的功能，点击直达其所属分类。 */
+/**
+ * 单页模式的功能搜索结果：**直接带开关**（与「功能」页一致），点左侧标题进所属分类。
+ *
+ * 之前单页模式只给一行文字、点了只能跳分类，想开一个功能得先进分类再翻；
+ * 这里把开关直接放到结果行上，搜到就能开/关。
+ */
 @Composable
 private fun FeatureSearchResult(
     query: String,
     onOpenCategory: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val q = query.trim()
+    // 与「功能」页同一口径：当前微信版本不支持的功能不出现
     val matched = remember(q) {
         if (q.isEmpty()) emptyList()
-        else FeaturesProvider.ALL_HOOK_ITEMS.filter {
-            it.name.contains(q, ignoreCase = true) || it.description.contains(q, ignoreCase = true)
-        }.take(60)
+        else FeaturesProvider.ALL_HOOK_ITEMS
+            .filter { it.unavailableReason == null }
+            .filter { it.name.contains(q, ignoreCase = true) || it.description.contains(q, ignoreCase = true) }
+            .take(60)
     }
+    val switchStates = remember { mutableStateMapOf<String, Boolean>() }
+
+    // 与 FeaturesPager.CatRow / SettingsActivity.FeatureRow 完全一致的开关流程
+    fun toggle(feature: com.Johnny.wcx.features.core.SwitchFeature, requested: Boolean) {
+        val unavailable = if (requested) feature.unavailableReason else null
+        if (unavailable != null) {
+            com.Johnny.wcx.utils.android.showToast(unavailable)
+            return
+        }
+        if (feature.onBeforeToggle(requested, context)) {
+            WePrefs.putBool(feature.name, requested)
+            feature.isEnabled = requested
+            switchStates[feature.name] = requested
+        }
+    }
+
     SoftCard(contentPadding = 0, modifier = modifier) {
         Column {
             if (matched.isEmpty()) {
@@ -914,41 +939,57 @@ private fun FeatureSearchResult(
                 )
             } else {
                 Text(
-                    text = "找到 " + matched.size + " 个功能",
+                    text = "找到 " + matched.size + " 个功能（可直接开关）",
                     fontSize = 11.sp,
                     color = WxPalette.textSecondary(),
                     modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 2.dp),
                 )
                 matched.forEachIndexed { index, feature ->
-                    Column(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                val category = feature.categories.firstOrNull()
-                                if (category != null) onOpenCategory(category)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                            .padding(start = 14.dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = feature.name,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = WxPalette.textPrimary(),
-                        )
-                        if (feature.description.isNotBlank()) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    feature.categories.firstOrNull()?.let { onOpenCategory(it) }
+                                }
+                                .padding(vertical = 2.dp),
+                        ) {
                             Text(
-                                text = feature.description,
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp,
-                                color = WxPalette.textSecondary(),
-                                maxLines = 2,
+                                text = feature.name,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = WxPalette.textPrimary(),
                             )
+                            if (feature.description.isNotBlank()) {
+                                Text(
+                                    text = feature.description,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    color = WxPalette.textSecondary(),
+                                    maxLines = 2,
+                                )
+                            }
+                            if (feature.categories.isNotEmpty()) {
+                                Text(
+                                    text = feature.categories.joinToString(" · "),
+                                    fontSize = 10.sp,
+                                    color = WxPalette.textSecondary(),
+                                )
+                            }
                         }
-                        if (feature.categories.isNotEmpty()) {
-                            Text(
-                                text = feature.categories.joinToString(" · "),
-                                fontSize = 10.sp,
-                                color = WxPalette.textSecondary(),
+                        val switchable = feature is com.Johnny.wcx.features.core.SwitchFeature &&
+                            !(feature is com.Johnny.wcx.features.core.ClickableFeature && feature.noSwitchWidget)
+                        if (switchable) {
+                            Spacer(Modifier.width(8.dp))
+                            val switchFeature = feature as com.Johnny.wcx.features.core.SwitchFeature
+                            Switch(
+                                checked = switchStates[feature.name] ?: switchFeature.isEnabled,
+                                onCheckedChange = { requested -> toggle(switchFeature, requested) },
                             )
                         }
                     }
