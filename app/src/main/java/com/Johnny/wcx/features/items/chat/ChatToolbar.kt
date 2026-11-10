@@ -289,7 +289,7 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         } else null
         if (byTag != null) return byTag
         return runCatching {
-            (itemView as ViewGroup).findViewWhich<TextView> { it.text?.isNotBlank() == true }?.text?.toString()
+            (itemView as ViewGroup).findViewWhich<TextView> { v -> (v as? TextView)?.text?.isNotBlank() == true }?.text?.toString()
         }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
