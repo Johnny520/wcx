@@ -26,7 +26,20 @@ object AutoSpeechToText : SwitchFeature(),
         WeChatMessageViewApi.removeListener(this)
     }
 
+    private const val TAG = "AutoSpeechToText"
+
     override fun onCreateView(
+        param: XC_MethodHook.MethodHookParam,
+        view: View
+    ) {
+        // 这里全是微信内部结构（apiManager 字段、transform 方法签名、MsgInfo 实体），
+        // 任一漂移都会抛异常。原来没有兜底：一条消息失败就等于整个功能「没反应」，
+        // 日志里也看不到。现在失败要留痕，自检页「最近错误」也能直接看到。
+        runCatching { handleCreateView(param, view) }
+            .onFailure { com.Johnny.wcx.utils.WeLogger.e(TAG, "自动语音转文字失败（本条消息跳过）：${it.message}", it) }
+    }
+
+    private fun handleCreateView(
         param: XC_MethodHook.MethodHookParam,
         view: View
     ) {
