@@ -57,7 +57,6 @@ import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.features.core.SwitchFeature
-import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.features.items.moments.BatchDeleteMoments
 import com.Johnny.wcx.preferences.WePrefs
@@ -744,7 +743,6 @@ private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能清单与分类启用概况") { featureOverview() },
     // 用户要的「真实质检」：不看开关开没开，看开了之后到底有没有生效
     HealthStep("功能回执") { featureReceiptSection() },
-    HealthStep("最近错误") { recentProblemSection() },
     HealthStep("脚本子系统") { scriptSubsystemSection(context) },
     HealthStep("关键类锚点") { anchors() },
     HealthStep("DexKit 锚点") { dexAnchorSection() },
@@ -1115,40 +1113,6 @@ private fun featureReceiptSection(): List<HealthItem> {
     }
 }
 
-/**
- * 最近错误：把运行日志里的 W/E 级记录汇总到自检页，点开可看详情并复制摘要。
- *
- * 这样「哪里报错了」不用再翻日志文件，质检一跑就能看到。
- */
-private fun recentProblemSection(): List<HealthItem> {
-    val section = "最近错误"
-    val digest = runCatching { WeLogger.digest(20) }.getOrNull()
-        ?: return listOf(HealthItem("运行日志", section, "读取失败", false, "无法读取运行日志文件。"))
-
-    if (digest.problems.isEmpty()) {
-        return listOf(
-            HealthItem(
-                "运行日志", section, "无错误", true,
-                "最近日志（${digest.fileName ?: "无"}）里没有 W/E 级记录。",
-            )
-        )
-    }
-
-    val detail = buildString {
-        append("最近 ").append(digest.problems.size).append(" 条错误/警告（新→旧）：\n")
-        digest.problems.take(10).forEach { problem -> append("· ").append(problem.header).append('\n') }
-        append("\n按钮会复制完整摘要（含堆栈，最多 3000 字）。")
-    }
-    return listOf(
-        HealthItem(
-            "错误 / 警告", section,
-            "${digest.errorCount} 错误 · ${digest.warnCount} 警告", false,
-            detail,
-            actionLabel = "复制摘要",
-            action = { digest.toShareText().take(MAX_REPORT_CHARS) },
-        )
-    )
-}
 
 /**
  * 网络与 CDN：域名连通性、是否挂代理、图片带不带 Referer 的实际返回。

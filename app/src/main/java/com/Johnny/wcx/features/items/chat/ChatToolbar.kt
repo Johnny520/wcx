@@ -105,7 +105,6 @@ import com.Johnny.wcx.ui.utils.iterable
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
-import com.Johnny.wcx.utils.android.constructor
 import com.Johnny.wcx.utils.now
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -395,7 +394,13 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             }
         }
 
-        ChatFooter::class.constructor.hookAfter {
+        // ChatFooter 只有 (Context, AttributeSet) / (Context, AttributeSet, int) 两个构造器，
+        // 没有无参构造器。reflekt 的 constructor() 扩展按默认条件匹配不到时会抛
+        // "No constructor matching conditions"，整个 hook 安装直接失败、工具栏不显示
+        //（自检页「功能回执」已能捕获该错误）。这里显式接管全部构造器，不再依赖条件匹配。
+        var hookedConstructors = 0
+        ChatFooter::class.java.declaredConstructors.forEach { ctor ->
+            ctor.hookAfter {
             val chatFooter = thisObject as FrameLayout
             val activity = chatFooter.context as Activity
 
@@ -475,8 +480,13 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                 healthIssue = null
             }
             WeLogger.i(TAG, "聊天工具栏已注入聊天页（容器子 View 数=${linearLayout.childCount}）")
+            }
+            hookedConstructors++
         }
-        WeLogger.i(TAG, "聊天工具栏 hook 已安装（聊天页创建时注入）")
+        if (hookedConstructors == 0) {
+            error("ChatFooter 没有可 Hook 的构造器（微信类结构变化），工具栏不会显示")
+        }
+        WeLogger.i(TAG, "聊天工具栏 hook 已安装（$hookedConstructors 个构造器，聊天页创建时注入）")
     }
 
     override fun onDisable() {
