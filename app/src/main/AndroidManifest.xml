@@ -96,6 +96,17 @@
             android:exported="true"
             android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
 
+        <!-- Python 脚本 / 扩展包设置页（在微信进程内通过 SplashActivity 代理启动） -->
+        <activity
+            android:name=".activity.scripting_python.PythonScriptsSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
+
+        <activity
+            android:name=".activity.extensions.ExtensionsSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
+
         <activity
             android:name=".activity.RedPacketStatsActivity"
             android:exported="true"

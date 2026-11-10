@@ -12992,6 +12992,13 @@ internal fun ScriptPluginMiuixPage(
                     onOpenManager = onOpenManager,
                     onOpenMarket = onOpenMarket,
                     onOpenReadme = { readmePlugin = it },
+                    // Python 脚本页：与对方仓库一致，用独立设置页承载（微信进程内通过代理 Activity 启动）
+                    onOpenPythonScripts = {
+                        com.Johnny.wcx.loader.utils.ActivityLauncher.launch(
+                            context,
+                            "com.Johnny.wcx.activity.scripting_python.PythonScriptsSettingsActivity",
+                        )
+                    },
                 )
             }
         }
