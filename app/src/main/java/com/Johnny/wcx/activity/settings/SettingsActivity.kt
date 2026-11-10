@@ -226,7 +226,15 @@ private fun SettingsRoot(onFinish: () -> Unit) {
         }
     }
 
-    MiuixStackNavigator(stack = stack, onExitRoot = onFinish) { screen, push, pop ->
+    MiuixStackNavigator(
+        stack = stack,
+        onExitRoot = onFinish,
+        // 覆盖层（Hchat 脚本设置浮层等）优先消费本次返回：只关浮层，不弹栈。
+        interceptBack = {
+            runCatching { h.Hchat.ui.miuix.MiuixSettingsPage.closeIfOpen(rootActivity) }
+                .getOrDefault(false)
+        },
+    ) { screen, push, pop ->
         when (screen) {
             SettingsNavTarget.Main -> MainPagerScreen(
                 onOpenCategory = { push(SettingsNavTarget.Category(it)) },
@@ -236,6 +244,10 @@ private fun SettingsRoot(onFinish: () -> Unit) {
                 onOpenLogs = { push(SettingsNavTarget.Logs) },
                 onOpenSettings = { push(SettingsNavTarget.Settings) },
                 onFinish = onFinish,
+                // 只有主界面位于栈顶时才由主界面处理返回（先回 pager 第 0 页/单页模式退出）；
+                // 一旦上面盖了子页面，返回必须由栈导航器逐级 pop，否则侧滑会直接 finish 掉
+                // 整个设置 Activity（表现为「一步退回微信主界面」）。
+                backEnabled = stack.size == 1,
             )
 
             is SettingsNavTarget.Category -> CategoryDetailScreen(
@@ -282,6 +294,7 @@ private fun MainPagerScreen(
     onOpenLogs: () -> Unit,
     onOpenSettings: () -> Unit,
     onFinish: () -> Unit,
+    backEnabled: Boolean = true,
 ) {
     val pagerState = rememberPagerState(pageCount = { 4 })
     val context = LocalContext.current
@@ -291,7 +304,7 @@ private fun MainPagerScreen(
     var singlePageMode by remember { mutableStateOf(WePrefs.getBoolOrFalse("home_single_page_mode")) }
     // 返回键兜底：任意 Tab/单页模式都先回到主页（第 0 页），已在主页才退出设置。
     // 之前没有这层处理，按返回会直接 finish 掉代理 Activity，用户看到的是「退回微信主界面」。
-    androidx.activity.compose.BackHandler {
+    androidx.activity.compose.BackHandler(enabled = backEnabled) {
         // Hchat 脚本设置浮层打开时，先关浮层（不依赖 Xposed 对模块 Activity 的 back hook）。
         if (runCatching { h.Hchat.ui.miuix.MiuixSettingsPage.closeIfOpen(context) }.getOrDefault(false)) {
             return@BackHandler

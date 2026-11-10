@@ -103,6 +103,11 @@ internal fun deviceCornerRadiusDp(): Dp {
 fun <T : Any> MiuixStackNavigator(
     stack: SnapshotStateList<T>,
     onExitRoot: () -> Unit,
+    /**
+     * 在弹栈前给调用方一次「消费本次返回」的机会（例如关闭覆盖层）。
+     * 返回 true 表示已被消费：本次手势只把页面弹回去，不从栈里移除任何一层。
+     */
+    interceptBack: () -> Boolean = { false },
     content: @Composable (screen: T, push: (T) -> Unit, pop: () -> Unit) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -141,6 +146,11 @@ fun <T : Any> MiuixStackNavigator(
     PredictiveBackHandler(enabled = stack.size > 1 && !animating) { events ->
         try {
             events.collect { e -> p.snapTo(e.progress) }
+            // 覆盖层（脚本设置浮层等）开着时，本次返回只用于关闭它，不弹栈。
+            if (interceptBack()) {
+                p.animateTo(0f, spec)
+                return@PredictiveBackHandler
+            }
             // Gesture committed — complete the spring slide-out, then remove.
             animating = true
             p.animateTo(1f, spec)
