@@ -18,7 +18,7 @@ import java.io.FileNotFoundException
  * 该异常与模块无关（资源属于 com.tencent.mm），但崩溃发生在微信内部、用户无法自救，
  * 因此这里做最小化兜底。
  *
- * 兜底策略（只保护 `res/raw/*.svg`）：
+ * 兜底策略（只保护 res/raw/ 目录下的 .svg）:
  * - 其余 drawable 加载：类型检查后立即放行，**不改变原调用路径、零额外开销**；
  * - 命中 `res/raw/xxx.svg`：调用原实现，只有确实抛「资源/文件找不到」时才降级为 null
  *   （ImageView 的 src 为空，界面继续渲染，不闪退）；其它异常原样抛出，不掩盖真实问题。
