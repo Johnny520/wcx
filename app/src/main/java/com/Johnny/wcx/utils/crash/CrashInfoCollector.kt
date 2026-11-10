@@ -136,6 +136,9 @@ object CrashInfoCollector {
         return buildString {
             appendLine("Version Name: ${BuildConfig.VERSION_NAME}")
             appendLine("Version Code: ${BuildConfig.VERSION_CODE}")
+            // 版本号保持纯版本号，具体构建落在日志里区分
+            appendLine("Commit Hash: ${BuildConfig.COMMIT_HASH.ifEmpty { "unknown" }}")
+            appendLine("Build Time: ${BuildConfig.BUILD_TIMESTAMP}")
         }
     }
 
