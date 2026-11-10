@@ -5,9 +5,7 @@ import android.os.Build
 import com.Johnny.wcx.extensions.MountedPythonRuntime
 import com.Johnny.wcx.extensions.PythonRuntimeArchive
 import com.Johnny.wcx.extensions.PythonRuntimePack
-import com.Johnny.wcx.loader.utils.InjectionHandle
 import com.Johnny.wcx.loader.utils.HybridClassLoader
-import com.Johnny.wcx.loader.utils.ResourcesInjector
 import dev.ujhhgtg.wekit.python.api.PythonPluginHost
 import dev.ujhhgtg.wekit.python.api.PythonRuntimeApi
 import dev.ujhhgtg.wekit.python.api.PythonRuntimeBackend
@@ -64,7 +62,6 @@ object PythonRuntimeLoader {
     @Volatile
     private var backend: PythonRuntimeBackend? = null
     private var startup: CompletableFuture<PythonRuntimeBackend>? = null
-    private var injectionHandle: InjectionHandle? = null
     private var runtimeClassLoader: ClassLoader? = null
     private var dexBuffers: Array<ByteBuffer>? = null
 
@@ -135,13 +132,23 @@ object PythonRuntimeLoader {
     private fun start(host: PythonPluginHost): PythonRuntimeBackend {
         val mounted = PythonRuntimePack.selectForMount() ?: throw PythonRuntimeMissingException()
         publish(PythonRuntimeState.MOUNTING, mounted, "assets")
-        val resources = HostInfo.application.resources
-        injectionHandle = ResourcesInjector.injectApk(
-            resources,
-            mounted.runtimeApk,
-            mounted.manifest.sha256,
-        )
-        resources.assets.open("chaquopy/build.json").use { it.read() }
+        // 校验运行时包完整性：直接读 APK 内的 assets/chaquopy/build.json。
+        //
+        // 严禁把 runtimeApk 的 assetPath 注入宿主微信的 Resources（旧实现：
+        // ResourcesInjector.injectApk(HostInfo.application.resources, ...)）。一旦注入，
+        // 运行时的资源表会与微信的资源表混在一起，微信按自己的资源 ID（如
+        // raw/icon_filled_hangup）查找时可能命中错误条目或落空，抛
+        // Resources$NotFoundException → InflateException → 微信主线程闪退。
+        runCatching {
+            java.util.zip.ZipFile(mounted.runtimeApk).use { zip ->
+                val entry = zip.getEntry("assets/chaquopy/build.json")
+                    ?: throw java.io.FileNotFoundException("assets/chaquopy/build.json")
+                zip.getInputStream(entry).use { it.readBytes() }
+            }
+        }.onFailure { e ->
+            WeLogger.e(TAG, "python runtime apk is incomplete: ${mounted.runtimeApk.name}", e)
+            throw PythonRuntimeMissingException()
+        }
 
         publish(PythonRuntimeState.MOUNTING, mounted, "dex")
         val loader = createClassLoader(mounted)
