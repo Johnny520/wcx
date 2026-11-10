@@ -185,6 +185,8 @@ internal sealed interface SettingsNavTarget {
     data object Acknowledgements : SettingsNavTarget
     data object HiddenContactsDiagnostics : SettingsNavTarget
     data object ModuleHealth : SettingsNavTarget
+    data object Logs : SettingsNavTarget
+    data object Settings : SettingsNavTarget
 }
 
 /**
@@ -231,6 +233,8 @@ private fun SettingsRoot(onFinish: () -> Unit) {
                 onOpenLicense = { push(SettingsNavTarget.License) },
                 onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
                 onOpenModuleHealth = { push(SettingsNavTarget.ModuleHealth) },
+                onOpenLogs = { push(SettingsNavTarget.Logs) },
+                onOpenSettings = { push(SettingsNavTarget.Settings) },
                 onFinish = onFinish,
             )
 
@@ -256,6 +260,15 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             SettingsNavTarget.HiddenContactsDiagnostics -> HiddenContactsDiagnosticsScreen(onBack = pop)
 
             SettingsNavTarget.ModuleHealth -> ModuleHealthScreen(onBack = pop)
+
+            // 单页模式没有 pager，日志/设置通过子页面进入，返回即回到单页主页
+            SettingsNavTarget.Logs -> LogsScreen(onBack = pop)
+
+            SettingsNavTarget.Settings -> SettingsPager(
+                onOpenLicense = { push(SettingsNavTarget.License) },
+                onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
+                onBack = pop,
+            )
         }
     }
 }
@@ -266,6 +279,8 @@ private fun MainPagerScreen(
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
     onOpenModuleHealth: () -> Unit,
+    onOpenLogs: () -> Unit,
+    onOpenSettings: () -> Unit,
     onFinish: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 4 })
@@ -320,8 +335,8 @@ private fun MainPagerScreen(
                         singlePageMode = it
                         WePrefs.putBool("home_single_page_mode", it)
                     },
-                    onOpenLogs = {},
-                    onOpenSettings = {},
+                    onOpenLogs = onOpenLogs,
+                    onOpenSettings = onOpenSettings,
                     onOpenScript = { h.Hchat.ui.miuix.MiuixSettingsPage.showScriptPlugin(context) },
                 )
             } else {

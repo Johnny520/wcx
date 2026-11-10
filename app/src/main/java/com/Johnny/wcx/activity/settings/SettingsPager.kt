@@ -165,7 +165,11 @@ import com.Johnny.wcx.ui.style.fxReveal
 // ---------------------------------------------------------------------------
 
 @Composable
-fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit) {
+fun SettingsPager(
+    onOpenLicense: () -> Unit,
+    onOpenAcknowledgements: () -> Unit,
+    onBack: (() -> Unit)? = null,
+) {
     val context = LocalComponentActivity.current
 
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -182,6 +186,7 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         title = "设置",
         largeTitle = "设置",
         subtitle = "界面 · 更新 · 备份恢复",
+        onBack = onBack,
     ) { _ ->
       LazyColumn(
         modifier = Modifier.fillMaxSize(),

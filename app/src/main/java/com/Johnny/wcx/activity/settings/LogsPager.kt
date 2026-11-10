@@ -946,3 +946,19 @@ private fun levelColor(level: Char): Color = when (level) {
     'V' -> Color(0xFF757575)
     else -> Color(0xFF9E9E9E)
 }
+
+
+/**
+ * 子页面形态的日志页：单页 Dashboard 点「日志」进入，左上角返回直接回到单页主页。
+ * （非单页模式下日志仍是 pager 的第 2 页，不经过这里。）
+ */
+@Composable
+fun LogsScreen(onBack: () -> Unit) {
+    PageScaffold(
+        title = "日志",
+        largeTitle = "日志",
+        onBack = onBack,
+    ) { _ ->
+        LogsPager()
+    }
+}
