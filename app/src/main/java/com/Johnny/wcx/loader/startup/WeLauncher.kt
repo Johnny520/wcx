@@ -54,6 +54,10 @@ object WeLauncher {
 
         ParcelableFixer.init()
 
+        // 兜底：「资源表里有 ID、APK 里没有文件」的 res/raw/*.svg 会让微信自己 inflate 时闪退，
+        // 这里只对该类资源做降级（其它资源零开销），详见 ResourceFallbackGuard 注释。
+        com.Johnny.wcx.utils.fix.ResourceFallbackGuard.install()
+
         // 缓存里存的是 R8 混淆后的类/方法描述符，每次构建混淆结果都不同。
         // key 必须带上「模块自身构建指纹」，否则升级模块后会复用上一版的名字，
         // 导致所有微信内部定位失败、功能与设置入口全部消失（表现为「微信像没装模块」）。
