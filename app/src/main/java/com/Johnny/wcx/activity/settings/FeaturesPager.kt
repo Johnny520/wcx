@@ -564,28 +564,29 @@ fun CategoryDetailScreen(
                 SectionLabel("功能", modifier = Modifier.padding(start = 6.dp, top = 16.dp, bottom = 6.dp))
             }
 
-            // 功能列表：一张白卡分组（iOS 风格），行间用细分隔线，行高紧凑
-            item {
-                SoftCard(contentPadding = 0, modifier = Modifier.fxReveal(1)) {
-                    Column {
-                        items.forEachIndexed { index, item ->
-                            CatRow(
-                                item = item,
-                                checked = switchStates[item.name] ?: ((item as? SwitchFeature)?.isEnabled == true),
-                                onCheckedChange = { switchStates[item.name] = it },
-                            )
-                            if (index != items.lastIndex) {
-                                SoftDivider(modifier = Modifier.padding(start = 14.dp))
-                            } else {
-                                Spacer(Modifier.height(4.dp))
-                            }
-                        }
+            // 功能列表：每行一个 Lazy item（真正虚拟化）+ 稳定 key。
+            // 之前把整段列表塞在一个 item 里，进入「聊天」这种几十项的分类要一次性组合全部行
+            // （每行都注册开关回调、读配置、画 squircle 卡片），上下滑动明显掉帧。
+            itemsIndexed(items, key = { _, feature -> feature.name }) { index, feature ->
+                Column(modifier = Modifier.groupedCardItem(index, items.size)) {
+                    CatRow(
+                        item = feature,
+                        checked = switchStates[feature.name] ?: ((feature as? SwitchFeature)?.isEnabled == true),
+                        onCheckedChange = { switchStates[feature.name] = it },
+                    )
+                    if (index != items.lastIndex) {
+                        SoftDivider(modifier = Modifier.padding(start = 14.dp))
+                    } else {
+                        Spacer(Modifier.height(4.dp))
                     }
                 }
             }
-            // 部分功能带内嵌设置面板（item.Ui()），单独渲染在列表下方
-            items.forEach { f ->
-                item(key = f.name + "#ui") { f.Ui() }
+            // 部分功能带内嵌设置面板（item.Ui()）：多数功能是空实现，合并到一个 item 里渲染，
+            // 不再给几十个空面板各占一个 Lazy item 槽位。
+            item(key = "__category_ui_panels__") {
+                Column {
+                    items.forEach { feature -> feature.Ui() }
+                }
             }
         }
     }
