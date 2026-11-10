@@ -83,7 +83,6 @@ import com.Johnny.wcx.features.hchat.HchatBootstrap
 import h.Hchat.hooks.items.script.ScriptPluginSettings
 import h.Hchat.hooks.items.script.ScriptPluginRuntime
 import h.Hchat.hooks.items.script.ScriptPluginManager
-import com.Johnny.wcx.features.core.SwitchFeature
 
 /**
  * 模块自检（最外层 / 全量）：把整个模块的公共依赖逐项扫描出来；「一键修复」= 体检 → 修复 → 复检 → 前后对比。
@@ -742,7 +741,6 @@ private fun showReportDialog(context: Context, title: String, items: List<Health
 private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能清单与分类启用概况") { featureOverview() },
     HealthStep("脚本子系统") { scriptSubsystemSection(context) },
-    HealthStep("功能实测") { unavailableFeaturesSection() },
     HealthStep("关键类锚点") { anchors() },
     HealthStep("DexKit 锚点") { dexAnchorSection() },
     HealthStep("锚点影响分析") { anchorImpactSection() },
@@ -820,7 +818,8 @@ private fun repairAction(context: Context): Pair<String, () -> String> =
 
 private fun featureOverview(): List<HealthItem> {
     val section = "功能清单与分类启用概况"
-    val items = FeaturesProvider.ALL_HOOK_ITEMS
+    // 与功能列表保持同一口径：当前微信版本不支持的条目已从 UI 隐藏，统计里也不再计入
+    val items = FeaturesProvider.ALL_HOOK_ITEMS.filter { it.unavailableReason == null }
     val out = mutableListOf<HealthItem>()
     val byCategory = items.groupBy { it.categories.firstOrNull() ?: "未分类" }.toSortedMap()
     val enabledTotal = items.count { WePrefs.getBoolOrFalse(it.name) }
@@ -1336,27 +1335,6 @@ private fun scriptSubsystemSection(context: Context): List<HealthItem> {
         "脚本公共 API", section, "$okApis/${apis.size} 就绪", okApis == apis.size,
         apis.joinToString("\n") { (name, ok) -> (if (ok) "✅ " else "❌ ") + name } +
             (if (okApis < apis.size) "\n\n公共 API 未就绪：依赖它的脚本能力（发消息/联系人/数据库读写）会失败。" else ""),
-    )
-    return out
-}
-
-/** 功能实测：所有「当前微信版本已不支持」的开关型功能逐一列出——这就是真正用不了的清单。 */
-private fun unavailableFeaturesSection(): List<HealthItem> {
-    val section = "功能实测"
-    val out = mutableListOf<HealthItem>()
-    val unavailable = FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<SwitchFeature>()
-        .filter { it.unavailableReason != null }
-    if (unavailable.isEmpty()) {
-        out += HealthItem(
-            "失效功能", section, "无", true,
-            "当前微信版本上，所有开关型功能均通过各自的可用性判定（unavailableReason 为空）。",
-        )
-        return out
-    }
-    out += HealthItem(
-        "失效功能", section, "${unavailable.size} 项不可用", false,
-        unavailable.joinToString("\n") { "· ${it.name}：${it.unavailableReason}" } +
-            "\n\n这些功能在当前微信版本上已被微信改动，开启也不会生效，需要等特征适配。",
     )
     return out
 }

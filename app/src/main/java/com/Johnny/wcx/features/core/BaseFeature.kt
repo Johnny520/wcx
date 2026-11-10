@@ -36,6 +36,28 @@ abstract class BaseFeature {
     open val unavailableReason: String?
         get() = null
 
+    /**
+     * 当前微信版本是否 ≥ major.minor.patch。
+     *
+     * 「微信从某版起整体移除了本功能依赖的实现」这类判断必须按版本号来：这类功能在 UI 上
+     * 直接把条目隐藏（不显示「失效/需适配」），因此不能依赖 DexKit 委托是否解析完成——
+     * 未解析时 isPlaceholder 同样为 true，会让功能列表项在解析结束前闪一下消失。
+     */
+    protected fun hostVersionAtLeast(major: Int, minor: Int, patch: Int): Boolean {
+        val nums = runCatching {
+            com.Johnny.wcx.utils.HostInfo.versionName
+                .split('.')
+                .map { seg -> seg.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+        }.getOrDefault(emptyList())
+        if (nums.isEmpty()) return false
+        val actual = intArrayOf(nums.getOrElse(0) { 0 }, nums.getOrElse(1) { 0 }, nums.getOrElse(2) { 0 })
+        val expected = intArrayOf(major, minor, patch)
+        for (i in 0..2) {
+            if (actual[i] != expected[i]) return actual[i] > expected[i]
+        }
+        return true
+    }
+
     /** WeKit 兼容: 功能稳定标识 (FeaturesLoader 注入, 本模块保留以兼容连带代码)。 */
     var technicalId: String = ""
 

@@ -47,6 +47,14 @@ object FeaturesLoader {
             allFeatures.forEach { feature ->
                 val isBroken = feature is IResolveDex && allBrokenItems.contains(feature)
 
+                // 当前微信版本已不支持的功能（微信把这部分实现删掉了）：完全不启动，
+                // 即便旧配置里开关仍是开着的。unavailableReason 必须是稳定判定（版本号），
+                // 不能用 DexKit 解析状态——解析未完成时同样为 true，会误跳过。
+                if (feature is SwitchFeature && feature.unavailableReason != null) {
+                    WeLogger.i(TAG, "skipping ${feature.name} — 当前微信版本不支持：${feature.unavailableReason}")
+                    return@forEach
+                }
+
                 if (isBroken && feature !is WeSettingsInjector) {
                     WeLogger.w(TAG, "skipping ${feature.name} — incomplete cache, awaiting re-resolution")
                     return@forEach

@@ -110,6 +110,9 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
         FeaturesProvider.ALL_HOOK_ITEMS
             .filterIsInstance<SwitchFeature>()
             .filter { item -> "密友功能" !in item.categories }
+            // 当前微信版本上已被微信移除/改版、开了也不会生效的功能：直接不出现，
+            // 不显示「失效/需适配」之类提示（用户看到只会以为模块坏了、想点修复）。
+            .filter { item -> item.unavailableReason == null }
     }
     val filteredItems = remember(query) {
         if (!searching) emptyList()
@@ -123,7 +126,8 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
     // 每个分类的启用概况（已启用 / 总数），用于分类卡片副标题
     val categoryStat = remember {
         FEATURE_CATEGORIES.associate { entry ->
-            val all = FeaturesProvider.ALL_HOOK_ITEMS.filter { entry.first in it.categories }
+            val all = FeaturesProvider.ALL_HOOK_ITEMS
+                .filter { entry.first in it.categories && it.unavailableReason == null }
             entry.first to (all.count { WePrefs.getBoolOrFalse(it.name) } to all.size)
         }
     }
@@ -396,7 +400,9 @@ fun CategoryDetailScreen(
     onOpenHiddenContactsDiagnostics: () -> Unit,
 ) {
     val items = remember(categoryName) {
-        FeaturesProvider.ALL_HOOK_ITEMS.filter { categoryName in it.categories }
+        // 当前微信版本已不支持的功能不进列表（隐藏，而不是显示「失效」）
+        FeaturesProvider.ALL_HOOK_ITEMS
+            .filter { categoryName in it.categories && it.unavailableReason == null }
     }
     val switchStates = remember(categoryName) {
         mutableStateMapOf<String, Boolean>().apply {
