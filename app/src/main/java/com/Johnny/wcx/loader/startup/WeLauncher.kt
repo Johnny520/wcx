@@ -58,20 +58,14 @@ object WeLauncher {
         // 这里只对该类资源做降级（其它资源零开销），详见 ResourceFallbackGuard 注释。
         com.Johnny.wcx.utils.fix.ResourceFallbackGuard.install()
 
-        // 缓存里存的是 R8 混淆后的类/方法描述符，每次构建混淆结果都不同。
-        // key 必须带上「模块自身构建指纹」，否则升级模块后会复用上一版的名字，
-        // 导致所有微信内部定位失败、功能与设置入口全部消失（表现为「微信像没装模块」）。
-        // 注意：本文件 import 的 BuildConfig 是 com.tencent.mm.boot.BuildConfig（微信的），
-        // 模块指纹必须显式取 com.Johnny.wcx.BuildConfig。
-        val moduleBuildStamp = "${com.Johnny.wcx.BuildConfig.COMMIT_HASH}|${com.Johnny.wcx.BuildConfig.BUILD_TIMESTAMP}"
+        // dex 缓存 key 只跟「微信版本 / 微信客户端版本」，不跟随模块构建指纹：
+        // 缓存里存的是微信侧的类与方法描述符（com.tencent.mm.*），与模块自身 R8 混淆结果无关，
+        // 所以同版本号的多次 dev 构建应当直接复用缓存（没有改动功能就不该整轮重新适配）。
+        // 单个功能是否需要重新解析由 DexCacheManager 的 methodHash 决定：构建期生成器按
+        // resolveDex 源码算哈希，只有该功能的定位实现变了、或缓存缺 key 时才重新解析。
         DexCacheManager.init(
-            buildString {
-                append(HostInfo.versionName).append(HostInfo.versionCode)
-                if (Preferences.resetDexCacheOnHotUpdate) {
-                    append('|').append(BuildConfig.CLIENT_VERSION_ARM64)
-                }
-                append('|').append(moduleBuildStamp)
-            }
+            if (!Preferences.resetDexCacheOnHotUpdate) "${HostInfo.versionName}${HostInfo.versionCode}"
+            else "${BuildConfig.VERSION_NAME}${BuildConfig.VERSION_CODE}${BuildConfig.CLIENT_VERSION_ARM64}"
         )
 
         if (TargetProcesses.isInMain) {
