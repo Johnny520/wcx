@@ -207,6 +207,17 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
 
     private val toolsState = MutableStateFlow<List<Pair<String, MenuItem>>>(emptyList())
 
+    /**
+     * 自检回执：注入/采集环节的**实际结果**。null = 正常，或还没进过聊天页（无法判断）。
+     *
+     * Hook 装上 ≠ 界面生效。工具栏是「注入型」功能，最容易出现「开关开着、日志里 hook 也装了，
+     * 但聊天页什么都没有」，所以这里把注入/采集的真实结论回报给模块自检。
+     */
+    @Volatile
+    private var healthIssue: String? = null
+
+    override fun runtimeIssue(): String? = if (isEnabled) healthIssue else null
+
     private var itemsOrder by WePrefs.prefOption("chat_toolbar_order", NAME_TO_ICON_MAP.keys.joinToString(","))
     private var enabledItems by WePrefs.prefOption("chat_toolbar_enabled_items", NAME_TO_ICON_MAP.keys)
     private var displayModeValue by WePrefs.prefOption(
@@ -371,7 +382,11 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
 
                     WeLogger.i(TAG, "采集到 ${tools.size} 个原生工具项")
                     toolsState.value = tools
+                    healthIssue = if (tools.isEmpty()) {
+                        "已注入聊天页，但没采集到任何原生工具项（AppPanel 结构变化），工具栏是空的"
+                    } else null
                 }.onFailure {
+                    healthIssue = "采集原生工具项失败：${it.message}（工具栏是空的）"
                     WeLogger.e(TAG, "采集聊天工具项失败（工具栏可能为空）：${it.message}", it)
                 }
 
@@ -392,6 +407,7 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                 ?: (0 until chatFooter.childCount).firstNotNullOfOrNull { chatFooter.getChildAt(it) as? LinearLayout }
             if (linearLayout == null) {
                 // 微信调整了 ChatFooter 内部层级：跳过本次注入（不再 NPE 中断整个 hook），并打印层级便于适配
+                healthIssue = "聊天页找不到注入容器（ChatFooter 层级变化），工具栏没有显示"
                 WeLogger.w(
                     TAG,
                     "ChatFooter 层级变化，找不到注入容器（子节点数=${chatFooter.childCount}）：${describeChildren(chatFooter)}"
@@ -452,6 +468,12 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                     }
                 }
             }, 0)
+            // 注入成功：采集结果由 AppPanel 的 hookAfter 决定（那里会把 0 项也回报上来）
+            if (toolsState.value.isEmpty()) {
+                healthIssue = "工具栏已注入聊天页，但当前没采集到原生工具项（AppPanel 结构变化）"
+            } else {
+                healthIssue = null
+            }
             WeLogger.i(TAG, "聊天工具栏已注入聊天页（容器子 View 数=${linearLayout.childCount}）")
         }
         WeLogger.i(TAG, "聊天工具栏 hook 已安装（聊天页创建时注入）")

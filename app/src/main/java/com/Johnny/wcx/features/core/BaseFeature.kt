@@ -58,6 +58,25 @@ abstract class BaseFeature {
         return true
     }
 
+    /**
+     * 运行时回执：功能「开着但当前状态不健康」时返回具体原因；null = 没有已知问题。
+     *
+     * 自检页会把「开关已开 && runtimeIssue() != null」直接列为「开着但没生效」，并可一键重启。
+     * 只有功能自己确认「该生效却没生效」时才返回（例如注入型功能找不到注入容器、
+     * 采集不到内容）；没进入过相关界面、无法判断时请返回 null，避免误报。
+     */
+    open fun runtimeIssue(): String? = null
+
+    /** 本进程内最近一次 Hook 命中的时间（elapsedRealtime；0 = 从未命中）。 */
+    @Volatile
+    var lastHookHitAt: Long = 0L
+        private set
+
+    /** Hook 命中打点：由框架在每次 hook 回调里自动调用，功能无需自己埋点。 */
+    internal fun noteHookHit() {
+        lastHookHitAt = android.os.SystemClock.elapsedRealtime()
+    }
+
     /** WeKit 兼容: 功能稳定标识 (FeaturesLoader 注入, 本模块保留以兼容连带代码)。 */
     var technicalId: String = ""
 
@@ -232,6 +251,7 @@ abstract class BaseFeature {
     // --- end dex delegate ---
 
     internal fun executeHookAction(param: XC_MethodHook.MethodHookParam, action: HookAction) {
+        noteHookHit()
         runCatching {
             action(param)
         }.onFailure { e -> WeLogger.e("executeHookAction", "failed to execute hook of $name", e) }

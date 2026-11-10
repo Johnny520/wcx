@@ -449,6 +449,32 @@ internal object ModuleDiagnostics {
             else "Hook 未安装：功能未开启，或锚点已随微信版本漂移",
         )
 
+        // ---- 功能回执：不看开关，看「开了之后到底有没有生效」 ----
+        // 逐个已开启的功能核对真实运行状态：
+        // ① 功能自己回报的运行时问题（注入失败、采集为空、找不到注入容器等）
+        // ② 开关开着但 Hook 根本没装上（enable() 安装失败会回滚 isActive，日志里有堆栈）
+        runCatching {
+            FeaturesProvider.ALL_HOOK_ITEMS.forEach { feature ->
+                if ((feature as? com.Johnny.wcx.features.core.SwitchFeature)?.isEnabled != true) return@forEach
+                val label = feature.categories.firstOrNull()?.takeIf { it.isNotBlank() }
+                    ?.let { "$it/${feature.name}" } ?: feature.name
+
+                val issue = runCatching { feature.runtimeIssue() }.getOrNull()
+                if (issue != null) {
+                    out += Live(label, false, issue)
+                    return@forEach
+                }
+
+                if (!feature.isActive) {
+                    out += Live(
+                        label, false,
+                        "开关是开的，但 Hook 没有安装成功（启动阶段失败，或当前进程不安装 Hook），" +
+                            "所以点了不会有任何反应。运行日志里搜「${feature.name}」能看到失败原因。",
+                    )
+                }
+            }
+        }
+
         return out
     }
 }

@@ -56,6 +56,8 @@ import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.core.FeaturesProvider
+import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.features.items.contacts.HideContacts
 import com.Johnny.wcx.features.items.moments.BatchDeleteMoments
 import com.Johnny.wcx.preferences.WePrefs
@@ -740,6 +742,9 @@ private fun showReportDialog(context: Context, title: String, items: List<Health
 
 private fun moduleHealthSteps(context: Context): List<HealthStep> = listOf(
     HealthStep("功能清单与分类启用概况") { featureOverview() },
+    // 用户要的「真实质检」：不看开关开没开，看开了之后到底有没有生效
+    HealthStep("功能回执") { featureReceiptSection() },
+    HealthStep("最近错误") { recentProblemSection() },
     HealthStep("脚本子系统") { scriptSubsystemSection(context) },
     HealthStep("关键类锚点") { anchors() },
     HealthStep("DexKit 锚点") { dexAnchorSection() },
@@ -1063,6 +1068,87 @@ private fun liveSection(): List<HealthItem> =
             inactive = live.inactive,
         )
     }
+
+/**
+ * 功能回执：不看开关，看「开了之后到底有没有真的生效」。
+ *
+ * - 功能自己回报的运行时问题（注入型功能找不到容器、采集为空等，见 [BaseFeature.runtimeIssue]）
+ * - 开关开着但 Hook 根本没装上（enable() 安装失败会回滚 isActive）
+ *
+ * 每一项都可「重启此功能」：禁用再启用会重新跑一遍 onEnable，多数安装/注入类问题能自愈。
+ */
+private fun featureReceiptSection(): List<HealthItem> {
+    val section = "功能回执"
+    val broken = FeaturesProvider.ALL_HOOK_ITEMS.filter { feature ->
+        (feature as? SwitchFeature)?.isEnabled == true &&
+            (runCatching { feature.runtimeIssue() }.getOrNull() != null || !feature.isActive)
+    }
+    if (broken.isEmpty()) {
+        return listOf(
+            HealthItem(
+                "已开启的功能", section, "全部生效", true,
+                "所有已开启的功能：Hook 都已安装，且没有功能回报运行时问题。\n\n" +
+                    "说明：这里能验证「装上了 + 注入成功」；完全没用过的功能无法证明「点了有反应」，" +
+                    "但只要有功能自己发现没生效，就会列在这里。",
+            )
+        )
+    }
+    return broken.map { feature ->
+        val issue = runCatching { feature.runtimeIssue() }.getOrNull()
+        HealthItem(
+            label = feature.name,
+            section = section,
+            value = if (issue != null) "开着但没生效" else "Hook 未安装",
+            ok = false,
+            detail = issue ?: ("开关是开的，但 Hook 没有安装成功（启动阶段安装失败），点了不会有任何反应。\n\n" +
+                "运行日志里搜「${feature.name}」可以看到失败堆栈；也可以先点下面的「重启此功能」试试。"),
+            actionLabel = "重启此功能",
+            action = {
+                runCatching {
+                    feature.disable()
+                    feature.enable()
+                    "已重启「${feature.name}」。如果是注入型功能（如聊天工具栏），请回到对应界面确认效果；" +
+                        "仍然无效的话把日志里该功能的 ERROR 发给作者。"
+                }.getOrElse { "重启失败：${it.message}" }
+            },
+        )
+    }
+}
+
+/**
+ * 最近错误：把运行日志里的 W/E 级记录汇总到自检页，点开可看详情并复制摘要。
+ *
+ * 这样「哪里报错了」不用再翻日志文件，质检一跑就能看到。
+ */
+private fun recentProblemSection(): List<HealthItem> {
+    val section = "最近错误"
+    val digest = runCatching { WeLogger.digest(20) }.getOrNull()
+        ?: return listOf(HealthItem("运行日志", section, "读取失败", false, "无法读取运行日志文件。"))
+
+    if (digest.problems.isEmpty()) {
+        return listOf(
+            HealthItem(
+                "运行日志", section, "无错误", true,
+                "最近日志（${digest.fileName ?: "无"}）里没有 W/E 级记录。",
+            )
+        )
+    }
+
+    val detail = buildString {
+        append("最近 ").append(digest.problems.size).append(" 条错误/警告（新→旧）：\n")
+        digest.problems.take(10).forEach { problem -> append("· ").append(problem.header).append('\n') }
+        append("\n按钮会复制完整摘要（含堆栈，最多 3000 字）。")
+    }
+    return listOf(
+        HealthItem(
+            "错误 / 警告", section,
+            "${digest.errorCount} 错误 · ${digest.warnCount} 警告", false,
+            detail,
+            actionLabel = "复制摘要",
+            action = { digest.toShareText().take(MAX_REPORT_CHARS) },
+        )
+    )
+}
 
 /**
  * 网络与 CDN：域名连通性、是否挂代理、图片带不带 Referer 的实际返回。
@@ -1395,6 +1481,26 @@ private fun moduleRepairSteps(context: Context): List<HealthStep> {
     val afterFix = mutableListOf<HealthItem>()
 
     val checklist = listOf(
+    HealthStep("重启异常功能") {
+        val broken = FeaturesProvider.ALL_HOOK_ITEMS.filter { feature ->
+            (feature as? SwitchFeature)?.isEnabled == true &&
+                (runCatching { feature.runtimeIssue() }.getOrNull() != null || !feature.isActive)
+        }
+        broken.forEach { feature ->
+            runCatching {
+                feature.disable()
+                feature.enable()
+            }
+        }
+        listOf(
+            HealthItem(
+                "重启异常功能", "重启异常功能",
+                if (broken.isEmpty()) "无需重启" else "${broken.size} 个", true,
+                if (broken.isEmpty()) "没有「开关开着但没生效」的功能。"
+                else "已重启：${broken.joinToString("、") { it.name }}。若仍无效，请把日志里对应功能的 ERROR 发给作者。",
+            )
+        )
+    },
     HealthStep("隐藏联系人刷新") {
         val ok = runCatching { WeConversationApi.reloadConversations() }.isSuccess
         listOf(
