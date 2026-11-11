@@ -265,8 +265,11 @@ fun HomePager(
 
     val scope = rememberCoroutineScope()
     // 抽成函数：首启自动检查一次；激活卡右侧的刷新按钮也能手动触发（检查中防抖）。
-    fun checkUpdateNow() {
-        if (isChecking) return
+    // force=true 用于首次自动检查：isChecking 初始为 true（进入页面即显示「检查中」），
+    // 若不带 force，这次检查会被自己的防抖拦下，isChecking 永远停在 true —— 表现为
+    // 主界面「检查更新」永远转圈、点刷新也没反应（设置页的检查是独立实现，所以正常）。
+    fun checkUpdateNow(force: Boolean = false) {
+        if (isChecking && !force) return
         scope.launch {
             isChecking = true
             runCatching {
@@ -305,7 +308,7 @@ fun HomePager(
             isChecking = false
         }
     }
-    LaunchedEffect(Unit) { checkUpdateNow() }
+    LaunchedEffect(Unit) { checkUpdateNow(force = true) }
 
     Box(modifier = Modifier.fillMaxSize()) {
     MiuixListScaffold(title = "") {
