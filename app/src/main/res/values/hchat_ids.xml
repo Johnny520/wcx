@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hchat 脚本子系统移植：hook 侧 findViewById 用的运行时 id -->
+<resources>
+    <item name="hchat_message_text_color_applied" type="id" />
+    <item name="hchat_message_text_color_original" type="id" />
+    <item name="hchat_message_text_color_value" type="id" />
+    <item name="hchat_home_text_color_state" type="id" />
+    <item name="hchat_home_text_color_row_state" type="id" />
+    <item name="hchat_message_bubble_original" type="id" />
+    <item name="hchat_message_bubble_target" type="id" />
+    <item name="hchat_fake_wallet_balance_target" type="id" />
+    <item name="hchat_sns_anti_recall_label" type="id" />
+    <item name="hchat_settings_page_host" type="id" />
+    <item name="hchat_chat_name_decoration" type="id" />
+</resources>

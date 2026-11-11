@@ -36,6 +36,47 @@ abstract class BaseFeature {
     open val unavailableReason: String?
         get() = null
 
+    /**
+     * 当前微信版本是否 ≥ major.minor.patch。
+     *
+     * 「微信从某版起整体移除了本功能依赖的实现」这类判断必须按版本号来：这类功能在 UI 上
+     * 直接把条目隐藏（不显示「失效/需适配」），因此不能依赖 DexKit 委托是否解析完成——
+     * 未解析时 isPlaceholder 同样为 true，会让功能列表项在解析结束前闪一下消失。
+     */
+    protected fun hostVersionAtLeast(major: Int, minor: Int, patch: Int): Boolean {
+        val nums = runCatching {
+            com.Johnny.wcx.utils.HostInfo.versionName
+                .split('.')
+                .map { seg -> seg.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+        }.getOrDefault(emptyList())
+        if (nums.isEmpty()) return false
+        val actual = intArrayOf(nums.getOrElse(0) { 0 }, nums.getOrElse(1) { 0 }, nums.getOrElse(2) { 0 })
+        val expected = intArrayOf(major, minor, patch)
+        for (i in 0..2) {
+            if (actual[i] != expected[i]) return actual[i] > expected[i]
+        }
+        return true
+    }
+
+    /**
+     * 运行时回执：功能「开着但当前状态不健康」时返回具体原因；null = 没有已知问题。
+     *
+     * 自检页会把「开关已开 && runtimeIssue() != null」直接列为「开着但没生效」，并可一键重启。
+     * 只有功能自己确认「该生效却没生效」时才返回（例如注入型功能找不到注入容器、
+     * 采集不到内容）；没进入过相关界面、无法判断时请返回 null，避免误报。
+     */
+    open fun runtimeIssue(): String? = null
+
+    /** 本进程内最近一次 Hook 命中的时间（elapsedRealtime；0 = 从未命中）。 */
+    @Volatile
+    var lastHookHitAt: Long = 0L
+        private set
+
+    /** Hook 命中打点：由框架在每次 hook 回调里自动调用，功能无需自己埋点。 */
+    internal fun noteHookHit() {
+        lastHookHitAt = android.os.SystemClock.elapsedRealtime()
+    }
+
     /** WeKit 兼容: 功能稳定标识 (FeaturesLoader 注入, 本模块保留以兼容连带代码)。 */
     var technicalId: String = ""
 
@@ -89,7 +130,14 @@ abstract class BaseFeature {
     }
 
     internal fun resolveInlineDex(dexKit: DexKitBridge) {
-        dexDelegates.forEach { it.findInline(dexKit) }
+        // 每个委托独立容错：某个锚点命中多个候选、或解析时抛异常，只让这一个委托降级，
+        // 绝不能把整个 API 拖下水。典型事故：8.0.80 的 img feature service 有一个方法
+        // 命中 2 个候选，IllegalStateException 直接把 WeMessageApi 的解析整体打断，
+        // 连带语音/图片/复读等所有发送能力一起不可用。
+        dexDelegates.forEach { delegate ->
+            runCatching { delegate.findInline(dexKit) }
+                .onFailure { WeLogger.e(TAG, "dex delegate resolve failed (${delegate.key})", it) }
+        }
     }
 
     internal val unhooks = mutableListOf<XC_MethodHook.Unhook>()
@@ -203,6 +251,7 @@ abstract class BaseFeature {
     // --- end dex delegate ---
 
     internal fun executeHookAction(param: XC_MethodHook.MethodHookParam, action: HookAction) {
+        noteHookHit()
         runCatching {
             action(param)
         }.onFailure { e -> WeLogger.e("executeHookAction", "failed to execute hook of $name", e) }

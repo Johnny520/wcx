@@ -542,9 +542,20 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             returnType = String::class
         }.self
     }
+    /**
+     * VoiceLogic.finishRecord —— 写入 voiceinfo（文件名 / 时长 / 场景），上传前必须调用，
+     * 少了这步微信找不到 voiceinfo，语音发不出去。
+     *
+     * 8.0.7x 起签名从 3 参扩到 5 参：
+     * `(String fileName, int duration, int scene, MsgInfo info, String msgSource)`（8.0.80 实测
+     * `q71.e1.u`）。原来只按 3/4 参匹配，新版直接匹配不到 → 语音链路中断。
+     * 这里按「静态 + 3..5 参 + 前三位 (String,int,int)」匹配，调用时按实际参数个数补 null
+     * （微信自己转发语音时也是传 null）。
+     */
     private val setVoiceMethod: Method by lazy {
         classVoiceNameGen.reflekt().firstMethod {
-            parameterCount { it == 3 || it == 4 }
+            modifiers(Modifiers.STATIC)
+            parameterCount { it in 3..5 }
             parameters {
                 it[0] == BString && it[1].typeMatches(int) && it[2].typeMatches(int)
             }
@@ -593,7 +604,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }
         }
 
-        methodImageSendEntry.find(dexKit) {
+        methodImageSendEntry.find(dexKit, allowFailure = true) {
             matcher {
                 declaredClass(classImageSender.clazz)
                 modifiers = Modifier.PUBLIC or Modifier.STATIC or Modifier.FINAL
@@ -602,13 +613,26 @@ object WeMessageApi : ApiFeature(), IResolveDex {
             }
         }
 
-        val taskClassName = methodImageSendEntry.method.parameterTypes[1]
-        classImageTask.setDescriptor(taskClassName.name)
+        if (!methodImageSendEntry.isPlaceholder) {
+            val taskClassName = methodImageSendEntry.method.parameterTypes[1]
+            classImageTask.setDescriptor(taskClassName.name)
+        } else {
+            WeLogger.w(TAG, "methodImageSendEntry 定位失败，图片发送链路降级")
+        }
 
         if (HostInfo.versionCode >= WeChatVersions.MM_8_0_67 && !HostInfo.isHostGooglePlay ||
             HostInfo.versionCode >= WeChatVersions.MM_8_0_66_PLAY && HostInfo.isHostGooglePlay
         ) {
-            methodImgUploadFeatureServiceSendImage.find(dexKit) {
+            // 8.0.80+ 同一类里存在多个「1 参 + 用到 params 串」的方法（实测 xa0.w::Uj 与 xa0.w::a），
+            // 只靠 'params' 区分不出来。命中多个时旧代码直接抛 IllegalStateException，
+            // 整个 WeMessageApi 解析失败 → 语音/图片/复读等全部发送能力一起不可用。
+            // 这里允许多候选：真正的 sendImage 是协程入口，返回 kotlinx.coroutines.flow.*，
+            // 按这个特征择优；挑不到就退回第一个候选，绝不抛异常。
+            methodImgUploadFeatureServiceSendImage.find(
+                dexKit,
+                allowMultiple = true,
+                allowFailure = true,
+            ) {
                 matcher {
                     declaredClass {
                         usingEqStrings("MicroMsg.ImgUpload.MsgImgFeatureService", "taskListener", "params")
@@ -618,8 +642,26 @@ object WeMessageApi : ApiFeature(), IResolveDex {
                     usingEqStrings("params")
                 }
             }
+            runCatching {
+                val picked = methodImgUploadFeatureServiceSendImage.candidates.firstOrNull {
+                    it.paramTypeNames.size == 1 &&
+                        it.returnTypeName.startsWith("kotlinx.coroutines.flow.")
+                } ?: methodImgUploadFeatureServiceSendImage.candidates.firstOrNull()
+                if (picked != null) {
+                    methodImgUploadFeatureServiceSendImage.setDescriptor(
+                        picked.className,
+                        picked.methodName,
+                        picked.methodSign,
+                    )
+                    WeLogger.i(
+                        TAG,
+                        "sendImage 定位到 ${picked.className}::${picked.methodName}" +
+                            " (候选 ${methodImgUploadFeatureServiceSendImage.candidates.size} 个)",
+                    )
+                }
+            }.onFailure { WeLogger.w(TAG, "sendImage 择优失败: ${it.message}") }
 
-            methodAppInfoSetAppId.find(dexKit) {
+            methodAppInfoSetAppId.find(dexKit, allowFailure = true) {
                 matcher {
                     declaredClass {
                         usingEqStrings("appinfo", "appid", "version", "appname", "isforceupdate", "messageaction", "messageext", "mediatagname")
@@ -636,7 +678,7 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
             methodAppInfoSetAppId.setPlaceholderDescriptor()
 
-            ctorNetSceneUploadMsgImg.find(dexKit) {
+            ctorNetSceneUploadMsgImg.find(dexKit, throwOnFailure = false) {
                 searchPackages("com.tencent.mm.modelimage")
                 matcher {
                     name = "<init>"
@@ -1546,17 +1588,21 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
             if (!copyFileViaVfs(path, destFullPath)) return false
 
-            // 设置语音信息
+            // 设置语音信息（VoiceLogic.setVoice 在 8.0.7x 起已不存在，拿不到就跳过时长）
             val finalDurationMs = durationMs.coerceIn(1, 60_000)
-            val setVoiceReceiver = getReceiverForMethod(setVoiceMethod)
-            val setVoiceResult = if (setVoiceMethod.parameterCount == 4) {
-                setVoiceMethod.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null)
+            val setVoice = runCatching { setVoiceMethod }.getOrNull()
+            if (setVoice == null) {
+                WeLogger.w(TAG, "VoiceLogic 没有 setVoice(String,int,int)，跳过时长设置：fileName=$fileName duration=${finalDurationMs}ms")
             } else {
-                setVoiceMethod.invoke(setVoiceReceiver, fileName, finalDurationMs, 0)
-            } as? Boolean ?: false
-
-            if (!setVoiceResult) {
-                WeLogger.w(TAG, "VoiceLogic.setVoice returned false, still starting voice service: fileName=$fileName, target=$toUser")
+                val setVoiceReceiver = getReceiverForMethod(setVoice)
+                val setVoiceResult = when (setVoice.parameterCount) {
+                    3 -> setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0)
+                    4 -> setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null)
+                    else -> setVoice.invoke(setVoiceReceiver, fileName, finalDurationMs, 0, null, null)
+                } as? Boolean ?: false
+                if (!setVoiceResult) {
+                    WeLogger.w(TAG, "VoiceLogic.setVoice returned false, still starting voice service: fileName=$fileName, target=$toUser")
+                }
             }
 
             startVoiceService()
@@ -1577,17 +1623,31 @@ object WeMessageApi : ApiFeature(), IResolveDex {
 
             val actualDuration = if (durationMs > 60000) 60000 else durationMs
 
-            val target = classVoiceLogic.clazz.reflekt()
-                .firstMethod {
-                    parameters {
-                        it[0] == BString && it[1] == BInt && it[2] == BInt
-                    }
-                    returnType = BBool
-                }.self
-            if (target.parameterCount == 4) {
-                target.invoke(null, partialPath, actualDuration, 0, null)
+            // 注意：8.0.7x 起 VoiceLogic 里没有 setVoice(String,int,int)，
+            // 原来这里直接 firstMethod 会抛异常，把整条发送链路打断，
+            // 表现就是「语音复读/转发发不出去」。时长只是展示字段，找不到就跳过。
+            val target = runCatching {
+                classVoiceLogic.clazz.reflekt()
+                    .firstMethod {
+                        modifiers(Modifiers.STATIC)
+                        parameterCount { it in 3..5 }
+                        parameters {
+                            it[0] == BString && it[1] == BInt && it[2] == BInt
+                        }
+                        returnType = BBool
+                    }.self
+            }.getOrNull()
+            if (target == null) {
+                WeLogger.w(TAG, "VoiceLogic 没有 setVoice(String,int,int)，跳过时长设置：duration=${actualDuration}ms")
             } else {
-                target.invoke(null, partialPath, actualDuration, 0)
+                val r = when (target.parameterCount) {
+                    3 -> target.invoke(null, partialPath, actualDuration, 0)
+                    4 -> target.invoke(null, partialPath, actualDuration, 0, null)
+                    else -> target.invoke(null, partialPath, actualDuration, 0, null, null)
+                }
+                if (r == false) {
+                    WeLogger.w(TAG, "VoiceLogic.finishRecord 返回 false（duration=${actualDuration}ms），继续尝试发送")
+                }
             }
 
             val service = classSceneVoiceService.clazz.reflekt()

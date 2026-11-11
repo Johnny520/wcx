@@ -34,6 +34,8 @@ permissions:
 
 jobs:
   build:
+    # 卡死保护：Hchat 整树后构建正常 30-45 分钟，超过 90 分钟视为异常直接失败
+    timeout-minutes: 90
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' || 

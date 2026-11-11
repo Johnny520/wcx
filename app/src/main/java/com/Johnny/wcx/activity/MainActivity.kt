@@ -23,6 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
@@ -32,6 +33,7 @@ import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
@@ -49,10 +51,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Chat
+import com.composables.icons.materialsymbols.outlined.Favorite
 import com.composables.icons.materialsymbols.outlined.Open_in_new
 import com.composables.icons.materialsymbols.outlined.Settings
 import com.composables.icons.materialsymbols.outlinedfilled.Check_circle
@@ -79,7 +83,21 @@ import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.formatEpoch
 import com.Johnny.wcx.utils.hook_status.HookStatus
 import com.Johnny.wcx.utils.openInSystem
-import com.Johnny.wcx.utils.registerBshSnapshotDecompileLaunchers
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
+import androidx.compose.ui.text.TextStyle
+import com.Johnny.wcx.features.core.FeaturesProvider
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
+import com.Johnny.wcx.ui.style.SoftDivider
 
 class MainActivity : ComponentActivity() {
 
@@ -109,8 +127,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val selectFileLauncher = registerBshSnapshotDecompileLaunchers()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -124,7 +140,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             ModuleTheme {
                 AppContent(
-                    selectFileLauncher,
                     onUrlClick = { url ->
                         url.toUri().openInSystem(this, true)
                     }
@@ -141,7 +156,7 @@ class MainActivity : ComponentActivity() {
     )
 
     @Composable
-    private fun AppContent(resultLauncher: ActivityResultLauncher<String>, onUrlClick: (String) -> Unit) {
+    private fun AppContent(onUrlClick: (String) -> Unit) {
         val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
         var showMenu by remember { mutableStateOf(false) }
@@ -206,25 +221,31 @@ class MainActivity : ComponentActivity() {
         }
 
         Scaffold(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(WxPalette.pageBackgroundBrush()),
+            containerColor = Color.Transparent,
             topBar = {
-                CenterAlignedTopAppBar(
+                TopAppBar(
                     title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(horizontalAlignment = Alignment.Start) {
                             Text(
                                 text = BuildConfig.TAG,
-                                style = MaterialTheme.typography.titleLarge
+                                fontSize = 28.sp,
+                                color = WxPalette.textPrimary(),
+                                fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                text = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                text = "微信增强模块 · ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                                fontSize = 12.sp,
+                                color = WxPalette.TextSecondary
                             )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
                         scrolledContainerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
-                            .copy(alpha = 0.9f)
+                            .copy(alpha = 0.9f),
                     ),
                     actions = {
                         IconButton(onClick = { showMenu = !showMenu }) {
@@ -259,13 +280,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("反编译 BeanShell 快照") },
-                                onClick = {
-                                    showMenu = false
-                                    resultLauncher.launch("*/*")
-                                }
-                            )
-                            DropdownMenuItem(
                                 text = { Text(if (isLauncherIconEnabled) "隐藏桌面图标" else "显示桌面图标") },
                                 onClick = {
                                     showMenu = false
@@ -294,176 +308,81 @@ class MainActivity : ComponentActivity() {
             Column(
                 modifier = Modifier
                     .padding(innerPadding)
-                    .padding(top = 16.dp)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 6.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // The activation card relies on the libxposed service, which is only
-                // bound when the module ships the libxposed entry point (standard flavor).
+                // ① 主状态卡（仿仪表盘：状态胶囊 + 图标 + 主标题 + 底部分栏）
                 if (BuildConfig.HAS_LIBXPOSED_ENTRY) {
                     val activationState = rememberActivationState()
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = activationState.color),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .shadow(4.dp, RoundedCornerShape(16.dp))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = if (activationState.isActivated) MaterialSymbols.OutlinedFilled.Check_circle else MaterialSymbols.OutlinedFilled.Warning,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text(
-                                    text = activationState.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = activationState.desc,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.8f)
-                                )
-                            }
-                        }
-                    }
+                    StatusCard(
+                        state = activationState,
+                        buildTime = formatEpoch(BuildConfig.BUILD_TIMESTAMP, true),
+                    )
                 }
 
-                ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                MaterialSymbols.OutlinedFilled.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text("构建信息", style = MaterialTheme.typography.titleMedium)
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        InfoItem("构建提交哈希", BuildConfig.COMMIT_HASH.ifEmpty { "未知" })
-                        Spacer(modifier = Modifier.height(8.dp))
-                        InfoItem(
-                            "构建提交时间",
-                            formatEpoch(BuildConfig.BUILD_TIMESTAMP, true)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        InfoItem("已适配微信版本", getAdaptedWeChatVersions())
-                        Spacer(modifier = Modifier.height(8.dp))
-                        InfoItem("当前微信版本", getWeChatVersion())
-                    }
-                }
-
-                ElevatedCard(
-                    onClick = {
-                        if (!(Shell.isAppGrantedRoot() ?: false)) {
-                            showNoRootDialog = true
-                        } else {
-                            val userId = androidUserId
-                            val hostPkg =
-                                prefs.getString("host_pkg_name", PackageNames.WECHAT)!!
-                            Shell.cmd(
-                                "am force-stop --user $userId $hostPkg",
-                                "am start --user $userId -n $hostPkg/${PackageNames.WECHAT}.ui.LauncherUI"
-                            ).submit { result ->
-                                if (result.isSuccess) {
-                                    finishAndRemoveTask()
-                                } else {
-                                    shortcutError = (result.out + result.err)
-                                        .joinToString("\n")
-                                        .ifBlank { "无法启动微信 (包名: $hostPkg)" }
+                // ② 快捷操作
+                SectionTitle("快捷操作")
+                WhiteCard {
+                    ListRow(
+                        icon = MaterialSymbols.Outlined.Chat,
+                        title = "打开微信",
+                        subtitle = "一键强行停止并启动微信",
+                        onClick = {
+                            // 强停 + 拉起：先 am force-stop 再 am start，成功后关掉本页
+                            if (!(Shell.isAppGrantedRoot() ?: false)) {
+                                showNoRootDialog = true
+                            } else {
+                                val userId = androidUserId
+                                val hostPkg = prefs.getString("host_pkg_name", PackageNames.WECHAT)!!
+                                Shell.cmd(
+                                    "am force-stop --user $userId $hostPkg",
+                                    "am start --user $userId -n $hostPkg/${PackageNames.WECHAT}.ui.LauncherUI",
+                                ).submit { result ->
+                                    if (result.isSuccess) {
+                                        finishAndRemoveTask()
+                                    } else {
+                                        shortcutError = (result.out + result.err)
+                                            .joinToString("\n")
+                                            .ifBlank { "无法启动微信 (包名: $hostPkg)" }
+                                    }
                                 }
                             }
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = MaterialSymbols.Outlined.Open_in_new,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(
-                                text = "打开微信",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "一键强行停止并启动微信",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    )
+                    SoftDivider()
+                    ListRow(
+                        icon = MaterialSymbols.Outlined.Settings,
+                        title = "打开模块设置",
+                        subtitle = "打开微信内的模块设置",
+                        onClick = {
+                            val hostPkg = prefs.getString("host_pkg_name", PackageNames.WECHAT)!!
+                            try {
+                                startActivity(com.Johnny.wcx.utils.android.Intent {
+                                    setClassName(hostPkg, "${PackageNames.WECHAT}.ui.LauncherUI")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    putExtra(BuildConfig.TAG, "1")
+                                })
+                                isLaunchingWeChat = true
+                            } catch (e: Exception) {
+                                shortcutError = e.message ?: "无法打开微信 (包名: $hostPkg)"
+                            }
                         }
-                    }
+                    )
                 }
 
-                ElevatedCard(
-                    onClick = {
-                        val hostPkg =
-                            prefs.getString("host_pkg_name", PackageNames.WECHAT)!!
-                        try {
-                            startActivity(com.Johnny.wcx.utils.android.Intent {
-                                setClassName(hostPkg, "${PackageNames.WECHAT}.ui.LauncherUI")
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                putExtra(BuildConfig.TAG, "1")
-                            })
-                            isLaunchingWeChat = true
-                        } catch (e: Exception) {
-                            shortcutError = e.message
-                                ?: "无法打开微信 (包名: $hostPkg)"
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
+                // ③ 设备信息
+                SectionTitle("设备信息")
+                WhiteCard {
+                    Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Icon(
-                            imageVector = MaterialSymbols.Outlined.Settings,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(
-                                text = "打开模块设置",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "打开微信内的模块设置",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        InfoItem("构建提交哈希", BuildConfig.COMMIT_HASH.ifEmpty { "未知" })
+                        InfoItem("构建提交时间", formatEpoch(BuildConfig.BUILD_TIMESTAMP, true))
+                        InfoItem("已适配微信版本", getAdaptedWeChatVersions())
+                        InfoItem("当前微信版本", getWeChatVersion())
                     }
                 }
 
@@ -628,26 +547,29 @@ class MainActivity : ComponentActivity() {
                         })
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier
-                        .padding(vertical = 4.dp)
-                        .alpha(0.1f),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                LinkCard(
-                    icon = MaterialSymbols.Outlined.Chat,
-                    title = "交流群组",
-                    subtitle = "https://t.me/wcx12138",
-                    onClick = { onUrlClick("https://t.me/wcx12138") }
-                )
-
-                LinkCard(
-                    icon = GitHubIcon,
-                    title = "GitHub",
-                    subtitle = "Johnny520/wcx",
-                    onClick = { onUrlClick("https://github.com/Johnny520/wcx") }
-                )
+                SectionTitle("相关链接")
+                WhiteCard {
+                    ListRow(
+                        icon = MaterialSymbols.Outlined.Chat,
+                        title = "交流群组",
+                        subtitle = "https://t.me/wcx12138",
+                        onClick = { onUrlClick("https://t.me/wcx12138") }
+                    )
+                    SoftDivider()
+                    ListRow(
+                        icon = GitHubIcon,
+                        title = "GitHub",
+                        subtitle = "Johnny520/wcx",
+                        onClick = { onUrlClick("https://github.com/Johnny520/wcx") }
+                    )
+                    SoftDivider()
+                    ListRow(
+                        icon = MaterialSymbols.Outlined.Favorite,
+                        title = "支持作者 · 爱发电",
+                        subtitle = "afdian.com/a/Johnny520（跳浏览器打开）",
+                        onClick = { onUrlClick("https://afdian.com/a/Johnny520") }
+                    )
+                }
             }
 
             if (showAboutDialog) {
@@ -670,6 +592,185 @@ class MainActivity : ComponentActivity() {
                     },
                 )
             }
+        }
+    }
+
+    /** 分区标题：灰色小字裸排。 */
+    @Composable
+    private fun SectionTitle(text: String) {
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = WxPalette.TextSecondary,
+            modifier = Modifier.padding(start = 6.dp, top = 8.dp),
+        )
+    }
+
+    /** 分组卡片容器：冷调玻璃底 + 渐变高光描边，与设置页/自检页同一套视觉。 */
+    @Composable
+    private fun WhiteCard(content: @Composable ColumnScope.() -> Unit) {
+        val shape = RoundedCornerShape(WxPalette.CardRadius)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(WxPalette.cardBrush())
+                .border(1.dp, WxPalette.cardBorderBrush(), shape),
+            content = content,
+        )
+    }
+
+    /** 卡片内一行：圆角图标 + 标题/副标题 + 右箭头。 */
+    @Composable
+    private fun ListRow(
+        icon: ImageVector,
+        title: String,
+        subtitle: String? = null,
+        onClick: () -> Unit,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(WxPalette.PrimarySoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = WxPalette.Primary,
+                    modifier = Modifier.size(19.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = WxPalette.textPrimary(),
+                )
+                if (!subtitle.isNullOrEmpty()) {
+                    Text(
+                        text = subtitle,
+                        fontSize = 12.sp,
+                        color = WxPalette.TextSecondary,
+                    )
+                }
+            }
+            Text(
+                text = "\u203A",
+                fontSize = 20.sp,
+                color = WxPalette.TextTertiary,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
+    }
+
+    /** 主状态卡：仿「仪表盘」顶部大卡 —— 状态胶囊 + 图标 + 主标题 + 底部分栏。 */
+    @Composable
+    private fun StatusCard(state: ActivationState, buildTime: String) {
+        val shape = RoundedCornerShape(WxPalette.CardRadius)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(WxPalette.cardBrush())
+                .border(1.dp, WxPalette.cardBorderBrush(), shape)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "状态",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = WxPalette.TextSecondary,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .background(state.color.copy(alpha = 0.12f), RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            text = state.title,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = state.color,
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(state.color.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (state.isActivated) {
+                                MaterialSymbols.OutlinedFilled.Check_circle
+                            } else {
+                                MaterialSymbols.OutlinedFilled.Warning
+                            },
+                            contentDescription = null,
+                            tint = state.color,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = state.title,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = WxPalette.textPrimary(),
+                        )
+                        Text(
+                            text = state.desc,
+                            fontSize = 11.sp,
+                            color = WxPalette.TextSecondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(WxPalette.cardBorder())
+                )
+                Row {
+                    Column(Modifier.weight(1f)) {
+                        Text("版本", fontSize = 11.sp, color = WxPalette.TextSecondary)
+                        Text(
+                            text = BuildConfig.VERSION_NAME,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = WxPalette.textPrimary(),
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("构建时间", fontSize = 11.sp, color = WxPalette.TextSecondary)
+                        Text(
+                            text = buildTime,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = WxPalette.textPrimary(),
+                        )
+                    }
+                }
         }
     }
 
@@ -730,9 +831,10 @@ class MainActivity : ComponentActivity() {
         ElevatedCard(
             onClick = onClick,
             modifier = Modifier
-                .fillMaxWidth()
-                .shadow(4.dp, RoundedCornerShape(16.dp)),
-            shape = RoundedCornerShape(16.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = WxPalette.cardBackground()),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),

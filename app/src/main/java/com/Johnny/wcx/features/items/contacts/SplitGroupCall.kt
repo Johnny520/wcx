@@ -355,11 +355,13 @@ object SplitGroupCall : ClickableFeature(), IContactInfoProvider, IResolveDex {
      * SubCoreMultiTalk、ILinkService 等锚点全部不存在，实测 8.0.71~8.0.76 可用。
      */
     override val unavailableReason: String?
-        get() = if (classSubCoreMultiTalk.isPlaceholder) {
+        get() = if (hostVersionAtLeast(8, 0, 77)) {
             "当前微信版本（8.0.77+）已移除多人通话模块，该功能不可用"
         } else null
 
     override fun onEnable() {
+        // 微信 8.0.77+ 已移除多人通话模块：旧配置残留「开着」时也不再注册联系人详情入口
+        if (hostVersionAtLeast(8, 0, 77)) return
         WeContactPrefsScreenApi.addProvider(this)
     }
 

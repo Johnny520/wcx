@@ -20,7 +20,7 @@ object DisableShareScreenshotToast : SwitchFeature(), IResolveDex {
     }
 
     override val unavailableReason: String?
-        get() = if (methodDisplayToast.isPlaceholder) {
+        get() = if (hostVersionAtLeast(8, 0, 80)) {
             "当前微信版本已移除「转发截图」提示的相关实现，该功能不可用"
         } else null
 

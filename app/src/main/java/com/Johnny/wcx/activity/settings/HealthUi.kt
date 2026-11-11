@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,9 +25,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.Johnny.wcx.ui.style.WxPalette
 
 /**
  * 模块自检页用的三个小组件。
@@ -66,7 +69,7 @@ internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                color = MiuixTheme.colorScheme.onSurface,
+                color = WxPalette.textPrimary(),
                 fontWeight = FontWeight.Medium,
             )
             if (summary.isNotBlank()) {
@@ -86,7 +89,7 @@ internal fun InsetDivider(start: Dp = 16.dp) {
             .fillMaxWidth()
             .padding(start = start)
             .height(1.dp)
-            .background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.2f))
+            .background(WxPalette.cardBorder())
     )
 }
 
@@ -102,13 +105,20 @@ internal fun PageScaffold(
     @Suppress("UNUSED_PARAMETER") largeTitle: String,
     @Suppress("UNUSED_PARAMETER") scrollBehavior: Any? = null,
     onBack: (() -> Unit)? = null,
+    subtitle: String? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(WxPalette.pageBackgroundBrush())
+            // 关键：之前没有状态栏内边距，标题直接顶进状态栏，被时间/信号图标压住。
+            .statusBarsPadding(),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onBack != null) {
@@ -118,15 +128,25 @@ internal fun PageScaffold(
                         .clickable(onClick = onBack)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
-                    Text(text = "返回", color = MiuixTheme.colorScheme.primary)
+                    Text(text = "返回", color = MiuixTheme.colorScheme.primary, fontSize = 15.sp)
                 }
             }
-            Text(
-                text = title,
-                color = MiuixTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 4.dp),
-            )
+            Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(
+                    text = title,
+                    color = WxPalette.textPrimary(),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        color = WxPalette.textSecondary(),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
         content(PaddingValues(0.dp))
     }

@@ -66,17 +66,31 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
 
     private const val TAG = "WeChatMessageViewApi"
 
-    private val methodChatItemOnBindView by dexMethod {
+    // 锚点修正（2026-11-06，8.0.79 / 8.0.80 双版本逐串验证）：
+    //  · 旧锚点里的 "[onBindView]" 是**孤儿串** —— 两版 APK 里实际只存在
+    //    "[onBindView] finish position:" / "[onBindView] never attach!" 这类更长串，
+    //    DexKit 按字符串常量精确匹配，旧串恒命中不到，导致整个消息 View 监听服务不工作
+    //    （表现：防撤回能拦住，但既没有灰标也没有「已撤回」标记）；
+    //  · "MicroMsg.MvvmChattingItem" 两版都存活，且与该日志串位于同一方法
+    //    （8.0.79 = vm5/g.h，8.0.80 = nm5/g.h），两串 AND 唯一命中。
+    // 同时允许失败：锚点再失效也不会像以前那样把整个 API 拖垮。
+    private val methodChatItemOnBindView by dexMethod(allowMultiple = true, allowFailure = true) {
         matcher {
             usingStrings(
                 "MicroMsg.MvvmChattingItem",
-                "[onBindView]"
+                "[onBindView] finish position:"
             )
         }
     }
 
     override fun onEnable() {
+        if (methodChatItemOnBindView.isPlaceholder) {
+            WeLogger.w(TAG, "onBindView 锚点未命中：消息 View 监听（含防撤回徽标）将不可用")
+        }
         methodChatItemOnBindView.hookAfter {
+            // adapter 缓存要在 View 解析之前做：即使下面拿不到 View 而提前返回，
+            // 也要把 adapter 存下来，供 findMessageViewById 按消息 id 反查气泡。
+            cacheAdapter(this)
             val holder = args[0] ?: return@hookAfter
             val view = holder.reflekt()
                 .firstFieldOrNull {
@@ -111,6 +125,57 @@ object WeChatMessageViewApi : ApiFeature(), IResolveDex {
             }
         }
     }
+
+    // ── 按消息 id 反查 View（不依赖 currentBindings） ──────────────────────────
+    //
+    // 消息列表 adapter（8.0.79/8.0.80 = com.tencent.mm.ui.chatting.adapter.k）同时提供：
+    //   b1(J)Landroid/view/View;              按消息 id 取该行 View
+    //   X0(J)Lcom/tencent/mm/storage/f9;      按消息 id 取 MsgInfo
+    // 这里按「1 个 long 形参 + 返回类型」做行为匹配，不写死混淆后的方法名。
+    // 用途：撤回发生时目标消息可能还没走过一次 onBind（currentBindings 里没有记录），
+    // 只靠绑定表刷不到，必须能按 id 直接找到已经显示在屏幕上的那一行。
+
+    @Volatile
+    private var cachedAdapter: Any? = null
+
+    private fun cacheAdapter(param: XC_MethodHook.MethodHookParam) {
+        if (cachedAdapter != null) return
+        runCatching {
+            if (WeMessageApi.classChattingDataAdapter.isPlaceholder) return
+            val adapter = param.thisObject?.reflekt()
+                ?.firstFieldOrNull { type = WeMessageApi.classChattingDataAdapter.clazz }
+                ?.get()
+            if (adapter != null) {
+                cachedAdapter = adapter
+                WeLogger.i(TAG, "cached chatting adapter: ${adapter.javaClass.name}")
+            }
+        }.onFailure { WeLogger.w(TAG, "cacheAdapter failed: ${it.message}") }
+    }
+
+    /** 按 msgSvrId 找到已创建的消息 View 及其 MessageInfo；找不到返回 null。 */
+    fun findMessageViewById(serverId: Long): Pair<View, MessageInfo>? {
+        if (serverId == 0L) return null
+        val adapter = cachedAdapter ?: return null
+        val view = runCatching {
+            pickAdapterMethod(adapter, View::class.java)?.invoke(adapter, serverId) as? View
+        }.getOrNull() ?: return null
+        if (WeMessageApi.classMsgInfo.isPlaceholder) return null
+        val msg = runCatching {
+            pickAdapterMethod(adapter, WeMessageApi.classMsgInfo.clazz)?.invoke(adapter, serverId)
+        }.getOrNull() ?: return null
+        return view to MessageInfo(msg)
+    }
+
+    private fun pickAdapterMethod(
+        target: Any,
+        returnType: Class<*>,
+    ): java.lang.reflect.Method? = runCatching {
+        target.javaClass.methods.firstOrNull { method ->
+            method.parameterCount == 1 &&
+                method.parameterTypes[0] == java.lang.Long::class.java &&
+                returnType.isAssignableFrom(method.returnType)
+        }
+    }.getOrNull()
 
     private fun ensureAttachStateListener(view: View) {
         synchronized(attachStateListeners) {

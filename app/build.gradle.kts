@@ -46,8 +46,8 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         // 版本号单一数据源：CI（.github/workflows/ci.yml）直接读取此处，
         // 发版时只需在此递增 versionCode / versionName
-        versionCode = 345
-        versionName = "v345"
+        versionCode = 346
+        versionName = "v346"
 
         buildConfigField("String", "COMMIT_HASH", "\"${gitHash}\"")
         buildConfigField("String", "TAG", "\"WCX\"")
@@ -161,6 +161,10 @@ android {
     }
 
     packaging {
+        // 严禁开启 jniLibs.useLegacyPackaging：LSPosed 在微信进程内通过 System.loadLibrary
+        // 从模块 APK 直接 mmap 加载 .so，该机制只对 STORED(未压缩) 生效。开启后 .so 变
+        // DEFLATED，System.loadLibrary 抛 UnsatisfiedLinkError → NativeLoader 类初始化失败
+        // → 整个模块在初始化阶段崩溃，微信里看不到任何模块痕迹，LSPosed 日志也无记录。
         resources.excludes += listOf(
             "kotlin/**",
             "**.bin",
@@ -270,6 +274,7 @@ val generateMethodHashes = tasks.register<GenerateMethodHashesTask>("generateMet
 
 // --- end tasks ---
 
+
 ksp {
     // Room schema export for migration diffing
     arg("room.schemaLocation", "$projectDir/schemas")
@@ -293,11 +298,15 @@ dependencies {
     implementation(libs.aboutlibraries.core)
     implementation(libs.aboutlibraries.compose.m3)
     implementation(libs.androidx.profileinstaller)
-    implementation(libs.miuix.ui)
-    implementation(libs.miuix.icons)
-    implementation(libs.miuix.preference)
-    implementation(libs.miuix.blur)
-    implementation(libs.miuix.shader)
+    // miuix 0.9.4 内置 aar（对齐 Hchat 上游 app/libs；maven 0.9.3 API 与上游代码不兼容）
+    implementation(files("libs/miuix-ui-android-0.9.4.aar"))
+    implementation(files("libs/miuix-core-android-0.9.4.aar"))
+    implementation(files("libs/miuix-squircle-android-0.9.4.aar"))
+    implementation(files("libs/miuix-preference-android-0.9.4.aar"))
+    implementation(files("libs/miuix-icons-android-0.9.4.aar"))
+    implementation(files("libs/miuix-nav-android-0.9.4.aar"))
+    implementation(files("libs/miuix-blur-android-0.9.4.aar"))
+    implementation(files("libs/miuix-shader-android-0.9.4.aar"))
     implementation(libs.materialkolor)
     implementation(libs.coil)
     implementation(libs.coil.compose)
@@ -306,15 +315,18 @@ dependencies {
 
     implementation(libs.composablehorizons.material.symbols.filled)
     implementation(libs.composablehorizons.material.symbols.outlined)
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
 
     implementation(libs.google.protobuf.javalite)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.serialization.protobuf)
     implementation(libs.mmkv)
-    // Termux 终端（GPLv3）：terminal-view 依赖 terminal-emulator
-    implementation(files("libs/terminal-emulator-0.118.0.aar"))
-    implementation(files("libs/terminal-view-0.118.0.aar"))
     // Hchat 脚本子系统依赖（迁移）
+    // Hchat 设置浮层渲染依赖 lifecycle-viewmodel-compose（LocalViewModelStoreOwner），
+    // 缺了会 NoClassDefFoundError 导致脚本页打不开（上游 build.gradle 里有这两项）
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.savedstate:savedstate:1.2.1")
     implementation("io.github.billywei01:fastkv:3.0.1")
     implementation("com.google.flatbuffers:flatbuffers-java:23.5.26")
     implementation("dev.rikka.ndk.thirdparty:cxx:1.2.0")
@@ -333,14 +345,12 @@ dependencies {
     implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.1")
 
-    implementation(project(":libs:common:bsh"))
-
     // 内置 Xposed API 82：Maven Central / 腾讯镜像都没有该构件，只能从 api.xposed.info 拉，
     // 而该源在 CI 上偶发超时会导致整个 master 构建失败（缓存丢失时必现）。内置后构建可复现。
     compileOnly(files("libs/xposed-api-82.jar"))
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
-    implementation(libs.dexkit)
+    implementation(files("libs/dexkit-2.2.0-76551eb-idle.aar"))
     implementation(libs.hiddenapibypass)
     implementation(project(":libs:common:reflekt"))
     implementation(libs.libsu.core)
@@ -357,8 +367,6 @@ dependencies {
     implementation(libs.okhttp3.okhttp)
     implementation(libs.jsoup)
 
-    implementation(files("libs/rhino-45f29f6.jar"))
-
     implementation(libs.fastjson2)
 
     compileOnly(libs.lombok)
@@ -372,8 +380,6 @@ dependencies {
 
     implementation(libs.mcp.server)
     implementation(libs.mcp.client)
-    implementation(libs.androidx.room.runtime)
-    ksp(libs.androidx.room.compiler)
     implementation(platform(libs.ktor.bom))
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.cors)

@@ -39,7 +39,7 @@ object AutoAddNearbyFriends : ClickableFeature(), IResolveDex {
      * 返回非空后设置页会拒绝开启并直接提示，避免用户开了开关却毫无反应。
      */
     override val unavailableReason: String?
-        get() = if (methodCreateMenu.isPlaceholder || methodMenuOnClick.isPlaceholder) {
+        get() = if (hostVersionAtLeast(8, 0, 79)) {
             "当前微信版本（8.0.79+）「附近的人」页面已改版，该功能不可用"
         } else null
 

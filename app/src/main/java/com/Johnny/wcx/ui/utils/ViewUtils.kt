@@ -63,8 +63,11 @@ fun ListAdapter.iterator(parent: ViewGroup): Iterator<View> =
         private var index = 0
         override fun hasNext() = index < count
         override fun next(): View {
+            // 先取值再自增：之前的写法先 index++ 再 getView(index) 会漏掉第 0 项，
+            // 并在最后一位越界取 getView(count)，抛异常把调用方整段逻辑带挂。
+            val position = index
             index++
-            return getView(index, null, parent)
+            return getView(position, null, parent)
         }
     }
 

@@ -357,6 +357,15 @@ object AntiMessageRecall : ClickableFeature(), WeXmlParserApi.IAfterParseListene
         recalledKeyCache = recalledKeyCache + key
         recalledRecords = recalledKeyCache
         refreshBoundViews(talker, msgSvrId)
+        // 绑定表里没有对应 View（消息还没走过一次 onBind、或消息 View 监听没挂上）时，
+        // 直接让 adapter 按 msgSvrId 反查已经显示在屏幕上的那一行，补上灰标。
+        if (WeChatMessageViewApi.findBoundViews { it.talker == talker && it.serverId == msgSvrId }.isEmpty()) {
+            runCatching {
+                val pair = WeChatMessageViewApi.findMessageViewById(msgSvrId) ?: return@runCatching
+                pair.first.post { applyRecallStyle(pair.first, pair.second) }
+                WeLogger.i(TAG, "recall badge applied via adapter lookup (msgSvrId=$msgSvrId)")
+            }.onFailure { WeLogger.w(TAG, "findMessageViewById failed: ${it.message}") }
+        }
         WeLogger.i(TAG, "marked recalled: $key")
     }
 
