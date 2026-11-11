@@ -34,12 +34,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -161,6 +165,37 @@ object WxPalette {
     @Composable
     fun cardBorder(): Color =
         if (isSystemInDarkTheme()) Color(0x1AFFFFFF) else Color(0x0D000000)
+}
+
+/**
+ * 渐变着色的矢量图标（与 [WxPalette.accentBrush] 品牌渐变一致）。
+ *
+ * `Icon` 的 tint 只接受纯色，不支持 Brush：这里先用 `tint = Unspecified` 原样绘制，
+ * 再在离屏图层上用 `SrcIn` 把渐变「盖」进图标的 alpha 区域，得到一张真正的渐变图标。
+ * [size] 传 null 时沿用调用方的 Modifier 尺寸。
+ */
+@Composable
+fun GradientIcon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    brush: Brush = WxPalette.accentBrush(),
+    size: Dp? = null,
+) {
+    Icon(
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+        tint = Color.Unspecified,
+        modifier = modifier
+            .then(if (size != null) Modifier.size(size) else Modifier)
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            .drawWithCache {
+                onDrawWithContent {
+                    drawContent()
+                    drawRect(brush, blendMode = BlendMode.SrcIn)
+                }
+            },
+    )
 }
 
 /**

@@ -93,6 +93,7 @@ import com.Johnny.wcx.ui.content.MiuixStackNavigator
 import com.Johnny.wcx.ui.content.liquid.vibrancy
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
 import com.Johnny.wcx.ui.style.AtmosphereBackground
+import com.Johnny.wcx.ui.style.GradientIcon
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
@@ -117,7 +118,6 @@ import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import androidx.compose.material3.Icon as M3Icon
 import androidx.compose.material3.Text as M3Text
 import androidx.compose.ui.draw.clipToBounds
 
@@ -426,9 +426,11 @@ private fun MainPagerScreen(
                         animationSpec = tween(200),
                         label = "navIcon",
                     ) { selected ->
-                        M3Icon(
+                        // Tab 图标统一品牌渐变（选中 filled / 未选中 outlined 仍可区分）
+                        GradientIcon(
                             imageVector = if (selected) item.filled else item.outlined,
                             contentDescription = item.label,
+                            size = 24.dp,
                         )
                     }
                     M3Text(
@@ -657,6 +659,7 @@ fun FeatureRow(
         )
     }
 }
+
 
 
 

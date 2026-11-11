@@ -88,6 +88,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.composables.icons.materialsymbols.outlined.Refresh
 import com.composables.icons.materialsymbols.outlined.Chat
 import com.composables.icons.materialsymbols.outlined.Code
+import com.Johnny.wcx.ui.style.GradientIcon
 import com.Johnny.wcx.ui.style.fxReveal
 import com.Johnny.wcx.ui.style.rememberGrowNumber
 import kotlin.math.roundToInt
@@ -642,11 +643,10 @@ private fun ActivationCard(
                     .background(accentColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
+                GradientIcon(
                     imageVector = MaterialSymbols.Outlined.Check_circle,
                     contentDescription = null,
-                    tint = accentColor,
-                    modifier = Modifier.size(26.dp),
+                    size = 26.dp,
                 )
             }
             Spacer(Modifier.width(12.dp))
