@@ -471,6 +471,10 @@ fun MiuixListScaffold(
     blurTopBar: Boolean = true,
     // 内容左右内边距。脚本 Tab 内嵌 Hchat 内容（其 SettingsCard 自带 12dp），此处传 0 避免双重内边距。
     horizontalPadding: Dp = 12.dp,
+    // 展开态显示在左上角的大标题与其下方副标题：默认大标题 = title、无副标题。
+    // 上滑时大标题与副标题一起收起，title 淡入顶栏中间；下滑再展开（「功能」「主页」同一套行为）。
+    largeTitle: String = title,
+    subtitle: String = "",
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
@@ -506,6 +510,8 @@ fun MiuixListScaffold(
                 // Transparent so the miuix bar's own opaque surface doesn't hide the blur.
                 color = if (blurTopBar) Color.Transparent else MiuixTheme.colorScheme.surface,
                 title = title,
+                largeTitle = largeTitle,
+                subtitle = subtitle,
                 scrollBehavior = scrollBehavior,
                 navigationIcon = { navigationIcon?.invoke() },
             )

@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
@@ -311,36 +310,19 @@ fun HomePager(
     LaunchedEffect(Unit) { checkUpdateNow(force = true) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-    MiuixListScaffold(title = "") {
-        // ---- 标题区域 ----
-        // fillMaxWidth + wrapContentHeight 防止无限高度约束导致灰色渲染
-        // background 设置与 TopAppBar 毛玻璃相同的背景色，避免滚动时出现灰色色块
-        item {
-            Column(
-                modifier = Modifier
-                    .fxReveal(0)
-                    .fillMaxWidth()
-                    .wrapContentHeight()
-                    .padding(top = 8.dp, start = 18.dp, end = 18.dp, bottom = 2.dp),
-            ) {
-                Text(
-                    text = "WCX",
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = WxPalette.textPrimary(),
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "微信，解锁超能力，重构你的使用体验",
-                    fontSize = 13.sp,
-                    color = WxPalette.TextSecondary,
-                )
-            }
-        }
-
+    // 「WCX」大标题 + 副标题交给顶栏渲染（与「功能」「日志」页同一套折叠行为）：
+    // 展开时贴状态栏显示在左上角，上滑时大小标题一起收起、title 淡入顶栏中间，下滑再展开。
+    // 原来标题写成列表的第一个 item，顶栏另占一层高度，所以 WCX 离状态栏很远、也不会折叠。
+    MiuixListScaffold(
+        title = "WCX",
+        subtitle = "微信，解锁超能力，重构你的使用体验",
+    ) {
         // ---- 样式开关：经典四 Tab ⇄ 单页 Dashboard ----
         item {
-            SoftCard(contentPadding = 12, modifier = Modifier.fxReveal(1)) {
+            SoftCard(
+                contentPadding = 12,
+                modifier = Modifier.padding(top = 12.dp).fxReveal(0),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
