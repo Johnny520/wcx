@@ -118,6 +118,7 @@ import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import androidx.compose.material3.Icon as M3Icon
 import androidx.compose.material3.Text as M3Text
 import androidx.compose.ui.draw.clipToBounds
 
@@ -426,12 +427,20 @@ private fun MainPagerScreen(
                         animationSpec = tween(200),
                         label = "navIcon",
                     ) { selected ->
-                        // Tab 图标统一品牌渐变（选中 filled / 未选中 outlined 仍可区分）
-                        GradientIcon(
-                            imageVector = if (selected) item.filled else item.outlined,
-                            contentDescription = item.label,
-                            size = 24.dp,
-                        )
+                        // 只有当前选中的 Tab 用品牌渐变（参考 LSPosed 底栏）；
+                        // 未选中的保持灰色描边，突出焦点、避免整条底栏都在渐变。
+                        if (selected) {
+                            GradientIcon(
+                                imageVector = item.filled,
+                                contentDescription = item.label,
+                                size = 24.dp,
+                            )
+                        } else {
+                            M3Icon(
+                                imageVector = item.outlined,
+                                contentDescription = item.label,
+                            )
+                        }
                     }
                     M3Text(
                         text = item.label,
