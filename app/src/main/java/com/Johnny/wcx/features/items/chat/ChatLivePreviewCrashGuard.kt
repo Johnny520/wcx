@@ -27,10 +27,14 @@ import de.robv.android.xposed.XposedBridge
  * 这是微信自身缺陷（栈内无任何模块代码），无法用常规 hookBefore/After 拦截——
  * 异常发生在微信自己的方法体内，构造器与 hookAfter 都接不住。
  *
- * 所以这里在微信的消息分发入口（sdk.platformtools.i3.dispatchMessage）套一层
- * 「替换 + invokeOriginal + try-catch」：仅当异常栈命中已知的微信自身崩溃
- * （含 finder 直播预览、不含任何模块帧）时才吞掉——消息循环继续，浮窗不显示，
+ * 防御挂点：崩溃链最外层的**普通方法**——聊天页创建这个浮窗的延迟任务
+ * `iq0.o.run`（8.0.80 的混淆名，Runnable；跨版本找不到就降级为只记日志）。
+ * 在它上面套「替换 + invokeOriginal + try-catch」：仅当异常栈命中已知的微信自身
+ * 崩溃（含 finder 直播预览、不含任何模块帧）时才吞掉——消息循环继续，浮窗不显示，
  * 进程不闪退；其它一切异常照常 rethrow，交给崩溃处理器记录。
+ *
+ * 注意：绝不能挂在 i3.dispatchMessage 上——那是主线程所有消息的入口，
+ * replacement + invokeOriginal 每条消息都要走一次反射，实测会拖慢整个微信。
  */
 @Feature(
     name = "聊天直播浮窗崩溃防御",
@@ -57,23 +61,24 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
     override val defaultEnabled: Boolean = true
 
     override fun onEnable() {
-        val handlerClass = runCatching {
-            Class.forName("com.tencent.mm.sdk.platformtools.i3", false, ClassLoaders.HOST)
+        val taskClass = runCatching {
+            Class.forName("iq0.o", false, ClassLoaders.HOST)
         }.getOrNull() ?: run {
-            WeLogger.w(TAG, "未找到微信消息分发类 i3，防御不可用（可能微信版本变化）")
+            WeLogger.w(TAG, "未找到 iq0.o（聊天页直播浮窗创建任务），防御不可用（微信版本变化）")
+            return
+        }
+        if (!Runnable::class.java.isAssignableFrom(taskClass)) {
+            WeLogger.w(TAG, "iq0.o 不再是 Runnable，防御不可用")
+            return
+        }
+        val runMethod = runCatching {
+            taskClass.getDeclaredMethod("run").apply { isAccessible = true }
+        }.getOrNull() ?: run {
+            WeLogger.w(TAG, "iq0.run 未找到，防御不可用")
             return
         }
 
-        val method = handlerClass.declaredMethods.firstOrNull {
-            it.name == "dispatchMessage" &&
-                it.parameterTypes.size == 1 &&
-                Message::class.java == it.parameterTypes[0]
-        } ?: run {
-            WeLogger.w(TAG, "i3.dispatchMessage(Message) 未找到，防御不可用（可能微信版本变化）")
-            return
-        }
-
-        XposedBridge.hookMethod(method, object : XC_MethodReplacement() {
+        XposedBridge.hookMethod(runMethod, object : XC_MethodReplacement() {
             override fun replaceHookedMethod(param: XC_MethodHook.MethodHookParam): Any? {
                 return try {
                     param.invokeOriginal()
@@ -91,7 +96,7 @@ object ChatLivePreviewCrashGuard : SwitchFeature() {
             }
         })
 
-        WeLogger.i(TAG, "聊天直播浮窗崩溃防御已安装（i3.dispatchMessage）")
+        WeLogger.i(TAG, "聊天直播浮窗崩溃防御已安装（iq0.run，仅豁免该已知崩溃）")
     }
 
     /** 栈里有 finder 直播预览帧、且没有任何模块帧 → 视为已知的微信自身崩溃。 */

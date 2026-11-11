@@ -20,9 +20,9 @@ object AutoViewOriginalMedia : SwitchFeature(), IResolveDex {
     /** 原图 / 原视频按钮的文案（中英文都认），只在本页面视图树内匹配。 */
     private val BUTTON_KEYWORDS = listOf("查看原图", "Full Image", "查看原视频", "Original quality")
 
-    /** 同一次展示里不重复点：微信这两个方法可能连续回调多次。 */
+    /** 命中即节流：这两个方法在图片查看页每切一张图都会触发。 */
     @Volatile
-    private var lastClickAt = 0L
+    private var lastHitAt = 0L
 
     private const val CLICK_THROTTLE_MS = 1200L
 
@@ -67,10 +67,12 @@ object AutoViewOriginalMedia : SwitchFeature(), IResolveDex {
 
             method.hookAfter {
                 val now = SystemClock.elapsedRealtime()
-                if (now - lastClickAt < CLICK_THROTTLE_MS) return@hookAfter
+                // 命中即节流（不管有没有点到）：之前只在点击成功后才节流，
+                // 没找到按钮时每次命中都做全树遍历，图片查看页连滑几张就明显卡顿。
+                if (now - lastHitAt < CLICK_THROTTLE_MS) return@hookAfter
+                lastHitAt = now
                 runCatching {
                     if (clickOriginalButton(thisObject)) {
-                        lastClickAt = now
                         WeLogger.i(TAG, "已自动点击「查看原图 / 查看原视频」")
                     }
                 }.onFailure { WeLogger.w(TAG, "自动点击原图按钮失败：${it.message}") }
