@@ -354,9 +354,34 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
         }
     }
 
-    /** 聊天页：壁纸会透过照片查看浮层/半透明查看页覆盖照片，故不挂壁纸。 */
-    private fun isChattingPage(activity: Activity): Boolean =
-        activity.javaClass.name == "com.tencent.mm.ui.ChattingUI"
+    /**
+     * 聊天页判定：壁纸挂在聊天页上会透过照片查看浮层/半透明页盖住内容，故聊天页一律不挂壁纸。
+     *
+     * ## 类名修正（聊天页浸透的根因）
+     * 微信 8.x 的真实类名是 `com.tencent.mm.ui.chatting.ChattingUI`，
+     * 此前误写成 `com.tencent.mm.ui.ChattingUI`（少一层 `.chatting`），判定永不命中，
+     * 导致内置主题的壁纸被挂到聊天页 decorView 顶层 → 聊天页看到主题壁纸（浸透）。
+     *
+     * ## 变体兼容
+     * 微信 8.0.80 共有 26+ 个继承 ChattingUI 的变体（ChattingMainUI / BizHalfScreenChattingUI /
+     * FinderChattingUI / VoipChattingUI / OpenImKefuServiceChattingUI / variants.AppBrandChattingUI 等），
+     * 精确等号只能覆盖主类，故改为沿父类链向上匹配，未来新增子类同样命中。
+     */
+    private fun isChattingPage(activity: Activity): Boolean {
+        var clazz: Class<*>? = activity.javaClass
+        var depth = 0
+        while (clazz != null && depth < 8) {
+            val name = clazz.name
+            if (name == "com.tencent.mm.ui.chatting.ChattingUI" ||
+                name == "com.tencent.mm.ui.ChattingUI"
+            ) {
+                return true
+            }
+            clazz = clazz.superclass
+            depth++
+        }
+        return false
+    }
 
     
 
@@ -431,6 +456,13 @@ object ThemeStore : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener
      * （看不到壁纸），且影响微信自绘窗口（wcx 设置入口卡启动图），故回退为顶层悬浮。
      */
     private fun applyWallpaper(activity: Activity) {
+        // 兜底：聊天页永不挂壁纸。
+        // onActivityResumed 分支已做豁免，这里再拦一次，防止 resume 时序竞态
+        // （转场期间壁纸先挂后判、liveActivities 快照不全等）导致漏判而浸透。
+        if (isChattingPage(activity)) {
+            removeWallpaper(activity)
+            return
+        }
         val decor = activity.window?.decorView as? ViewGroup ?: return
         val alpha = overlayOpacityPct.coerceIn(5, 100) / 100f
         val theme = currentTheme()

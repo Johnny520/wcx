@@ -100,6 +100,13 @@ import com.Johnny.wcx.constants.Preferences
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.items.debug.ResetDexCache
 import com.Johnny.wcx.preferences.WePrefs
+import kotlin.io.path.writeText
+import kotlin.io.path.readText
+import kotlin.io.path.div
+import kotlin.io.path.exists
+import com.Johnny.wcx.utils.fs.KnownPaths
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.content.MiuixSmallTitle
 import com.Johnny.wcx.ui.utils.GitHubIcon
 import com.Johnny.wcx.ui.utils.theme.AppColorSpec
@@ -150,13 +157,19 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
+import androidx.compose.foundation.layout.fillMaxSize
+import com.Johnny.wcx.ui.style.fxReveal
 
 // ---------------------------------------------------------------------------
 //  Page 2 — Settings
 // ---------------------------------------------------------------------------
 
 @Composable
-fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit) {
+fun SettingsPager(
+    onOpenLicense: () -> Unit,
+    onOpenAcknowledgements: () -> Unit,
+    onBack: (() -> Unit)? = null,
+) {
     val context = LocalComponentActivity.current
 
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -169,7 +182,16 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
     UpdateErrorDialog(message = updateError, onDismiss = { updateError = null })
     ChangelogDialog(show = showChangelog, onDismiss = { showChangelog = false }, context = context)
 
-    MiuixListScaffold(title = "设置") {
+    PageScaffold(
+        title = "设置",
+        largeTitle = "设置",
+        subtitle = "界面 · 更新 · 备份恢复",
+        onBack = onBack,
+    ) { _ ->
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+      ) {
         // Account info card — shown at top of Settings tab.
         item {
             Spacer(Modifier.height(12.dp))
@@ -179,7 +201,10 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 界面
         item {
             MiuixSmallTitle(text = "界面", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth().fxReveal(0),
+            ) {
                 ThemeSection()
             }
         }
@@ -187,7 +212,10 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 微信主题
         item {
             MiuixSmallTitle(text = "微信主题", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "主题工坊",
                     summary = "内置 6 款全局主题，全局沉浸壁纸（主页/通讯录/发现/我的 4 个界面，或全部界面）+ 对应气泡，支持透明度调节与备份恢复",
@@ -200,7 +228,10 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 调试
         item {
             MiuixSmallTitle(text = "调试", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefSwitch(
                     key = Preferences.VERBOSE_LOG,
                     title = "详细日志",
@@ -225,7 +256,10 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 兼容
         item {
             MiuixSmallTitle(text = "兼容", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefSwitch(
                     key = Preferences.NO_DEX_RESOLVE,
                     title = "禁用版本适配",
@@ -250,7 +284,10 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 配置
         item {
             MiuixSmallTitle(text = "配置", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "导出配置",
                     summary = "将模块配置导出为 JSON",
@@ -275,7 +312,10 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 更新
         item {
             MiuixSmallTitle(text = "更新", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "检查更新",
                     summary = "立即检查模块是否有新版本并自动下载",
@@ -299,7 +339,10 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         // 关于
         item {
             MiuixSmallTitle(text = "关于", modifier = Modifier.padding(top = 12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 PrefArrow(
                     title = "鸣谢名单",
                     summary = "感谢为本模块提供基础和灵感的项目与作者",
@@ -338,6 +381,7 @@ fun SettingsPager(onOpenLicense: () -> Unit, onOpenAcknowledgements: () -> Unit)
         }
 
         item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
+      }
     }
 }
 
@@ -393,7 +437,10 @@ private fun ProfileCard() {
         }
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    SoftCard(
+        contentPadding = 0,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -418,23 +465,28 @@ private fun ProfileCard() {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = identity.nickname.ifEmpty { wxId.ifEmpty { "—" } },
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = WxPalette.textPrimary(),
                 )
                 if (wxId.isNotEmpty()) {
                     Text(
                         text = wxId,
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 12.sp,
+                        color = WxPalette.TextSecondary,
                         modifier = Modifier.padding(top = 2.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
+            com.Johnny.wcx.ui.style.StatusPill(
+                text = BuildConfig.VERSION_NAME,
+                color = WxPalette.Primary,
+                background = WxPalette.PrimarySoft,
+            )
         }
     }
 }
@@ -445,7 +497,7 @@ private fun AvatarPlaceholder() {
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh),
+            .background(WxPalette.cardBackground()),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -702,6 +754,16 @@ private fun exportConfig(context: Context) {
                                 null -> put(key, JsonNull)
                             }
                         }
+                        // 数据文件不属于 WePrefs：聊天分组存在 moduleData/conversation_groups.json，
+                        // 之前导出只打包偏好，恢复后分组全部失效（用户实测反馈）。这里一并打包。
+                        runCatching {
+                            val groupsFile = KnownPaths.moduleData / "conversation_groups.json"
+                            if (groupsFile.exists()) {
+                                put("__file__conversation_groups.json", groupsFile.readText())
+                            }
+                        }.onFailure {
+                            WeLogger.e("WePrefs", "failed to bundle conversation groups", it)
+                        }
                     }
                     DefaultJson.encodeToString(jsonObject)
                 }
@@ -736,6 +798,24 @@ private fun importConfig(context: Context) {
                     } ?: return@launch
                     val jsonObject = DefaultJson.parseToJsonElement(jsonString).jsonObject
                     for ((key, element) in jsonObject) {
+                        // 数据文件还原：__file__<name> 是导出时打包的 moduleData 下文件。
+                        // 只接受安全的文件名（防路径穿越），且必须是 .json。
+                        if (key.startsWith("__file__") && element is JsonPrimitive && element.isString) {
+                            val fileName = key.removePrefix("__file__")
+                            val safeName = fileName.matches(Regex("[A-Za-z0-9._-]+")) && fileName.endsWith(".json")
+                            if (!safeName) {
+                                WeLogger.w("WePrefs", "skip unsafe restore file name: " + fileName)
+                                continue
+                            }
+                            runCatching {
+                                val target = KnownPaths.moduleData / fileName
+                                target.parent?.toFile()?.mkdirs()
+                                target.writeText(element.content)
+                            }.onFailure {
+                                WeLogger.e("WePrefs", "failed to restore data file " + fileName, it)
+                            }
+                            continue
+                        }
                         when (element) {
                             is JsonNull -> WePrefs.default.remove(key)
                             is JsonPrimitive -> when {
@@ -761,7 +841,7 @@ private fun importConfig(context: Context) {
                 }.onFailure {
                     showToastSuspend("导入失败!")
                     WeLogger.e("WePrefs", "failed to import", it)
-                }.onSuccess { showToastSuspend("导入成功") }
+                }.onSuccess { showToastSuspend("导入成功：聊天分组等数据文件已还原，其余设置重启微信后生效") }
                 withContext(Dispatchers.Main) { finish() }
             }
         }
@@ -909,7 +989,7 @@ private fun UpdateAvailableDialog(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                                    .background(WxPalette.cardBackground())
                                     .padding(horizontal = 5.dp, vertical = 1.dp)
                             ) {
                                 Text(
@@ -1182,18 +1262,15 @@ fun LicenseScreen(onBack: () -> Unit) {
         }
     }
 
-    MiuixListScaffold(
+    PageScaffold(
         title = "开放源代码库",
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = MaterialSymbols.Outlined.Arrow_back,
-                    contentDescription = "返回",
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
-            }
-        },
-    ) {
+        largeTitle = "开放源代码库",
+        onBack = onBack,
+    ) { _ ->
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+      ) {
         item {
             TextField(
                 state = queryState,
@@ -1251,6 +1328,7 @@ fun LicenseScreen(onBack: () -> Unit) {
         }
 
         item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
+      }
     }
 }
 
@@ -1312,7 +1390,7 @@ private fun LibraryRow(library: Library, modifier: Modifier = Modifier) {
                             color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                                .background(WxPalette.cardBackground())
                                 .padding(horizontal = 8.dp, vertical = 3.dp),
                         )
                     }
@@ -1329,18 +1407,15 @@ private fun LibraryRow(library: Library, modifier: Modifier = Modifier) {
 @Composable
 fun AcknowledgementsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    MiuixListScaffold(
+    PageScaffold(
         title = "鸣谢",
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = MaterialSymbols.Outlined.Arrow_back,
-                    contentDescription = "返回",
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
-            }
-        },
-    ) {
+        largeTitle = "鸣谢",
+        onBack = onBack,
+    ) { _ ->
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+      ) {
         item {
             Column(
                 modifier = Modifier
@@ -1361,7 +1436,10 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "本模块大量功能实现源于 wekit 模块作者，已获作者授权。",
@@ -1375,7 +1453,10 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
 
         item {
             Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1416,7 +1497,10 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
 
         item {
             Spacer(Modifier.height(12.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "首先，我想明确一点：二次创作本身是一件非常好的事情。无论是新增实用功能，还是修复原有缺陷、优化使用体验，这些贡献都能切实提升项目的实用价值，让工具变得更好用、更完善。\n\n在遵守开源精神的前提下，发挥各自的创意与技术，打磨出更优秀、更强大的作品。如果这些改进能够继续以免费的形式开放分享给社区，让更多人受益，甚至可以说，技术进步的最终意义，本就是服务更多人（请允许我在此稍作夸大其词）。\n\n在二次发布或衍生项目中，保留原项目的开源信息、作者署名及相关声明。这既是对开源社区基本规则的尊重，也是对原作者的劳动成果的一种认可。\n当然，是否保留这些信息，最终取决于每位开发者的个人判断与选择。",
@@ -1437,5 +1521,6 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
         }
 
         item { Spacer(Modifier.height(CONTENT_BOTTOM_INSET)) }
+      }
     }
 }

@@ -499,23 +499,74 @@ private fun surfaceRows(): List<DiagRow> {
     return out
 }
 
+/** 一个锚点探测项：[method] 非空时额外校验该方法是否存在（区分「类在但入口变了」与「类都没有」）。 */
+private data class AnchorSpec(val label: String, val className: String, val method: String?)
+
 private fun anchorRows(): List<DiagRow> {
     val out = mutableListOf<DiagRow>()
+    val loader = HideContacts::class.java.classLoader
+
     listOf(
-        "聊天页" to "com.tencent.mm.ui.chatting.ChattingUI",
-        "资料页" to "com.tencent.mm.plugin.profile.ui.ContactInfoUI",
-        "通讯录" to "com.tencent.mm.ui.contact.address.AddressLiveList",
-        "wcdb" to "com.tencent.wcdb.database.SQLiteDatabase",
-    ).forEach { (label, className) ->
-        val found = runCatching {
-            Class.forName(className, false, HideContacts::class.java.classLoader)
-        }.isSuccess
+        AnchorSpec("聊天页", "com.tencent.mm.ui.chatting.ChattingUI", "onCreate"),
+        AnchorSpec("资料页", "com.tencent.mm.plugin.profile.ui.ContactInfoUI", "onCreate"),
+        AnchorSpec("通讯录", "com.tencent.mm.ui.contact.address.AddressLiveList", null),
+        AnchorSpec("wcdb", "com.tencent.wcdb.database.SQLiteDatabase", null),
+        AnchorSpec("wcdb compat", "com.tencent.wcdb.compat.SQLiteDatabase", null),
+    ).forEach { spec ->
+        val clazz = runCatching { Class.forName(spec.className, false, loader) }.getOrNull()
+        val methodOk = runCatching {
+            val m = spec.method
+            if (m == null) true else clazz?.declaredMethods?.any { it.name == m } == true
+        }.getOrDefault(spec.method == null)
         out += DiagRow(
-            label, "锚点自检", if (found) "已找到" else "未找到", found,
-            "类 $className\n" + if (found) {
-                "在当前微信版本中存在，依赖它的拦截可用。"
-            } else {
-                "未找到——当前微信版本里该类已改名/挪包，依赖它的功能会退化，需要适配（无法自动修复）。"
+            spec.label, "锚点自检",
+            when {
+                clazz == null -> "未找到"
+                !methodOk -> "类在，方法缺失"
+                else -> "已找到"
+            },
+            clazz != null && methodOk,
+            buildString {
+                append("类 ").append(spec.className).append('\n')
+                val m = spec.method
+                when {
+                    clazz == null ->
+                        append("未找到 —— 当前微信版本里该类已改名/挪包，依赖它的隐藏与拦截会退化，需要适配（无法自动修复）。")
+                    !methodOk && m != null ->
+                        append("类存在，但缺少 ").append(m).append(" 方法 —— 微信可能改了入口，拦截多半不会生效。")
+                    else -> {
+                        append("类")
+                        if (m != null) append("及 ").append(m).append(" 方法")
+                        append("在当前版本可用，依赖它的拦截正常。")
+                    }
+                }
+            },
+        )
+    }
+
+    // DexKit 解析状态：判定「开关开了但 Hook 没装上」到底卡在哪一步
+    val anchors = runCatching {
+        ModuleDiagnostics.anchors { feature, key ->
+            feature.contains("隐藏") || feature.contains("联系人") || feature.contains("密友") ||
+                key.contains("contact", true) || key.contains("hide", true)
+        }
+    }.getOrDefault(emptyList())
+    if (anchors.isNotEmpty()) {
+        val okCount = anchors.count { it.resolved }
+        out += DiagRow(
+            "DexKit 锚点", "锚点自检", okCount.toString() + "/" + anchors.size, okCount == anchors.size,
+            buildString {
+                append("隐藏联系人相关功能的 Dex 锚点解析情况（只读缓存，不会重新扫描）：\n\n")
+                anchors.forEach { a ->
+                    append(if (a.resolved) "✅ " else "❌ ")
+                        .append(a.feature).append(" · ").append(a.key)
+                    if (!a.active) append("（功能未开启）")
+                    append('\n')
+                }
+                if (okCount < anchors.size) {
+                    append("\n❌ 的项表示：该锚点在当前微信版本上没匹配到目标，")
+                    append("即使开关是开的，对应的隐藏/拦截也不会生效。")
+                }
             },
         )
     }

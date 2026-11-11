@@ -1,0 +1,22 @@
+package com.Johnny.wcx.extensions
+
+import kotlinx.serialization.Serializable
+
+/**
+ * The remotely published index (`manifest.json` Release asset): for every pack,
+ * the latest version, its Release asset file name, and the asset's SHA-256.
+ */
+@Serializable
+data class PackIndex(
+    val packs: List<PackIndexEntry>,
+)
+
+@Serializable
+data class PackIndexEntry(
+    val id: String,
+    val version: String,
+    val asset: String,
+    val sha256: String,
+    /** Pack-type-specific metadata persisted into the install manifest. */
+    val meta: String? = null,
+)

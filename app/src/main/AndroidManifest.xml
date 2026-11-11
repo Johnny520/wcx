@@ -7,6 +7,32 @@
     <!-- Android 11+ package visibility: allow main app to query WeChat -->
     <queries>
         <package android:name="com.tencent.mm" />
+        <package android:name="org.lsposed.lspatch" />
+        <package android:name="io.va.exposed" />
+        <package android:name="io.va.exposed32" />
+        <package android:name="me.weishu.exp" />
+        <package android:name="top.canyie.dreamland.manager" />
+        <package android:name="com.topjohnwu.magisk" />
+        <package android:name="io.github.huskydg.magisk" />
+        <package android:name="me.weishu.kernelsu" />
+        <package android:name="me.bmax.apatch" />
+        <package android:name="com.sukisu.ultra" />
+        <package android:name="org.sukisu.manager" />
+        <package android:name="io.va.exposed64" />
+        <package android:name="io.github.lsposed.manager" />
+        <package android:name="org.lsposed.manager" />
+        <package android:name="org.meowcat.edxposed.manager" />
+        <package android:name="com.solohsu.android.edxp.manager" />
+        <package android:name="de.robv.android.xposed.installer" />
+        <!-- 模块自检「模块冲突」需要探测的已知微信 Hook / 增强模块；
+             Android 11+ 未声明的包名 getPackageInfo 会直接抛异常，因此逐个列出。 -->
+        <package android:name="com.fkzhang.wechatxposed" />
+        <package android:name="com.fkzhang.wechatxposed.pro" />
+        <package android:name="me.hd.wauxv" />
+        <package android:name="com.tencent.mm.wechatx" />
+        <package android:name="com.wcxlc.kimjaejiang" />
+        <package android:name="top.mmjz.floatingclouds" />
+        <package android:name="com.johnny.wcx" />
     </queries>
 
     <application
@@ -70,9 +96,15 @@
             android:exported="true"
             android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
 
+        <!-- Python 脚本 / 扩展包设置页（在微信进程内通过 SplashActivity 代理启动） -->
         <activity
-            android:name=".activity.agent.WeAgentSettingsActivity"
-            android:exported="true"
+            android:name=".activity.scripting_python.PythonScriptsSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
+
+        <activity
+            android:name=".activity.extensions.ExtensionsSettingsActivity"
+            android:exported="false"
             android:theme="@style/Theme.Material3.DynamicColors.DayNight.NoActionBar" />
 
         <activity
