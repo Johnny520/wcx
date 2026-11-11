@@ -479,10 +479,10 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
         if (cleaned.isEmpty() || !WeDatabaseApi.isReady) return cleaned
         return runCatching {
             val ph = cleaned.joinToString(",") { "?" }
-            val args = arrayOf(*cleaned.toTypedArray(), *cleaned.toTypedArray())
+            val args = (cleaned + cleaned).toTypedArray()
             val resolved = WeDatabaseApi.rawQuery(
                 "SELECT username FROM rcontact WHERE username IN ($ph) OR alias IN ($ph)",
-                args
+                args as Array<Any>?
             ).use { c ->
                 val out = mutableListOf<String>()
                 val idx = c.getColumnIndex("username")
