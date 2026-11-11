@@ -457,7 +457,7 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
             GroupType.PRESET_UNREAD -> "rconversation.unReadCount>0 OR rconversation.unReadMuteCount>0"
             GroupType.PRESET_GROUPS -> "rconversation.username LIKE '%@chatroom'"
             GroupType.PRESET_OFFICIALS -> "rconversation.username LIKE 'gh_%'"
-            GroupType.MANUAL -> membersInClause(group.members)
+            GroupType.MANUAL -> membersInClause(normalizeMemberIds(group.members))
             GroupType.SQL -> membersInClause(resolveGroupMembers(group))
         }
     }
@@ -467,6 +467,34 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
         if (cleaned.isEmpty()) return "0"
         val list = cleaned.joinToString(",") { "'${it.replace("'", "''")}'" }
         return "rconversation.username IN ($list)"
+    }
+
+    /**
+     * 把分组成员 ID 归一化成 rconversation.username。
+     * SQL IN 匹配不到只会静默消失（表现为「加进分组的好友/群聊不显示」）：
+     * 历史数据可能混入别名等无法匹配 talker 的值，这里在过滤前统一用 rcontact 解析一次。
+     */
+    private fun normalizeMemberIds(members: List<String>): List<String> {
+        val cleaned = members.filter { it.isNotBlank() }.distinct()
+        if (cleaned.isEmpty() || !WeDatabaseApi.isReady) return cleaned
+        return runCatching {
+            val ph = cleaned.joinToString(",") { "?" }
+            val args = arrayOf(*cleaned.toTypedArray(), *cleaned.toTypedArray())
+            val resolved = WeDatabaseApi.rawQuery(
+                "SELECT username FROM rcontact WHERE username IN ($ph) OR alias IN ($ph)",
+                args
+            ).use { c ->
+                val out = mutableListOf<String>()
+                val idx = c.getColumnIndex("username")
+                while (c.moveToNext()) out += c.getString(idx)
+                out
+            }
+            val unmatched = cleaned.filter { it !in resolved }
+            if (unmatched.isNotEmpty()) {
+                WeLogger.w(TAG, "group members not resolvable to username: $unmatched")
+            }
+            (resolved + cleaned.filter { it.contains("@") }).distinct()
+        }.getOrElse { cleaned }
     }
 
     // The homepage conversation-list cursor does NOT flow through the standard
@@ -487,7 +515,13 @@ object ConversationGrouping : ClickableFeature(), IResolveDex {
     // Returns the rewritten SQL, or null to leave it untouched (all non-list queries and "全部").
     private fun rewriteConversationListSql(sql: String): String? {
         val predicate = activePredicate ?: return null
-        if (!looksLikeConversationListQuery(sql)) return null
+        if (!looksLikeConversationListQuery(sql)) {
+            // 谓词在但这条 SQL 不像主页列表查询：以前完全静默，排查「分组切过去没有效果」无从下手。
+            if (sql.contains("rconversation", ignoreCase = true)) {
+                WeLogger.w(TAG, "tab filter skipped by marker check: " + sql.take(300))
+            }
+            return null
+        }
 
         val hidden = if (HideContacts.isEnabled) HideContacts.hiddenContacts else emptySet()
         val hiddenClause = if (hidden.isEmpty()) {

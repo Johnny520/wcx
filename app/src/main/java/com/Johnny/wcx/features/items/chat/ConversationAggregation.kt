@@ -334,7 +334,8 @@ object ConversationAggregation : ClickableFeature(),
 
         startRefreshThread()
 
-        hookMainUiRefresh()
+        runCatching { hookMainUiRefresh() }
+            .onFailure { WeLogger.e(TAG, "hookMainUiRefresh failed（不中断其余 hook 注册）", it) }
         WeLogger.i(TAG, "onEnable: after hookMainUiRefresh")
         diagFile("onEnable: after hookMainUiRefresh")
         hookColdStartResidualRecovery()
@@ -496,16 +497,15 @@ object ConversationAggregation : ClickableFeature(),
                 }
             }
 
-            if (folderRows.isEmpty()) return@runCatching
-
             val foldedCount = withQueryRewriteSuppressed {
                 WeDatabaseApi.rawQuery(
                     "SELECT COUNT(*) FROM ${ConversationTable.NAME} WHERE ${ConversationTable.PARENT_REF} LIKE ?",
                     arrayOf("$FOLDER_PREFIX%")
                 ).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
             }
-
-            if (foldedCount == 0) return@runCatching
+            // 文件夹行可能已被删、但 parentRef 绑定残留（旧版本释放中断）：
+            // 这批会话因 parentRef 非空被微信挡在主页之外，必须照常清理，否则永久不可见。
+            if (folderRows.isEmpty() && foldedCount == 0) return@runCatching
 
             WeLogger.w(
                 TAG,
@@ -795,7 +795,17 @@ object ConversationAggregation : ClickableFeature(),
     }
 
     private fun hookMainUiRefresh() {
-        MainUI::class.reflekt().firstMethod("onResume").hookAfter {
+        // 8.0.78+ 生命周期方法可能不在 MainUI 里声明，reflekt 按名匹配失败会直接抛异常；
+        // 这里必须解析失败降级，否则 onEnable 第一站就中断，后面所有 hook 都不会注册，
+        // 表现就是「归拢彻底失效且日志只有 onEnable: begin」。
+        val onResume = runCatching { MainUI::class.reflekt().firstMethod("onResume") }
+            .onFailure { WeLogger.e(TAG, "MainUI.onResume 解析失败，归拢失去 onResume 触发器", it) }
+            .getOrNull()
+        if (onResume == null) {
+            WeLogger.w(TAG, "MainUI.onResume not found; 归拢将依赖数据库监听与手动重进微信触发")
+            return
+        }
+        onResume.hookAfter {
             syncFoldersToDatabase()
         }
     }
@@ -2479,6 +2489,12 @@ object ConversationAggregation : ClickableFeature(),
                 }
             }.onFailure { WeLogger.w(TAG, "list tables failed", it) }
             val contactColumns = tableColumns(ContactTable.NAME)
+            // 空列集说明 PRAGMA 没真正执行（启动早期 / 切库瞬间）。此时 REQUIRED - empty
+            // 会误判成 schema mismatch 并被 latch 成永久 false，归拢从此静默跳过直到重启。
+            if (conversationColumns.isEmpty() || contactColumns.isEmpty()) {
+                WeLogger.w(TAG, "schema probe returned empty columns; treat as transient, will retry")
+                return@runCatching null
+            }
             val missingConversationColumns = ConversationTable.REQUIRED_COLUMNS - conversationColumns
             val missingContactColumns = ContactTable.REQUIRED_COLUMNS - contactColumns
             if (missingConversationColumns.isNotEmpty() || missingContactColumns.isNotEmpty()) {

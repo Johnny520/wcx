@@ -105,6 +105,7 @@ import com.Johnny.wcx.ui.utils.iterable
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.now
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -185,17 +186,38 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         val indexInGrid: Int,
     ) {
         fun click() {
-            val grid = gridView.get() ?: return
-            val item = itemView.get() ?: return
+            // 工具面板会被微信按需重建；以前引用失效时直接静默 return，
+            // 用户看到的就是「工具栏在、点了没反应」，且日志里毫无痕迹。
+            val grid = gridView.get() ?: run { fail("原生面板已重建，GridView 引用失效"); return }
+            val item = itemView.get() ?: run { fail("工具项 View 引用失效"); return }
             val id = runCatching { grid.adapter?.getItemId(indexInGrid) }.getOrNull() ?: indexInGrid.toLong()
-            runCatching { grid.performItemClick(item, indexInGrid, id) }
-                .onFailure { WeLogger.e(TAG, "触发工具项失败：$name", it) }
+            // 面板展开时优先用真实挂载的 child：采集时的 View 是 adapter.getView 新建的
+            // 离屏实例，部分版本上微信的点击处理绑在真实 child 上，直接用它会「点了没反应」。
+            val liveIndex = indexInGrid - grid.firstVisiblePosition
+            val live = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
+            runCatching { grid.performItemClick(live ?: item, indexInGrid, id) }
+                .onFailure {
+                    WeLogger.e(TAG, "触发工具项失败：$name", it)
+                    healthIssue = "工具项「$name」触发失败：${it.message}"
+                    showToast("聊天工具栏：${it.message ?: "触发失败"}")
+                }
         }
 
         fun longClick() {
-            val item = itemView.get() ?: return
+            val item = itemView.get() ?: run { fail("工具项 View 引用失效"); return }
             runCatching { item.performLongClick() }
-                .onFailure { WeLogger.e(TAG, "长按工具项失败：$name", it) }
+                .onFailure {
+                    WeLogger.e(TAG, "长按工具项失败：$name", it)
+                    healthIssue = "工具项「$name」长按失败：${it.message}"
+                    showToast("聊天工具栏：长按失败")
+                }
+        }
+
+        /** 引用失效等「点了必然没反应」的场景：留日志、报自检、并让用户当场看到提示。 */
+        fun fail(reason: String) {
+            WeLogger.w(TAG, "触发工具项失败：$name（$reason）")
+            healthIssue = "工具项「$name」点击无效：$reason"
+            showToast("聊天工具栏：$name 点击无效，请重新展开工具面板后重试")
         }
     }
 
