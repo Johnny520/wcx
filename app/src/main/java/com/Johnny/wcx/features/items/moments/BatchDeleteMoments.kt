@@ -61,7 +61,6 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.style.DangerBanner
 import com.Johnny.wcx.ui.style.SectionLabel
 import com.Johnny.wcx.ui.style.SoftCard
-import com.Johnny.wcx.ui.style.StatusPill
 import com.Johnny.wcx.ui.style.StyleRow
 import com.Johnny.wcx.ui.style.StyleTitle
 import com.Johnny.wcx.ui.style.WxPalette
@@ -106,10 +105,9 @@ import androidx.compose.ui.text.style.TextOverflow
  * 2. 逐条构造 NetScene 并投递到微信网络队列
  * 3. 按可配置的间隔与批量暂停节流，降低风控概率
  *
- * ## opType 自动学习
- * 微信 8.0.80 中没有可查的 opType 常量类，因此本功能采用**观察学习**：
- * hook `NetSceneSnsObjectOp` 的 `(J,I)` 构造器，把你手动删除一条朋友圈时微信自己传入的
- * opType 记录下来，批量删除时复用同一个值。首次使用前需要手动删一条做校准。
+ * ## opType 自动识别
+ * 微信没有可查的 opType 常量类：删除第一条时依次试删候选值，接口返回成功即锁定该值，
+ * 同一次批量任务内后续条目直接复用，无需用户先手动删除来「学习」。
  *
  * ## 风险
  * 高频删除朋友圈会触发微信风控：删除被拒、朋友圈发布/查看受限。
@@ -119,7 +117,7 @@ import androidx.compose.ui.text.style.TextOverflow
 @Feature(
     name = "批量删除朋友圈",
     categories = ["朋友圈"],
-    description = "按年份或数量批量删除自己发布的朋友圈\n自动学习删除参数 · 节流执行 · 支持中止"
+    description = "按年份或数量批量删除自己发布的朋友圈\n自动识别删除参数 · 节流执行 · 支持中止"
 )
 object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
@@ -148,7 +146,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         private set
 
     // ── 配置键 ────────────────────────────────────────────────────────────────
-    private const val PREF_OP_TYPE = "sns_batch_delete_op_type"
     private const val PREF_INTERVAL = "sns_batch_delete_interval"
     private const val PREF_BATCH_SIZE = "sns_batch_delete_batch_size"
     private const val PREF_BATCH_PAUSE = "sns_batch_delete_batch_pause"
@@ -774,8 +771,9 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     }
 
     // ── 配置（持久化） ────────────────────────────────────────────────────────
-    /** 学习到的 opType，-1 表示尚未学到。 */
-    private var learnedOpType by WePrefs.prefOption(PREF_OP_TYPE, -1)
+    /** 本次进程内已识别的 opType，-1 表示尚未识别（首次批量删除时自动探测）。 */
+    @Volatile
+    private var resolvedOpType: Int = -1
     private var intervalInput by WePrefs.prefOption(PREF_INTERVAL, "5000")
     private var batchSizeInput by WePrefs.prefOption(PREF_BATCH_SIZE, "20")
     private var batchPauseInput by WePrefs.prefOption(PREF_BATCH_PAUSE, "60000")
@@ -785,7 +783,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private val running = AtomicBoolean(false)
     @Volatile private var cancelRequested = false
 
-    /** 正在删除的 snsId：用于区分「模块触发」与「用户手动触发」，避免污染学习样本。 */
+    /** 正在删除的 snsId：用于把 onGYNetEnd 返回的结果关联到对应条目。 */
     private val deletingSnsIds = ConcurrentHashMap.newKeySet<Long>()
 
     /** 删除结果：snsId -> retcode（0 成功）。 */
@@ -835,12 +833,11 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     )
 
     // ══════════════════════════════════════════════════════════════════════════
-    // 生命周期 / 自动学习
+    // 生命周期
     // ══════════════════════════════════════════════════════════════════════════
 
     override fun onEnable() {
         hookOpResult()
-        hookOpTypeLearning()
     }
 
     /** 监听删除结果：从 onGYNetEnd 的 JSON 里取 retcode。 */
@@ -860,34 +857,6 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             }
         }.onFailure {
             WeLogger.e(TAG, "hook NetSceneSnsObjectOp.onGYNetEnd failed", it)
-        }
-    }
-
-    /**
-     * 学习 opType：hook `NetSceneSnsObjectOp(long, int)` 构造器。
-     *
-     * 只有非模块触发（用户手动删除）才更新样本，避免把历史值覆盖成错误值。
-     */
-    private fun hookOpTypeLearning() {
-        runCatching {
-            val cls = classSnsObjectOp.clazz
-            val ctor = findSnsOpConstructor(cls) ?: run {
-                WeLogger.w(TAG, "未找到 NetSceneSnsObjectOp(long,int) 构造器，opType 学习不可用")
-                return
-            }
-            ctor.hookAfterDirectly {
-                val snsId = (args.getOrNull(0) as? Long) ?: return@hookAfterDirectly
-                val opType = (args.getOrNull(1) as? Int) ?: return@hookAfterDirectly
-                if (deletingSnsIds.contains(snsId)) return@hookAfterDirectly
-
-                if (learnedOpType != opType) {
-                    learnedOpType = opType
-                    WeLogger.i(TAG, "已学习 opType=$opType（来源：手动删除 snsId=$snsId）")
-                }
-            }
-            WeLogger.i(TAG, "opType 学习 hook 已安装")
-        }.onFailure {
-            WeLogger.e(TAG, "hook NetSceneSnsObjectOp 构造器失败", it)
         }
     }
 
@@ -1214,7 +1183,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     /**
      * 执行批量删除（后台线程，不阻塞 UI）。
      *
-     * @return false 表示前置条件不满足（未学习 opType / 正在运行 / 超过每日上限）。
+     * @return false 表示前置条件不满足（正在运行 / 超过每日上限 / 参数识别失败）。
      */
     fun startDelete(
         items: List<MomentItem>,
@@ -1254,14 +1223,13 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                     return@thread
                 }
 
-                // 自动探测 opType：无需用户手动删除来「学习」。
-                // 依次尝试 1→2→3，用第一条试删，命中即锁定该值继续。
+                // 自动识别 opType：依次尝试候选值，用第一条试删，命中即锁定该值继续。
                 var startIndex = 0
-                if (learnedOpType < 0 && queue.isNotEmpty()) {
+                if (resolvedOpType < 0 && queue.isNotEmpty()) {
                     onProgress(0, queue.size, "正在自动识别删除参数…")
                     val probed = probeOpType(ctor, queue.first().snsId)
                     if (probed > 0) {
-                        learnedOpType = probed
+                        resolvedOpType = probed
                         success++
                         bumpTodayCount(1)
                         startIndex = 1
@@ -1365,7 +1333,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
 
     /** 删除一条，阻塞等待结果（最多 15 秒）。 */
     private fun deleteOne(ctor: Constructor<*>, snsId: Long): Boolean {
-        val opType = learnedOpType
+        val opType = resolvedOpType
         if (opType < 0) return false
         return try {
             deletingSnsIds.add(snsId)
@@ -1415,25 +1383,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                             message = "· 微信对「短时间内大量删除朋友圈」有风控：会出现删除失败、" +
                                 "朋友圈发布/查看受限等限制。\n" +
                                 "· 默认 5 秒/条、每 20 条停 60 秒、每日上限 200 条，请勿把间隔调到 1 秒以下。\n" +
-                                "· 删除不可恢复，不会进入回收站。\n" +
-                                "· 首次使用需先手动删除一条朋友圈，用于学习删除参数。"
+                                "· 删除不可恢复，不会进入回收站。"
                         )
-
-                        SoftCard(gradient = WxPalette.GradMint) {
-                            SectionLabel("删除参数")
-                            StyleRow(
-                                title = "opType（自动学习）",
-                                subtitle = if (learnedOpType >= 0) "已学习：opType=$learnedOpType"
-                                else "尚未学习：请先手动删除一条自己的朋友圈",
-                                trailing = {
-                                    StatusPill(
-                                        text = if (learnedOpType >= 0) "已就绪" else "待学习",
-                                        color = if (learnedOpType >= 0) WxPalette.Primary else WxPalette.Warning,
-                                        background = if (learnedOpType >= 0) WxPalette.PrimarySoft else WxPalette.WarningSoft,
-                                    )
-                                },
-                            )
-                        }
 
                         SoftCard(gradient = WxPalette.GradBlue) {
                             SectionLabel("扫描范围")
