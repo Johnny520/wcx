@@ -122,7 +122,9 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
         val msgType: Int,
         val channelId: Int,
         val headImg: String = "",
-        val nickName: String = ""
+        val nickName: String = "",
+        /** 这个红包是不是自己发的：自己发的红包即使被抢（「抢自己的红包」开启）也不自动回复、不计入统计。 */
+        val isSelfSender: Boolean = false,
     )
 
     override fun onEnable() {
@@ -220,7 +222,7 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
 
             // 抢红包金额统计：开关开启才写入（关闭时不执行任何读写）；
             // 金额<=0/解析异常已在上方短路；任一异常仅记日志，绝不影响抢红包核心流程。
-            if (RedPacketStatsManager.isEnabled()) {
+            if (RedPacketStatsManager.isEnabled() && !info.isSelfSender) {
                 RedPacketStatsManager.addSuccessRecord(
                     senderName = info.nickName,
                     chatName = runCatching { WeDatabaseApi.getDisplayName(info.talker) }.getOrDefault(""),
@@ -235,8 +237,12 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
             // 注意 Kotlin 字符串转义：字面的 "$amount" 必须写成 "\$amount"，
             // 写成 "\\$amount" 会被解析成「反斜杠 + amount 变量的值」，
             // 导致 replace 永远匹配不到用户填的占位符（历史 bug：回复内容原样带着 $amount 发出去）。
+            // 自己发的红包不自动回复：回复是「感谢别人发红包」，谢自己毫无意义且会刷屏。
             val reply = packetAutoReply
-            if (reply.isNotBlank()) {
+            if (reply.isNotBlank() && info.isSelfSender) {
+                WeLogger.i(TAG, "skip auto-reply: red packet was sent by myself (sendId=${info.sendId})")
+            }
+            if (reply.isNotBlank() && !info.isSelfSender) {
                 val replyTalker = info.talker
                 val replyChatName = runCatching { WeDatabaseApi.getDisplayName(replyTalker) }.getOrDefault("")
                 val replyText = reply
@@ -388,6 +394,7 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                 msgType = msgType,
                 channelId = channelId,
                 headImg = headImg,
+                isSelfSender = msgInfo.isSelfSender,
                 nickName = nickName
             )
 
@@ -532,7 +539,7 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                         ListItem(
                             modifier = Modifier.clickable { self = !self },
                             trailingContent = { Switch(checked = self, onCheckedChange = { self = it }) },
-                            supportingContent = { Text("默认情况下不抢自己发出的红包") },
+                            supportingContent = { Text("默认情况下不抢自己发出的红包；即使开启也不会自动回复、不计入金额统计") },
                             headlineContent = { Text("抢自己的红包") },
                         )
                         TextField(
