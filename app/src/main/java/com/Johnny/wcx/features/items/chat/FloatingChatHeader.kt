@@ -509,7 +509,7 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
             titles
                 .filter { it.width > 0 && !it.text.isNullOrBlank() }
                 .maxByOrNull { it.width.toLong() * it.height }
-                ?.let { drawTitlePill(canvas, it, fill, stroke, density) }
+                ?.let { drawTitlePill(canvas, it, fill, stroke, density, icons, rightIcon, commonRadius) }
         }
 
         private fun collect(
@@ -546,6 +546,9 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
         private fun centerXInHost(view: View): Float =
             offsetInHost(view, true) + view.width / 2f
 
+        /** [centerXInHost] 的简写，胶囊右边界计算用。 */
+        private fun cx(view: View): Float = centerXInHost(view)
+
         private fun drawIconRing(
             canvas: Canvas,
             icon: View,
@@ -580,6 +583,9 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
             fill: Int,
             stroke: Int,
             density: Float,
+            icons: List<View>,
+            rightIcon: View?,
+            ringRadius: Float,
         ) {
             val cy = offsetInHost(title, false) + title.height / 2f
             val halfHeight = minOf(
@@ -589,25 +595,22 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
             ).coerceAtLeast(0f)
             if (halfHeight == 0f) return
 
-            // 胶囊水平范围 = 标题文字 ∪ 同一行的兄弟图标（如免打扰铃铛）。
-            // 之前只框文字 + 固定 16dp padding，免打扰图标会落在胶囊外，
-            // 看起来「没有挂在中间段内」。
+            // 胶囊水平范围 = 标题文字 ∪ 紧贴标题的同行图标（如免打扰铃铛）。
+            // 原先只看 title.parent 的直接子节点，但 8.0.79+ 的标题与铃铛不在同一个
+            // 父容器里，于是铃铛落在胶囊外（用户反馈）。这里改为在整栏图标里找：
+            // 垂直居中对齐 + 水平紧邻标题（≤12dp），避免把返回/更多按钮也算进来。
             var contentLeft = offsetInHost(title, true)
             var contentRight = offsetInHost(title, true) + title.width
-            (title.parent as? ViewGroup)?.let { p ->
-                val titleMidY = title.top + title.height / 2
-                for (i in 0 until p.childCount) {
-                    val sib = p.getChildAt(i)
-                    if (sib === title || sib.visibility != View.VISIBLE) continue
-                    if (sib !is ImageView || sib.drawable == null) continue
-                    val sibMidY = sib.top + sib.height / 2
-                    // 只并入与标题垂直居中对齐（同一行）的图标，忽略返回/更多等其它控件。
-                    if (Math.abs(sibMidY - titleMidY) > (sib.height + title.height) / 2f) continue
-                    val l = offsetInHost(sib, true)
-                    val r = l + sib.width
-                    if (l < contentLeft) contentLeft = l
-                    if (r > contentRight) contentRight = r
-                }
+            val titleMidY = offsetInHost(title, false) + title.height / 2f
+            val neighbourGap = 12 * density
+            icons.forEach { sib ->
+                if (sib === title || sib.visibility != View.VISIBLE) return@forEach
+                val sibCy = offsetInHost(sib, false) + sib.height / 2f
+                if (Math.abs(sibCy - titleMidY) > minOf(sib.height, title.height) / 2f) return@forEach
+                val l = offsetInHost(sib, true)
+                val r = l + sib.width
+                if (l >= contentRight && l - contentRight <= neighbourGap) contentRight = r
+                else if (r <= contentLeft && contentLeft - r <= neighbourGap) contentLeft = l
             }
 
             val pad = 14 * density
@@ -621,7 +624,11 @@ object FloatingChatHeader : ClickableFeature(), IResolveDex {
             // 而且整段看起来不居中。改为不对称后，长标题只会被右侧截断，左侧始终覆盖内容。
             val gap = 8 * density
             val safeLeft = bounds.left + 46 * density + gap
-            val safeRight = bounds.right - 46 * density - gap
+            // 右边界不再固定留 46dp：按「更多」按钮实际圆环的左边缘算。
+            // 否则长群名 + 免打扰铃铛时，铃铛会被这个固定安全区挤到胶囊外面。
+            val safeRight = rightIcon
+                ?.let { cx(it) - ringRadius - gap }
+                ?: (bounds.right - gap)
             if (safeRight <= safeLeft) return
 
             var pillLeft: Float

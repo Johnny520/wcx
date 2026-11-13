@@ -191,16 +191,27 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             val grid = gridView.get() ?: run { fail("原生面板已重建，GridView 引用失效"); return }
             val item = itemView.get() ?: run { fail("工具项 View 引用失效"); return }
             val id = runCatching { grid.adapter?.getItemId(indexInGrid) }.getOrNull() ?: indexInGrid.toLong()
-            // 面板展开时优先用真实挂载的 child：采集时的 View 是 adapter.getView 新建的
-            // 离屏实例，部分版本上微信的点击处理绑在真实 child 上，直接用它会「点了没反应」。
+            // 点击顺序（用户反馈「只有快捷回复有效」= 之前只调 performItemClick，这条路微信不走）：
+            // 1. 面板展开时真实挂载的 child 直接 performClick —— 与手指点同一实例同一监听
+            // 2. 采集用的离屏实例 performClick —— adapter.getView 内若自己绑了监听，这一步就能命中
+            // 3. 兜底 GridView.performItemClick（依赖微信设置了 OnItemClickListener）
             val liveIndex = indexInGrid - grid.firstVisiblePosition
             val live = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
-            runCatching { grid.performItemClick(live ?: item, indexInGrid, id) }
-                .onFailure {
-                    WeLogger.e(TAG, "触发工具项失败：$name", it)
-                    healthIssue = "工具项「$name」触发失败：${it.message}"
-                    showToast("聊天工具栏：${it.message ?: "触发失败"}")
-                }
+            var handled = false
+            if (live != null) handled = runCatching { live.performClick() }.getOrDefault(false)
+            if (!handled) handled = runCatching { item.performClick() }.getOrDefault(false)
+            if (!handled) {
+                runCatching { grid.performItemClick(live ?: item, indexInGrid, id) }
+                    .onFailure {
+                        WeLogger.e(TAG, "触发工具项失败：$name", it)
+                        healthIssue = "工具项「$name」触发失败：${it.message}"
+                        showToast("聊天工具栏：${it.message ?: "触发失败"}")
+                    }
+            }
+            WeLogger.i(TAG, "tap tool '$name' handled=$handled live=${live != null}")
+            if (!handled) {
+                healthIssue = "工具项「$name」点击未命中（可能面板未展开或监听结构变化）"
+            }
         }
 
         fun longClick() {
