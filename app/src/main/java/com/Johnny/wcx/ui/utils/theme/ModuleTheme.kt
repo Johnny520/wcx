@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.Johnny.wcx.ui.style.LocalWxDarkMode
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -61,6 +62,8 @@ fun ModuleTheme(
     ) {
         MiuixTheme(controller = controller) {
             CompositionLocalProvider(
+                // 模块自绘配色（WxPalette）跟随「主题模式」设置，而不是系统的深色开关
+                LocalWxDarkMode provides darkTheme,
                 LocalContentColor provides MiuixTheme.colorScheme.onBackground,
                 // material3 的 Text 默认读取的是 material3 自己的 LocalContentColor
                 // （默认 Color.Black）。miuix 组件树里无人提供它，导致深色模式下

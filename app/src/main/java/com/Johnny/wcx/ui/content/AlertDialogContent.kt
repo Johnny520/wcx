@@ -48,7 +48,8 @@ fun AlertDialogContent(
     ) {
         Column(
             modifier = Modifier
-                .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFF4FAF7))))
+                // 深色下必须跟着换：原先写死白→浅绿渐变，模块深色时文字已变白，白底白字整框看不见
+                .background(WxPalette.cardBrush())
                 .padding(20.dp)
                 .then(if (fillHeight) Modifier.fillMaxSize() else Modifier),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -82,7 +83,7 @@ fun AlertDialogContent(
 
             text?.let {
                 val bodyStyle = MaterialTheme.typography.bodyMedium
-                val bodyColor = MaterialTheme.colorScheme.onSurface
+                val bodyColor = WxPalette.textPrimary()
 
                 Box(
                     modifier = Modifier

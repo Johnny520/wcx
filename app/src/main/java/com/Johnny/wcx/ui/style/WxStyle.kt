@@ -89,17 +89,17 @@ object WxPalette {
     /** 页面底色（跟随深浅色）。深色用冷调近黑，不用死黑。 */
     @Composable
     fun pageBackground(): Color =
-        if (isSystemInDarkTheme()) DarkBackground else Background
+        if (isWxDark()) DarkBackground else Background
 
     /** 卡片底色（跟随深浅色）。深色比底板亮一档，靠明度差拉出层次。 */
     @Composable
     fun cardBackground(): Color =
-        if (isSystemInDarkTheme()) Color(0xFF1A1D24) else Color.White
+        if (isWxDark()) Color(0xFF1A1D24) else Color.White
 
     /** 主文字色（跟随深浅色） */
     @Composable
     fun textPrimary(): Color =
-        if (isSystemInDarkTheme()) Color(0xFFF2F2F7) else TextPrimary
+        if (isWxDark()) Color(0xFFF2F2F7) else TextPrimary
 
     /** 次文字色 */
     @Composable
@@ -118,7 +118,7 @@ object WxPalette {
 
     /** 页面氛围底：深色为冷调纵向渐变，浅色为中性微渐变。 */
     @Composable
-    fun pageBackgroundBrush(): Brush = if (isSystemInDarkTheme()) {
+    fun pageBackgroundBrush(): Brush = if (isWxDark()) {
         Brush.linearGradient(listOf(Color(0xFF0A0B0F), Color(0xFF11141A), Color(0xFF0A0B0F)))
     } else {
         Brush.linearGradient(listOf(Color(0xFFF7F8FB), Color(0xFFEFF2F7)))
@@ -126,7 +126,7 @@ object WxPalette {
 
     /** 卡片底：深色为「上亮下暗」冷调玻璃，浅色为白到极淡灰。 */
     @Composable
-    fun cardBrush(): Brush = if (isSystemInDarkTheme()) {
+    fun cardBrush(): Brush = if (isWxDark()) {
         Brush.linearGradient(listOf(Color(0xFF1E222B), Color(0xFF161A21)))
     } else {
         Brush.linearGradient(listOf(Color.White, Color(0xFFFCFCFE)))
@@ -134,7 +134,7 @@ object WxPalette {
 
     /** 卡片描边：左上亮、右下透明的渐变，勾出玻璃边缘高光。 */
     @Composable
-    fun cardBorderBrush(): Brush = if (isSystemInDarkTheme()) {
+    fun cardBorderBrush(): Brush = if (isWxDark()) {
         Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x0AFFFFFF)))
     } else {
         Brush.linearGradient(listOf(Color(0x14000000), Color(0x05000000)))
@@ -151,7 +151,7 @@ object WxPalette {
      */
     @Composable
     fun darkenGradient(gradient: List<Color>): List<Color> {
-        if (!isSystemInDarkTheme()) return gradient
+        if (!isWxDark()) return gradient
         return when (gradient) {
             GradBlue -> listOf(Color(0xFF16233A), Color(0xFF121C2C))
             GradMint -> listOf(Color(0xFF122A24), Color(0xFF0F2019))
@@ -164,7 +164,7 @@ object WxPalette {
     /** 卡片描边：浅色下几乎不可见，深色下一层极淡白边 */
     @Composable
     fun cardBorder(): Color =
-        if (isSystemInDarkTheme()) Color(0x1AFFFFFF) else Color(0x0D000000)
+        if (isWxDark()) Color(0x1AFFFFFF) else Color(0x0D000000)
 }
 
 /**
@@ -205,6 +205,24 @@ fun GradientIcon(
  * 不堆阴影。可点击时自带 0.972 按压回弹（spring），全局统一手感。
  * [glow] = true 时叠一圈强调渐变描边，用于「当前状态/主操作」卡片。
  */
+/**
+ * 模块当前生效主题是否为深色，由 [com.Johnny.wcx.ui.utils.theme.ModuleTheme] 提供。
+ *
+ * 设置里的「主题模式」可以强制深色/浅色，而系统开关可能还是浅色（反之亦然）。
+ * 所有配色都必须读这个值：直接用 `isWxDark()` 会导致「模块深色 + 系统浅色」
+ * 时底板仍是白色、文字却已切成白色，白底白字整页看不见（用户反馈）。
+ */
+val LocalWxDarkMode = androidx.compose.runtime.staticCompositionLocalOf<Boolean?> { null }
+
+/**
+ * 模块主题的深色状态；配色判断统一用它。
+ *
+ * 没有 provider 时回退系统判断：注入到微信里的 Compose 内容（聊天工具栏、悬浮栏等）
+ * 不走 ModuleTheme，保持与系统深色开关一致的行为。
+ */
+@Composable
+fun isWxDark(): Boolean = LocalWxDarkMode.current ?: isSystemInDarkTheme()
+
 @Composable
 fun SoftCard(
     modifier: Modifier = Modifier,
@@ -264,7 +282,7 @@ fun AtmosphereBackground(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val dark = isSystemInDarkTheme()
+    val dark = isWxDark()
     val glowBlue = if (dark) Color(0x243D7EFF) else Color(0x123D7EFF)
     val glowMint = if (dark) Color(0x1C00D4A0) else Color(0x0E00D4A0)
     Box(modifier.fillMaxSize().background(WxPalette.pageBackgroundBrush())) {
@@ -420,7 +438,7 @@ fun SoftDivider(modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 2.dp)
             .height(1.dp)
-            .background(if (isSystemInDarkTheme()) Color(0x1FFFFFFF) else Color(0x14000000)),
+            .background(if (isWxDark()) Color(0x1FFFFFFF) else Color(0x14000000)),
     )
 }
 
