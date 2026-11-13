@@ -84,6 +84,7 @@ import com.Johnny.wcx.features.api.core.models.WeOfficialAccount
 import com.Johnny.wcx.features.items.chat.ConversationAggregation
 import com.Johnny.wcx.features.items.chat.ConversationGrouping
 import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.ui.utils.RequestFullScreenDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
 import kotlinx.coroutines.Dispatchers
@@ -158,8 +159,12 @@ fun BaseContactSelector(
     onItemClick: (IWeContact) -> Unit,
     onSelectAll: ((List<IWeContact>) -> Unit)? = null,
     onDeselectAll: ((List<IWeContact>) -> Unit)? = null,
-    onInvertSelection: ((List<IWeContact>) -> Unit)? = null
+    onInvertSelection: ((List<IWeContact>) -> Unit)? = null,
+    /** true 时把承载弹窗扩成整屏，列表能用满屏幕高度。 */
+    fullScreen: Boolean = false,
 ) {
+    if (fullScreen) RequestFullScreenDialog()
+
     val context = LocalContext.current
     val localizedContext = LocalContext.current
     val currentLocalizedContext = rememberUpdatedState(localizedContext)
@@ -295,7 +300,9 @@ fun BaseContactSelector(
     var selectedAggregationId by remember { mutableStateOf<String?>(null) }
     var selectedGroupingId by remember { mutableStateOf<String?>(null) }
 
-    var filtersExpanded by remember { mutableStateOf(true) }
+    // 默认折叠：筛选胶囊/标签/排序/批量操作默认收起，只留搜索框与箭头，
+    // 列表能多吃下十几行（用户反馈：小窗里只能看到几个人）。
+    var filtersExpanded by remember { mutableStateOf(false) }
 
     var sortMode by remember { mutableStateOf(SortMode.ALPHABETICAL) }
     var sortReversed by remember { mutableStateOf(false) }
@@ -493,6 +500,7 @@ fun BaseContactSelector(
         modifier = modifier
             .fillMaxWidth()
             .fillMaxHeight(),
+        fillHeight = fullScreen,
         title = { Text(title) },
         text = {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -989,7 +997,9 @@ fun ContactsSelector(
     contacts: List<IWeContact>,
     initialSelectedWxIds: Set<String>,
     onDismiss: () -> Unit,
-    onConfirm: (Set<String>) -> Unit
+    onConfirm: (Set<String>) -> Unit,
+    /** true 时把承载弹窗扩成整屏（转发选择等需要浏览长列表的场景）。 */
+    fullScreen: Boolean = false,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedWxIds by remember { mutableStateOf(initialSelectedWxIds) }
@@ -1042,7 +1052,8 @@ fun ContactsSelector(
                 }
             }
             selectedWxIds = newSelection
-        }
+        },
+        fullScreen = fullScreen,
     )
 }
 
@@ -1084,8 +1095,13 @@ private fun sortContactsByDisplayName(contacts: List<IWeContact>): List<IWeConta
  */
 private fun filterSortedContacts(sorted: List<IWeContact>, query: String): List<IWeContact> {
     if (query.isEmpty()) return sorted
-    return sorted.filter {
-        it.displayName.contains(query, ignoreCase = true) ||
-                it.wxId.contains(query, ignoreCase = true)
+    return sorted.filter { contact ->
+        contact.displayName.contains(query, ignoreCase = true) ||
+                contact.nickname.contains(query, ignoreCase = true) ||
+                contact.wxId.contains(query, ignoreCase = true) ||
+                // 备注名 / 真实微信号：用户常按这两项搜索（备注在 displayName 里带括号，
+                // 单独匹配一次更稳）；群聊/公众号模型没有这两个字段，安全跳过。
+                (contact is WeContact && contact.remarkName.contains(query, ignoreCase = true)) ||
+                (contact is WeContact && contact.customWxId.contains(query, ignoreCase = true))
     }
 }
