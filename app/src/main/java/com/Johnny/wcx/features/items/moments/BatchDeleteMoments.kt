@@ -153,6 +153,15 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
     private const val PREF_DAILY_DATE = "sns_batch_delete_daily_date"
     private const val PREF_DAILY_COUNT = "sns_batch_delete_daily_count"
 
+    /** 单条删除等待回执的上限；超时视为「已发出但没结果」，不再重试。 */
+    private const val DELETE_TIMEOUT_MS = 10_000L
+
+    /** 连续失败多少条就提前中止本轮（避免让用户白等几十分钟）。 */
+    private const val MAX_CONSECUTIVE_FAIL = 3
+
+    /** 回包里对象 id 的候选字段名（微信各版本用过 id / snsId / objectId）。 */
+    private val OP_ID_KEYS = arrayOf("snsId", "objectId", "objectid", "id")
+
     // ── DexKit 定位 ───────────────────────────────────────────────────────────
     /** NetSceneSnsObjectOp：cgi 特征串 + 包过滤，单串避免「同串不同方法」不命中。 */
     private val classSnsObjectOp by dexClass {
@@ -162,8 +171,14 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
     }
 
-    /** onGYNetEnd：用于读取每条删除请求的服务端返回码。 */
-    private val methodOpOnGYNetEnd by dexMethod {
+    /**
+     * onGYNetEnd：用于读取每条删除请求的服务端返回码。
+     *
+     * allowMultiple：该类的 onGYNetEnd 在不同版本可能是 4 参（…，JSONObject）或
+     * 5/6 参（…，JSONObject，byte[]…），加约束后仍可能命中多个重载；
+     * 由 delegate 统一 hook 全部候选，避免「Multiple methods found」把整个 hook 带挂。
+     */
+    private val methodOpOnGYNetEnd by dexMethod(allowMultiple = true, allowFailure = true) {
         matcher {
             declaredClass(classSnsObjectOp.clazz)
             name = "onGYNetEnd"
@@ -830,6 +845,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         val failed: Int,
         val skipped: Int,
         val cancelled: Boolean,
+        /** 第一条失败的真实原因，直接给用户看，避免「全失败但不知道为什么」。 */
+        val firstError: String = "",
     )
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -840,24 +857,100 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         hookOpResult()
     }
 
-    /** 监听删除结果：从 onGYNetEnd 的 JSON 里取 retcode。 */
+    /**
+     * 监听删除结果：从 onGYNetEnd 的回包里取每条 op 的 retcode。
+     *
+     * 这里有两个旧实现的坑，都会导致「批量删除一条都没删掉，单选一条却能成功」：
+     * 1. onGYNetEnd 的形参个数在版本间会变（微信 8.0.x 多一个 byte[] resp，
+     *    JSONObject 从 args[2] 被推到 args[3]）。写死 `args[2] as? JSONObject`
+     *    会取到 errMsg 字符串并直接 return，结果永远是「超时未收到回执」。
+     *    现在改成「在 args 里找第一个 JSONObject」。
+     * 2. 回包里的 id 字段名与表示方式不固定（snsId / objectId / id，可能是 uint64
+     *    十进制字符串）。匹配不上时若在途只有一条，就直接归给这条。
+     */
     private fun hookOpResult() {
         runCatching {
+            if (methodOpOnGYNetEnd.isPlaceholder) {
+                WeLogger.e(TAG, "onGYNetEnd 未解析到：删除结果无法回填，批量删除会全部超时")
+                return
+            }
             methodOpOnGYNetEnd.hookAfter {
-                val json = args.getOrNull(2) as? JSONObject ?: return@hookAfter
-                val retCode = json.optInt("retcode", -1)
-                // snsId 可能以 snsId / objectId 字段返回，两种都尝试
-                val snsId = json.optLong("snsId", 0L).takeIf { it != 0L }
-                    ?: json.optLong("objectId", 0L).takeIf { it != 0L }
-                WeLogger.i(TAG, "NetSceneSnsObjectOp result: retcode=$retCode snsId=$snsId")
+                val json = args.firstOrNull { it is JSONObject } as? JSONObject
+                if (json == null) {
+                    WeLogger.w(
+                        TAG,
+                        "onGYNetEnd 回包里没有 JSONObject，args=" +
+                            args.joinToString { it?.javaClass?.simpleName ?: "null" },
+                    )
+                    return@hookAfter
+                }
+                val outerCode = json.optInt("retcode", 0)
+                val results = parseOpResults(json)
+                WeLogger.i(
+                    TAG,
+                    "NetSceneSnsObjectOp 回包：outerRetcode=$outerCode results=" +
+                        results.joinToString { "${it.first}:${it.second}" } +
+                        " pending=$deletingSnsIds",
+                )
 
-                if (snsId != null && deletingSnsIds.contains(snsId)) {
-                    deleteResults[snsId] = retCode
+                var matched = 0
+                results.forEach { (id, ret) ->
+                    if (deletingSnsIds.contains(id)) {
+                        deleteResults[id] = ret
+                        matched++
+                    }
+                }
+                if (matched == 0 && deletingSnsIds.size == 1) {
+                    // id 对不上（uint64 / 字段漂移）：串行删除时在途只有一条，直接回填给它，
+                    // 否则这条会一直等到超时并判失败。
+                    val only = deletingSnsIds.first()
+                    val ret = results.firstOrNull()?.second ?: outerCode
+                    deleteResults[only] = ret
+                    WeLogger.w(TAG, "回包 id 未匹配，按单一在途兜底回填：snsId=$only ret=$ret")
                 }
             }
         }.onFailure {
             WeLogger.e(TAG, "hook NetSceneSnsObjectOp.onGYNetEnd failed", it)
         }
+    }
+
+    /** 解析 mmsnsobjectop 回包：`{object:[{id,ret}]}` 与单条 `{snsId,retcode}` 都兼容。 */
+    private fun parseOpResults(json: JSONObject): List<Pair<Long, Int>> {
+        val out = ArrayList<Pair<Long, Int>>()
+        val arrayKeys = arrayOf("object", "objectList", "obj", "list")
+        for (key in arrayKeys) {
+            val arr = json.optJSONArray(key) ?: continue
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val id = readOpId(o) ?: continue
+                out.add(id to readOpRet(o))
+            }
+        }
+        if (out.isEmpty()) {
+            readOpId(json)?.let { out.add(it to readOpRet(json)) }
+        }
+        return out
+    }
+
+    private fun readOpRet(o: JSONObject): Int =
+        if (o.has("ret")) o.optInt("ret", -1) else o.optInt("retcode", -1)
+
+    /** 取回包里的 snsId，兼容数字 / 有符号字符串 / uint64 十进制字符串。 */
+    private fun readOpId(o: JSONObject): Long? {
+        for (key in OP_ID_KEYS) {
+            if (!o.has(key)) continue
+            when (val v = o.opt(key)) {
+                is Number -> return v.toLong()
+                is String -> {
+                    val text = v.trim()
+                    if (text.isEmpty()) continue
+                    text.toLongOrNull()?.let { return it }
+                    // snsId 在库里是负数，服务端按 uint64 回包（差 2^64）
+                    runCatching { java.math.BigInteger(text).toLong() }.getOrNull()?.let { return it }
+                }
+            }
+        }
+        return null
     }
 
     private fun findSnsOpConstructor(cls: Class<*>): Constructor<*>? {
@@ -1216,10 +1309,32 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
             var success = 0
             var failed = 0
             var cancelled = false
+            var firstError = ""
+            var consecutiveFail = 0
+            var stopRequested = false
             try {
                 val ctor = findSnsOpConstructor(classSnsObjectOp.clazz)
                 if (ctor == null) {
-                    onFinished(DeleteReport(queue.size, 0, 0, queue.size, false))
+                    WeLogger.e(
+                        TAG,
+                        "SnsObjectOp 构造器未找到，class=" +
+                            runCatching { classSnsObjectOp.clazz.name }.getOrDefault("?") +
+                            " 候选=" + runCatching {
+                                classSnsObjectOp.clazz.declaredConstructors.joinToString(" | ") { c ->
+                                    c.parameterTypes.joinToString(",") { it.name }
+                                }
+                            }.getOrDefault("?"),
+                    )
+                    onFinished(
+                        DeleteReport(
+                            total = queue.size,
+                            success = 0,
+                            failed = queue.size,
+                            skipped = 0,
+                            cancelled = false,
+                            firstError = "没找到朋友圈删除对象的构造器（微信版本变化）",
+                        )
+                    )
                     return@thread
                 }
 
@@ -1236,13 +1351,23 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         onProgress(1, queue.size, "参数已识别（opType=$probed），开始批量删除")
                     } else {
                         WeLogger.e(TAG, "opType 自动探测失败，全部候选均未成功")
-                        onFinished(DeleteReport(queue.size, 0, queue.size, 0, false))
+                        onFinished(
+                            DeleteReport(
+                                total = queue.size,
+                                success = 0,
+                                failed = queue.size,
+                                skipped = 0,
+                                cancelled = false,
+                                firstError = "删除参数探测失败：微信没有返回可识别的结果",
+                            )
+                        )
                         return@thread
                     }
                 }
 
                 queue.forEachIndexed { index, item ->
                     if (index < startIndex) return@forEachIndexed
+                    if (stopRequested) return@forEachIndexed
                     if (cancelRequested) {
                         cancelled = true
                         return@forEachIndexed
@@ -1259,12 +1384,32 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         return@forEachIndexed
                     }
 
-                    val ok = deleteOne(ctor, item.snsId)
+                    val code = deleteOne(ctor, item.snsId)
+                    val ok = code == 0
                     if (ok) {
                         success++
+                        consecutiveFail = 0
                         bumpTodayCount(1)
                     } else {
                         failed++
+                        consecutiveFail++
+                        if (firstError.isEmpty()) firstError = describeFailure(code)
+                        WeLogger.w(
+                            TAG,
+                            "删除失败 snsId=${item.snsId} 原因=${describeFailure(code)} 连续失败=$consecutiveFail",
+                        )
+                        // 连续失败说明不是单条数据问题（参数/队列/风控），再跑下去只是让用户干等
+                        if (consecutiveFail >= MAX_CONSECUTIVE_FAIL) {
+                            WeLogger.e(TAG, "连续 $consecutiveFail 条删除失败，提前中止本轮")
+                            stopRequested = true
+                            cancelled = true
+                            onProgress(
+                                index + 1,
+                                queue.size,
+                                "连续失败，已中止：$firstError",
+                            )
+                            return@forEachIndexed
+                        }
                     }
                     onProgress(index + 1, queue.size, "${item.createTimeText} ${if (ok) "已删除" else "失败"}")
                 }
@@ -1280,6 +1425,7 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                         failed = failed,
                         skipped = items.size - queue.size,
                         cancelled = cancelled,
+                        firstError = firstError,
                     )
                 )
             }
@@ -1318,6 +1464,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                 Thread.sleep(120)
             }
             deletingSnsIds.remove(snsId)
+            // 换下一个候选前留一点空隙，否则第二个请求会被微信网络队列 forbid 掉
+            Thread.sleep(800)
         }
         return -1
     }
@@ -1331,35 +1479,63 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
         }
     }
 
-    /** 删除一条，阻塞等待结果（最多 15 秒）。 */
-    private fun deleteOne(ctor: Constructor<*>, snsId: Long): Boolean {
+    /**
+     * 删除一条，阻塞等待结果。
+     *
+     * @return 0 = 服务端确认删除；>0（或 < -2）= 服务端返回码；-1 = 请求没进微信网络队列；
+     *         -2 = 删除参数未识别；null = 已发出但没等到回执。
+     */
+    private fun deleteOne(ctor: Constructor<*>, snsId: Long): Int? {
         val opType = resolvedOpType
-        if (opType < 0) return false
+        if (opType < 0) return -2
         return try {
-            deletingSnsIds.add(snsId)
             deleteResults.remove(snsId)
             val netScene = ctor.newInstance(snsId, opType)
-            WeNetSceneApi.sendNetScene(netScene)
+            deletingSnsIds.add(snsId)
+
+            // 微信 NetSceneQueue 对「同类型任务」有 forbid 机制：正在等待/运行时会拒绝入队。
+            // 旧实现不看返回值，被拒也当成功，这条就会静默等到超时再判失败。
+            var sent = false
+            for (attempt in 1..3) {
+                sent = runCatching { WeNetSceneApi.sendNetScene(netScene) }.getOrDefault(false)
+                if (sent) break
+                WeLogger.w(TAG, "删除请求入队被拒（第 $attempt 次）：snsId=$snsId")
+                Thread.sleep(600)
+            }
+            if (!sent) {
+                deletingSnsIds.remove(snsId)
+                WeLogger.w(TAG, "删除 snsId=$snsId 未能入队：微信网络队列忙")
+                return -1
+            }
 
             // 等待 onGYNetEnd 回填结果
-            val deadline = System.currentTimeMillis() + 15_000
+            val deadline = System.currentTimeMillis() + DELETE_TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
                 val ret = deleteResults.remove(snsId)
                 if (ret != null) {
                     deletingSnsIds.remove(snsId)
                     WeLogger.i(TAG, "删除 snsId=$snsId retcode=$ret")
-                    return ret == 0
+                    return ret
                 }
                 Thread.sleep(120)
             }
-            WeLogger.w(TAG, "删除 snsId=$snsId 超时未收到结果")
+            WeLogger.w(TAG, "删除 snsId=$snsId 超时未收到回执（opType=$opType）")
             deletingSnsIds.remove(snsId)
-            false
+            null
         } catch (t: Throwable) {
             WeLogger.e(TAG, "删除 snsId=$snsId 抛异常", t)
             deletingSnsIds.remove(snsId)
-            false
+            -3
         }
+    }
+
+    /** 把 deleteOne 的返回码翻成人话，直接展示给用户。 */
+    private fun describeFailure(code: Int?): String = when {
+        code == null -> "等不到微信回执（网络或字段不匹配）"
+        code == -1 -> "请求没能进入微信网络队列"
+        code == -2 -> "删除参数未识别（opType 探测失败）"
+        code == -3 -> "调用删除接口抛异常"
+        else -> "微信返回错误码 $code"
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2074,7 +2250,8 @@ object BatchDeleteMoments : ClickableFeature(), IResolveDex {
                                 runCatching {
                                     showToast(
                                         "批量删除结束：成功 ${report.success}，失败 ${report.failed}" +
-                                            if (report.cancelled) "（已中止）" else ""
+                                            (if (report.cancelled) "（已中止）" else "") +
+                                            (if (report.firstError.isNotBlank()) "；首个失败原因：${report.firstError}" else "")
                                     )
                                 }
                             }
