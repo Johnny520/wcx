@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
 import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.LinearLayout
@@ -174,48 +175,64 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
     /**
      * 一个原生工具项。
      *
-     * 不再缓存微信 GridView 上的 OnItemClickListener / OnItemLongClickListener 字段：
-     * 那是反射私有字段，字段类型或名字一变就是 NPE（整轮采集直接失败、工具栏空白）。
-     * 改成记录「所在 GridView + 该项 View + 位置」，点击时走 View 的公开 API
-     * （GridView.performItemClick / View.performLongClick），与用户手指点原生图标同一条路径。
+     * 点击路径对齐上游 WeKit：**直接调用微信注册在 GridView 上的 OnItemClickListener 实例**。
+     *
+     * 之前为了避免反射私有字段 NPE，改成 GridView.performItemClick / View.performClick——
+     * 但微信的工具格根本不走 ItemClick 分发，结果除了模块自绘的「快捷回复」，其余点了全没反应
+     * （群友反馈「只有快捷回复是有效的」）。这里按上游恢复直调，反射失败也只是退回兜底，
+     * 不会像旧实现那样把整轮采集带挂。
      */
     private data class MenuItem(
         val name: String,
+        val onClickListener: AdapterView.OnItemClickListener?,
+        val onLongClickListener: AdapterView.OnItemLongClickListener?,
         val gridView: WeakReference<GridView>,
         val itemView: WeakReference<View>,
         val indexInGrid: Int,
     ) {
         fun click() {
-            // 工具面板会被微信按需重建；以前引用失效时直接静默 return，
-            // 用户看到的就是「工具栏在、点了没反应」，且日志里毫无痕迹。
             val grid = gridView.get() ?: run { fail("原生面板已重建，GridView 引用失效"); return }
             val item = itemView.get() ?: run { fail("工具项 View 引用失效"); return }
             val id = runCatching { grid.adapter?.getItemId(indexInGrid) }.getOrNull() ?: indexInGrid.toLong()
-            // 点击顺序（用户反馈「只有快捷回复有效」= 之前只调 performItemClick，这条路微信不走）：
-            // 1. 面板展开时真实挂载的 child 直接 performClick —— 与手指点同一实例同一监听
-            // 2. 采集用的离屏实例 performClick —— adapter.getView 内若自己绑了监听，这一步就能命中
-            // 3. 兜底 GridView.performItemClick（依赖微信设置了 OnItemClickListener）
+
+            // ① 上游 WeKit 的路径：微信自己的 OnItemClickListener
+            onClickListener?.let { listener ->
+                val delivered = runCatching { listener.onItemClick(grid, item, indexInGrid, id) }
+                    .onFailure { WeLogger.e(TAG, "触发工具项失败：$name", it) }
+                    .isSuccess
+                if (delivered) {
+                    WeLogger.i(TAG, "tap tool '$name' via onItemClickListener")
+                    return
+                }
+            }
+
+            // ② 兜底：真实挂载 child / 采集实例 performClick，最后 performItemClick
             val liveIndex = indexInGrid - grid.firstVisiblePosition
             val live = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
-            var handled = false
-            if (live != null) handled = runCatching { live.performClick() }.getOrDefault(false)
-            if (!handled) handled = runCatching { item.performClick() }.getOrDefault(false)
-            if (!handled) {
-                runCatching { grid.performItemClick(live ?: item, indexInGrid, id) }
-                    .onFailure {
-                        WeLogger.e(TAG, "触发工具项失败：$name", it)
-                        healthIssue = "工具项「$name」触发失败：${it.message}"
-                        showToast("聊天工具栏：${it.message ?: "触发失败"}")
-                    }
-            }
-            WeLogger.i(TAG, "tap tool '$name' handled=$handled live=${live != null}")
-            if (!handled) {
-                healthIssue = "工具项「$name」点击未命中（可能面板未展开或监听结构变化）"
+            // performItemClick 是 void，runCatching 里要显式返回 true 才能参与布尔判断
+            val clicked = runCatching { (live ?: item).performClick() }.getOrDefault(false) ||
+                runCatching {
+                    grid.performItemClick(live ?: item, indexInGrid, id)
+                    true
+                }.getOrDefault(false)
+            WeLogger.i(TAG, "tap tool '$name' fallback clicked=$clicked listener=${onClickListener != null}")
+            if (!clicked) {
+                healthIssue = "工具项「$name」点击无效：没取到微信的点击监听，兜底也未命中"
+                showToast("聊天工具栏：$name 点击无效，请重新展开工具面板后重试")
             }
         }
 
         fun longClick() {
+            val grid = gridView.get()
             val item = itemView.get() ?: run { fail("工具项 View 引用失效"); return }
+            onLongClickListener?.let { listener ->
+                if (grid != null) {
+                    val id = runCatching { grid.adapter?.getItemId(indexInGrid) }.getOrNull() ?: indexInGrid.toLong()
+                    runCatching { listener.onItemLongClick(grid, item, indexInGrid, id) }
+                        .onFailure { WeLogger.e(TAG, "长按工具项失败：$name", it) }
+                    return
+                }
+            }
             runCatching { item.performLongClick() }
                 .onFailure {
                     WeLogger.e(TAG, "长按工具项失败：$name", it)
@@ -402,12 +419,30 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                     val appPanel = args[0] as? View ?: return@runCatching
                     collectGrids(appPanel).forEach { grid ->
                         val adapter = grid.adapter ?: return@forEach
+                        // 微信注册在 GridView 上的点击监听：直调它才是「点原生格子」的真实路径
+                        val onClickListener = runCatching {
+                            grid.reflekt()
+                                .firstField { type = AdapterView.OnItemClickListener::class }
+                                .get()
+                        }.getOrNull() as? AdapterView.OnItemClickListener
+                        val onLongClickListener = runCatching {
+                            grid.reflekt()
+                                .firstField { type = AdapterView.OnItemLongClickListener::class }
+                                .get()
+                        }.getOrNull() as? AdapterView.OnItemLongClickListener
                         for (index in 0 until adapter.count) {
                             val itemView = runCatching { adapter.getView(index, null, grid) }.getOrNull()
                                 ?: continue
                             val name = toolNameOf(itemView) ?: continue
                             tools.add(
-                                name to MenuItem(name, WeakReference(grid), WeakReference(itemView), index)
+                                name to MenuItem(
+                                    name = name,
+                                    onClickListener = onClickListener,
+                                    onLongClickListener = onLongClickListener,
+                                    gridView = WeakReference(grid),
+                                    itemView = WeakReference(itemView),
+                                    indexInGrid = index,
+                                )
                             )
                         }
                     }
