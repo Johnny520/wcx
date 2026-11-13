@@ -156,12 +156,12 @@ fun BaseContactSelector(
     subtitleProvider: ((IWeContact) -> String)? = { it.wxId },
     leadingControl: @Composable (LazyItemScope.(IWeContact) -> Unit)? = null,
     trailingControl: @Composable (LazyItemScope.(IWeContact) -> Unit)? = null,
+    /** true 时把承载弹窗扩成整屏，列表能用满屏幕高度。 */
+    fullScreen: Boolean = false,
     onItemClick: (IWeContact) -> Unit,
     onSelectAll: ((List<IWeContact>) -> Unit)? = null,
     onDeselectAll: ((List<IWeContact>) -> Unit)? = null,
     onInvertSelection: ((List<IWeContact>) -> Unit)? = null,
-    /** true 时把承载弹窗扩成整屏，列表能用满屏幕高度。 */
-    fullScreen: Boolean = false,
 ) {
     if (fullScreen) RequestFullScreenDialog()
 
@@ -996,10 +996,10 @@ fun ContactsSelector(
     title: String,
     contacts: List<IWeContact>,
     initialSelectedWxIds: Set<String>,
+    /** true 时把承载弹窗扩成整屏（转发选择等需要浏览长列表的场景）。默认小窗，不影响既有调用方。 */
+    fullScreen: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (Set<String>) -> Unit,
-    /** true 时把承载弹窗扩成整屏（转发选择等需要浏览长列表的场景）。 */
-    fullScreen: Boolean = false,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedWxIds by remember { mutableStateOf(initialSelectedWxIds) }
