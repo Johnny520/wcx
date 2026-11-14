@@ -86,3 +86,39 @@
 
 典型流程：`qk.py <旧串关键词>` 找新文案 → `qs.py <新串>` 拿引用方法 → `inv80.py` 验证签名/invoke 约束
 → 写进 `dexMethod` matcher（多串 AND 里剔除孤儿串，必要时换类内独有串收窄）。
+
+## 第二轮处理结果（commit 5080030b / 待推）
+
+41 组新增失效里，能确定语义映射的已经按新串重描；语义无法确定的统一改为
+「安全降级」——补 `allowFailure` + placeholder 守卫 + `WeLogger.w` 留痕，
+不再因为一个锚点失效把整个 Feature 连同同文件其它 hook 一起装挂。
+
+### 按新串重描
+
+| 功能 | 新锚点 |
+|---|---|
+| 启用内部 URL | `MicroMsg.MMURIJumpHandler` + `(Context, String, Object[]) → boolean`（收敛 `app.plugin.j.d`） |
+| 对话框窗口级背景模糊 | 单串 `com/tencent/mm/ui/widget/dialog/MMProgressDialog$Builder`（类已混淆成 `u3`，类名字符串仍被 `u3.d(...)` 引用）；`onEnable` 的 `listOf` 改 `listOfNotNull(runCatching{}.getOrNull())`，避免一个 placeholder 抛异常把后面几个对话框类的 hook 全带走 |
+
+### 安全降级（串彻底消失 / 语义无法映射）
+
+| 功能 | 处理 |
+|---|---|
+| 禁用微信进程状态检测器 | `pass this check,because request is null! ????` 成孤儿串；全 APK 只剩 finder 的 `[onUserVisibleFocused] pass this check`，语义是页面可见性 ≠ 进程检测，不顶替 → 跳过并留痕 |
+| 恢复旧版「我」界面卡包 | EcsOrderService / MoreTabUI 相关串全失效 → 整体跳过 |
+| 自定义尾巴 | UploadPackHelper 已混淆改名、SnsUploadUI 埋点串成孤儿串 → 整体跳过 |
+| 通知进化 `dealNotify` | 单处守卫 |
+| 朋友圈评论防撤回 `setCommentDelFlag` | 单处守卫 |
+| 禁用「刚刚在看」提醒 | 单处守卫 |
+| 修改运动步数 | 单处守卫；「上传」按钮处显式 Toast「当前微信版本已不支持该操作（上传接口未定位到）」，不再点一下就抛 |
+| 常驻互动消息入口 | 3 个失效锚点逐个前置 `isPlaceholder` 判断（另外 3 个仍有效，功能部分可用） |
+| 主题 `updateStatusBar` | 降级；状态栏透明还有 `methodHomeUiSetActionBarColor` 兜住 |
+| 隐藏联系人 4 处 | 朋友圈 `SnsInfoToSnsStruct` / `SnsSyncUpdateRedDotCache`、VoIP `VoipMpStartFgs` / `VoipStartAcceptVoip` 原来都没有 `allowFailure`，任一失效会连带 SQL 拦截等核心 hook 一起装不上 → 补 `allowFailure` + 守卫 |
+| 自动启用合并发送媒体 | 已有 placeholder 守卫，补 `WeLogger.w` 留痕 |
+
+### 已确认无需改动
+
+- 语音/视频通话画中画（PipVoip）：已有 `allowFailure` + `if (!methodFlutterVoipMinimize.isPlaceholder)` 守卫
+- 移除通话时聊天限制：`targets()` 遍历处已判 `delegate.isPlaceholder` → 记入 skipped
+- 解除单个表情数量上限：上一批已改成 `filter { !it.isPlaceholder }.forEach`
+- 超级对话置顶：rawQuery 锚点整段是注释（功能走 HideContacts 的公共实现）
