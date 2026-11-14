@@ -1043,7 +1043,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
      * struct for every Moments renderer. See hidecontacts/HideContactsMoments.kt for why this is
      * the right chokepoint for a hidden contact's inline likes/comments on someone else's post.
      */
-    internal val methodSnsInfoToSnsStruct by dexMethod {
+    internal val methodSnsInfoToSnsStruct by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("snsInfoToSnsStruct", "com.tencent.mm.plugin.sns.data.SnsUtil", "mSnsInfo is null, why?")
         }
@@ -1068,7 +1068,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
      * method shape — `static void (c3, SnsObject)` — is identical on both trees, so the hook body
      * needs no per-version branching.
      */
-    internal val methodSnsSyncUpdateRedDotCache by dexMethod {
+    internal val methodSnsSyncUpdateRedDotCache by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("updateSyncDataCache", "com.tencent.mm.plugin.sns.model.NetSceneSnsSync")
         }
@@ -1121,7 +1121,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
     }
 
     /** `xp5.b.d(String username, boolean, boolean, boolean)` — starts the VoIP foreground service. */
-    internal val methodVoipMpStartFgs by dexMethod {
+    internal val methodVoipMpStartFgs by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.VoIPMPVoIPNotificationHelper", "startFGS isBindVoIPForegroundService ")
         }
@@ -1236,7 +1236,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             usingEqStrings("MicroMsg.VoipIncomingCallManager", "acceptIncomingCal, roomInfo:")
         }
     }
-    internal val methodVoipStartAcceptVoip by dexMethod {
+    internal val methodVoipStartAcceptVoip by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.voip")
         matcher {
             usingEqStrings("MicroMsg.VoipIncomingCallManager", "startAcceptVoIP, roomInfo:")

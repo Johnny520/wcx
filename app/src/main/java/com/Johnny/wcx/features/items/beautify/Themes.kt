@@ -1387,7 +1387,12 @@ object Themes : ClickableFeature(), IResolveDex {
         }
     }
 
-    private val methodHomeUiUpdateStatusBar by dexMethod {
+    /**
+     * 8.0.80：HomeUI 类内已无任何 updateStatusBar 相关串（"updateStatusBar %s" 成孤儿串），
+     * 该锚点解析不到。状态栏透明还有 methodHomeUiSetActionBarColor 这条链路兜住，
+     * 所以这里只做安全降级，不影响主题整体。
+     */
+    private val methodHomeUiUpdateStatusBar by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.LauncherUI.HomeUI", "updateStatusBar %s")
         }
@@ -2462,7 +2467,7 @@ object Themes : ClickableFeature(), IResolveDex {
             }
 
         // C0540fd 14/15 —— HomeUI 状态栏颜色
-        methodHomeUiUpdateStatusBar.hookAfter { setHomeStatusBarTransparent(thisObject) }
+        if (!methodHomeUiUpdateStatusBar.isPlaceholder) methodHomeUiUpdateStatusBar.hookAfter { setHomeStatusBarTransparent(thisObject) }
         methodHomeUiSetActionBarColor.hookAfter { setHomeStatusBarTransparent(thisObject) }
 
         // C0977lv 4 —— MoreTabUI.handleTabSwitchInForStatus

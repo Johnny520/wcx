@@ -38,27 +38,27 @@ object CustomSourceApp : ClickableFeature(), IResolveDex {
 
     private data class SourceApp(val appId: String, val appName: String)
 
-    private val methodCommitSnsInfo by dexMethod {
+    private val methodCommitSnsInfo by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.UploadPackHelper", "commit sns info ret %d, typeFlag %d sightMd5 %s")
         }
     }
 
-    private val methodSetSdkAppId by dexMethod {
+    private val methodSetSdkAppId by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.sns.model")
         matcher {
             usingEqStrings("setSdkId", "com.tencent.mm.plugin.sns.model.UploadPackHelper")
         }
     }
 
-    private val methodSetSdkAppName by dexMethod {
+    private val methodSetSdkAppName by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.sns.model")
         matcher {
             usingEqStrings("setSdkAppName", "com.tencent.mm.plugin.sns.model.UploadPackHelper")
         }
     }
 
-    private val methodSnsUploadUIInitView by dexMethod {
+    private val methodSnsUploadUIInitView by dexMethod(allowFailure = true) {
         matcher {
             declaredClass = "com.tencent.mm.plugin.sns.ui.SnsUploadUI"
             usingEqStrings("initView", "customizeInputView", "com.tencent.mm.plugin.sns.ui.SnsUploadUI")
@@ -69,6 +69,12 @@ object CustomSourceApp : ClickableFeature(), IResolveDex {
     private var appName by prefOption("custom_app_name", "")
 
     override fun onEnable() {
+        // 8.0.80：UploadPackHelper 已被混淆改名、SnsUploadUI 的 initView/customizeInputView
+        // 埋点串也成孤儿串，三个关键锚点全部失效。整体跳过并留痕，避免 placeholder 抛异常。
+        if (methodSetSdkAppId.isPlaceholder || methodSetSdkAppName.isPlaceholder || methodSnsUploadUIInitView.isPlaceholder) {
+            WeLogger.w(TAG, "锚点在当前微信版本已失效（朋友圈上传链路已改版），跳过")
+            return
+        }
         methodSnsUploadUIInitView.hookAfter {
             val controller = thisObject.reflekt().getField("mController", true)!!
             val elements = controller.reflekt().firstField { type = LinkedList::class; superclass() }.get()!! as LinkedList<*>

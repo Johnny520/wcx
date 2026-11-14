@@ -63,7 +63,7 @@ internal fun HideContacts.installMomentsHooks() {
  * state we touch — there is no way for this hook to re-trigger itself.
  */
 private fun HideContacts.installMomentsRedDotHook() {
-    methodSnsSyncUpdateRedDotCache.hookBefore {
+    if (!methodSnsSyncUpdateRedDotCache.isPlaceholder) methodSnsSyncUpdateRedDotCache.hookBefore {
         // Static two-arg method: args[0] is the NetSceneSnsSync instance the synthetic accessor was
         // handed, args[1] is the SnsObject. `Username` is a real (unobfuscated) protobuf field.
         val snsObject = args.getOrNull(1) as? SnsObject ?: return@hookBefore
@@ -134,7 +134,7 @@ private fun HideContacts.installMomentsInlineEntryHook() {
         return replyUsername != null && isHiddenNow(replyUsername)
     }
 
-    methodSnsInfoToSnsStruct.hookBefore {
+    if (!methodSnsInfoToSnsStruct.isPlaceholder) methodSnsInfoToSnsStruct.hookBefore {
         // isEntryHidden() below already re-checks isHiddenNow() per-entry (so #show / triple-tap
         // keep working); this is purely a fast path to skip all reflection when nothing is hidden.
         if (isTemporarilyShown || hiddenContacts.isEmpty()) return@hookBefore

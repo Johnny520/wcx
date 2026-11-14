@@ -11,6 +11,7 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.Intent
 import com.Johnny.wcx.utils.android.baseActivity
 
@@ -25,6 +26,7 @@ import com.Johnny.wcx.utils.android.baseActivity
     description = "没有未读互动消息时也在朋友圈顶部显示互动消息入口"
 )
 object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
+    private const val TAG = "AlwaysShowInteractionEntry"
 
     private const val HEADER_UIC =
         "com.tencent.mm.plugin.sns.ui.improve.component.header.ImproveHeaderUIC"
@@ -40,7 +42,7 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
     private var noInteractionMessages = false
 
     /** ImproveHeaderUIC$onNotifyChange$1$1 — 有互动消息, 显示气泡并写入文案 */
-    private val methodShowNotifyBar by dexMethod {
+    private val methodShowNotifyBar by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "invokeSuspend",
@@ -50,7 +52,7 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
     }
 
     /** ImproveHeaderUIC$onNotifyChange$1$4 — 没有互动消息, 隐藏气泡 */
-    private val methodHideNotifyBar by dexMethod {
+    private val methodHideNotifyBar by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
                 "invokeSuspend",
@@ -59,20 +61,20 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodGetNotifyLayout by dexMethod {
+    private val methodGetNotifyLayout by dexMethod(allowFailure = true) {
         matcher { usingEqStrings($$"access$getMsgNotifyLayout", HEADER_UIC) }
     }
 
-    private val methodGetNotifyContent by dexMethod {
+    private val methodGetNotifyContent by dexMethod(allowFailure = true) {
         matcher { usingEqStrings($$"access$getMsgNotifyContent", HEADER_UIC) }
     }
 
-    private val methodGetNotifyImg by dexMethod {
+    private val methodGetNotifyImg by dexMethod(allowFailure = true) {
         matcher { usingEqStrings($$"access$getMsgNotifyImg", HEADER_UIC) }
     }
 
     /** ImproveHeaderUIC.gotoNotifyMsgUI() — 点击入口后的跳转 */
-    private val methodGotoNotifyMsgUI by dexMethod {
+    private val methodGotoNotifyMsgUI by dexMethod(allowFailure = true) {
         matcher {
             paramCount(0)
             returnType(Void.TYPE)
@@ -84,7 +86,7 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
         get() = methodGetNotifyLayout.method.declaringClass
 
     override fun onEnable() {
-        methodHideNotifyBar.hookAfter {
+        if (!methodHideNotifyBar.isPlaceholder) methodHideNotifyBar.hookAfter {
             noInteractionMessages = true
             val headerUic = extractHeaderUic(thisObject ?: return@hookAfter) ?: return@hookAfter
             notifyLayout(headerUic).isVisible = true
@@ -93,7 +95,7 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
             notifyImg(headerUic).isVisible = false
         }
 
-        methodShowNotifyBar.hookAfter {
+        if (!methodShowNotifyBar.isPlaceholder) methodShowNotifyBar.hookAfter {
             noInteractionMessages = false
             val headerUic = extractHeaderUic(thisObject ?: return@hookAfter) ?: return@hookAfter
             // 恢复上面隐藏掉的头像
@@ -102,7 +104,7 @@ object AlwaysShowInteractionEntry : SwitchFeature(), IResolveDex {
 
         // 微信默认进「最近消息」(SnsMsgUIWithRelevance), 一条互动都没有时那页是空的。
         // 这种情况直接进它底部「全部互动消息」按钮打开的 SnsMsgUIWithAll。
-        methodGotoNotifyMsgUI.hookBefore {
+        if (!methodGotoNotifyMsgUI.isPlaceholder) methodGotoNotifyMsgUI.hookBefore {
             if (!noInteractionMessages) return@hookBefore
             val headerUic = thisObject ?: return@hookBefore
             val activity = notifyLayout(headerUic).context.baseActivity ?: return@hookBefore

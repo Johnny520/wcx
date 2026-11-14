@@ -148,7 +148,7 @@ object AntiMomentCommentsDelete : SwitchFeature(), IResolveDex {
         }
 
         // Block WeChat's own in-memory soft-delete bit so the object stays "live".
-        methodSnsCommentSetCommentDelFlag.hookBefore {
+        if (!methodSnsCommentSetCommentDelFlag.isPlaceholder) methodSnsCommentSetCommentDelFlag.hookBefore {
             try {
                 // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
                 if (method is java.lang.reflect.Method) {

@@ -56,7 +56,7 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
 
     // com.tencent.mm.booter.notification.x.d(x, String talker, String content, int, int, boolean)
     // args[1] is the talker wxid. Anchored on a log string unique to that method.
-    private val methodDealNotify by dexMethod {
+    private val methodDealNotify by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.booter.notification")
         matcher {
             paramCount(6)
@@ -181,7 +181,7 @@ object NotificationsEvolved : SwitchFeature(), IResolveDex {
         // Capture the exact talker wxid before WeChat builds the notification.
         // x.d → m0.a → e0.b → Notification.Builder.build() all run synchronously on
         // this thread, so the build() hook below reads it back via the ThreadLocal.
-        methodDealNotify.hookBefore {
+        if (!methodDealNotify.isPlaceholder) methodDealNotify.hookBefore {
             currentTalker.set(args[1] as? String)
         }
 
