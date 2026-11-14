@@ -179,7 +179,7 @@ object MainThreadWatchdog {
 
     /** 落盘：SharedPreferences（供模块自检展示）+ 已由调用方写入运行日志。 */
     private fun record(text: String) {
-        val ctx: Context? = HostInfo.application ?: return
+        val ctx: Context = HostInfo.application ?: return
         runCatching {
             val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val head = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
