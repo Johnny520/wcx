@@ -1272,7 +1272,9 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
     internal val methodVoipLegacyInsertMsg by dexMethod(allowFailure = true) {
         matcher {
             declaredClass {
-                usingEqStrings("MicroMsg.VoipPluginManager", "weixin://voip/callagain/?username=")
+                // 8.0.79 起这条 URL 只以 HTML 片段形式内联在 b2 里（"<a href=\"weixin://voip/callagain/?username=..."），
+                // 精确匹配的短串已不存在 → 整个 val 恒为 placeholder。改用包含匹配（usingStrings 默认 Contains）。
+                usingStrings("weixin://voip/callagain/?username=")
             }
             paramCount = 8
             returnType("void")
