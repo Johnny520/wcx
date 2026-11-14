@@ -43,7 +43,12 @@ object ResourceFallbackGuard {
                 "loadDrawableForCookie",
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        val value = param.args.getOrNull(0) as? TypedValue ?: return
+                        // 注意：不能写死 args[0]。loadDrawableForCookie 的签名在不同 Android
+                        // 版本是 (Resources, TypedValue, int, int) / (Resources, TypedValue, int, int, String)，
+                        // 0 号参数一直是 Resources wrapper —— 原来按 args[0] 取 TypedValue 恒为 null，
+                        // 于是整段兜底一次都没命中过（日志里 332 次 installed、0 次 missing raw svg），
+                        // 微信照样因为 res/raw/*.svg 缺失 inflate 失败而闪退。
+                        val value = param.args.firstOrNull { it is TypedValue } as? TypedValue ?: return
                         val path = value.string ?: return
                         if (!path.startsWith(RAW_SVG_PREFIX) || !path.endsWith(SVG_SUFFIX)) return
 
