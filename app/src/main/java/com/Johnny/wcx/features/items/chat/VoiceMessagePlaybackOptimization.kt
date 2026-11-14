@@ -25,6 +25,7 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.content.m3.RadioButtonWidget
 import com.Johnny.wcx.ui.content.m3.SegmentedColumn
 import com.Johnny.wcx.ui.utils.showComposeDialog
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.bool
 
 /**
@@ -55,6 +56,8 @@ import com.Johnny.wcx.utils.reflection.bool
     description = "优化语音消息听筒/扬声器自动切换: 完全禁用自动切换, 或切换后继承播放进度不再从头重播"
 )
 object VoiceMessagePlaybackOptimization : ClickableFeature(), IResolveDex {
+
+    private const val TAG = "VoicePlaybackOptimization"
 
     /** 完全禁用自动切换 */
     private const val MODE_DISABLE = 0
@@ -100,25 +103,48 @@ object VoiceMessagePlaybackOptimization : ClickableFeature(), IResolveDex {
         }
     }
 
-    /** AutoPlay.setSpeakerOn(boolean) (8.0.65-74 G / 8.0.76 H): 记录当前扬声器状态。 */
-    private val methodSetSpeakerOn by dexMethod {
+    /**
+     * AutoPlay.setSpeakerOn(boolean)：8.0.65-74 = G / 8.0.76 = H / 8.0.80 = x0.G。
+     *
+     * 8.0.80 实测：AutoPlay 的两条老日志串
+     * `speakerOn has been set %s` 与 `switchSpeaker, isSpeakerOn: %b, isPlaying: %b`
+     * 都只剩常量池条目、无任何方法引用（孤儿串），原锚点必然 0 命中。
+     * 同时 `MicroMsg.AutoPlay` 这个 TAG 在 8.0.80 被 20+ 个聊天页类共用，
+     * 单独拿它做 declaredClass 会多命中 —— 改用同类独有串
+     * `isHeadsetPlugged: %b, isBluetoothOn: %b` 收窄到真正的 AutoPlay（x0）。
+     * 类内 boolean 形参的方法有 G/d/F/J 四个，用「调 platformtools.Log.c」区分出 G
+     * （d 走 xlog.Log.w 且调 onStop，J 带 keep_app_silent，F 完全不打日志）。
+     */
+    private val methodSetSpeakerOn by dexMethod(allowFailure = true) {
         matcher {
             declaredClass {
-                usingEqStrings("MicroMsg.AutoPlay")
+                usingEqStrings("MicroMsg.AutoPlay", "isHeadsetPlugged: %b, isBluetoothOn: %b")
             }
-            usingEqStrings("speakerOn has been set %s")
+            usingEqStrings("MicroMsg.AutoPlay")
             paramTypes(bool)
+            returnType("void")
+            addInvoke {
+                declaredClass = "com.tencent.mm.sdk.platformtools.Log"
+                name = "c"
+            }
         }
     }
 
-    /** AutoPlay.switchSpeaker() (8.0.65-74 K / 8.0.76 L): 无参切换, 内部继承播放位置。 */
-    private val methodSwitchSpeaker by dexMethod {
+    /**
+     * AutoPlay.switchSpeaker()：8.0.65-74 = K / 8.0.76 = L / 8.0.80 = x0.K。
+     * 无参 void 方法，方法体先取 d1.isPlaying() 再调 d1.g(Z) 完成切换 —— 用后者定位。
+     */
+    private val methodSwitchSpeaker by dexMethod(allowFailure = true) {
         matcher {
             declaredClass {
-                usingEqStrings("MicroMsg.AutoPlay")
+                usingEqStrings("MicroMsg.AutoPlay", "isHeadsetPlugged: %b, isBluetoothOn: %b")
             }
-            usingEqStrings("switchSpeaker, isSpeakerOn: %b, isPlaying: %b")
             paramCount = 0
+            returnType("void")
+            addInvoke {
+                declaredClass = "com.tencent.mm.modelbase.d1"
+                name = "g"
+            }
         }
     }
 
@@ -133,6 +159,12 @@ object VoiceMessagePlaybackOptimization : ClickableFeature(), IResolveDex {
             when (playbackMode) {
                 MODE_DISABLE -> result = false
                 MODE_INHERIT_PROGRESS -> {
+                    // 锚点缺失（微信改版）时保持原生切换行为 —— 直接调 placeholder 会抛异常，
+                    // 而这里在聊天页播放语音的热路径上，抛出去就是播放中断。
+                    if (methodSetSpeakerOn.isPlaceholder || methodSwitchSpeaker.isPlaceholder) {
+                        WeLogger.w(TAG, "skip inherit-progress: speaker anchors not resolved in this WeChat version")
+                        return@hookBefore
+                    }
                     val task = thisObject!!
                     val autoPlay = task.reflekt()
                         .firstField { type = classAutoPlay.clazz }
