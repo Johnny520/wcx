@@ -22,7 +22,7 @@ object EnhanceQuery : SwitchFeature(), WeDatabaseListenerApi.IQueryListener {
         val rewritten = rewriteSql(sql)
 
         if (rewritten != sql) {
-            WeLogger.i(TAG, "enhanced moments SQL query")
+            WeLogger.d(TAG, "enhanced moments SQL query")
             return rewritten
         }
 

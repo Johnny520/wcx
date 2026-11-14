@@ -91,9 +91,17 @@ object WeLauncher {
 
         // Hchat 脚本子系统（可插拔）：独立后台引导，失败不影响 WCX 既有功能。
         // 移除本调用即完全下线脚本子系统。
-        runCatching {
-            com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
-        }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
+        //
+        // 只在主进程引导：脚本插件全部跑在微信主进程（消息监听、UI、打开设置页都在这里），
+        // 而小程序 / 插件 / 推送等子进程会被系统频繁起停。之前每个进程都跑一遍
+        // 「加载 native 库 + 建 DexKitBridge + 全量 DexFinder 解析 + 装 2 个 Feature」，
+        // 实测 17 小时内完成 330 次引导（与 ModuleLoader 的 333 次进程加载几乎 1:1），
+        // 是持续的 CPU/IO 峰值来源（表现为刷朋友圈、切小程序时卡顿）。
+        if (TargetProcesses.isInMain) {
+            runCatching {
+                com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
+            }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
+        }
 
     }
 
