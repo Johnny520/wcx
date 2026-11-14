@@ -195,7 +195,7 @@ object ConversationAggregation : ClickableFeature(),
     private val methodSqliteWrapperRawQuery by dexMethod(allowFailure = true) {
         matcher {
             modifiers = JavaModifier.PUBLIC
-            usingEqStrings("sql is null ", "DB IS CLOSED ! {%s}")
+            usingEqStrings("DB IS CLOSED ! {%s}")
             paramTypes("java.lang.String", "java.lang.String[]", "int")
             returnType("android.database.Cursor")
         }
