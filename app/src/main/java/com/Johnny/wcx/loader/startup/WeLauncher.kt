@@ -74,6 +74,12 @@ object WeLauncher {
             LocalAdaptationEngine.init(appContext)
             SelfHealingMonitor.init()
 
+            // 主线程卡死取证：心跳停摆 3 秒即抓主线程堆栈落盘（同时写 WCX 运行日志与
+            // SharedPreferences，进程被杀后仍能在「模块自检」里看到）。此前这个看门狗
+            // 只有实现、从未被安装，所以「点会话整个微信卡死」这种故障现场毫无证据。
+            runCatching { MainThreadWatchdog.install() }
+                .onFailure { WeLogger.w(TAG, "main thread watchdog install failed: ${it.message}") }
+
             val prefs =
                 context.getSharedPreferences("${PackageNames.WECHAT}_preferences", Context.MODE_PRIVATE)
             RuntimeConfig.mmPrefs = prefs

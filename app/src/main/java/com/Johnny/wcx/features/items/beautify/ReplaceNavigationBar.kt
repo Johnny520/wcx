@@ -674,10 +674,13 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         }
     }
 
-    private val methodUpdateTabUnread by dexMethod {
+    private val methodUpdateTabUnread by dexMethod(allowFailure = true) {
         matcher {
             declaredClass = "com.tencent.mm.ui.LauncherUIBottomTabView"
-            usingEqStrings("MicroMsg.LauncherUITabView", "updateMainTabUnread %d")
+            // 8.0.80 起微信把该方法的日志串从 "updateMainTabUnread %d" 改成
+            // "[updateMainTabUnread] unread : "（与同类的 Friend/Contact/Settings 三个
+            // 未读更新方法统一格式），旧串只剩常量池条目、已无任何方法引用（孤儿串）。
+            usingEqStrings("MicroMsg.LauncherUITabView", "[updateMainTabUnread] unread : ")
         }
     }
 

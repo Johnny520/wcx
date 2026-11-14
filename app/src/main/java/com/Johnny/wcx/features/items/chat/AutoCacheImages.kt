@@ -26,9 +26,14 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 @Feature(name = "自动缓存图片", categories = ["聊天"], description = "监听接收到的图片消息, 自动触发微信从 CDN 下载, 将原图缓存到本地")
 object AutoCacheImages : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
@@ -42,12 +47,29 @@ object AutoCacheImages : ClickableFeature(), WeDatabaseListenerApi.IInsertListen
     /** 正在缓存中的 msgSvrId，避免同一张图被重复触发下载。 */
     private val inFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
+    /** 缓存任务作用域：随功能开关一起取消，避免关闭功能后仍有下载在跑。 */
+    private var scope: CoroutineScope? = null
+
+    /**
+     * 全局并发闸门。
+     *
+     * 旧实现「一张图一个协程」无上限并发：Dispatchers.IO 最多 64 个线程，群相册、
+     * 连发图片时几十个原图下载同时阻塞会把 IO 线程池占满 —— 微信自己的数据库写入、
+     * 消息收取同样要 IO 线程，于是整个进程卡住（用户感知就是「突然卡死、划任务栏也卡、
+     * 只能强杀」）。这里限制同时最多 2 个下载，其余排队。
+     */
+    private val downloadGate = Semaphore(2)
+
     override fun onEnable() {
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         WeDatabaseListenerApi.addListener(this)
     }
 
     override fun onDisable() {
         WeDatabaseListenerApi.removeListener(this)
+        scope?.cancel()
+        scope = null
+        inFlight.clear()
     }
 
     override fun onInsert(table: String, values: ContentValues) {
@@ -74,14 +96,26 @@ object AutoCacheImages : ClickableFeature(), WeDatabaseListenerApi.IInsertListen
         WeLogger.d(TAG, "detected image message; msgSvrId=$msgSvrId, auto caching")
         // 同一条消息可能被数据库回调触发多次，去重避免重复触发原图下载。
         if (!inFlight.add(msgSvrId)) return
-        CoroutineScope(Dispatchers.IO).launch {
+        val sc = scope
+        if (sc == null) {
+            inFlight.remove(msgSvrId)
+            return
+        }
+        sc.launch {
             try {
-                val path = WeMessageApi.cacheImage(msgSvrId)
-                if (path != null) {
-                    WeLogger.d(TAG, "cached image to $path")
-                } else {
-                    WeLogger.w(TAG, "failed to auto-cache image msgSvrId=$msgSvrId")
+                downloadGate.withPermit {
+                    val path = WeMessageApi.cacheImage(msgSvrId)
+                    if (path != null) {
+                        WeLogger.d(TAG, "cached image to $path")
+                    } else {
+                        WeLogger.w(TAG, "failed to auto-cache image msgSvrId=$msgSvrId")
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // 后台协程未捕获异常会结束整个宿主进程，必须就地吃掉并留痕。
+                WeLogger.w(TAG, "auto cache image failed msgSvrId=$msgSvrId: ${e.message}", e)
             } finally {
                 inFlight.remove(msgSvrId)
             }

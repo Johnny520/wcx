@@ -101,10 +101,10 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     // ji1.s.og, most of com.tencent.mm.feature.avatar.w calls this,
     // e.g. Cg, ig, cg, og, rg
     private val methodMvvmLoadAvatar1 by dexMethod(allowFailure = true) {
-        // 8.0.80 起 "MicroMsg.AvatarGetContactServiceHelper" 已成孤儿串（无 const-string 引用）。
-        // 只保留仍存活的 "put stack into pool: "，配合原有的 4 参签名
-        // (ImageView, String, String, float) → void：
-        // 8.0.76 = avatar.w.kj / 8.0.79 = avatar.w.Aj / 8.0.80 = avatar.w.Gj，三版均唯一命中。
+        // 8.0.80 实测：日志串 "put stack into pool: " 只剩常量池条目、已无任何方法引用（孤儿串），
+        // 而 "MicroMsg.AvatarGetContactServiceHelper" 仍被
+        // zs1.s.Gj(ImageView, String, String, float)V 引用（就是本锚点要找的方法）。
+        // 两者在 8.0.79 及更早是同一个方法里的两条串，8.0.80 换了日志文案。
         matcher {
             paramTypes(
                 "android.widget.ImageView",
@@ -113,7 +113,7 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
                 "float"
             )
             returnType(Void.TYPE)
-            usingEqStrings("put stack into pool: ")
+            usingEqStrings("MicroMsg.AvatarGetContactServiceHelper")
         }
     }
 
@@ -121,7 +121,8 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     private val methodMvvmLoadAvatar2 by dexMethod(allowFailure = true) {
         matcher {
             declaredClass {
-                usingEqStrings("MicroMsg.AvatarGetContactServiceHelper", "put stack into pool: ")
+                // 8.0.80：去掉已成孤儿串的 "put stack into pool: "
+                usingEqStrings("MicroMsg.AvatarGetContactServiceHelper")
             }
 
             usingEqStrings("imageView")
@@ -191,10 +192,13 @@ object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IRes
     }
 
     // com.tencent.mm.pluginsdk.ui.u.b
-    private val methodConversationAvatar by dexMethod {
+    private val methodConversationAvatar by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.pluginsdk.ui")
         matcher {
-            usingEqStrings("MicroMsg.AvatarDrawable", "imageView is null")
+            // 8.0.80："imageView is null" 已漂到别的类（feature.avatar.w.Gj），
+            // 只留 "MicroMsg.AvatarDrawable"；其余约束（4 参签名 + void + 调 View.invalidate）
+            // 在 8.0.80 的 pluginsdk.ui.u.b 上全部满足，仍唯一收敛。
+            usingEqStrings("MicroMsg.AvatarDrawable")
             paramTypes(
                 "android.widget.ImageView",
                 "java.lang.String",
