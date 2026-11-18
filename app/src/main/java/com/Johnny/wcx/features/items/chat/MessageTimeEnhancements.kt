@@ -183,44 +183,53 @@ object MessageTimeEnhancements : ClickableFeature(),
             2f,
             context.resources.displayMetrics
         ).toInt()
-        time.setPadding(time.paddingLeft, verticalPaddingPx, time.paddingRight, verticalPaddingPx)
+        // 每条消息 bind 都无条件 setPadding 会触发 requestLayout，
+        // 而这里是在 onBindView(after) 里调用，改高度会让列表滚动锚点在测量后漂移。
+        if (time.paddingTop != verticalPaddingPx || time.paddingBottom != verticalPaddingPx) {
+            time.setPadding(time.paddingLeft, verticalPaddingPx, time.paddingRight, verticalPaddingPx)
+        }
 
         val lp = time.layoutParams as? RelativeLayout.LayoutParams
         if (lp != null) {
-            // System messages are always centered, regardless of user config or sender
+            val newMarginStart: Int
+            val newMarginEnd: Int
+            val newGravity: Int
+            var rulesChanged = false
+            val rules = lp.getRules()
+            fun hasRule(rule: Int) = rule != 0 && rules[rule] != 0
             if (isAlwaysCentered || msgInfo.type?.isSystem == true) {
-                lp.addRule(RelativeLayout.CENTER_HORIZONTAL)
-                lp.removeRule(RelativeLayout.ALIGN_PARENT_START)
-                lp.removeRule(RelativeLayout.ALIGN_PARENT_END)
-                lp.marginStart = 0
-                lp.marginEnd = 0
-                time.gravity = Gravity.CENTER_HORIZONTAL
+                if (!hasRule(RelativeLayout.CENTER_HORIZONTAL)) { lp.addRule(RelativeLayout.CENTER_HORIZONTAL, -1); rulesChanged = true }
+                if (hasRule(RelativeLayout.ALIGN_PARENT_START)) { lp.removeRule(RelativeLayout.ALIGN_PARENT_START); rulesChanged = true }
+                if (hasRule(RelativeLayout.ALIGN_PARENT_END)) { lp.removeRule(RelativeLayout.ALIGN_PARENT_END); rulesChanged = true }
+                newMarginStart = 0
+                newMarginEnd = 0
+                newGravity = Gravity.CENTER_HORIZONTAL
             } else {
-                lp.removeRule(RelativeLayout.CENTER_HORIZONTAL)
-
-                // 3. Conditional alignment based on who sent the message
+                if (hasRule(RelativeLayout.CENTER_HORIZONTAL)) { lp.removeRule(RelativeLayout.CENTER_HORIZONTAL); rulesChanged = true }
                 if (msgInfo.isSelfSender) {
-                    // Align to the Right (End)
-                    lp.removeRule(RelativeLayout.ALIGN_PARENT_START)
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_END)
-
-                    lp.marginEnd = edgeMarginPx
-                    lp.marginStart = 0 // Clear opposing margin to prevent bugs on view recycling
-
-                    time.gravity = Gravity.END
+                    if (hasRule(RelativeLayout.ALIGN_PARENT_START)) { lp.removeRule(RelativeLayout.ALIGN_PARENT_START); rulesChanged = true }
+                    if (!hasRule(RelativeLayout.ALIGN_PARENT_END)) { lp.addRule(RelativeLayout.ALIGN_PARENT_END, -1); rulesChanged = true }
+                    newMarginEnd = edgeMarginPx
+                    newMarginStart = 0
+                    newGravity = Gravity.END
                 } else {
-                    // Align to the Left (Start)
-                    lp.removeRule(RelativeLayout.ALIGN_PARENT_END)
-                    lp.addRule(RelativeLayout.ALIGN_PARENT_START)
-
-                    lp.marginStart = edgeMarginPx
-
-                    lp.marginEnd = 0
-                    time.gravity = Gravity.START
+                    if (hasRule(RelativeLayout.ALIGN_PARENT_END)) { lp.removeRule(RelativeLayout.ALIGN_PARENT_END); rulesChanged = true }
+                    if (!hasRule(RelativeLayout.ALIGN_PARENT_START)) { lp.addRule(RelativeLayout.ALIGN_PARENT_START, -1); rulesChanged = true }
+                    newMarginStart = edgeMarginPx
+                    newMarginEnd = 0
+                    newGravity = Gravity.START
                 }
             }
-
-            time.layoutParams = lp
+            // 只有规则/边距/重力真的变了才写回；setter 每次都会 requestLayout，
+            // 无条件写回会让 bind 后的 RecyclerView 反复重排、滚动位置漂移。
+            if (rulesChanged || lp.marginStart != newMarginStart || lp.marginEnd != newMarginEnd ||
+                time.gravity != newGravity
+            ) {
+                lp.marginStart = newMarginStart
+                lp.marginEnd = newMarginEnd
+                time.gravity = newGravity
+                time.layoutParams = lp
+            }
         }
     }
 
