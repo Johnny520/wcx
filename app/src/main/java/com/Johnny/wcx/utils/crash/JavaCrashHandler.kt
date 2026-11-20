@@ -46,6 +46,9 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
             )
             WeLogger.e(TAG, "Exception: " + throwable.javaClass.name)
             WeLogger.e(TAG, "Message: " + throwable.message)
+            runCatching {
+                WeLogger.e(TAG, "Classification: " + CrashInfoCollector.classificationSummary(throwable))
+            }
             WeLogger.e(TAG, "========================================")
 
             // 收集崩溃信息
