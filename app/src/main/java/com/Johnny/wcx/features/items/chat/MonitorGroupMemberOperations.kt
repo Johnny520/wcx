@@ -11,7 +11,7 @@ import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.widget.TextView
-import com.Johnny.wcx.utils.HookUtils.hookBeforeDirectly
+import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.Johnny.wcx.utils.reflection.ClassLoaders
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
