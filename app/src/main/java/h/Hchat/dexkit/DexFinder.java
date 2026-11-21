@@ -1470,9 +1470,10 @@ public class DexFinder {
                                 "success restore file, from ",
                                 ".mp4"));
                 if (methods.isEmpty()) {
+                    // 8.0.80 起 "MicroMsg.VideoInfoStorage"（Ln71/z1 等）不再与 restore 日志出现在同一方法，
+                    // 三串 AND 归零；只保留日志串 + ".mp4"，唯一命中 Lfj0/d;->Mj(String)String。
                     methods = dexKit.findMethod(
                             mkMethodUsingStrings(
-                                    "MicroMsg.VideoInfoStorage",
                                     "success restore file, from ",
                                     ".mp4"));
                 }
@@ -1820,8 +1821,21 @@ public class DexFinder {
             }
 
             if (emojiManagerSendMethod == null) {
+                // 8.0.80(0x28005032) 实测：两串都是同一方法内的字符串常量子串 ——
+                //   "sendEmoji: context is null" / "sendEmoji: emoji not found, imgPath %s"
+                //   -> Lcom/tencent/mm/feature 表情实现类 Li82/h;->W(Context,String,String,MsgIdTalker,int)Z
+                // （TAG 串为 "MicroMsg.emoji.EmojiMgrImpl"；注意 emoji 日志串随时间被加了后缀，
+                //   这里用子串语义，若某一版再删掉其中一条，再用剩余单串兜一次。）
                 List<MethodData> methods = dexKit.findMethod(
                         mkMethodUsingStrings("sendEmoji: context is null", "sendEmoji: emoji not found"));
+                if (methods.isEmpty()) {
+                    methods = dexKit.findMethod(
+                            mkMethodUsingStrings("sendEmoji: context is null"));
+                }
+                if (methods.isEmpty()) {
+                    methods = dexKit.findMethod(
+                            mkMethodUsingStrings("sendEmoji: emoji not found"));
+                }
                 for (MethodData methodData : methods) {
                     try {
                         Method method = methodData.getMethodInstance(classLoader);
@@ -2074,6 +2088,8 @@ public class DexFinder {
     }
 
     private Method findFavoriteListCursorMethod() {
+        // 8.0.80(0x28005032)：唯一命中 Lbe2/a3;->R0(J,int,int)J（public static），
+        // 该方法体同时含 "klem, tryStartBatchGet, ..." 三条更长的日志串。
         List<MethodData> methods = dexKit.findMethod(
                 mkMethodUsingStrings("tryStartBatchGet..."));
         for (MethodData methodData : methods) {
@@ -2153,6 +2169,10 @@ public class DexFinder {
 
             List<MethodData> methods = dexKit.findMethod(
                     mkMethodUsingStrings("sendFavMsg: processing favId=%d, favType=%d, dataListSize=%d"));
+            // 8.0.80(0x28005032)：仍命中 Lcom/tencent/mm/plugin/fav/ui/j6;->run()V，该方法用 Llm/o3;->field_favProto
+            // 字段，favoriteItemClassFromUsingFields 因此得到 Llm/o3;（FavItemInfo 存储模型，含
+            // field_localId/field_type/field_favProto 与 convertFrom(Cursor)），其后 isFavoriteSendMethod
+            // 用 isAssignableFrom 兼容子类 Lbe2/u3;（fav/ui/i6.j 的第 5 参类型）。
             for (MethodData methodData : methods) {
                 Class<?> clazz = favoriteItemClassFromUsingFields(methodData);
                 if (!isFavoriteItemClass(clazz)) continue;
@@ -2174,10 +2194,21 @@ public class DexFinder {
             }
 
             favoriteSendMethod = null;
+            // 8.0.80(0x28005032) 实测：两串同属 Lcom/tencent/mm/plugin/fav/ui/i6;->i(Context,v6,Runnable)V，
+            // 真正的发送入口是同类的 j(Context,String,String,boolean,FavItemInfo,Runnable)V（该方法体内无任何字符串，
+            // 只能靠 findFavoriteSendDispatchMethod 类内扫描收敛）。
             List<MethodData> methods = dexKit.findMethod(
                     mkMethodUsingStrings(
                             "want to send fav msg, but context is null",
                             "want to send fav msg, but info is null"));
+            if (methods.isEmpty()) {
+                // 回落：若某版本把上面两条日志拆散，用 FavSendLogic 类内另一条日志串定位到同一个类
+                //（8.0.80 -> i6.l / i6.m，仍在 i6 内，类内扫描一样能找到 j）。
+                methods = dexKit.findMethod(
+                        mkMethodUsingStrings(
+                                "MicroMsg.FavSendLogic",
+                                "want to send fav video, but context is null"));
+            }
             for (MethodData methodData : methods) {
                 Method anchor = methodData.getMethodInstance(classLoader);
                 Method dispatch = findFavoriteSendDispatchMethod(anchor);
@@ -2690,6 +2721,9 @@ public class DexFinder {
             List<Method> batchCandidates = new ArrayList<>();
             FindMethod find = new FindMethod();
             MethodMatcher matcher = new MethodMatcher();
+            // 8.0.80(0x28005032)：四条精确串全部仍在，且同属
+            //   Lw41/ba;->k(List,Lw41/ia)V（public static void，AsyncDeleteMessageStage1 批删）；
+            //   单会话版是同类的 j(String,Lw41/ia)V（由下面的类内扫描取得）。
             matcher.usingEqStrings(
                     "MicroMsg.MsgInfoStorageLogic",
                     "summerdel deleteMsgByTalker[%s] stack[%s]",
@@ -3286,6 +3320,9 @@ public class DexFinder {
                 List<Class<?>> candidates = new ArrayList<>();
                 collectSendTextClassCandidates(candidates, 20,
                         new String[][]{
+                                // 8.0.80(0x28005032)：URI 在 Ldh3/a;-><init>(String)/(List) 中，
+                                // TAG "MicroMsg.Label.NetSceneAddContactLabel" 在同类 doScene 中 —— 类级 AND 仍命中，
+                                // 后两路（含无前缀子串）作为回落。
                                 {"/cgi-bin/micromsg-bin/addcontactlabel", "MicroMsg.Label.NetSceneAddContactLabel"},
                                 {"NetSceneAddContactLabel"},
                                 {"addcontactlabel"}
@@ -3307,11 +3344,16 @@ public class DexFinder {
             }
             if (modifyContactLabelListCtor == null) {
                 List<Class<?>> candidates = new ArrayList<>();
+                // 8.0.80(0x28005032)：TAG "MicroMsg.Label.NetSceneModifyContactLabelList" 已被 R8 整体删除
+                //（全 18 dex 的 string_ids 中不存在），原「URI + TAG」类级 AND 与「NetSceneModifyContactLabelList」
+                // 子串两路都归零；现把 URI 单串放第一路：唯一命中 Ldh3/e;（其 <init>(LinkedList) 即目标构造器，
+                // 另一命中 Lgd5/jy4; 无 LinkedList 构造器会被跳过）。
                 collectSendTextClassCandidates(candidates, 20,
                         new String[][]{
+                                {"/cgi-bin/micromsg-bin/modifycontactlabellist"},
+                                {"modifycontactlabellist"},
                                 {"/cgi-bin/micromsg-bin/modifycontactlabellist", "MicroMsg.Label.NetSceneModifyContactLabelList"},
-                                {"NetSceneModifyContactLabelList"},
-                                {"modifycontactlabellist"}
+                                {"NetSceneModifyContactLabelList"}
                         });
                 collectSendTextMethodOwnerCandidates(candidates, 20,
                         new String[][]{
@@ -3468,6 +3510,10 @@ public class DexFinder {
                     && chatPageFragmentExitMethod != null) return;
 
             if (chatPageStartMethod == null) {
+                // 8.0.80(0x28005032)：该日志串仍是活儿，唯一命中
+                //   Lcom/tencent/mm/ui/NewChattingTabUI;->u(String,Bundle,boolean)V（签名与 isChatPageStartMethod 一致）。
+                // 同版本 BaseConversationUI.startChatting(String,Bundle,Z,Z)V 的日志已改名成
+                //   "try startChatting, ishow:%b, post: %b"（4 参，签名不符，故意不选）。
                 List<MethodData> methods = dexKit.findMethod(
                         mkMethodUsingStrings("try startChatting, ishow:%b userName:%s needAnim:%b"));
                 for (MethodData methodData : methods) {
@@ -4611,6 +4657,9 @@ public class DexFinder {
     private Method findSnsHelperChainMethod(String marker) {
         if (snsUploadPackHelperClass == null) return null;
         try {
+            // 8.0.80(0x28005032)：marker 串仍被 Lcom/tencent/mm/plugin/sns/model/i8; 的方法体引用，
+            //   "setSdkAppName" -> i8.K(String)i8、"setSdkId" -> i8.L(String)i8、"setContentDes" 同类同型；
+            //   "setUploadList" 只用于 isSnsUploadPackHelperClass 的类级候选（i8.Y(List)V 返回 void，不走本方法）。
             List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(marker));
             for (MethodData methodData : methods) {
                 try {
