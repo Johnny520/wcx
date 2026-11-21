@@ -17,15 +17,18 @@ object WeAppMsgApi : ApiFeature(), IResolveDex {
     private const val TAG = "WeAppMsgApi"
 
     override fun resolveDex(dexKit: DexKitBridge) {
+        // 8.0.80：原两串被拆到同类不同方法（t/v），类级方法级 AND 恒失败；改用单串（parse amessage xml failed 仅 xx0/r 引用）
         val classAppMsgContent = dexKit.findClass {
             matcher {
-                usingStrings("<appmsg appid=\"", "parse amessage xml failed")
+                usingStrings("parse amessage xml failed")
             }
         }.single()
 
+        // 8.0.80：summerbig sendAppMsg 日志串已删除；AppMsgLogic TAG 多类共用，
+        // 改用「TAG + k0.O 独有串 isUseOriginThumb:%b」同方法 AND，唯一命中 pluginsdk.model.app.k0
         val classAppMsgLogic = dexKit.findClass {
             matcher {
-                usingStrings("MicroMsg.AppMsgLogic", "summerbig sendAppMsg attachFilePath[%s], content[%s]")
+                usingStrings("MicroMsg.AppMsgLogic", "isUseOriginThumb:%b")
             }
         }.single()
 

@@ -1314,8 +1314,10 @@ public class DexFinder {
                 return;
             }
 
+            // 8.0.80：summerbig sendAppMsg 日志串已删除；AppMsgLogic TAG 多类共用，
+            // 改用「TAG + k0.O 独有串 isUseOriginThumb:%b」同方法 AND，唯一命中 pluginsdk.model.app.k0.O
             List<MethodData> methods = dexKit.findMethod(
-                    mkMethodUsingStrings("summerbig sendAppMsg attachFilePath"));
+                    mkMethodUsingStrings("MicroMsg.AppMsgLogic", "isUseOriginThumb:%b"));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -4194,7 +4196,7 @@ public class DexFinder {
         if (!"android.util.Pair".equals(method.getReturnType().getName())) return false;
         if (!KavaReflector.isStatic(method)) return false;
         Class<?>[] params = method.getParameterTypes();
-        if (params.length != 10 && params.length != 12) return false;
+        if (params.length != 10 && params.length != 12 && params.length != 13) return false;
         if (params[0].isPrimitive()) return false;
         return params[1] == String.class
                 && params[2] == String.class
@@ -4208,7 +4210,12 @@ public class DexFinder {
                 || (params.length == 12
                 && !params[9].isPrimitive()
                 && (params[10] == boolean.class || params[10] == Boolean.class)
-                && params[11] == String.class));
+                && params[11] == String.class)
+                || (params.length == 13
+                && !params[9].isPrimitive()
+                && (params[10] == boolean.class || params[10] == Boolean.class)
+                && params[11] == String.class
+                && params[12] == String.class));
     }
 
     private boolean isAppMsgParseMethod(Method method, Class<?> appMsgClass) {

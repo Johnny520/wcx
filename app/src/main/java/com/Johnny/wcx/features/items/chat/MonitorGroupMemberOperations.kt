@@ -198,13 +198,13 @@ object MonitorGroupMemberOperations : SwitchFeature(), IResolveDex, WeDatabaseLi
         runCatching {
             val bufType = Class.forName("android.widget.TextView\$BufferType", false, ClassLoaders.HOST)
             TextView::class.java.getDeclaredMethod("setText", CharSequence::class.java, bufType)
-                .hookBeforeDirectly { param ->
-                    val original = param.args.getOrNull(0) as? CharSequence ?: return@hookBeforeDirectly
+                .hookBeforeDirectly {
+                    val original = args.getOrNull(0) as? CharSequence ?: return@hookBeforeDirectly
                     val raw = original.toString()
                     if (!raw.contains(LINK_TAG)) return@hookBeforeDirectly
                     val rendered = renderCustomLinks(raw) ?: return@hookBeforeDirectly
-                    param.args[0] = rendered
-                    (param.thisObject as? TextView)?.let { tv ->
+                    args[0] = rendered
+                    (thisObject as? TextView)?.let { tv ->
                         if (tv.movementMethod == null) {
                             tv.movementMethod = LinkMovementMethod.getInstance()
                         }
