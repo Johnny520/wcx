@@ -174,8 +174,8 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
         runCatching {
             val method = Activity::class.java
                 .getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
-            method.hookBeforeDirectly { param ->
-                val event = param.args.firstOrNull() as? MotionEvent ?: return@hookBeforeDirectly
+            method.hookBeforeDirectly {
+                val event = args.firstOrNull() as? MotionEvent ?: return@hookBeforeDirectly
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     lastTouchAt.set(SystemClock.uptimeMillis())
                 }
