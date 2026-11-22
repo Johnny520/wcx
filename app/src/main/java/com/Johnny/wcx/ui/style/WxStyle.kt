@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
@@ -279,12 +280,17 @@ fun isWxDark(): Boolean = LocalWxDarkMode.current ?: isSystemInDarkTheme()
 fun SoftCard(
     modifier: Modifier = Modifier,
     gradient: List<Color> = WxPalette.GradPlain,
+    /**
+     * 纯色底（知友 AI 页面按这个参数调用）。给出时覆盖 [gradient]，
+     * 用于「浅底提示卡」这类需要语义色（warningSoft 等）的场景。
+     */
+    background: Color? = null,
     contentPadding: Int = 16,
     glow: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val plain = gradient.isEmpty() || gradient == WxPalette.GradPlain
+    val plain = background != null || gradient.isEmpty() || gradient == WxPalette.GradPlain
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -311,8 +317,11 @@ fun SoftCard(
         Column(
             modifier = Modifier
                 .background(
-                    if (plain) WxPalette.cardBrush()
-                    else Brush.linearGradient(WxPalette.darkenGradient(gradient)),
+                    when {
+                        background != null -> SolidColor(background)
+                        plain -> WxPalette.cardBrush()
+                        else -> Brush.linearGradient(WxPalette.darkenGradient(gradient))
+                    },
                     shape,
                 )
                 .border(if (glow) 1.2.dp else 1.dp, if (glow) WxPalette.accentBrush() else WxPalette.cardBorderBrush(), shape)

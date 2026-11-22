@@ -209,6 +209,47 @@ object GroupDigestEntry {
         host = act
         refreshUnread()
     }
+
+    private const val TAG = "GroupDigestEntry"
+
+    /**
+     * 当前是否停在「微信」首页 Tab。
+     *
+     * 只看 Activity 类名不够：LauncherUI 四个 Tab 共用一个 Activity，通讯录/发现/我 也满足。
+     * 这里按「会话列表可见」判定，不依赖侧边栏功能是否开启。
+     */
+    private fun isHomeTabVisible(act: Activity): Boolean {
+        return runCatching {
+            if (act.isFinishing) return@runCatching false
+            var found = false
+            fun scan(view: View, depth: Int) {
+                if (found || depth > 16) return
+                if (view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView" && view.isShown) {
+                    found = true
+                    return
+                }
+                if (view is ViewGroup) {
+                    for (i in 0 until view.childCount) scan(view.getChildAt(i), depth + 1)
+                }
+            }
+            act.window?.decorView?.let { scan(it, 0) }
+            found
+        }.getOrDefault(false)
+    }
+
+    /** 打开群总结面板：直接用 Compose 对话框，不经过侧边栏的面板体系。 */
+    private fun showDigestDialog(act: Activity) {
+        runCatching {
+            showComposeDialog(act) {
+                InjectedUiTheme(darkTheme = ThemeSettings.themeMode.resolve()) {
+                    GroupDigestPanel(onClose = { onDismiss() })
+                }
+            }
+        }.onFailure {
+            WeLogger.e(TAG, "打开群总结面板失败", it)
+            showToast("打开群总结面板失败：" + it.message)
+        }
+    }
 }
 
 @Composable
@@ -250,45 +291,6 @@ private fun GroupDigestButton(count: Int, onClick: () -> Unit) {
                     color = Color.White,
                 )
             }
-        }
-    }
-
-    private const val TAG = "GroupDigestEntry"
-
-    /**
-     * 当前是否停在「微信」首页 Tab。
-     *
-     * 只看 Activity 类名不够：LauncherUI 四个 Tab 共用一个 Activity，通讯录/发现/我 也满足。
-     * 这里按「会话列表可见」判定，与侧边栏是同一套判据，但不依赖侧边栏开关是否打开。
-     */
-    private fun isHomeTabVisible(act: Activity): Boolean = runCatching {
-        if (act.isFinishing) return@runCatching false
-        var found = false
-        fun scan(view: View, depth: Int) {
-            if (found || depth > 16) return
-            if (view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView" && view.isShown) {
-                found = true
-                return
-            }
-            if (view is ViewGroup) {
-                for (i in 0 until view.childCount) scan(view.getChildAt(i), depth + 1)
-            }
-        }
-        act.window?.decorView?.let { scan(it, 0) }
-        found
-    }.getOrDefault(false)
-
-    /** 打开群总结面板：直接用 Compose 对话框，不经过侧边栏的面板体系。 */
-    private fun showDigestDialog(act: Activity) {
-        runCatching {
-            showComposeDialog(act) {
-                InjectedUiTheme(darkTheme = ThemeSettings.themeMode.resolve()) {
-                    GroupDigestPanel(onClose = { onDismiss() })
-                }
-            }
-        }.onFailure {
-            WeLogger.e(TAG, "打开群总结面板失败", it)
-            showToast("打开群总结面板失败：" + it.message)
         }
     }
 }
