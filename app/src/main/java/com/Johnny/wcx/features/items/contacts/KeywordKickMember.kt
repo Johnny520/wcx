@@ -109,7 +109,7 @@ object KeywordKickMember : ClickableFeature(), WeDatabaseListenerApi.IInsertList
         matcher {
             usingEqStrings("getChatroomData hashMap is null!")
             paramCount(1)
-            paramTypes(String::class)
+            paramTypes("java.lang.String")
         }
     }
 
