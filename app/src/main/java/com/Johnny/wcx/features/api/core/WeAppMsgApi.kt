@@ -11,13 +11,20 @@ import java.lang.reflect.Modifier
 @Feature(name = "AppMsg 发送服务", categories = ["API"], description = "提供 XML 卡片消息发送能力")
 object WeAppMsgApi : ApiFeature(), IResolveDex {
 
-    // allowFailure = true：定位失败（微信改结构）时只让本 API 不可用，不要把整个 Dex 解析流程抛崩
-    private val methodParseXml by dexMethod(allowFailure = true)    // AppMsgContent#parse(String)（8.0.80 = xx0.r.v）
-    private val methodSendAppMsg by dexMethod(allowFailure = true)  // AppMsgLogic#send(AppMsgContent, ...)（8.0.80 = k0.K）
+    // 定位失败（微信改结构）时只让本 API 不可用：解析逻辑整体包在 runCatching 里，不把 Dex 解析流程抛崩
+    private val methodParseXml by dexMethod()    // AppMsgContent#parse(String)（8.0.80 = xx0.r.v）
+    private val methodSendAppMsg by dexMethod()  // AppMsgLogic#send(AppMsgContent, ...)（8.0.80 = k0.K）
 
     private const val TAG = "WeAppMsgApi"
 
     override fun resolveDex(dexKit: DexKitBridge) {
+        // 整个解析流程做兜底：任何一步多命中 / 锚点漂移都只让本 API 不可用，
+        // 不再把异常抛给 Dex 解析调度器（过去会以 "query did not return a unique result" 上报）。
+        runCatching { resolveAnchors(dexKit) }
+            .onFailure { WeLogger.e(TAG, "AppMsg 锚点解析失败，本 API 暂不可用", it) }
+    }
+
+    private fun resolveAnchors(dexKit: DexKitBridge) {
         // 8.0.80 起 "parse msg failed" / "parse amessage xml failed" 被 3~4 个类同时引用
         // （fo4.o、r51.a、xx0.r、h71.g），按字符串找类必然多命中，
         // findClass(...).single() 会抛 "query did not return a unique result: N"，把整轮 Dex 解析带崩。
