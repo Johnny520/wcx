@@ -35,11 +35,6 @@ import java.lang.reflect.Modifier
 @Feature(name = "数据库服务", categories = ["API"], description = "提供数据库直接查询能力")
 object WeDatabaseApi : ApiFeature(), IResolveDex {
 
-    /** `methodGetStorage` 只是 DexKit 兜底；主路径用反射直接拿 Storage，解析不到不影响取库。 */
-    override val supersededAnchors: Map<String, String> = mapOf(
-        "WeDatabaseApi:methodGetStorage" to "DexKit 兜底路径，主路径用反射获取 Storage",
-    )
-
     private val classMmKernel by dexClass {
         matcher {
             usingEqStrings("MicroMsg.MMKernel", "Kernel not null, has initialized.")
