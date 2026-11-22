@@ -10,12 +10,15 @@ import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.HostInfo
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.reflection.BString
 import org.luckypray.dexkit.DexKitBridge
 import java.lang.reflect.Modifier
 
 @Feature(name = "微信服务管理服务", categories = ["API"], description = "提供获取并使用微信服务的能力")
 object WeServiceApi : ApiFeature(), IResolveDex {
+
+    private const val TAG = "WeServiceApi"
 
     private val methodServiceManagerGetService by dexMethod {
         matcher {
@@ -246,7 +249,10 @@ object WeServiceApi : ApiFeature(), IResolveDex {
             matcher {
                 usingEqStrings("MicroMsg.MMKernel", "Kernel not null, has initialized.")
             }
-        }.single()
+        }.singleOrNull() ?: run {
+            WeLogger.e(TAG, "定位 MMKernel 失败, 服务定位能力不可用")
+            return
+        }
 
         methodMmKernelGetServiceImpl.find(dexKit) {
             matcher {
@@ -268,6 +274,10 @@ object WeServiceApi : ApiFeature(), IResolveDex {
                 }
             }
         }
-        methodVideoPathFeatureServiceRestoreMp4Path.setDescriptor(results.single())
+        val restoreMethod = results.singleOrNull() ?: run {
+            WeLogger.e(TAG, "定位视频路径恢复方法失败, 找到 ${results.size} 个候选")
+            return
+        }
+        methodVideoPathFeatureServiceRestoreMp4Path.setDescriptor(restoreMethod)
     }
 }

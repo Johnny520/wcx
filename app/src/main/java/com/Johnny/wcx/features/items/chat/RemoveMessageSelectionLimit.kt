@@ -83,10 +83,11 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val selectedMessagesField: Field by lazy {
-        methodToggleMessageSelection.method.declaringClass.declaredFields.single {
-            it.type == CopyOnWriteArraySet::class.java
-        }.makeAccessible()
+    private val selectedMessagesField: Field? by lazy {
+        // 找不到就返回 null（过去 single{} 会抛 NoSuchElementException，把整条 hook 链带崩）
+        methodToggleMessageSelection.method.declaringClass.declaredFields
+            .firstOrNull { it.type == CopyOnWriteArraySet::class.java }
+            ?.makeAccessible()
     }
 
     private data class TemporarilyRemovedSelections(
@@ -126,7 +127,8 @@ object RemoveMessageSelectionLimit : SwitchFeature(), IResolveDex {
                 val adapter = param.thisObject ?: return
                 val message = param.args[0] ?: return
                 @Suppress("UNCHECKED_CAST")
-                val selectedMessages = selectedMessagesField.get(adapter) as CopyOnWriteArraySet<Any>
+                val field = selectedMessagesField ?: return
+                val selectedMessages = field.get(adapter) as? CopyOnWriteArraySet<Any> ?: return
                 if (message in selectedMessages || selectedMessages.size < SELECTION_LIMIT) return
 
                 // Let WeChat run its original add and UI refresh path with 99 existing selections.

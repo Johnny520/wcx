@@ -103,49 +103,65 @@ object WeTextStatusApi : ApiFeature(), IResolveDex {
     }
 
     override fun resolveDex(dexKit: DexKitBridge) {
-        val latestStatusMethod = dexKit.getMethodData(
-            methodLatestStatusByUsername.getDescriptorString()!!,
-        )!!
-        val storageInterface = latestStatusMethod.declaredClass!!.interfaces.single { candidate ->
+        // 任一步「多命中 / 零命中」都只让本 API 不可用，不再把异常抛给 Dex 解析调度器
+        // （过去 .single() 会以 "query did not return a unique result: N" 出现在诊断报告里）
+        runCatching { resolveAnchors(dexKit) }
+            .onFailure { WeLogger.e(TAG, "文本状态锚点解析失败, 本 API 暂不可用", it) }
+    }
+
+    private fun resolveAnchors(dexKit: DexKitBridge) {
+        val latestDesc = methodLatestStatusByUsername.getDescriptorString() ?: return
+        val latestStatusMethod = dexKit.getMethodData(latestDesc) ?: return
+        val storageInterface = latestStatusMethod.declaredClass?.interfaces?.firstOrNull { candidate ->
             candidate.methods.any { method ->
                 method.methodName == latestStatusMethod.methodName &&
                     method.paramTypeNames == latestStatusMethod.paramTypeNames &&
                     method.returnTypeName == latestStatusMethod.returnTypeName
             }
+        } ?: run {
+            WeLogger.e(TAG, "定位 TextStatusStorage 接口失败")
+            return
         }
         val storageAccessor = dexKit.findMethod {
             matcher {
                 paramTypes()
                 returnType(storageInterface.name)
             }
-        }.single { candidate ->
-            candidate.declaredClass!!.fields.any { field ->
+        }.firstOrNull { candidate ->
+            candidate.declaredClass?.fields?.any { field ->
                 field.typeName == candidate.declaredClassName &&
                     Modifier.isStatic(field.modifiers)
-            }
+            } == true
+        } ?: run {
+            WeLogger.e(TAG, "定位 TextStatusStorage 访问器失败")
+            return
         }
 
-        val topicInfoMethod = dexKit.getMethodData(
-            methodTextStatusTopicInfo.getDescriptorString()!!,
-        )!!
-        val setIconMethod = dexKit.getMethodData(
-            methodSetTextStatusIcon.getDescriptorString()!!,
-        )!!
-        val iconHelperType = setIconMethod.paramTypeNames.first()
+        val topicDesc = methodTextStatusTopicInfo.getDescriptorString() ?: return
+        val topicInfoMethod = dexKit.getMethodData(topicDesc) ?: return
+        val setIconDesc = methodSetTextStatusIcon.getDescriptorString() ?: return
+        val setIconMethod = dexKit.getMethodData(setIconDesc) ?: return
+        val iconHelperType = setIconMethod.paramTypeNames.firstOrNull() ?: return
         val iconHelperAccessor = dexKit.findMethod {
             matcher {
                 paramTypes()
                 returnType(iconHelperType)
                 modifiers(Modifier.STATIC)
             }
-        }.single()
+        }.singleOrNull() ?: run {
+            WeLogger.e(TAG, "定位 TextStatus icon helper 访问器失败")
+            return
+        }
         val statusDescriptionMethod = dexKit.findMethod {
             matcher {
                 declaredClass(iconHelperType)
                 paramTypes(topicInfoMethod.returnTypeName)
                 returnType(String::class.java)
             }
-        }.single()
+        }.singleOrNull() ?: run {
+            WeLogger.e(TAG, "定位 TextStatus 描述方法失败")
+            return
+        }
         val statusType = latestStatusMethod.returnTypeName
         val currentStatusActionsMethod = dexKit.findMethod {
             matcher {
@@ -156,11 +172,15 @@ object WeTextStatusApi : ApiFeature(), IResolveDex {
                     "show, menu empty",
                 )
             }
-        }.single { candidate ->
+        }.firstOrNull { candidate ->
             candidate.usesFieldThroughDirectInvoke("field_UserName")
+        } ?: run {
+            WeLogger.e(TAG, "定位 TextStatus 动作菜单方法失败")
+            return
         }
 
-        classTextStatusService.setDescriptor(storageAccessor.declaredClass!!)
+        val storageClass = storageAccessor.declaredClass ?: return
+        classTextStatusService.setDescriptor(storageClass)
         methodTextStatusStorageAccessor.setDescriptor(storageAccessor)
         methodTextStatusIconHelperAccessor.setDescriptor(iconHelperAccessor)
         methodTextStatusDescription.setDescriptor(statusDescriptionMethod)
@@ -198,8 +218,8 @@ object WeTextStatusApi : ApiFeature(), IResolveDex {
     fun openCurrentStatusActions(context: Context, wxId: String): Boolean = runCatching {
         val current = readCurrentStatus(wxId) ?: return false
         val actionMethod = methodCurrentStatusActions.method
-        val showParam = actionMethod.declaringClass.declaredConstructors
-            .single().parameterTypes.single().createInstance()
+        val ctor = actionMethod.declaringClass.declaredConstructors.singleOrNull() ?: return false
+        val showParam = ctor.parameterTypes.firstOrNull()?.createInstance() ?: return false
         val logic = actionMethod.declaringClass.createInstance(showParam)
         logic.reflekt().firstField {
             type = Context::class

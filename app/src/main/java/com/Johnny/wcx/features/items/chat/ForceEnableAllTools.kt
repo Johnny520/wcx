@@ -9,6 +9,7 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.WeLogger
 import org.luckypray.dexkit.DexKitBridge
 
 @Feature(
@@ -17,6 +18,8 @@ import org.luckypray.dexkit.DexKitBridge
     description = "在聊天工具面板中强制启用所有功能"
 )
 object ForceEnableAllTools : SwitchFeature(), IResolveDex {
+
+    private const val TAG = "ForceEnableAllTools"
 
     private val classAppPanelConfig by dexClass()
     private val fieldAppPanelConfig by dexField()
@@ -45,20 +48,32 @@ object ForceEnableAllTools : SwitchFeature(), IResolveDex {
                 paramCount = 0
                 returnType = "void"
             }
-        }.single()
+        }.singleOrNull() ?: run {
+            WeLogger.e(TAG, "定位 AppPanel 刷新方法失败, 功能不可用")
+            return
+        }
         methodRefreshAppPanel.setDescriptor(refreshMethod)
 
         val usedFields = refreshMethod.usingFields.map { it.field }.distinct()
-        val firstFlag = usedFields.first { field ->
+        val firstFlag = usedFields.firstOrNull { field ->
             field.modifiers and Modifiers.FINAL != 0 &&
                 field.type.fields.count { it.typeName == "boolean" } == 1
+        } ?: run {
+            WeLogger.e(TAG, "定位 AppPanel 配置标记字段失败, 功能不可用")
+            return
         }
         val configClass = firstFlag.declaredClass
-        val appPanelConfig = usedFields.single { field ->
+        val appPanelConfig = usedFields.firstOrNull { field ->
             field.className == APP_PANEL_CLASS && field.typeName == configClass.name
+        } ?: run {
+            WeLogger.e(TAG, "定位 AppPanel 配置字段失败, 功能不可用")
+            return
         }
-        val flagEnabled = firstFlag.type.fields.single {
+        val flagEnabled = firstFlag.type.fields.firstOrNull {
             it.typeName == "boolean"
+        } ?: run {
+            WeLogger.e(TAG, "定位 AppPanel 开关字段失败, 功能不可用")
+            return
         }
 
         classAppPanelConfig.setDescriptor(configClass)
