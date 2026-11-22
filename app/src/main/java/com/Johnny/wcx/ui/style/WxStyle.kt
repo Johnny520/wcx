@@ -101,9 +101,9 @@ object WxPalette {
     fun textPrimary(): Color =
         if (isWxDark()) Color(0xFFF2F2F7) else TextPrimary
 
-    /** 次文字色 */
+    /** 次文字色（跟随深浅色）。曾经固定返回浅色值，导致深色下文字发暗。 */
     @Composable
-    fun textSecondary(): Color = TextSecondary
+    fun textSecondary(): Color = if (isWxDark()) TextSecondaryDark else TextSecondary
 
     // ── 高科技增强令牌 ──────────────────────────────────────────────────────
     /** 强调渐变两端：青绿 → 电光蓝。用于选中态、进度、关键按钮。 */
@@ -165,6 +165,58 @@ object WxPalette {
     @Composable
     fun cardBorder(): Color =
         if (isWxDark()) Color(0x1AFFFFFF) else Color(0x0D000000)
+
+    // ── 以下令牌随知友（AARCNoa/zhiyou）的 AI 模块一并移植进来 ──────────────
+    // 命名与知友保持一致，AI 页面整套 UI 直接可用；WCX 原有页面不受影响。
+
+    /** 语义成功色（等同品牌绿）。 */
+    val Ok = Primary
+
+    /** 关闭态圆点。 */
+    val DotOff = Color(0x33999999)
+
+    /** 深色模式三级文字（浅色是「越次要越淡」，深色必须「越次要越暗」）。 */
+    val TextPrimaryDark = Color(0xFFF2F2F7)
+    val TextSecondaryDark = Color(0xFF98989F)
+    val TextTertiaryDark = Color(0xFF6B6B72)
+
+    /** 统一强调色（电光蓝）：强调文字、进度、选中描边、主按钮。 */
+    val Accent = Color(0xFF3D7EFF)
+
+    /**
+     * 卡片内的次级小块（统计格、内嵌按钮底）：浅色用页面灰，深色比卡片再亮一档。
+     * 只用于「卡片内部还需要再分一层」的场景，不要拿它当页面或卡片底色。
+     */
+    @Composable
+    fun insetSurface(): Color =
+        if (isWxDark()) DarkSurfaceHigh else Background
+
+    /** 三级文字色（跟随深浅色）：提示、占位、不可用状态。 */
+    @Composable
+    fun textTertiary(): Color =
+        if (isWxDark()) TextTertiaryDark else TextTertiary
+
+    /** 分割线：比描边再明显一点，用于卡片内的列表/栏位分隔。 */
+    @Composable
+    fun divider(): Color =
+        if (isWxDark()) Color(0x1FFFFFFF) else Color(0x14000000)
+
+    /** 品牌绿浅底（选中行、徽标、胶囊）。 */
+    @Composable
+    fun primarySoft(): Color =
+        if (isWxDark()) Primary.copy(alpha = 0.16f) else PrimarySoft
+
+    @Composable
+    fun dangerSoft(): Color =
+        if (isWxDark()) Danger.copy(alpha = 0.16f) else DangerSoft
+
+    @Composable
+    fun warningSoft(): Color =
+        if (isWxDark()) Warning.copy(alpha = 0.16f) else WarningSoft
+
+    @Composable
+    fun infoSoft(): Color =
+        if (isWxDark()) Info.copy(alpha = 0.16f) else InfoSoft
 }
 
 /**
