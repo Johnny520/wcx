@@ -1,5 +1,6 @@
 package com.Johnny.wcx.activity.settings
 
+import com.Johnny.wcx.activity.settings.ai.AiPager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
@@ -188,6 +189,7 @@ internal sealed interface SettingsNavTarget {
     data object ModuleHealth : SettingsNavTarget
     data object Logs : SettingsNavTarget
     data object Settings : SettingsNavTarget
+    data object Ai : SettingsNavTarget
 }
 
 /**
@@ -277,7 +279,9 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             // 单页模式没有 pager，日志/设置通过子页面进入，返回即回到单页主页
             SettingsNavTarget.Logs -> LogsScreen(onBack = pop)
 
+            SettingsNavTarget.Ai -> AiPager(onBack = pop)
             SettingsNavTarget.Settings -> SettingsPager(
+                onOpenAi = { push(SettingsNavTarget.Ai) },
                 onOpenLicense = { push(SettingsNavTarget.License) },
                 onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
                 onBack = pop,

@@ -19,6 +19,7 @@ import com.Johnny.wcx.utils.MainThreadWatchdog
 import com.Johnny.wcx.utils.RuntimeConfig
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.ai.AiProfileInitializer
 import com.Johnny.wcx.utils.crash.ExitReasonRecorder
 import com.Johnny.wcx.utils.crash.JavaCrashHandler
 import com.Johnny.wcx.utils.crash.NativeCrashHandler
@@ -49,6 +50,11 @@ object WeLauncher {
                 // 启动时间线 + 上次退出原因：用于判断「后台被杀」是偶发还是周期性。
                 runCatching { ProcessTimeline.recordStartup(appCtx) }
                 runCatching { ExitReasonRecorder.recordOnStartup(appCtx) }
+                // AI 档案的初始化是内存态：进程重启后还能读到 initializing 的档案，
+                // 说明上一次被中断了，必须复位成失败态，否则档案弹窗会永远停在「准备中」。
+                if (TargetProcesses.isInMain) {
+                    runCatching { AiProfileInitializer.recoverInterrupted() }
+                }
             }, "WCX-ExitReason").apply { isDaemon = true }.start()
         }
 

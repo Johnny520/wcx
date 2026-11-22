@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Add
+import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Bug_report
 import com.Johnny.wcx.activity.settings.CONTENT_BOTTOM_INSET
 import com.Johnny.wcx.ai.AiLetterIndex
@@ -83,6 +84,8 @@ internal fun AiPager(
     onRequestAdd: () -> Unit = {},
     /** 外部（浮层确认添加后）触发的刷新计数：变化即重读索引。 */
     externalRefresh: Int = 0,
+    /** 设置页从导航栈进入时给返回按钮用；独立使用时传 null 不显示。 */
+    onBack: (() -> Unit)? = null,
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var summaries by remember { mutableStateOf<List<AiProfileSummary>>(emptyList()) }
@@ -128,6 +131,7 @@ internal fun AiPager(
         ) {
             AiHeader(
                 tab = tab,
+                onBack = onBack,
                 onTabChange = { tab = it },
                 onAdd = { if (tab == 1) showAddGroup = true else onRequestAdd() },
                 onPrompts = if (BuildConfig.DEBUG) {
@@ -260,6 +264,7 @@ internal fun AiPager(
 @Composable
 private fun AiHeader(
     tab: Int,
+    onBack: (() -> Unit)? = null,
     onTabChange: (Int) -> Unit,
     onAdd: () -> Unit,
     /** debug 专用：null 表示不显示入口（release 包）。 */
@@ -274,6 +279,17 @@ private fun AiHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (onBack != null) {
+            Icon(
+                imageVector = MaterialSymbols.Outlined.Arrow_back,
+                contentDescription = "返回",
+                tint = WxPalette.textPrimary(),
+                modifier = Modifier
+                    .size(22.dp)
+                    .clickable { onBack() },
+            )
+            Spacer(Modifier.width(2.dp))
+        }
         SegmentPill("好友", tab == 0) { onTabChange(0) }
         SegmentPill("群组", tab == 1) { onTabChange(1) }
         SegmentPill("设置", tab == 2) { onTabChange(2) }

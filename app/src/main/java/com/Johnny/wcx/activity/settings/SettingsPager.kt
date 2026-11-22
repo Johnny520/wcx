@@ -61,6 +61,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import coil3.compose.AsyncImage
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Account_circle
+import com.composables.icons.materialsymbols.outlined.Article
 import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Auto_delete
 import com.composables.icons.materialsymbols.outlined.Block
@@ -166,6 +167,7 @@ import com.Johnny.wcx.ui.style.fxReveal
 
 @Composable
 fun SettingsPager(
+    onOpenAi: () -> Unit = {},
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
     onBack: (() -> Unit)? = null,
@@ -355,6 +357,12 @@ fun SettingsPager(
                     title = "提示",
                     summary = "牙膏要一点一点挤, 显卡要一刀一刀切, PPT 要一张一张放, 代码要一行一行写, 单个功能预计自出现在 commit 之日起, 三年内开发完毕",
                     icon = MaterialSymbols.Outlined.Lightbulb_2,
+                )
+                PrefArrow(
+                    title = "AI 助手",
+                    summary = "好友档案 · 智能建议 · 自动回复 · 群聊总结",
+                    icon = MaterialSymbols.Outlined.Article,
+                    onClick = onOpenAi,
                 )
                 PrefArrow(
                     title = "开放源代码许可",
