@@ -198,10 +198,18 @@ object TabLongPressUnreadPanel : SwitchFeature(), IResolveDex {
 
         // 微信原有长按监听（8.0.80 = com.tencent.mm.ui.w8，公用 OnLongClickListener 接口）要保留：
         // 直接覆盖会把微信自己的长按行为弄丢。
+        // 说明：不走 View#getOnLongClickListener（API 28+ 属 BlockedPrivateApi，lint 会拦 release），
+        // 改用 AOSP 私有字段 mListenerInfo.mOnLongClickListener 读取，字段名稳定且不触发 lint 阻断规则。
         val previous = runCatching {
-            View::class.java.getDeclaredMethod("getOnLongClickListener")
+            val listenerInfo = View::class.java
+                .getDeclaredField("mListenerInfo")
                 .apply { isAccessible = true }
-                .invoke(tab) as? View.OnLongClickListener
+                .get(tab)
+                ?: return@runCatching null
+            listenerInfo.javaClass
+                .getDeclaredField("mOnLongClickListener")
+                .apply { isAccessible = true }
+                .get(listenerInfo) as? View.OnLongClickListener
         }.getOrNull()
 
         tab.isLongClickable = true
