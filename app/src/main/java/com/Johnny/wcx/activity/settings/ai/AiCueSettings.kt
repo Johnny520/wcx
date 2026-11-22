@@ -1,0 +1,161 @@
+package com.Johnny.wcx.activity.settings.ai
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.Johnny.wcx.features.ai.AiConfig
+import com.Johnny.wcx.features.items.chat.AiCueSound
+import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.style.WxPalette
+
+/**
+ * AI 页的「设置」页：目前只有双击提示音。
+ *
+ * 放在这里而不是全局设置，是因为它只影响 AI 建议这一个手势 —— 放进通用设置里
+ * 用户根本不会知道「双击还有声音」。
+ */
+@Composable
+internal fun AiCueSettings() {
+    val styles = AiCueSound.Style.values()
+    var enabled by remember { mutableStateOf(AiConfig.isCueSoundEnabled) }
+    var selectedId by remember { mutableStateOf(AiConfig.cueSoundId) }
+    val selectedIndex = AiCueSound.Style.indexOf(selectedId)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SoftCard(contentPadding = 0) {
+            AiSwitchRow(
+                title = "双击提示音",
+                subtitle = "聊天页双击触发 AI 建议时响一声",
+                checked = enabled,
+                onCheckedChange = {
+                    enabled = it
+                    AiConfig.setCueSoundEnabled(it)
+                    // 打开时顺便放一声，让用户知道「开」是什么效果。
+                    if (it) AiCueSound.preview(selectedIndex)
+                },
+                // 收起时不要留一条孤零零的分隔线。
+                showDivider = enabled,
+            )
+
+            // 音色跟着开关走：开着才展开，关掉整块收起。
+            AnimatedVisibility(
+                visible = enabled,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    styles.forEachIndexed { index, item ->
+                        CueStyleRow(
+                            label = item.label,
+                            hint = item.hint,
+                            selected = index == selectedIndex,
+                            onClick = {
+                                selectedId = item.id
+                                AiConfig.setCueSoundId(item.id)
+                                // 选中的同时试听：不用再单独点一次「播放」。
+                                AiCueSound.preview(index)
+                            },
+                            showDivider = index != styles.lastIndex,
+                        )
+                    }
+                }
+            }
+        }
+
+        Text(
+            text = "点一下试听并选中。关掉开关后双击不再发声，卡片照常弹出。",
+            fontSize = 11.sp,
+            color = WxPalette.textTertiary(),
+            lineHeight = 16.sp,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun CueStyleRow(
+    label: String,
+    hint: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    showDivider: Boolean,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(if (selected) WxPalette.Primary else WxPalette.divider())
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    fontSize = 14.sp,
+                    color = WxPalette.textPrimary(),
+                )
+                Text(
+                    text = hint,
+                    fontSize = 11.sp,
+                    color = WxPalette.textSecondary(),
+                )
+            }
+            Text(
+                text = "试听",
+                fontSize = 12.sp,
+                color = WxPalette.Primary,
+            )
+        }
+        if (showDivider) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp)
+                    .height(0.5.dp)
+                    .background(WxPalette.divider())
+            )
+        }
+    }
+}
