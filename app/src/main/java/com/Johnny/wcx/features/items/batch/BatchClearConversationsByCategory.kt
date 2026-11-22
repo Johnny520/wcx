@@ -48,7 +48,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * 按类别批量清空会话。
  *
- * 设计要点（与仓库既有 features/items/batch/* 保持一致，同时补齐批量任务必须做的事）：
+ * 设计要点（与仓库既有 features/items/batch 下实现保持一致，同时补齐批量任务必须做的事）：
  * 1. 只读数据库（rconversation / rcontact / bizinfo）在 Dispatchers.IO 上做；
  * 2. 真正删会话调的是微信自己的 ConversationStorage 方法（hideConversation / deleteConversation），
  *    它们会同步通知会话列表观察者，**必须回到主线程**执行，否则列表不刷新甚至崩 adapter；
