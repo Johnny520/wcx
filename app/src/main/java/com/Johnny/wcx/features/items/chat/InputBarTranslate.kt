@@ -25,6 +25,7 @@ import com.composables.icons.materialsymbols.outlined.Arrow_drop_down
 import com.composables.icons.materialsymbols.outlined.Language
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import dev.ujhhgtg.reflekt.reflekt
+import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.api.ui.WeChatInputBarMenuApi
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
@@ -247,7 +248,7 @@ object InputBarTranslate : SwitchFeature(), WeChatInputBarMenuApi.IActionItemsPr
             if (handled) {
                 true
             } else {
-                runCatching { previous?.onLongClick(view) }.getOrDefault(false)
+                runCatching { previous?.onLongClick(view) }.getOrNull() ?: false
             }
         }
     }

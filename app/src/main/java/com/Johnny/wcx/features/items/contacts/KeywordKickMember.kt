@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
@@ -109,7 +110,7 @@ object KeywordKickMember : ClickableFeature(), WeDatabaseListenerApi.IInsertList
         matcher {
             usingEqStrings("getChatroomData hashMap is null!")
             paramCount(1)
-            paramTypes("java.lang.String")
+            paramTypes(String::class)
         }
     }
 

@@ -18,6 +18,7 @@ import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.api.core.WeApi
 import com.Johnny.wcx.features.api.core.WeConversationApi
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
