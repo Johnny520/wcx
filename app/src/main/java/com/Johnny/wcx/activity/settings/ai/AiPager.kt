@@ -2,6 +2,8 @@ package com.Johnny.wcx.activity.settings.ai
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -67,6 +69,7 @@ import com.Johnny.wcx.ai.AiProfileSummary
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.content.ScrimDialog
+import com.Johnny.wcx.features.items.chat.AiMomentsCopy
 import com.Johnny.wcx.ui.content.AiConfigPanel
 import com.Johnny.wcx.ui.style.WxPalette
 import kotlinx.coroutines.Dispatchers
@@ -145,8 +148,13 @@ internal fun AiPager(
                 },
             )
 
-            // 设置页不依赖档案索引，不进「载入中」这条分支。
+            // 说明页与设置页都不依赖档案索引，不进「载入中」这条分支。
             if (tab == 2) {
+                AiHelpPage(
+                    onOpenConfig = { showConfig = true },
+                    onMomentsCopy = { AiMomentsCopy.showDialog(context) },
+                )
+            } else if (tab == 3) {
                 AiCueSettings(onOpenConfig = { showConfig = true })
             } else if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -328,10 +336,18 @@ private fun AiHeader(
             )
             Spacer(Modifier.width(2.dp))
         }
-        SegmentPill("好友", tab == 0) { onTabChange(0) }
-        SegmentPill("群组", tab == 1) { onTabChange(1) }
-        SegmentPill("设置", tab == 2) { onTabChange(2) }
-        Spacer(Modifier.weight(1f))
+        // 四个分段可能比屏幕宽：放进可横向滚动的容器，右侧「添加」始终可见。
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SegmentPill("好友", tab == 0) { onTabChange(0) }
+            SegmentPill("群组", tab == 1) { onTabChange(1) }
+            SegmentPill("说明", tab == 2) { onTabChange(2) }
+            SegmentPill("设置", tab == 3) { onTabChange(3) }
+        }
         // 顺序：提示词（仅 debug）在左，添加在右。
         if (onPrompts != null) {
             AiIconPill(
@@ -357,7 +373,7 @@ private fun SegmentPill(text: String, selected: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(50))
             .background(if (selected) WxPalette.primarySoft() else WxPalette.insetSurface())
             .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Text(
             text = text,
