@@ -36,6 +36,35 @@ object WePacketDispatcher : ApiFeature(), IResolveDex {
 
     private val recentRequests = ConcurrentHashMap<String, Long>()
 
+    /** 已提示过「不可序列化」的请求类型，避免同一条 cgi 反复刷日志。 */
+    private val warnedNotSerializable = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * 把 `parseFrom(bytes)` 的结果写回 wrapper 的 `a` 字段。
+     *
+     * protobuf 的 `parseFrom` 是静态工厂（`parseFrom(byte[]) -> XxxReq`），不会修改传入对象，
+     * 旧实现调用后丢掉返回值，导致请求/响应篡改规则配了也不生效。这里把新对象塞回 wrapper，
+     * 微信后续序列化用的就是篡改后的内容。失败返回 null（调用方只记日志，不影响原请求）。
+     */
+    private fun applyParsedPb(wrapper: Any, current: Any, tampered: ByteArray): Any? = runCatching {
+        val parsed = current.reflekt()
+            .firstMethodOrNull { name = "parseFrom"; parameterCount = 1 }
+            ?.invokeStatic(tampered)
+            ?: return@runCatching null
+        wrapper.reflekt().setField("a", parsed)
+        parsed
+    }.onFailure {
+        WeLogger.w(TAG, "apply parsed pb failed: ${it.javaClass.simpleName} ${it.message}")
+    }.getOrNull()
+
+    private fun warnNotSerializable(uri: String?, cgiId: Int, className: String) {
+        if (warnedNotSerializable.size > 64) warnedNotSerializable.clear()
+        val key = "$cgiId|$uri|$className"
+        if (warnedNotSerializable.add(key)) {
+            WeLogger.w(TAG, "request not serializable, tamper skipped: $key")
+        }
+    }
+
     override fun onEnable() {
         Handler(Looper.getMainLooper()).postDelayed(3000) {
             try {
@@ -51,10 +80,23 @@ object WePacketDispatcher : ApiFeature(), IResolveDex {
                     val uri = v0Ref.invokeMethod("getUri", superclass = true) as? String? ?: "null"
                     val cgiId = v0Ref.invokeMethod("getType", superclass = true) as Int
                     try {
-                        val reqWrapper = v0Ref.invokeMethod("getReqObj", superclass = true)!!
-                        val reqPbObj = reqWrapper.reflekt().getField("a", superclass = true)!!
-                        val reqBytes = reqPbObj.reflekt().firstMethodOrNull { name = "toByteArray"; superclass() }
-                            ?.invoke() as? ByteArray ?: return@hookBefore
+                        val reqWrapper = v0Ref.invokeMethod("getReqObj", superclass = true)
+                            ?: return@hookBefore
+                        val reqPbObj = reqWrapper.reflekt().getField("a", superclass = true)
+                            ?: return@hookBefore
+
+                        // 模块自己用 generic 通道发的请求（WePacketHelper.sendGenericCgi 构造的 raw 包装类）
+                        // 里没有完整的 protobuf 字段，toByteArray() 会对 required 字段抛
+                        // NPE（com.tencent.mm.protobuf.f.computeSize() on null）——
+                        // 这类请求本来就不该参与篡改，只记一次 W 日志，避免每发一条 cgi 刷一条错误。
+                        val reqBytes = runCatching {
+                            reqPbObj.reflekt().firstMethodOrNull { name = "toByteArray"; superclass() }
+                                ?.invoke() as? ByteArray
+                        }.getOrNull()
+                        if (reqBytes == null) {
+                            warnNotSerializable(uri, cgiId, reqPbObj.javaClass.name)
+                            return@hookBefore
+                        }
 
                         // 构造唯一标识符
                         val key =
@@ -81,8 +123,11 @@ object WePacketDispatcher : ApiFeature(), IResolveDex {
                         }
 
                         WePacketManager.handleRequestTamper(uri, cgiId, reqBytes)?.let { tampered ->
-                            reqPbObj.reflekt().invokeMethod("parseFrom", tampered)
-                            WeLogger.i(TAG, "tampered request: $uri")
+                            // parseFrom 是静态工厂，返回新对象：旧实现把返回值丢掉了，
+                            // 等于什么都没改（篡改规则配了也不生效）。写回 wrapper.a 才真正生效。
+                            if (applyParsedPb(reqWrapper, reqPbObj, tampered) != null) {
+                                WeLogger.i(TAG, "tampered request: $uri")
+                            }
                         }
                     } catch (_: NoSuchElementException) {
                         // ignored; toByteArray might not exist since a might be Integer
@@ -138,18 +183,18 @@ object WePacketDispatcher : ApiFeature(), IResolveDex {
                                                 val respPbObjRef = respPbObj.reflekt()
 
                                                 runCatching {
-                                                    val originalRespBytes = respPbObjRef
-                                                        .invokeMethod("toByteArray", superclass = true)!! as ByteArray
+                                                    val originalRespBytes = runCatching {
+                                                        respPbObjRef.invokeMethod("toByteArray", superclass = true) as? ByteArray
+                                                    }.getOrNull() ?: return@runCatching
                                                     WePacketManager.handleResponseTamper(
                                                         uri,
                                                         cgiId,
                                                         originalRespBytes
                                                     )?.let { tampered ->
-                                                        respPbObjRef.invokeMethod("parseFrom", tampered)
-                                                        WeLogger.i(
-                                                            TAG,
-                                                            "tampered response (PB): $uri"
-                                                        )
+                                                        // 同上：parseFrom 返回新对象，必须写回 wrapper.a
+                                                        if (applyParsedPb(respWrapper, respPbObj, tampered) != null) {
+                                                            WeLogger.i(TAG, "tampered response (PB): $uri")
+                                                        }
                                                     }
                                                 }
                                             }
