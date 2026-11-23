@@ -42,6 +42,7 @@ internal object InternalFeatureGroups {
             "AI 长消息速读",
             "朋友圈帮我评论",
             "AI 每日总结",
+            "AI 自动增量整理",
         ),
     )
 

@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.features.ai.AiConfig
+import com.Johnny.wcx.ai.AutoIncrementalScheduler
 import com.Johnny.wcx.features.items.chat.AiCueSound
 import com.Johnny.wcx.features.items.chat.ChatAiSummary
 import com.Johnny.wcx.preferences.WePrefs
@@ -50,6 +51,7 @@ import com.Johnny.wcx.ui.style.WxPalette
  */
 @Composable
 internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val styles = AiCueSound.Style.values()
     var enabled by remember { mutableStateOf(AiConfig.isCueSoundEnabled) }
     var selectedId by remember { mutableStateOf(AiConfig.cueSoundId) }
@@ -130,6 +132,82 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
                         if (seconds == delaySeconds) {
                             Text("已选", fontSize = 11.sp, color = WxPalette.Primary)
                         }
+                    }
+                }
+            }
+        }
+
+        // 档案自动整理：每天补一次新增聊天（默认关，会花额度）。
+        var autoIncremental by remember { mutableStateOf(AutoIncrementalScheduler.isEnabled) }
+        var autoHour by remember { mutableStateOf(AutoIncrementalScheduler.hour) }
+        var incrementalRunning by remember { mutableStateOf(false) }
+        SoftCard(contentPadding = 0) {
+            AiSwitchRow(
+                title = "档案自动整理",
+                subtitle = "每天到点给已就绪的好友档案补一次新增聊天（默认关，会消耗额度）",
+                checked = autoIncremental,
+                onCheckedChange = {
+                    autoIncremental = it
+                    AutoIncrementalScheduler.setEnabled(it)
+                },
+                showDivider = autoIncremental,
+            )
+            if (autoIncremental) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("时间", fontSize = 13.sp, color = WxPalette.textPrimary())
+                    Spacer(Modifier.weight(1f))
+                    AutoIncrementalScheduler.HOUR_OPTIONS.forEach { option ->
+                        val selected = option == autoHour
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (selected) WxPalette.primarySoft() else WxPalette.insetSurface())
+                                .clickable {
+                                    autoHour = option
+                                    AutoIncrementalScheduler.setHour(option)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                        ) {
+                            Text(
+                                text = "${option}点",
+                                fontSize = 12.sp,
+                                color = if (selected) WxPalette.Primary else WxPalette.textSecondary(),
+                            )
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (incrementalRunning) "正在整理，进度看「好友」页" else "也可以现在补一次",
+                        fontSize = 12.sp,
+                        color = WxPalette.textSecondary(),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(WxPalette.primarySoft())
+                            .clickable(enabled = !incrementalRunning) {
+                                incrementalRunning = true
+                                AutoIncrementalScheduler.runNow { message ->
+                                    incrementalRunning = false
+                                    com.Johnny.wcx.utils.android.showToast(context, message)
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                    ) {
+                        Text("立即整理", fontSize = 12.sp, color = WxPalette.Primary)
                     }
                 }
             }
