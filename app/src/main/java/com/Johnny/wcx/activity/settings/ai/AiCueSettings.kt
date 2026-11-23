@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.features.items.chat.AiCueSound
 import com.Johnny.wcx.features.items.chat.ChatAiSummary
+import com.Johnny.wcx.features.items.chat.AiDigestHint
 import com.Johnny.wcx.features.items.chat.AiMomentsCopy
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AiConfigStatusRow
@@ -103,8 +104,14 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
                     title = "朋友圈文案",
                     detail = "给个关键词，生成 3 条可直接发的文案",
                 ) { AiMomentsCopy.showDialog(context) }
+                AiToolRow(
+                    title = "未读速览 / 今日摘要",
+                    detail = "整理所有未读会话的要点，或今天各会话的进展",
+                ) { AiDigestHint.tellWhereToUse(context) }
                 AiCapabilityHint("待办 / 回复 / 问答 / 群公告", "聊天页长按输入框 → 菜单里选")
                 AiCapabilityHint("改写这条", "长按自己发的文字消息 →「AI 改写这条」")
+                AiCapabilityHint("写备注", "单聊里长按任意消息 →「AI 写备注」")
+                AiCapabilityHint("读图翻译", "长按聊天里的图片 →「AI 读图翻译」")
             }
         }
 

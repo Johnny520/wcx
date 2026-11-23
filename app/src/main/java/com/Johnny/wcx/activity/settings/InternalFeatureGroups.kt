@@ -31,6 +31,10 @@ internal object InternalFeatureGroups {
             "AI 写群公告",
             "AI 朋友圈文案",
             "AI 改写得体",
+            "AI 未读速览",
+            "AI 今日摘要",
+            "AI 写备注",
+            "AI 图片翻译",
         ),
     )
 

@@ -252,6 +252,66 @@ object TranslateSupport {
         }
     }
 
+    /**
+     * 多模态调用：把一张 JPEG 与提示词一起发过去（图片走 data URL）。
+     *
+     * 只有支持图片输入的模型能用（如 gpt-4o / qwen-vl / glm-4v）。不支持时接口会直接报错，
+     * 错误文案会原样展示，用户能看出是模型不支持而不是模块坏了。
+     */
+    fun chatCompletionWithImage(
+        systemPrompt: String,
+        userPrompt: String,
+        jpeg: ByteArray,
+        config: AiConfig = aiConfig(),
+        timeoutMs: Long = 60_000L,
+    ): Result<String> {
+        if (!config.isUsable) {
+            return Result.failure(IOException("未配置 AI 接口，请先到「AI 助手 → 设置 → AI 接口」填写"))
+        }
+        if (jpeg.isEmpty()) return Result.failure(IOException("图片内容为空"))
+        val url = normalizeApiUrl(config.apiUrl)
+        val base64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+        val body = runCatching {
+            buildJsonObject {
+                put("model", config.model.ifBlank { "deepseek-chat" })
+                put("temperature", 0.2)
+                put("messages", buildJsonArray {
+                    if (systemPrompt.isNotBlank()) {
+                        add(buildJsonObject {
+                            put("role", "system")
+                            put("content", systemPrompt)
+                        })
+                    }
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("content", buildJsonArray {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", userPrompt)
+                            })
+                            add(buildJsonObject {
+                                put("type", "image_url")
+                                put("image_url", buildJsonObject {
+                                    put("url", "data:image/jpeg;base64,$base64")
+                                })
+                            })
+                        })
+                    })
+                })
+            }.toString()
+        }.getOrElse { return Result.failure(IOException("请求体构造失败", it)) }
+
+        val headers = mapOf(
+            "Content-Type" to "application/json; charset=utf-8",
+            "Authorization" to "Bearer ${config.apiKey}",
+        )
+        return request(url, "POST", body, headers, timeoutMs).mapCatching { response ->
+            val content = parseChatContent(response)
+            if (content.isBlank()) throw IOException("AI 返回内容为空，请确认模型支持图片输入")
+            content
+        }
+    }
+
     private fun parseChatContent(body: String): String {
         val root = json.parseToJsonElement(body).jsonObject
         val choices = root["choices"]?.jsonArray
