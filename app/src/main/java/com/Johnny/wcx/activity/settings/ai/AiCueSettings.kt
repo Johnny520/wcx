@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,12 +30,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.features.items.chat.AiCueSound
 import com.Johnny.wcx.features.items.chat.ChatAiSummary
+import com.Johnny.wcx.features.items.chat.AiMomentsCopy
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AiConfigStatusRow
 import com.Johnny.wcx.ui.style.SoftCard
@@ -89,6 +92,20 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
                 },
                 showDivider = false,
             )
+        }
+
+        // AI 工具：入口本来分散在聊天页各处，这里集中列一遍，顺便说明在哪触发。
+        val context = LocalContext.current
+        SoftCard(contentPadding = 16) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("AI 工具", fontSize = 13.sp, color = WxPalette.textPrimary())
+                AiToolRow(
+                    title = "朋友圈文案",
+                    detail = "给个关键词，生成 3 条可直接发的文案",
+                ) { AiMomentsCopy.showDialog(context) }
+                AiCapabilityHint("待办 / 回复 / 问答 / 群公告", "聊天页长按输入框 → 菜单里选")
+                AiCapabilityHint("改写这条", "长按自己发的文字消息 →「AI 改写这条」")
+            }
         }
 
         // 能力清单：AI 的每个能力都在这一个页面内开，不让用户去功能列表里找。
@@ -151,6 +168,25 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
             lineHeight = 16.sp,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
+    }
+}
+
+@Composable
+private fun AiToolRow(title: String, detail: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(WxPalette.insetSurface())
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 13.sp, color = WxPalette.textPrimary())
+            Text(detail, fontSize = 11.sp, color = WxPalette.textSecondary(), lineHeight = 16.sp)
+        }
+        Text("打开", fontSize = 11.sp, color = WxPalette.Accent)
     }
 }
 

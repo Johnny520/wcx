@@ -162,19 +162,19 @@ fun AiConfigPanel(
         }
 
         SoftCard(contentPadding = 14) {
-            CfgField(
+            AiInputField(
                 label = "API 地址",
                 value = url,
                 placeholder = "https://api.deepseek.com",
                 onChange = { url = it; error = null },
             )
-            CfgField(
+            AiInputField(
                 label = "API Key",
                 value = key,
                 placeholder = "sk-...",
                 onChange = { key = it; error = null },
             )
-            CfgField(
+            AiInputField(
                 label = "模型名称",
                 value = model,
                 placeholder = AiConfig.DEFAULT_MODEL,
@@ -268,7 +268,7 @@ fun AiConfigPanel(
                         }
                     }
                 }
-                CfgField(
+                AiInputField(
                     label = "输出上限 max_tokens（0 = 不传）",
                     value = maxTokens,
                     placeholder = "393216",
@@ -277,7 +277,7 @@ fun AiConfigPanel(
                         maxTokens.toIntOrNull()?.let { AiConfig.setMaxTokens(it) }
                     },
                 )
-                CfgField(
+                AiInputField(
                     label = "温度 0~2（默认 0.9）",
                     value = temperature,
                     placeholder = "0.9",
@@ -425,7 +425,7 @@ fun aiStatusSubtitle(status: AiConfig.Status): String = when {
 // ── 面板内部组件（与 WCX 其它页面同一套视觉） ────────────────────────────────
 
 @Composable
-private fun CfgField(
+fun AiInputField(
     label: String,
     value: String,
     placeholder: String,
