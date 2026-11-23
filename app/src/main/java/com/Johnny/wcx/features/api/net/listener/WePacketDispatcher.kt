@@ -47,9 +47,10 @@ object WePacketDispatcher : ApiFeature(), IResolveDex {
      * 微信后续序列化用的就是篡改后的内容。失败返回 null（调用方只记日志，不影响原请求）。
      */
     private fun applyParsedPb(wrapper: Any, current: Any, tampered: ByteArray): Any? = runCatching {
-        // 注意：invokeStatic 只声明在具体类型 Method 上（firstMethodOrNull 返回的是
-        // BaseReflectedMethod，没有该方法），所以这里用 firstMethod + runCatching 兜底。
-        val parsed = current.reflekt()
+        // 注意：invokeStatic 只在「类反射器」（Class.reflekt()）返回的 ReflectedMethod 上，
+        // 实例反射器（instance.reflekt()）返回的 InstanceReflectedMethod 没有该方法，
+        // 所以这里必须走 current.javaClass.reflekt()。
+        val parsed = current.javaClass.reflekt()
             .firstMethod { name = "parseFrom"; parameterCount = 1 }
             .invokeStatic(tampered)
             ?: return@runCatching null
