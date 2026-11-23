@@ -241,6 +241,7 @@ private fun SettingsRoot(onFinish: () -> Unit) {
         when (screen) {
             SettingsNavTarget.Main -> MainPagerScreen(
                 onOpenCategory = { push(SettingsNavTarget.Category(it)) },
+                onOpenAi = { push(SettingsNavTarget.Ai) },
                 onOpenLicense = { push(SettingsNavTarget.License) },
                 onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
                 onOpenModuleHealth = { push(SettingsNavTarget.ModuleHealth) },
@@ -293,6 +294,7 @@ private fun SettingsRoot(onFinish: () -> Unit) {
 @Composable
 private fun MainPagerScreen(
     onOpenCategory: (String) -> Unit,
+    onOpenAi: () -> Unit,
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
     onOpenModuleHealth: () -> Unit,
@@ -379,7 +381,11 @@ private fun MainPagerScreen(
                         )
                         1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                         2 -> LogsPager()
-                        else -> SettingsPager(onOpenLicense = onOpenLicense, onOpenAcknowledgements = onOpenAcknowledgements)
+                        else -> SettingsPager(
+                            onOpenAi = onOpenAi,
+                            onOpenLicense = onOpenLicense,
+                            onOpenAcknowledgements = onOpenAcknowledgements,
+                        )
                     }
                 }
             }

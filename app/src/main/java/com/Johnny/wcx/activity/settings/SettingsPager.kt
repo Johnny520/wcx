@@ -211,6 +211,22 @@ fun SettingsPager(
             }
         }
 
+        // 实验室
+        item {
+            MiuixSmallTitle(text = "实验室", modifier = Modifier.padding(top = 12.dp))
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                PrefArrow(
+                    title = "AI 助手",
+                    summary = "好友档案 · 智能建议 · 自动回复 · 群聊总结",
+                    icon = MaterialSymbols.Outlined.Article,
+                    onClick = onOpenAi,
+                )
+            }
+        }
+
         // 微信主题
         item {
             MiuixSmallTitle(text = "微信主题", modifier = Modifier.padding(top = 12.dp))
@@ -357,12 +373,6 @@ fun SettingsPager(
                     title = "提示",
                     summary = "牙膏要一点一点挤, 显卡要一刀一刀切, PPT 要一张一张放, 代码要一行一行写, 单个功能预计自出现在 commit 之日起, 三年内开发完毕",
                     icon = MaterialSymbols.Outlined.Lightbulb_2,
-                )
-                PrefArrow(
-                    title = "AI 助手",
-                    summary = "好友档案 · 智能建议 · 自动回复 · 群聊总结",
-                    icon = MaterialSymbols.Outlined.Article,
-                    onClick = onOpenAi,
                 )
                 PrefArrow(
                     title = "开放源代码许可",
