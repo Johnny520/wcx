@@ -34,17 +34,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.features.items.chat.AiCueSound
+import com.Johnny.wcx.features.items.chat.ChatAiSummary
+import com.Johnny.wcx.preferences.WePrefs
+import com.Johnny.wcx.ui.content.AiConfigStatusRow
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.WxPalette
 
 /**
- * AI 页的「设置」页：目前只有双击提示音。
+ * AI 页的「设置」页 —— AI 相关开关的唯一落点。
  *
- * 放在这里而不是全局设置，是因为它只影响 AI 建议这一个手势 —— 放进通用设置里
- * 用户根本不会知道「双击还有声音」。
+ * 接口配置、双击提示音、能力入口说明都在这里，功能列表里不再出现 AI 的子功能条目，
+ * 用户不需要在「API / 聊天」分类里逐个找。
  */
 @Composable
-internal fun AiCueSettings() {
+internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
     val styles = AiCueSound.Style.values()
     var enabled by remember { mutableStateOf(AiConfig.isCueSoundEnabled) }
     var selectedId by remember { mutableStateOf(AiConfig.cueSoundId) }
@@ -57,6 +60,37 @@ internal fun AiCueSettings() {
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // AI 接口配置：全模块只有这一处入口，功能自己的设置页不再重复放置地址/Key 输入框。
+        SoftCard(contentPadding = 0) {
+            AiConfigStatusRow(onClick = onOpenConfig)
+        }
+
+        // 唯一带独立开关的 AI 能力：其它能力无开关（随 AI 助手常驻），只有它需要用户决定开不开。
+        var summaryEnabled by remember { mutableStateOf(ChatAiSummary.isEnabled) }
+        SoftCard(contentPadding = 0) {
+            AiSwitchRow(
+                title = "聊天记录 AI 总结",
+                subtitle = "聊天输入栏长按菜单里总结最近消息，接口同上",
+                checked = summaryEnabled,
+                onCheckedChange = {
+                    summaryEnabled = it
+                    WePrefs.putBool(ChatAiSummary.name, it)
+                    ChatAiSummary.isEnabled = it
+                },
+            )
+        }
+
+        // 能力清单：AI 的每个能力都在这一个页面内开，不让用户去功能列表里找。
+        SoftCard(contentPadding = 16) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("AI 能力在哪开", fontSize = 13.sp, color = WxPalette.textPrimary())
+                AiCapabilityHint("自动回复", "「好友」页点进某个档案 → 打开「自动回复」，只对这个人生效")
+                AiCapabilityHint("群聊总结", "「群聊」页点右上角 + 添加群，按设定时段自动总结")
+                AiCapabilityHint("双击建议", "聊天页双击任意消息，弹出 AI 建议")
+                AiCapabilityHint("接口与密钥", "上面第一张卡片，全模块只有这一处")
+            }
+        }
+
         SoftCard(contentPadding = 0) {
             AiSwitchRow(
                 title = "双击提示音",
@@ -103,6 +137,25 @@ internal fun AiCueSettings() {
             color = WxPalette.textTertiary(),
             lineHeight = 16.sp,
             modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun AiCapabilityHint(title: String, detail: String) {
+    Row(Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            fontSize = 12.sp,
+            color = WxPalette.textPrimary(),
+            modifier = Modifier.width(72.dp),
+        )
+        Text(
+            text = detail,
+            fontSize = 12.sp,
+            color = WxPalette.textSecondary(),
+            lineHeight = 17.sp,
+            modifier = Modifier.weight(1f),
         )
     }
 }

@@ -1,5 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
+import com.Johnny.wcx.features.ai.AiConfig as AiSettings
+
 import com.Johnny.wcx.preferences.WePrefs.Companion.prefOption
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.collections.LruCache
@@ -99,12 +101,28 @@ object TranslateSupport {
         val isUsable: Boolean get() = apiKey.isNotBlank() && apiUrl.isNotBlank()
     }
 
-    /** 读取与 AIAutoReply 共享的配置（同一个 SharedPreferences 键，没有第二套密钥）。 */
-    fun aiConfig(): AiConfig = AiConfig(
-        apiUrl = runCatching { aiApiUrl }.getOrDefault(""),
-        apiKey = runCatching { aiApiKey }.getOrDefault(""),
-        model = runCatching { aiModel }.getOrDefault(""),
-    )
+    /**
+     * 读取 AI 接口配置。
+     *
+     * 全模块只有一处配置入口：「AI 助手 → 设置 → AI 接口」（[com.Johnny.wcx.features.ai.AiConfig]）。
+     * 这里优先用它，用户只填一次，翻译 / 聊天总结 / 自动回复就都能用；
+     * 没填过才回落到旧的 `ai_reply_*` 键，保证升级后老配置不会失效，也不产生第二份密钥。
+     */
+    fun aiConfig(): AiConfig {
+        val unified = runCatching {
+            if (AiSettings.isConfigured) {
+                AiConfig(apiUrl = AiSettings.chatUrl, apiKey = AiSettings.apiKey, model = AiSettings.model)
+            } else {
+                null
+            }
+        }.getOrNull()
+        if (unified != null) return unified
+        return AiConfig(
+            apiUrl = runCatching { aiApiUrl }.getOrDefault(""),
+            apiKey = runCatching { aiApiKey }.getOrDefault(""),
+            model = runCatching { aiModel }.getOrDefault(""),
+        )
+    }
 
     /**
      * 把用户填的地址补全成 OpenAI 兼容的 /chat/completions 地址。

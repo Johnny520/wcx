@@ -60,7 +60,6 @@ import com.composables.icons.materialsymbols.outlined.Sports_esports
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
-import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.SoftDivider
@@ -243,7 +242,7 @@ fun HomePager(
     onOpenScript: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val allItems = FeaturesProvider.ALL_HOOK_ITEMS
+    val allItems = VisibleHookItems
     // 单页模式：功能搜索（分类网格上方）——输入即过滤，点结果直达所属分类
     var featureQuery by remember { mutableStateOf("") }
     val enabledCount = remember {
@@ -892,7 +891,7 @@ private fun FeatureSearchResult(
     // 与「功能」页同一口径：当前微信版本不支持的功能不出现
     val matched = remember(q) {
         if (q.isEmpty()) emptyList()
-        else FeaturesProvider.ALL_HOOK_ITEMS
+        else VisibleHookItems
             .filter { it.unavailableReason == null }
             .filter { it.name.contains(q, ignoreCase = true) || it.description.contains(q, ignoreCase = true) }
             .take(60)
@@ -998,7 +997,7 @@ private fun CategoryGrid(onOpenCategory: (String) -> Unit) {
                     val colorIndex = FEATURE_CATEGORIES.indexOfFirst { it.first == entry.first }
                     val tint = CATEGORY_COLORS[colorIndex.coerceAtLeast(0) % CATEGORY_COLORS.size]
                     val stat = runCatching {
-                        val all = FeaturesProvider.ALL_HOOK_ITEMS.filter { entry.first in it.categories }
+                        val all = VisibleHookItems.filter { entry.first in it.categories }
                         all.count { WePrefs.getBoolOrFalse(it.name) } to all.size
                     }.getOrDefault(0 to 0)
                     Column(

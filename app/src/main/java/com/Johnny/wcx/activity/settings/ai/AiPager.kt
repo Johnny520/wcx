@@ -65,6 +65,7 @@ import com.Johnny.wcx.ai.AiProfileSummary
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.content.ScrimDialog
+import com.Johnny.wcx.ui.content.showAiConfigDialog
 import com.Johnny.wcx.ui.style.WxPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -78,12 +79,7 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 internal fun AiPager(
-    /**
-     * 「添加好友」不在这里渲染：它由 `MainPagerScreen` 在底部导航条**之后**以半屏浮层打开，
-     * 这样遮罩与卡片才盖得住导航条。
-     */
-    onRequestAdd: () -> Unit = {},
-    /** 外部（浮层确认添加后）触发的刷新计数：变化即重读索引。 */
+    /** 外部（例如从别处回到本页）触发的刷新计数：变化即重读索引。 */
     externalRefresh: Int = 0,
     /** 设置页从导航栈进入时给返回按钮用；独立使用时传 null 不显示。 */
     onBack: (() -> Unit)? = null,
@@ -101,6 +97,10 @@ internal fun AiPager(
     var toast by remember { mutableStateOf<String?>(null) }
     // debug 提示词面板：入口在「添加」左边，默认收起（面板内每段也各自收起）。
     var showPrompts by remember { mutableStateOf(false) }
+    // 「添加好友」浮层：以前由外层 SettingsActivity 渲染，WCX 接线时没接上 → 点添加没反应。
+    // 现在由本页自己渲染，跟「添加群」一样内部闭环，AI 相关的一切都在这一页里。
+    var showAddFriend by remember { mutableStateOf(false) }
+    var showConfig by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -134,7 +134,7 @@ internal fun AiPager(
                 tab = tab,
                 onBack = onBack,
                 onTabChange = { tab = it },
-                onAdd = { if (tab == 1) showAddGroup = true else onRequestAdd() },
+                onAdd = { if (tab == 1) showAddGroup = true else showAddFriend = true },
                 onPrompts = if (BuildConfig.DEBUG) {
                     { showPrompts = true }
                 } else {
@@ -144,7 +144,7 @@ internal fun AiPager(
 
             // 设置页不依赖档案索引，不进「载入中」这条分支。
             if (tab == 2) {
-                AiCueSettings()
+                AiCueSettings(onOpenConfig = { showConfig = true })
             } else if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("载入中…", fontSize = 13.sp, color = WxPalette.textSecondary())
@@ -158,13 +158,13 @@ internal fun AiPager(
                 )
             } else {
                 if (!AiConfig.isConfigured) {
-                    ConfigureBanner()
+                    ConfigureBanner(onClick = { showConfig = true })
                 }
                 AiFriendList(
                     summaries = summaries,
                     onOpen = { openWxId = it },
                     onLongPress = { deleteTarget = it },
-                    onAdd = onRequestAdd,
+                    onAdd = { showAddFriend = true },
                 )
             }
         }
@@ -246,6 +246,28 @@ internal fun AiPager(
                         toast = "已删除档案"
                         reload()
                     }
+                },
+            )
+        }
+
+        if (showAddFriend) {
+            AiAddFriendSheet(
+                onDismiss = { showAddFriend = false },
+                onConfirmed = { created ->
+                    showAddFriend = false
+                    toast = if (created > 0) "已添加 $created 位好友，点进档案选起始年份开始整理" else "没有新增（已在列表中）"
+                    reload()
+                },
+            )
+        }
+
+        if (showConfig) {
+            showAiConfigDialog(
+                context = context,
+                onSaved = {
+                    showConfig = false
+                    toast = "AI 接口已保存"
+                    reload()
                 },
             )
         }
@@ -332,9 +354,9 @@ private fun SegmentPill(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ConfigureBanner() {
+private fun ConfigureBanner(onClick: () -> Unit = {}) {
     Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-        SoftCard(background = WxPalette.warningSoft()) {
+        SoftCard(background = WxPalette.warningSoft(), onClick = onClick) {
             Text(
                 "还没有配置 AI 接口",
                 fontSize = 14.sp,
@@ -342,7 +364,7 @@ private fun ConfigureBanner() {
                 color = WxPalette.textPrimary(),
             )
             Text(
-                "到「主页 → AI 已激活」填写接口地址、密钥与模型名。",
+                "点这里填写接口地址、密钥与模型名。",
                 fontSize = 12.sp,
                 color = WxPalette.textSecondary(),
                 lineHeight = 18.sp,
