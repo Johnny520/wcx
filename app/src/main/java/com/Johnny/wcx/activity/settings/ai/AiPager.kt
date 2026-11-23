@@ -149,13 +149,15 @@ internal fun AiPager(
                 },
             )
 
-            // 说明页与设置页都不依赖档案索引，不进「载入中」这条分支。
+            // 总结 / 说明 / 设置都不依赖好友档案索引，不进「载入中」这条分支。
             if (tab == 2) {
+                AiReportPage()
+            } else if (tab == 3) {
                 AiHelpPage(
                     onOpenConfig = { showConfig = true },
                     onMomentsCopy = { AiMomentsCopy.showDialog(context) },
                 )
-            } else if (tab == 3) {
+            } else if (tab == 4) {
                 AiCueSettings(onOpenConfig = { showConfig = true })
             } else if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -357,8 +359,9 @@ private fun AiHeader(
         ) {
             SegmentPill("好友", tab == 0) { onTabChange(0) }
             SegmentPill("群组", tab == 1) { onTabChange(1) }
-            SegmentPill("说明", tab == 2) { onTabChange(2) }
-            SegmentPill("设置", tab == 3) { onTabChange(3) }
+            SegmentPill("总结", tab == 2) { onTabChange(2) }
+            SegmentPill("说明", tab == 3) { onTabChange(3) }
+            SegmentPill("设置", tab == 4) { onTabChange(4) }
         }
         // 顺序：提示词（仅 debug）在左，添加在右。
         if (onPrompts != null) {
