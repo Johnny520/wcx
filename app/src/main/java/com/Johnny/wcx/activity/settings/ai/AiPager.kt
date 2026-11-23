@@ -41,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -103,6 +104,7 @@ internal fun AiPager(
     var showConfig by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // 列表只读 index.json：好友快照由「添加好友」浮层自己按需刷新，页面不该为它卡住。
     LaunchedEffect(refreshKey, externalRefresh) {
