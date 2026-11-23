@@ -1806,18 +1806,44 @@ object ConversationAggregation : ClickableFeature(),
 
     private fun launchFolderContainer(source: Any?, folderId: String) {
         val context = source as? Context ?: return
+        // 8.0.80 上微信的会话盒子页对自定义 parentRef 支持不稳定：文件夹里已经没有成员时
+        // 打开只会得到空白页，看起来像「点开没反应」甚至「被当成联系人」。
+        // 这种情况直接说清楚，不要进空白页。查询失败（-1）时不拦，交给微信自己处理。
+        val folded = runCatching {
+            withQueryRewriteSuppressed {
+                WeDatabaseApi.rawQuery(
+                    "SELECT COUNT(*) FROM ${ConversationTable.NAME} WHERE ${ConversationTable.PARENT_REF} = ?",
+                    arrayOf(folderId)
+                ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+            }
+        }.getOrDefault(-1)
+        if (folded == 0) {
+            showToast(context, "这个收纳盒子是空的：会话可能已被移出或删除")
+            WeLogger.w(TAG, "打开空文件夹已拦截：$folderId")
+            return
+        }
         val intent = Intent().apply {
             setClassName(context, CONTAINER_UI_NAME)
             applyFolderContainerIntent(this, folderId)
         }
-        context.startActivity(intent)
+        runCatching { context.startActivity(intent) }
+            .onFailure { error ->
+                WeLogger.e(TAG, "打开收纳盒子失败：$folderId", error)
+                showToast(context, "打开收纳盒子失败：${error.message ?: "未知错误"}")
+            }
     }
 
     private fun applyFolderContainerIntent(intent: Intent, folderId: String) {
+        // 只传「这个盒子叫什么」。之前把 folderId 同时塞进 Contact_ChatRoomId / room_name，
+        // 微信会拿它去当群聊 / 联系人查，查不到就是一页空白 —— 8.0.80 上尤其明显。
+        // 标题由 configureFolderActivity 用 setTitle 覆盖，不依赖这些 extra。
         intent.putExtra(WeChatIntentExtra.CONTACT_USER, folderId)
-        intent.putExtra(WeChatIntentExtra.CONTACT_CHAT_ROOM_ID, folderId)
-        intent.putExtra(WeChatIntentExtra.ROOM_NAME, folderId)
+        intent.putExtra(WeChatIntentExtra.ROOM_NAME, folderTitleOf(folderId).ifBlank { "收纳盒子" })
     }
+
+    /** 盒子标题：优先用户起的名，取不到时给个中性词，避免把 folderId 露在标题上。 */
+    private fun folderTitleOf(folderId: String): String =
+        runCatching { folderById(folderId)?.name }.getOrNull().orEmpty()
 
     private fun configureFolderActivity(activity: BaseConversationUI) {
         val folder = folderById(activeFolderId ?: return) ?: return
