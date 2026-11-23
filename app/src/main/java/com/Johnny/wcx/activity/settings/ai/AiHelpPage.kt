@@ -73,6 +73,10 @@ internal fun AiHelpPage(
                 HelpItem("AI 写群公告", "只在群聊出现：给个主题，出公告 + 新成员欢迎语。") to null,
                 HelpItem("AI 未读速览", "所有未读会话的要点，需要你回复的排最前面，不会标记已读。") to null,
                 HelpItem("AI 今日摘要", "今天各会话的进展与待跟进。") to null,
+                HelpItem("AI 周报", "本周各会话的进展汇总，写工作总结可直接用。") to null,
+                HelpItem("AI 搜聊天", "给个关键词，在所有会话里找出谁提过、说了什么。") to null,
+                HelpItem("AI 群纪要", "群聊里用：把最近消息整理成结论 / 待办 / 待确认。") to null,
+                HelpItem("AI 该回谁", "找出「对方最后一句还没被我回复」的会话，并给一句怎么回。") to null,
             ),
         )
 
@@ -83,6 +87,7 @@ internal fun AiHelpPage(
                 HelpItem("AI 改写这条", "自己发的文字：正式 / 简短 / 客气三种版本。") to null,
                 HelpItem("AI 写备注", "单聊里用：给这个人写 3 条备注建议。") to null,
                 HelpItem("AI 读图翻译", "图片消息：提取图中文字并翻译，没文字就描述图片。") to null,
+                HelpItem("AI 速读这条", "超过 80 字的长消息：压成 3 句要点，保留数字与时间。") to null,
             ),
         )
 

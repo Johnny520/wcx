@@ -30,7 +30,7 @@ import java.util.Calendar
  */
 
 /** 跨会话读取：统一在这里做 SQL 与消息清洗。 */
-private object AiDigestSource {
+internal object AiDigestSource {
 
     private const val TAG = "AiDigestSource"
 
@@ -54,26 +54,44 @@ private object AiDigestSource {
         }
     }
 
-    /** 今天有消息的会话：按最后一条消息时间倒序。 */
-    fun activeTodayTalkers(limit: Int): List<String> {
-        val startOfDay = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
+    /** 从某时刻起有消息的会话：按最后一条消息时间倒序。 */
+    fun activeTalkersSince(since: Long, limit: Int): List<String> {
         val rows = runCatching {
             WeDatabaseApi.executeQuery(
                 "SELECT talker, MAX(createTime) AS last FROM message WHERE createTime >= ? " +
                         "GROUP BY talker ORDER BY last DESC LIMIT $limit",
-                arrayOf<Any>(startOfDay),
+                arrayOf<Any>(since),
             )
         }.getOrElse { error ->
-            WeLogger.e(TAG, "查询今日会话失败", error)
+            WeLogger.e(TAG, "查询活跃会话失败", error)
             return emptyList()
         }
         return rows.mapNotNull { (it["talker"] as? String)?.takeIf { t -> t.isNotBlank() } }
     }
+
+    /** 今天有消息的会话。 */
+    fun activeTodayTalkers(limit: Int): List<String> = activeTalkersSince(startOfToday(), limit)
+
+    /** 本周一 00:00（周报用）。 */
+    fun startOfWeek(): Long {
+        val calendar = Calendar.getInstance().apply {
+            firstDayOfWeek = Calendar.MONDAY
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        return calendar.timeInMillis
+    }
+
+    /** 今天 00:00。 */
+    fun startOfToday(): Long = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
 
     /** 某会话最近 [count] 条消息，返回「我：xxx / 对方：xxx」。 */
     fun recentLines(talker: String, count: Int): List<String> {

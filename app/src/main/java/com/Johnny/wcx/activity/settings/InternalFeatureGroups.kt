@@ -35,6 +35,11 @@ internal object InternalFeatureGroups {
             "AI 今日摘要",
             "AI 写备注",
             "AI 图片翻译",
+            "AI 周报",
+            "AI 搜聊天",
+            "AI 群纪要",
+            "AI 该回谁",
+            "AI 长消息速读",
         ),
     )
 
