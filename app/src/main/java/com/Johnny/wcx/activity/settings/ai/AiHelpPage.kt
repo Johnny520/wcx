@@ -92,6 +92,17 @@ internal fun AiHelpPage(
         )
 
         HelpSection(
+            title = "在朋友圈用",
+            subtitle = "长按某条朋友圈",
+            items = listOf(
+                HelpItem(
+                    "AI 帮我评论",
+                    "给 3 条评论建议，点任意一条复制；作者有档案会带上你们的记忆与标签，不会自动发送。",
+                ) to null,
+            ),
+        )
+
+        HelpSection(
             title = "在 AI 页面用",
             subtitle = "不需要开会话",
             items = listOf(

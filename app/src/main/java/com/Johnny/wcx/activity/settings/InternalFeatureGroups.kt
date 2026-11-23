@@ -40,6 +40,7 @@ internal object InternalFeatureGroups {
             "AI 群纪要",
             "AI 该回谁",
             "AI 长消息速读",
+            "朋友圈帮我评论",
         ),
     )
 
