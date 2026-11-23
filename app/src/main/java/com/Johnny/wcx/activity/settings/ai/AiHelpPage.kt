@@ -102,6 +102,7 @@ internal fun AiHelpPage(
                 ) to onMomentsCopy,
                 HelpItem("双击建议", "聊天页双击屏幕，按好友档案给建议（开关在「设置」）。") to null,
                 HelpItem("自动回复", "按人开关：在「好友」页点进档案里打开。") to null,
+                HelpItem("回复延迟", "自动回复前等多久：3/5/8/12/20/30 秒六档，默认 8 秒，在「设置」里调。") to null,
                 HelpItem("群聊总结", "按群定时自动总结，在「群组」页逐个设置。") to null,
             ),
         )

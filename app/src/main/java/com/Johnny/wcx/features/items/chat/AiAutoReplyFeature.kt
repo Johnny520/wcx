@@ -36,7 +36,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 对方经常把一段话拆成几条发（「在吗」「我跟你说个事」「昨天那个」），每条落库都会触发
  * 一次 `onInsert`。如果每条都回，就会出现「第一条刚回完，对方还在打字」的场面，而且回的是
  * 半句话。所以这里用**防抖**：每条新消息都把待回复任务取消重建，等最后一条之后
- * [QUIET_MS] 秒内再没有新动静，才真正生成并发送。
+ * 「回复延迟」秒内再没有新动静，才真正生成并发送。
  *
  * 回复生成期间同样算「有新消息就作废」：生成要几秒到十几秒，这期间对方再说话，
  * 已经生成的那条已经过时，丢弃后由新消息重新计时。
@@ -62,7 +62,9 @@ object AiAutoReplyFeature : ApiFeature(), WeDatabaseListenerApi.IInsertListener 
      * 它同时就是「两次回复之间的最小间隔」：回复发出去之后对方再说话，仍然要等
      * 他自己的 8 秒静默，所以不需要再叠一层冷却。
      */
-    private const val QUIET_MS = 8_000L
+    /** 静默窗口的默认值；实际值由「AI 助手 → 设置 → 回复延迟」决定（3~30 秒六档）。 */
+
+    private val quietMs: Long get() = AiConfig.replyDelayMs
 
     /** 用户自己最后一次发消息的时间：比我方收到的那条更晚，说明用户已经自己回了。 */
     private val lastUserMessageAt = ConcurrentHashMap<String, Long>()
@@ -184,7 +186,7 @@ object AiAutoReplyFeature : ApiFeature(), WeDatabaseListenerApi.IInsertListener 
         lastActivityAt[talker] = msgTime
         val seq = invalidate(talker)
         pending[talker] = scope.launch {
-            delay(QUIET_MS)
+            delay(quietMs)
 
             // 静默期内又来了消息（对方的或自己的）：这一轮作废，由那条新消息重新计时。
             if (generation[talker] != seq) {

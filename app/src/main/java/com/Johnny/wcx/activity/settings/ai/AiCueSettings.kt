@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ import com.Johnny.wcx.features.items.chat.ChatAiSummary
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AiConfigStatusRow
 import com.Johnny.wcx.ui.style.SoftCard
+import com.Johnny.wcx.ui.content.ScrimDialog
 import com.Johnny.wcx.ui.style.WxPalette
 
 /**
@@ -63,6 +65,74 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
         // AI 接口配置：全模块只有这一处入口，功能自己的设置页不再重复放置地址/Key 输入框。
         SoftCard(contentPadding = 0) {
             AiConfigStatusRow(onClick = onOpenConfig)
+        }
+
+        // 自动回复延迟：六档固定值，默认 8 秒。
+        var showDelayPicker by remember { mutableStateOf(false) }
+        var delaySeconds by remember { mutableStateOf(AiConfig.replyDelaySeconds) }
+        SoftCard(contentPadding = 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDelayPicker = true }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("回复延迟", fontSize = 15.sp, color = WxPalette.textPrimary())
+                    Text(
+                        text = "对方最后一条之后等这么久没新消息才回",
+                        fontSize = 11.sp,
+                        color = WxPalette.textSecondary(),
+                    )
+                }
+                Text("${delaySeconds} 秒", fontSize = 13.sp, color = WxPalette.Accent)
+                Text("  ›", fontSize = 13.sp, color = WxPalette.textTertiary())
+            }
+        }
+
+        if (showDelayPicker) {
+            ScrimDialog(
+                show = true,
+                onDismissRequest = { showDelayPicker = false },
+                title = "回复延迟",
+            ) {
+                AiConfig.REPLY_DELAY_OPTIONS.forEach { seconds ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (seconds == delaySeconds) WxPalette.primarySoft()
+                                else androidx.compose.ui.graphics.Color.Transparent,
+                            )
+                            .clickable {
+                                delaySeconds = seconds
+                                AiConfig.setReplyDelaySeconds(seconds)
+                                showDelayPicker = false
+                            }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "$seconds 秒",
+                            fontSize = 14.sp,
+                            color = if (seconds == delaySeconds) WxPalette.Primary else WxPalette.textPrimary(),
+                        )
+                        if (seconds == AiConfig.DEFAULT_REPLY_DELAY_SECONDS) {
+                            Text(
+                                text = "  默认",
+                                fontSize = 11.sp,
+                                color = WxPalette.textTertiary(),
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        if (seconds == delaySeconds) {
+                            Text("已选", fontSize = 11.sp, color = WxPalette.Primary)
+                        }
+                    }
+                }
+            }
         }
 
         // 需要用户决定的开关都在这一张卡里，不再散落在功能列表。

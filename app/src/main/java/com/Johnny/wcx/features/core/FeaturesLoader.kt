@@ -120,21 +120,27 @@ object FeaturesLoader {
         if (Preferences.noDexResolve) return
         if (!TargetProcesses.isInMain) return
 
-        // 版本兼容性检测：大量Hook失效时输出警告日志并弹窗提示用户
-        try {
-            val (compatible, message) = VersionCompat.checkCompatibility(
-                brokenItems.size,
-                FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<IResolveDex>().size
-            )
-            if (!compatible) {
-                WeLogger.w(TAG, "版本兼容性警告: $message")
-                // 弹窗提示用户当前微信版本部分功能暂未适配
-                showToast("当前微信版本部分功能暂未适配，等待模块更新")
-            } else {
-                WeLogger.i(TAG, "版本兼容性: $message")
+        // 版本兼容性检测：大量 Hook 失效时输出警告日志并提示用户。
+        //
+        // 必须先排除「首次启动」：微信升级/清数据后的第一次启动没有任何 Dex 缓存，
+        // 所有委托都会因为「缺缓存」进 brokenItems —— 这不是「功能没适配」，
+        // 之前会把这种情况误报成「当前微信版本部分功能暂未适配」，一装完模块就吓用户一跳。
+        val totalResolvable = FeaturesProvider.ALL_HOOK_ITEMS.filterIsInstance<IResolveDex>().size
+        val coldStartWithoutCache = totalResolvable > 0 && brokenItems.size >= totalResolvable
+        if (coldStartWithoutCache) {
+            WeLogger.i(TAG, "首次启动无 Dex 缓存（${brokenItems.size}/$totalResolvable），跳过版本兼容性提示")
+        } else {
+            try {
+                val (compatible, message) = VersionCompat.checkCompatibility(brokenItems.size, totalResolvable)
+                if (!compatible) {
+                    WeLogger.w(TAG, "版本兼容性警告: $message")
+                    showToast("当前微信版本部分功能暂未适配，等待模块更新")
+                } else {
+                    WeLogger.i(TAG, "版本兼容性: $message")
+                }
+            } catch (e: Throwable) {
+                WeLogger.e(TAG, "版本兼容性检测异常", e)
             }
-        } catch (e: Throwable) {
-            WeLogger.e(TAG, "版本兼容性检测异常", e)
         }
 
         WeLogger.i(TAG, "launching background coroutine to repair ${brokenItems.size} items")

@@ -120,6 +120,17 @@ object AiConfig {
      */
     const val KEY_SUGGEST_GESTURE = "ai_suggest_gesture"
 
+    /**
+     * 自动回复的静默延迟（秒）：对方最后一条消息之后等这么久没新消息才回。
+     *
+     * 六档固定值（3/5/8/12/20/30），默认 8 秒 —— 短了会抢话，长了回得慢。
+     */
+    const val KEY_REPLY_DELAY = "ai_reply_delay_seconds"
+
+    const val DEFAULT_REPLY_DELAY_SECONDS = 8
+
+    val REPLY_DELAY_OPTIONS = intArrayOf(3, 5, 8, 12, 20, 30)
+
     /** 音色 id。与 `AiCueSound.Style` 一一对应。 */
     const val CUE_STYLE_WOOD = "wood"
     const val CUE_STYLE_DEEP = "deep"
@@ -327,6 +338,26 @@ object AiConfig {
         runCatching { WePrefs.putBool(KEY_SUGGEST_GESTURE, enabled) }
             .onFailure { WeLogger.e(TAG, "save suggest gesture failed", it) }
         WeLogger.i(TAG, "双击建议 -> ${if (enabled) "开" else "关"}")
+    }
+
+    /** 自动回复延迟（秒），不在六档内时回落到默认 8 秒。 */
+    val replyDelaySeconds: Int
+        get() {
+            if (!prefsAvailable) return DEFAULT_REPLY_DELAY_SECONDS
+            val saved = runCatching { WePrefs.getIntOrDef(KEY_REPLY_DELAY, DEFAULT_REPLY_DELAY_SECONDS) }
+                .getOrDefault(DEFAULT_REPLY_DELAY_SECONDS)
+            return if (saved in REPLY_DELAY_OPTIONS) saved else DEFAULT_REPLY_DELAY_SECONDS
+        }
+
+    /** 自动回复延迟（毫秒），直接给静默窗口用。 */
+    val replyDelayMs: Long get() = replyDelaySeconds * 1000L
+
+    fun setReplyDelaySeconds(seconds: Int) {
+        if (!prefsAvailable) return
+        val value = if (seconds in REPLY_DELAY_OPTIONS) seconds else DEFAULT_REPLY_DELAY_SECONDS
+        runCatching { WePrefs.putInt(KEY_REPLY_DELAY, value) }
+            .onFailure { WeLogger.e(TAG, "save reply delay failed", it) }
+        WeLogger.i(TAG, "自动回复延迟 -> ${value}s")
     }
 
     fun setCueSoundEnabled(enabled: Boolean) {
