@@ -65,9 +65,19 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
             AiConfigStatusRow(onClick = onOpenConfig)
         }
 
-        // 唯一带独立开关的 AI 能力：其它能力无开关（随 AI 助手常驻），只有它需要用户决定开不开。
+        // 需要用户决定的开关都在这一张卡里，不再散落在功能列表。
+        var gestureEnabled by remember { mutableStateOf(AiConfig.isSuggestGestureEnabled) }
         var summaryEnabled by remember { mutableStateOf(ChatAiSummary.isEnabled) }
         SoftCard(contentPadding = 0) {
+            AiSwitchRow(
+                title = "双击建议",
+                subtitle = "聊天页双击屏幕弹出 AI 建议卡（关掉后双击不响应）",
+                checked = gestureEnabled,
+                onCheckedChange = {
+                    gestureEnabled = it
+                    AiConfig.setSuggestGestureEnabled(it)
+                },
+            )
             AiSwitchRow(
                 title = "聊天记录 AI 总结",
                 subtitle = "聊天输入栏长按菜单里总结最近消息，接口同上",
@@ -77,6 +87,7 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
                     WePrefs.putBool(ChatAiSummary.name, it)
                     ChatAiSummary.isEnabled = it
                 },
+                showDivider = false,
             )
         }
 

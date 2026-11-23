@@ -112,6 +112,14 @@ object AiConfig {
     const val KEY_CUE_STYLE = "ai_global_cue_style"
     const val KEY_CUE_STYLE_NAME = "ai_global_cue_style_name"
 
+    /**
+     * 双击手势总开关（默认开）。
+     *
+     * 关掉后聊天页双击完全不被识别 —— 手势是每条触摸事件都要跑的分发路径，
+     * 关掉就该彻底不挂 hook，而不是挂着再判断。
+     */
+    const val KEY_SUGGEST_GESTURE = "ai_suggest_gesture"
+
     /** 音色 id。与 `AiCueSound.Style` 一一对应。 */
     const val CUE_STYLE_WOOD = "wood"
     const val CUE_STYLE_DEEP = "deep"
@@ -306,6 +314,20 @@ object AiConfig {
     val isCueSoundEnabled: Boolean
         get() = prefsAvailable && runCatching { WePrefs.getBoolOrDef(KEY_CUE_SOUND, true) }
             .getOrDefault(true)
+
+    /** 双击建议手势是否启用（默认开，未初始化存储时也视为开）。 */
+    val isSuggestGestureEnabled: Boolean
+        get() {
+            if (!prefsAvailable) return true
+            return runCatching { WePrefs.getBoolOrDef(KEY_SUGGEST_GESTURE, true) }.getOrDefault(true)
+        }
+
+    fun setSuggestGestureEnabled(enabled: Boolean) {
+        if (!prefsAvailable) return
+        runCatching { WePrefs.putBool(KEY_SUGGEST_GESTURE, enabled) }
+            .onFailure { WeLogger.e(TAG, "save suggest gesture failed", it) }
+        WeLogger.i(TAG, "双击建议 -> ${if (enabled) "开" else "关"}")
+    }
 
     fun setCueSoundEnabled(enabled: Boolean) {
         if (!prefsAvailable) return

@@ -11,6 +11,7 @@ import com.Johnny.wcx.ai.AiProfileStore
 import com.Johnny.wcx.ai.AiRunState
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.ui.WeChatMessageViewApi
+import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.WeLogger
@@ -110,6 +111,11 @@ object AiSuggestGesture : ApiFeature() {
     }
 
     private fun hookTouch(className: String) {
+        // 总开关关掉就不挂 hook：分发路径上每条触摸都要跑，不值得挂着再判断。
+        if (!AiConfig.isSuggestGestureEnabled) {
+            WeLogger.i(TAG, "双击建议已关闭，跳过手势挂载（$className）")
+            return
+        }
         val method = runCatching {
             className.toClass().getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
         }.getOrNull() ?: return
@@ -120,6 +126,8 @@ object AiSuggestGesture : ApiFeature() {
     }
 
     private fun handleTouch(param: XC_MethodHook.MethodHookParam) {
+        // 设置里关掉后立即生效：hook 已挂上也不必等重启，读一次内存里的开关即可。
+        if (!AiConfig.isSuggestGestureEnabled) return
         val activity = param.thisObject as? Activity ?: return
         val event = param.args.getOrNull(0) as? MotionEvent ?: return
         if (activity.isFinishing || activity.isDestroyed) return
