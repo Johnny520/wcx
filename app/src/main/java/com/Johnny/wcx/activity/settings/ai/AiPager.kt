@@ -61,6 +61,7 @@ import com.Johnny.wcx.activity.settings.CONTENT_BOTTOM_INSET
 import com.Johnny.wcx.ai.AiLetterIndex
 import com.Johnny.wcx.ai.AiProfileState
 import com.Johnny.wcx.BuildConfig
+import com.Johnny.wcx.ai.AiImportantAlerts
 import com.Johnny.wcx.ai.AiProfileStore
 import com.Johnny.wcx.ai.group.GroupDigestScheduler
 import com.Johnny.wcx.ai.group.GroupDigestStore
@@ -168,6 +169,17 @@ internal fun AiPager(
                     onAdd = { showAddGroup = true },
                 )
             } else {
+                val alerts = remember(refreshKey) { AiImportantAlerts.pending() }
+                if (alerts.isNotEmpty()) {
+                    ImportantAlertCard(
+                        alerts = alerts,
+                        onDismiss = {
+                            AiImportantAlerts.markAllRead()
+                            toast = "已标记全部重要信息为「知道了」"
+                            reload()
+                        },
+                    )
+                }
                 if (!AiConfig.isConfigured) {
                     ConfigureBanner(onClick = { showConfig = true })
                 }
@@ -381,6 +393,56 @@ private fun SegmentPill(text: String, selected: Boolean, onClick: () -> Unit) {
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             color = if (selected) WxPalette.Primary else WxPalette.textSecondary(),
         )
+    }
+}
+
+/**
+ * 重要信息提醒卡：自动回复过程中识别到的「别漏」内容。
+ *
+ * 只显示最近几条，点「知道了」全部标记已读（内容是提醒，不是待办，不需要逐条处理）。
+ */
+@Composable
+private fun ImportantAlertCard(
+    alerts: List<com.Johnny.wcx.ai.AiImportantAlert>,
+    onDismiss: () -> Unit,
+) {
+    Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+        SoftCard(background = WxPalette.warningSoft()) {
+            Text(
+                "有 ${alerts.size} 条重要信息",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = WxPalette.textPrimary(),
+            )
+            alerts.take(3).forEach { alert ->
+                Text(
+                    text = "${alert.name}：${alert.text}",
+                    fontSize = 12.sp,
+                    color = WxPalette.textSecondary(),
+                    lineHeight = 17.sp,
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(WxPalette.primarySoft())
+                        .clickable { onDismiss() }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                ) {
+                    Text("知道了", fontSize = 12.sp, color = WxPalette.Primary)
+                }
+                Text(
+                    text = "自动回复时识别到的截止时间、金额、地点与明确要求",
+                    fontSize = 11.sp,
+                    color = WxPalette.textTertiary(),
+                    modifier = Modifier.weight(1f),
+                    lineHeight = 15.sp,
+                )
+            }
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
 import android.content.ContentValues
+import com.Johnny.wcx.ai.AiImportantAlerts
 import com.Johnny.wcx.ai.AiProfileStore
 import com.Johnny.wcx.ai.AiRunState
 import com.Johnny.wcx.ai.AiSuggestEngine
@@ -169,6 +170,19 @@ object AiAutoReplyFeature : ApiFeature(), WeDatabaseListenerApi.IInsertListener 
         if (!profile.isReady || !profile.autoReply) {
             skip(talker, "档案未就绪或自动回复已关闭 ready=${profile.isReady} autoReply=${profile.autoReply}")
             return
+        }
+
+        // 重要信息提醒：对方给的截止时间 / 金额 / 地址 / 明确要求，单独记一条，
+        // 免得被「AI 已经替我回了」盖过去。规则判定，不发额外请求。
+        if (isText) {
+            runCatching {
+                AiImportantAlerts.maybeRecord(
+                    talker = talker,
+                    name = profile.remark.ifBlank { profile.nickname },
+                    text = message.content,
+                    at = msgTime,
+                )
+            }.onFailure { WeLogger.w(TAG, "记录重要信息失败", it) }
         }
         // 整理/审查期间整档只读，自动回复一律不触发（和智能建议同一条拦截）。
         if (AiRunState.isBusy(talker, profile)) {
