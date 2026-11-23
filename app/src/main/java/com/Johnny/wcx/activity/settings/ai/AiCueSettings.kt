@@ -98,6 +98,8 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
                 AiCapabilityHint("自动回复", "「好友」页点进某个档案 → 打开「自动回复」，只对这个人生效")
                 AiCapabilityHint("群聊总结", "「群聊」页点右上角 + 添加群，按设定时段自动总结")
                 AiCapabilityHint("双击建议", "聊天页双击任意消息，弹出 AI 建议")
+                AiCapabilityHint("AI 待办提取", "聊天输入栏长按菜单 →「AI 提取待办」，只整理不改聊天")
+                AiCapabilityHint("AI 帮我想怎么回", "聊天输入栏长按菜单 →「AI 帮我想怎么回」，生成 3 条候选")
                 AiCapabilityHint("接口与密钥", "上面第一张卡片，全模块只有这一处")
             }
         }

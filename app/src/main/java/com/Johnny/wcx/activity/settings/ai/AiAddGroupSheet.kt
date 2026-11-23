@@ -46,6 +46,8 @@ import kotlinx.coroutines.withContext
 internal fun AiAddGroupSheet(
     existingIds: Set<String>,
     onDismiss: () -> Unit,
+    /** 未配置时点提示条 -> 打开 AI 配置面板。 */
+    onRequestConfig: () -> Unit = {},
     onAdded: (Int) -> Unit,
 ) {
     var all by remember { mutableStateOf<List<WeGroup>>(emptyList()) }
@@ -118,6 +120,11 @@ internal fun AiAddGroupSheet(
                 }
             }
         }
+
+        AiConfigHintBar(
+            onClick = onRequestConfig,
+            text = "还没填 AI 配置：添加后不会生成总结，先去填写",
+        )
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             AiSecondaryButton(

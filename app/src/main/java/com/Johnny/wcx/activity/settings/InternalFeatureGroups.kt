@@ -25,6 +25,8 @@ internal object InternalFeatureGroups {
             "群聊总结",
             "AI 档案入口",
             "聊天记录 AI 总结",
+            "AI 待办提取",
+            "AI 帮我回复",
         ),
     )
 

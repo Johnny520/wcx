@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.height
@@ -66,7 +67,7 @@ import com.Johnny.wcx.ai.AiProfileSummary
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.content.ScrimDialog
-import com.Johnny.wcx.ui.content.showAiConfigDialog
+import com.Johnny.wcx.ui.content.AiConfigPanel
 import com.Johnny.wcx.ui.style.WxPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -228,6 +229,10 @@ internal fun AiPager(
             AiAddGroupSheet(
                 existingIds = groupSummaries.mapTo(HashSet()) { it.groupId },
                 onDismiss = { showAddGroup = false },
+                onRequestConfig = {
+                    showAddGroup = false
+                    showConfig = true
+                },
                 onAdded = { count ->
                     showAddGroup = false
                     toast = if (count > 0) "已添加 $count 个群" else "没有添加"
@@ -255,6 +260,10 @@ internal fun AiPager(
         if (showAddFriend) {
             AiAddFriendSheet(
                 onDismiss = { showAddFriend = false },
+                onRequestConfig = {
+                    showAddFriend = false
+                    showConfig = true
+                },
                 onConfirmed = { created ->
                     showAddFriend = false
                     toast = if (created > 0) "已添加 $created 位好友，点进档案选起始年份开始整理" else "没有新增（已在列表中）"
@@ -263,11 +272,15 @@ internal fun AiPager(
             )
         }
 
-        if (showConfig) {
-            showAiConfigDialog(
-                context = context,
+        ScrimDialog(
+            show = showConfig,
+            onDismissRequest = { showConfig = false },
+            title = "AI 配置",
+        ) {
+            AiConfigPanel(
+                modifier = Modifier.heightIn(max = 520.dp),
+                onDismiss = { showConfig = false },
                 onSaved = {
-                    showConfig = false
                     toast = "AI 接口已保存"
                     reload()
                 },

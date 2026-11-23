@@ -14,16 +14,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,12 +29,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Chevron_right
 import com.Johnny.wcx.features.ai.AiConfig
+import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.showToast
@@ -45,24 +46,26 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 全局 AI 配置对话框。主页「AI」卡片和各个 AI 功能的设置页都调它，
- * 保证模块里只有**一个** AI 配置入口。
+ * AI 配置面板：整个模块只有这一份实现。
  *
- * 保存规则（用户明确要求）：先做真实连通性校验，**校验通过才落库**并标记为已激活；
- * 校验失败只把原因显示在对话框里，不覆盖已有配置、不改动已经生效的状态。
+ * 视觉与 WCX 其它页面同一套（灰底 + 白卡 + 胶囊），不再用 material3 的输入框与按钮，
+ * 放进设置页的浮层、功能弹窗、独立对话框都长一样。
+ *
+ * 保存规则（用户明确要求）：只有真实请求成功才落库并标记为已激活；
+ * 失败只把原因显示在面板里，不覆盖现有配置。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AiConfigDialogContent(
+fun AiConfigPanel(
     onDismiss: () -> Unit,
     onSaved: (AiConfig.Status) -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     var url by remember { mutableStateOf(AiConfig.rawUrl.ifBlank { AiConfig.DEFAULT_URL }) }
     var key by remember { mutableStateOf(AiConfig.rawApiKey) }
     var model by remember { mutableStateOf(AiConfig.rawModel.ifBlank { AiConfig.DEFAULT_MODEL }) }
     var thinking by remember { mutableStateOf(AiConfig.status.thinking) }
     var thinkingLevel by remember { mutableStateOf(AiConfig.thinkingLevel) }
-    // 输出上限与温度是即时生效的请求参数，不参与「配置齐全」判定，也不需要重新校验接口。
     var advanced by remember { mutableStateOf(false) }
     var maxTokens by remember { mutableStateOf(AiConfig.maxTokens.toString()) }
     var temperature by remember { mutableStateOf(AiConfig.temperature.toString()) }
@@ -76,7 +79,7 @@ fun AiConfigDialogContent(
     val scope = rememberCoroutineScope()
     val status = AiConfig.status
 
-    // 打开时如果配置齐全，先拉一次模型列表（不消耗 token），方便直接挑模型。
+    // 打开时如果已有地址与 Key，先拉一次模型列表（只读接口，不消耗 token）。
     LaunchedEffect(Unit) {
         if (url.isNotBlank() && key.isNotBlank()) {
             loadingModels = true
@@ -118,7 +121,6 @@ fun AiConfigDialogContent(
             withContext(Dispatchers.Main) {
                 verifying = false
                 if (result.ok) {
-                    // 只有真实请求成功才写入偏好 —— 失败时旧配置原样保留。
                     val finalModel = model.trim().ifBlank { result.models.firstOrNull().orEmpty() }
                     AiConfig.saveVerified(url, key, finalModel)
                     showToast("已保存")
@@ -132,279 +134,216 @@ fun AiConfigDialogContent(
         }
     }
 
-    AlertDialogContent(
-        title = { Text("AI 配置") },
-        text = {
-            DefaultColumn(scrollable = true) {
-                // 当前生效状态：与主页卡片同一口径（配置齐全 + 最近一次真实请求成功）。
-                Text(
-                    text = when {
-                        !status.readable -> "当前：读不到配置"
-                        status.verified -> "当前：已激活 · ${status.model}"
-                        status.configured -> "当前：未激活"
-                        else -> "当前：未配置"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (status.verified) WxPalette.Ok else WxPalette.textSecondary(),
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // 当前状态：与「AI 助手」页顶部卡片同一口径（配置齐全 + 最近一次真实请求成功）。
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (status.verified) WxPalette.Ok else WxPalette.Warning),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = when {
+                    !status.readable -> "当前：读不到配置"
+                    status.verified -> "当前：已激活 · ${status.model}"
+                    status.configured -> "当前：未激活"
+                    else -> "当前：未配置"
+                },
+                fontSize = 12.sp,
+                color = if (status.verified) WxPalette.Ok else WxPalette.textSecondary(),
+            )
+        }
+
+        SoftCard(contentPadding = 14) {
+            CfgField(
+                label = "API 地址",
+                value = url,
+                placeholder = "https://api.deepseek.com",
+                onChange = { url = it; error = null },
+            )
+            CfgField(
+                label = "API Key",
+                value = key,
+                placeholder = "sk-...",
+                onChange = { key = it; error = null },
+            )
+            CfgField(
+                label = "模型名称",
+                value = model,
+                placeholder = AiConfig.DEFAULT_MODEL,
+                onChange = { model = it; error = null },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CfgTextAction(
+                    text = if (loadingModels) "读取中…" else "读取可用模型",
+                    enabled = !loadingModels && url.isNotBlank() && key.isNotBlank(),
+                    onClick = { runFetchModels() },
                 )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it; error = null },
-                    label = { Text("API 地址") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = key,
-                    onValueChange = { key = it; error = null },
-                    label = { Text("API Key") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it; error = null },
-                    label = { Text("模型名称") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                // 深度思考是本地开关：切换即时生效，不需要重新校验接口。常用，放在高级外面。
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = "深度思考",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = WxPalette.textPrimary(),
-                        )
-                        Text(
-                            text = if (thinking) "已开启 · ${thinkingLevel.label}，更慢、消耗更多" else "关闭",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = WxPalette.textSecondary(),
-                        )
-                    }
-                    Switch(
-                        checked = thinking,
-                        onCheckedChange = {
-                            thinking = it
-                            AiConfig.setThinking(it)
-                        },
-                    )
-                }
-
-                // ── 高级：思考强度 / 输出上限 / 温度 ──
-                // 都有合理默认值（高 / 393216 / 0.9），摆在正文里只会让人觉得必须调。
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { advanced = !advanced }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = "高级",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = WxPalette.textPrimary(),
-                        )
-                        Text(
-                            text = if (advanced) {
-                                "思考强度 · 输出上限 · 说话温度"
-                            } else {
-                                // 思考关着时不显示强度：展开后也没有那一项，免得它像是生效的。
-                                (if (thinking) "强度 ${thinkingLevel.label} · " else "") +
-                                    "温度 ${temperature.ifBlank { "0.9" }}"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = WxPalette.textSecondary(),
-                        )
-                    }
-                    Text(
-                        text = if (advanced) "收起" else "展开",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = WxPalette.Accent,
-                    )
-                    Icon(
-                        imageVector = MaterialSymbols.Outlined.Chevron_right,
-                        contentDescription = null,
-                        tint = WxPalette.Accent,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-
-                if (advanced) {
-                    // 思考强度：四档。思考关着时没有强度可调，不显示。
-                    if (thinking) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = "思考强度",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = WxPalette.textSecondary(),
-                            )
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                AiConfig.ThinkingLevel.values().forEach { level ->
-                                    FilterChip(
-                                        selected = level == thinkingLevel,
-                                        onClick = {
-                                            thinkingLevel = level
-                                            AiConfig.setThinkingLevel(level)
-                                        },
-                                        label = { Text(level.label) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 输出上限：思考与工具调用抢同一份输出预算，服务商默认值偏小时
-                    // arguments 会被截成半截 JSON。0 = 不传。
-                    OutlinedTextField(
-                        value = maxTokens,
-                        onValueChange = { text ->
-                            maxTokens = text.filter { it.isDigit() }.take(7)
-                            maxTokens.toIntOrNull()?.let { AiConfig.setMaxTokens(it) }
-                        },
-                        label = { Text("输出上限（max_tokens，0 = 不传）") },
-                        supportingText = {
-                            Text(
-                                "默认 393216。服务商不认这个参数或嫌它太大时，会自动去掉重试。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = WxPalette.textSecondary(),
-                            )
-                        },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    // 温度只影响「说话」类请求（建议 / 自动回复）；
-                    // 整理、审查、侧写汇总各自传 0.2~0.3，让分类判断稳定。
-                    OutlinedTextField(
-                        value = temperature,
-                        onValueChange = { text ->
-                            temperature = text
-                            text.toDoubleOrNull()?.takeIf { it in 0.0..2.0 }
-                                ?.let { AiConfig.setTemperature(it) }
-                        },
-                        label = { Text("温度（0~2，默认 0.9）") },
-                        supportingText = {
-                            Text(
-                                "只影响建议与自动回复的语气：低更板正稳妥，高更活络。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = WxPalette.textSecondary(),
-                            )
-                        },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    // 识别图片：把对方这一轮最近一张图挂到 user 消息里。关着时图片只有 `[图片]` 占位。
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "识别图片",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = WxPalette.textPrimary(),
-                            )
-                            Text(
-                                text = "对方发来图片时把这张图一起发给模型，让它看懂图再回。需要模型支持图片输入。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = WxPalette.textSecondary(),
-                            )
-                        }
-                        Switch(
-                            checked = recognizeImages,
-                            onCheckedChange = {
-                                recognizeImages = it
-                                AiConfig.setRecognizeImages(it)
-                            },
-                        )
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TextButton(
-                        onClick = { runFetchModels() },
-                        enabled = !loadingModels && url.isNotBlank() && key.isNotBlank(),
-                    ) {
-                        Text(if (loadingModels) "读取中…" else "读取可用模型")
-                    }
-                    if (models.isNotEmpty()) {
-                        Text(
-                            "共 ${models.size} 个",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = WxPalette.textSecondary(),
-                        )
-                    }
-                }
-
-                error?.let { message ->
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = WxPalette.Danger,
-                    )
-                }
-
                 if (models.isNotEmpty()) {
                     Text(
-                        "可用模型",
-                        style = MaterialTheme.typography.bodySmall,
+                        text = "共 ${models.size} 个",
+                        fontSize = 11.sp,
+                        color = WxPalette.textTertiary(),
+                        modifier = Modifier.padding(start = 10.dp),
+                    )
+                }
+            }
+            if (models.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    models.forEach { name ->
+                        CfgChip(
+                            label = name,
+                            selected = name == model,
+                            onClick = { model = name; error = null },
+                        )
+                    }
+                }
+            }
+        }
+
+        SoftCard(contentPadding = 14) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { advanced = !advanced },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("高级参数", fontSize = 14.sp, color = WxPalette.textPrimary())
+                    Text(
+                        text = "思考模式、输出上限、温度、图片识别",
+                        fontSize = 11.sp,
                         color = WxPalette.textSecondary(),
                     )
+                }
+                Text(
+                    text = if (advanced) "收起" else "展开",
+                    fontSize = 12.sp,
+                    color = WxPalette.Accent,
+                )
+                androidx.compose.material3.Icon(
+                    imageVector = MaterialSymbols.Outlined.Chevron_right,
+                    contentDescription = null,
+                    tint = WxPalette.Accent,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+
+            if (advanced) {
+                Spacer(Modifier.size(4.dp))
+                CfgSwitchRow(
+                    title = "深度思考",
+                    detail = "请求里带 reasoning，慢一些但推理更稳（需模型支持）",
+                    checked = thinking,
+                    onChange = {
+                        thinking = it
+                        AiConfig.setThinking(it)
+                    },
+                )
+                if (thinking) {
+                    Text("思考强度", fontSize = 12.sp, color = WxPalette.textSecondary())
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        models.forEach { candidate ->
-                            FilterChip(
-                                selected = candidate == model,
-                                onClick = { model = candidate; error = null },
-                                label = { Text(candidate) },
+                        AiConfig.ThinkingLevel.values().forEach { level ->
+                            CfgChip(
+                                label = level.label,
+                                selected = level == thinkingLevel,
+                                onClick = {
+                                    thinkingLevel = level
+                                    AiConfig.setThinkingLevel(level)
+                                },
                             )
                         }
                     }
                 }
-
-                if (status.configured) {
-                    TextButton(
-                        onClick = {
-                            AiConfig.clear()
-                            onSaved(AiConfig.status)
-                            showToast("已清除")
-                            onDismiss()
-                        },
-                    ) { Text("清除配置", color = WxPalette.Danger) }
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-        confirmButton = {
-            Button(
-                onClick = { runVerifyAndSave() },
-                enabled = !verifying,
-            ) {
-                Text(
-                    text = if (verifying) "校验中…" else "测试并保存",
-                    fontWeight = FontWeight.Medium,
+                CfgField(
+                    label = "输出上限 max_tokens（0 = 不传）",
+                    value = maxTokens,
+                    placeholder = "393216",
+                    onChange = { text ->
+                        maxTokens = text.filter { it.isDigit() }.take(7)
+                        maxTokens.toIntOrNull()?.let { AiConfig.setMaxTokens(it) }
+                    },
+                )
+                CfgField(
+                    label = "温度 0~2（默认 0.9）",
+                    value = temperature,
+                    placeholder = "0.9",
+                    onChange = { text ->
+                        temperature = text
+                        text.toDoubleOrNull()?.takeIf { it in 0.0..2.0 }
+                            ?.let { AiConfig.setTemperature(it) }
+                    },
+                )
+                CfgSwitchRow(
+                    title = "识别图片",
+                    detail = "对方发图时把图一起发给模型，需要模型支持图片输入",
+                    checked = recognizeImages,
+                    onChange = {
+                        recognizeImages = it
+                        AiConfig.setRecognizeImages(it)
+                    },
                 )
             }
-        },
-    )
+        }
+
+        error?.let { message ->
+            Text(
+                text = message,
+                fontSize = 12.sp,
+                color = WxPalette.Danger,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+
+        CfgPrimaryButton(
+            text = if (verifying) "校验中…" else "测试并保存",
+            enabled = !verifying,
+            onClick = { runVerifyAndSave() },
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CfgSecondaryButton(
+                text = "取消",
+                modifier = Modifier.weight(1f),
+                onClick = onDismiss,
+            )
+            if (status.configured) {
+                CfgSecondaryButton(
+                    text = "清除配置",
+                    modifier = Modifier.weight(1f),
+                    color = WxPalette.Danger,
+                    onClick = {
+                        AiConfig.clear()
+                        showToast("已清除 AI 配置")
+                        onSaved(AiConfig.status)
+                        onDismiss()
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** 兼容旧调用点：内容与 [AiConfigPanel] 完全一致。 */
+@Composable
+fun AiConfigDialogContent(
+    onDismiss: () -> Unit,
+    onSaved: (AiConfig.Status) -> Unit = {},
+) {
+    AiConfigPanel(onDismiss = onDismiss, onSaved = onSaved)
 }
 
 /** 在任意 Context（设置页 / 功能弹窗）里打开全局 AI 配置对话框。 */
@@ -420,12 +359,7 @@ fun showAiConfigDialog(
     }
 }
 
-/**
- * 「当前 AI 状态 + 配置入口」行，供各 AI 功能的设置页复用。
- *
- * 功能自己的设置页不再放 API 地址 / Key / 模型输入框，只放这一行：
- * 点它打开全局配置，状态文案与主页卡片同一口径（配置齐全 + 最近一次真实请求成功）。
- */
+/** 「当前 AI 状态 + 配置入口」行，供各 AI 功能的设置页复用。 */
 @Composable
 fun AiConfigStatusRow(
     onClick: () -> Unit,
@@ -469,7 +403,7 @@ fun AiConfigStatusRow(
             fontSize = 12.sp,
             color = WxPalette.Accent,
         )
-        Icon(
+        androidx.compose.material3.Icon(
             imageVector = MaterialSymbols.Outlined.Chevron_right,
             contentDescription = null,
             tint = WxPalette.Accent,
@@ -483,9 +417,160 @@ fun aiStatusSubtitle(status: AiConfig.Status): String = when {
     !status.readable -> "读不到配置"
     !status.configured -> "未配置"
     status.active -> status.model
-    // 未激活时先给模型名，再给一句失败原因。
     else -> status.detail?.takeIf { it.isNotBlank() }
         ?.let { "${status.model} · ${it.take(28)}" }
         ?: "${status.model} · 未激活"
 }
 
+// ── 面板内部组件（与 WCX 其它页面同一套视觉） ────────────────────────────────
+
+@Composable
+private fun CfgField(
+    label: String,
+    value: String,
+    placeholder: String,
+    onChange: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, fontSize = 12.sp, color = WxPalette.textSecondary())
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(WxPalette.insetSurface())
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            if (value.isEmpty() && placeholder.isNotEmpty()) {
+                Text(placeholder, fontSize = 14.sp, color = WxPalette.textTertiary())
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 14.sp, color = WxPalette.textPrimary()),
+                cursorBrush = SolidColor(WxPalette.Primary),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CfgChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) WxPalette.primarySoft() else WxPalette.insetSurface())
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = if (selected) WxPalette.Primary else WxPalette.textSecondary(),
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun CfgSwitchRow(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onChange(!checked) }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 14.sp, color = WxPalette.textPrimary())
+            if (detail.isNotBlank()) {
+                Text(
+                    text = detail,
+                    fontSize = 11.sp,
+                    color = WxPalette.textSecondary(),
+                    lineHeight = 16.sp,
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        CfgSwitch(checked = checked, onChange = onChange)
+    }
+}
+
+/** 迷你开关：不依赖 material3 Switch 的尺寸，和卡片排版更贴合。 */
+@Composable
+private fun CfgSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(44.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (checked) WxPalette.Primary else WxPalette.textTertiary().copy(alpha = 0.3f))
+            .clickable { onChange(!checked) }
+            .padding(2.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(RoundedCornerShape(50))
+                .background(WxPalette.cardBackground())
+                .align(if (checked) Alignment.CenterEnd else Alignment.CenterStart),
+        )
+    }
+}
+
+@Composable
+private fun CfgTextAction(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        color = if (enabled) WxPalette.Accent else WxPalette.textTertiary(),
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun CfgPrimaryButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (enabled) WxPalette.Primary else WxPalette.Primary.copy(alpha = 0.35f))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = androidx.compose.ui.graphics.Color.White)
+    }
+}
+
+@Composable
+private fun CfgSecondaryButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: androidx.compose.ui.graphics.Color? = null,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(WxPalette.insetSurface())
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, fontSize = 14.sp, color = color ?: WxPalette.textPrimary())
+    }
+}

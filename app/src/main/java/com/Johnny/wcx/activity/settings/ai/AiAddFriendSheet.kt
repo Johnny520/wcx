@@ -64,6 +64,8 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun AiAddFriendSheet(
     onDismiss: () -> Unit,
+    /** 未配置时点提示条 -> 打开 AI 配置面板。 */
+    onRequestConfig: () -> Unit = {},
     onConfirmed: (Int) -> Unit,
 ) {
     BackHandler { onDismiss() }
@@ -163,6 +165,12 @@ internal fun AiAddFriendSheet(
                 }
             }
         }
+
+        // 没填接口就先把话说清楚：勾了也不会自动整理。
+        AiConfigHintBar(
+            onClick = onRequestConfig,
+            text = "还没填 AI 配置：添加后不会自动整理，先去填写",
+        )
 
         // 确认条在卡片内部，卡片本身已带 navigationBarsPadding，所以这里只留一点间距。
         Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {

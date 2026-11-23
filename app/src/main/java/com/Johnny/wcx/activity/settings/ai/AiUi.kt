@@ -311,6 +311,44 @@ fun AiIconPill(
     }
 }
 
+/**
+ * 未配置 AI 时的提示条：放在「添加好友 / 添加群聊 / 触发 AI」的按钮上方。
+ *
+ * 用户勾了人 / 勾了群却没有任何反应，最常见的原因就是没填接口 —— 与其让人猜，
+ * 不如直接告诉他「现在勾了也不会生效」，并给一个能点的入口。
+ */
+@Composable
+fun AiConfigHintBar(
+    onClick: () -> Unit,
+    text: String = "还没填 AI 配置：添加后不会自动整理",
+) {
+    if (com.Johnny.wcx.features.ai.AiConfig.isConfigured) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(WxPalette.warningSoft())
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            fontSize = 11.sp,
+            color = WxPalette.textSecondary(),
+            lineHeight = 16.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "去填写",
+            fontSize = 11.sp,
+            color = WxPalette.Accent,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
 /** 轻量输入框：圆角浅底 + 单行/多行。 */
 @Composable
 fun AiTextInput(
