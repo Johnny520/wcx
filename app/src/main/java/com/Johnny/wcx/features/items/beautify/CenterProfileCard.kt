@@ -53,7 +53,7 @@ import com.Johnny.wcx.utils.android.isDarkMode
 
 @Feature(
     name = "资料卡居中",
-    categories = ["界面美化", "个人资料"],
+    categories = ["界面美化"],
     description = "居中「我」界面的资料卡",
 )
 object CenterProfileCard : ClickableFeature(), IResolveDex {

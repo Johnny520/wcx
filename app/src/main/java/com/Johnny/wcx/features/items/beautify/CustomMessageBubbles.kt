@@ -79,7 +79,7 @@ import kotlin.io.path.div
 import kotlin.io.path.exists
 import androidx.compose.ui.graphics.Color as ComposeColor
 
-@Feature(name = "自定义消息气泡", categories = ["界面美化", "聊天"], description = "自定义聊天中的消息气泡图片和颜色")
+@Feature(name = "自定义消息气泡", categories = ["界面美化"], description = "自定义聊天中的消息气泡图片和颜色")
 object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
 
     private val TAG = this::class.simpleName

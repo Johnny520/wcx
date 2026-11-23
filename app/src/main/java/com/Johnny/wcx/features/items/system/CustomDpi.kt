@@ -33,7 +33,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier as ReflectModifier
 
 @Feature(
-    name = "DPI 修改", categories = ["界面美化", "系统与隐私"],
+    name = "DPI 修改", categories = ["界面美化"],
     description = "自定义微信屏幕密度"
 )
 object CustomDpi : ClickableFeature(), IResolveDex {

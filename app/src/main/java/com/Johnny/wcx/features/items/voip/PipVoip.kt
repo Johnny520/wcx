@@ -30,7 +30,7 @@ import java.util.WeakHashMap
 
 @Feature(
     name = "音视频通话使用画中画",
-    categories = ["聊天", "音视频通话"],
+    categories = ["音视频通话"],
     description = "让微信的音视频通话使用原生的画中画模式而非悬浮窗 (没写完)"
 )
 object PipVoip : SwitchFeature(), IResolveDex {

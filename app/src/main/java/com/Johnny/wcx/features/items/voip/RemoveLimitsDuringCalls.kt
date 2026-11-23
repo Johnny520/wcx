@@ -20,7 +20,7 @@ import java.lang.reflect.Method
  * com.tencent.mm.voipmp.helper.DeviceOccupyHelper，混淆名 Lpq/b;），不再依赖任何锚点。
  * 微信改类名/挪包都不影响，只有日志串变化才会失效——失效时日志会明确写出来。
  */
-@Feature(name = "移除通话时聊天限制", categories = ["聊天", "音视频通话"], description = "绕过正在通话时聊天限制")
+@Feature(name = "移除通话时聊天限制", categories = ["音视频通话"], description = "绕过正在通话时聊天限制")
 object RemoveLimitsDuringCalls : SwitchFeature(), IResolveDex {
 
     private const val TAG = "RemoveLimitsDuringCalls"

@@ -86,7 +86,7 @@ import kotlin.io.path.writeText
 import kotlin.math.min
 
 @Feature(
-    name = "自定义好友本地头像", categories = ["联系人与群组", "联系人详情页面"],
+    name = "自定义好友本地头像", categories = ["联系人详情页面"],
     description = "为指定联系人或群组使用本地图片替换显示的头像"
 )
 object CustomLocalFriendAvatars : ClickableFeature(), IContactInfoProvider, IResolveDex {
