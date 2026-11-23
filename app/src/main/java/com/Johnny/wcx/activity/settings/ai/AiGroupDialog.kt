@@ -37,6 +37,7 @@ import com.Johnny.wcx.ai.group.GroupDigestRunner
 import com.Johnny.wcx.ai.group.GroupDigestScheduler
 import com.Johnny.wcx.ai.group.GroupDigestStatus
 import com.Johnny.wcx.ai.group.GroupDigestStore
+import com.Johnny.wcx.ai.group.WorkGroupAnalyzer
 import com.Johnny.wcx.ai.group.MAX_INTERVAL_MINUTES
 import com.Johnny.wcx.ai.group.MIN_INTERVAL_MINUTES
 import com.Johnny.wcx.ai.group.PRESET_INTERVALS
@@ -66,6 +67,7 @@ internal fun AiGroupDialog(
     var customOpen by remember { mutableStateOf(false) }
     var customText by remember { mutableStateOf("") }
     var expandedId by remember { mutableStateOf<String?>(null) }
+    var analyzing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
@@ -129,6 +131,22 @@ internal fun AiGroupDialog(
                     if (on) GroupDigestScheduler.schedule(groupId) else GroupDigestScheduler.cancel(groupId)
                 }
             }
+            reload()
+            onChanged()
+        }
+    }
+
+    fun updateProgress() {
+        if (analyzing) return
+        analyzing = true
+        scope.launch {
+            val name = config?.name.orEmpty()
+            val result = WorkGroupAnalyzer.analyze(groupId, name)
+            analyzing = false
+            toast = result.fold(
+                { "进度已更新：${it.percent}%" },
+                { it.message ?: "分析失败" },
+            )
             reload()
             onChanged()
         }
@@ -205,6 +223,63 @@ internal fun AiGroupDialog(
                         fontSize = 12.sp,
                         color = WxPalette.textSecondary(),
                         modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+
+            AiSwitchRow(
+                title = "工作群",
+                subtitle = "按 AI 梳理群里的任务目标与进度，列表页群名后显示百分比",
+                checked = current.workGroup,
+                onCheckedChange = { on ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) { WorkGroupAnalyzer.setWorkGroup(groupId, on) }
+                        reload()
+                        onChanged()
+                    }
+                },
+            )
+            if (current.workGroup) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = if (current.progressPercent >= 0) {
+                                "当前进度 ${current.progressPercent}%"
+                            } else {
+                                "还没评估进度"
+                            },
+                            fontSize = 14.sp,
+                            color = WxPalette.textPrimary(),
+                        )
+                        if (current.progressGoals.isNotEmpty()) {
+                            Text(
+                                text = current.progressGoals.joinToString("；"),
+                                fontSize = 11.sp,
+                                color = WxPalette.textSecondary(),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (current.progressNote.isNotBlank()) {
+                            Text(
+                                text = current.progressNote,
+                                fontSize = 11.sp,
+                                color = WxPalette.textTertiary(),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    AiSecondaryButton(
+                        text = if (analyzing) "分析中…" else "更新进度",
+                        onClick = { updateProgress() },
+                        modifier = Modifier.width(100.dp),
                     )
                 }
             }

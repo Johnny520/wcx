@@ -47,6 +47,10 @@ data class GroupSummary(
     val lastStatus: String = "",
     /** 暂停 / 失败时给列表显示的原因，正常时为空。 */
     val lastError: String = "",
+    /** 工作群：开了之后可以按 AI 分析任务进度，列表页群名后显示百分比。 */
+    val workGroup: Boolean = false,
+    /** 进度百分比 0~100；-1 表示还没评估过。 */
+    val progressPercent: Int = -1,
 )
 
 /**
@@ -72,6 +76,15 @@ data class GroupDigestConfig(
     val failures: Int = 0,
     /** 时间正序（老 → 新）；裁尾删前面，列表页倒序显示。 */
     val digests: List<GroupDigest> = emptyList(),
+    /** 工作群模式：AI 会梳理群里的任务目标并跟踪进度。 */
+    val workGroup: Boolean = false,
+    /** 预估完成度 0~100；-1 = 还没评估。 */
+    val progressPercent: Int = -1,
+    /** 当前的主要目标（AI 从聊天里梳理出来的，最多 5 条）。 */
+    val progressGoals: List<String> = emptyList(),
+    /** 一句话说明为什么是这个进度。 */
+    val progressNote: String = "",
+    val progressUpdatedAt: Long = 0,
 ) {
 
     val intervalMs: Long
@@ -158,6 +171,8 @@ data class GroupDigestConfig(
         lastHeadline = digests.lastOrNull()?.headline.orEmpty(),
         lastStatus = lastStatus,
         lastError = lastError,
+        workGroup = workGroup,
+        progressPercent = progressPercent,
     )
 }
 

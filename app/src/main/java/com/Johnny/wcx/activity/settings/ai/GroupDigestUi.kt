@@ -108,6 +108,20 @@ private fun GroupRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (group.workGroup && group.progressPercent >= 0) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(WxPalette.primarySoft())
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                text = "${group.progressPercent}%",
+                                fontSize = 11.sp,
+                                color = WxPalette.Primary,
+                            )
+                        }
+                    }
                     if (group.unread > 0) UnreadBadge(group.unread)
                 }
                 Text(
