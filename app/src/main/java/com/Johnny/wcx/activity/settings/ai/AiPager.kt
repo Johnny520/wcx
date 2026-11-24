@@ -168,7 +168,6 @@ internal fun AiPager(
                     groups = groupSummaries,
                     onOpen = { openGroupId = it },
                     onLongPress = { deleteGroupTarget = it },
-                    onAdd = { showAddGroup = true },
                 )
             } else {
                 val alerts = remember(refreshKey) { AiImportantAlerts.pending() }
@@ -189,7 +188,6 @@ internal fun AiPager(
                     summaries = summaries,
                     onOpen = { openWxId = it },
                     onLongPress = { deleteTarget = it },
-                    onAdd = { showAddFriend = true },
                 )
             }
         }
@@ -476,15 +474,13 @@ private fun AiFriendList(
     summaries: List<AiProfileSummary>,
     onOpen: (String) -> Unit,
     onLongPress: (AiProfileSummary) -> Unit,
-    onAdd: () -> Unit,
 ) {
     if (summaries.isEmpty()) {
+        // 添加入口只有右上角一个，这里不再放按钮，避免同一动作出现两次。
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             AiEmptyCard(
                 title = "还没有好友档案",
-                body = "选一个好友，让 AI 先读懂你们的聊天，之后才能给建议。",
-                action = "添加好友",
-                onAction = onAdd,
+                body = "点右上角「添加」选一个好友，让 AI 先读懂你们的聊天，之后才能给建议。",
             )
         }
         return

@@ -46,15 +46,13 @@ internal fun GroupDigestList(
     groups: List<GroupSummary>,
     onOpen: (String) -> Unit,
     onLongPress: (GroupSummary) -> Unit,
-    onAdd: () -> Unit,
 ) {
     if (groups.isEmpty()) {
+        // 添加入口只有右上角一个，这里不再放按钮，避免同一动作出现两次。
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             AiEmptyCard(
                 title = "还没有群总结",
-                body = "选一个群，每隔一段时间自动整理成一条摘要。",
-                action = "添加群聊",
-                onAction = onAdd,
+                body = "点右上角「添加群」选一个群，每隔一段时间自动整理成一条摘要。",
             )
         }
         return
