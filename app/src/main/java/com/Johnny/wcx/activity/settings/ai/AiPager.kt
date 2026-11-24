@@ -153,12 +153,12 @@ internal fun AiPager(
             if (tab == 2) {
                 AiReportPage()
             } else if (tab == 3) {
-                AiHelpPage(
+                AiHelpPage()
+            } else if (tab == 4) {
+                AiCueSettings(
                     onOpenConfig = { showConfig = true },
                     onMomentsCopy = { AiMomentsCopy.showDialog(context) },
                 )
-            } else if (tab == 4) {
-                AiCueSettings(onOpenConfig = { showConfig = true })
             } else if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("载入中…", fontSize = 13.sp, color = WxPalette.textSecondary())

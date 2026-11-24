@@ -50,7 +50,10 @@ import com.Johnny.wcx.ui.style.WxPalette
  * 用户不需要在「API / 聊天」分类里逐个找。
  */
 @Composable
-internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
+internal fun AiCueSettings(
+    onOpenConfig: () -> Unit = {},
+    onMomentsCopy: () -> Unit = {},
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val styles = AiCueSound.Style.values()
     var enabled by remember { mutableStateOf(AiConfig.isCueSoundEnabled) }
@@ -67,6 +70,27 @@ internal fun AiCueSettings(onOpenConfig: () -> Unit = {}) {
         // AI 接口配置：全模块只有这一处入口，功能自己的设置页不再重复放置地址/Key 输入框。
         SoftCard(contentPadding = 0) {
             AiConfigStatusRow(onClick = onOpenConfig)
+        }
+
+        // 创作工具：朋友圈文案。说明页只讲怎么用，实际入口放在这里。
+        SoftCard(contentPadding = 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onMomentsCopy() }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("朋友圈文案", fontSize = 15.sp, color = WxPalette.textPrimary())
+                    Text(
+                        text = "给个关键词，出 3 条可直接发的文案",
+                        fontSize = 11.sp,
+                        color = WxPalette.textSecondary(),
+                    )
+                }
+                Text("  ›", fontSize = 13.sp, color = WxPalette.textTertiary())
+            }
         }
 
         // 自动回复延迟：六档固定值，默认 8 秒。
