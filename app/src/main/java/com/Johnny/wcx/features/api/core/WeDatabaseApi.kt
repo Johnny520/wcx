@@ -105,6 +105,21 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
     private var lastInitAttemptAt = 0L
 
     /**
+     * 同类 CoreStorage 解析失败后的冷却。
+     *
+     * 8.0.80 上 hook 到的 storage 取不到 SqliteDB wrapper，而 getCoreStorage 在一次启动里
+     * 会被调用几千次 —— 之前每次都跑一遍「全字段反射 + 每个字段的 declaredMethods」，
+     * 单日日志刷出 9000+ 条同一条 W，白烧 CPU。冷却期内直接返回。
+     */
+    private const val FAILED_RETRY_COOLDOWN_MS = 15_000L
+
+    @Volatile
+    private var lastFailedStorageClass: String? = null
+
+    @Volatile
+    private var lastFailedAt = 0L
+
+    /**
      * 按需初始化数据库。
      *
      * 正常路径是 hook `MMKernel.getCoreStorage()`：微信第一次取 storage 时把 db 存下来。
@@ -518,6 +533,14 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
 
     @Synchronized
     private fun initializeDatabase(storageObj: Any) {
+        val storageClassName = storageObj.javaClass.name
+        val nowMs = SystemClock.elapsedRealtime()
+        if (storageClassName == lastFailedStorageClass &&
+            nowMs - lastFailedAt < FAILED_RETRY_COOLDOWN_MS
+        ) {
+            return
+        }
+
         // 1) 已知 wrapper 类型精确匹配（8.0.79 及更早）。8.0.80 起
         //    "MicroMsg.SqliteDB" / "sql is null " 两个特征串已消失，classSqliteDbWrapper 解析失败，
         //    这里必须全程 runCatching，否则 NoSuchElementException 会让整个「数据库服务」装挂。
@@ -549,6 +572,8 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
 
         val wrapperObj = byType ?: byShape
         if (wrapperObj == null) {
+            lastFailedStorageClass = storageClassName
+            lastFailedAt = nowMs
             WeLogger.w(
                 TAG,
                 "initializeDatabase: CoreStorage(${storageObj.javaClass.name}) 中未找到 SqliteDB wrapper，本次跳过"
@@ -575,6 +600,7 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
         val previousPath = if (alreadyReady) dbPathOf(db) else null
         db = database
         lastStorageRef = java.lang.ref.WeakReference(storageObj)
+        lastFailedStorageClass = null
         val currentPath = dbPathOf(database)
         WeLogger.i(TAG, "数据库服务就绪：${storageObj.javaClass.name} -> ${wrapperObj.javaClass.name}")
         if (alreadyReady) {

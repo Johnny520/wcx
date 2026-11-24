@@ -177,7 +177,9 @@ object DisableVideosAutoPlay : SwitchFeature() {
                     }
                 })
             }.onFailure {
-                WeLogger.w(TAG, "hook ${clazz.simpleName}.onTouchEvent 失败：${it.message}")
+                // 多数版本里这几个 View 没有 override onTouchEvent（触摸由子控件 / 父类处理），
+                // 属正常情况：点击识别靠上面的 View.performClick，这里只作为补充。
+                WeLogger.d(TAG, "${clazz.simpleName} 没有可 hook 的 onTouchEvent：${it.message}")
             }
         }
     }

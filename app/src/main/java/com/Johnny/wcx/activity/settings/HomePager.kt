@@ -288,7 +288,8 @@ fun HomePager(
                         val cause = result.cause
                         val message = cause?.message.orEmpty()
                         if (message.contains("403") || message.contains("rate limit", true)) {
-                            WeLogger.w("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
+                            // 未认证接口 60 次/小时/IP 共享限流，403 是常态：降到 D，用户日志里不该出现。
+                            WeLogger.d("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
                         } else {
                             WeLogger.w(
                                 "HomePager",
@@ -300,7 +301,7 @@ fun HomePager(
                     }
                 }
             }.onFailure {
-                WeLogger.e("HomePager", "Update check exception", it)
+                WeLogger.w("HomePager", "更新检查异常：${it.javaClass.simpleName} ${it.message.orEmpty().take(120)}")
                 latestVersion = null
                 isLatest = false
             }
