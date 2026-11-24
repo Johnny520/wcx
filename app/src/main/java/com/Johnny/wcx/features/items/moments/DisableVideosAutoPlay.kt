@@ -3,89 +3,66 @@ package com.Johnny.wcx.features.items.moments
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
-import com.Johnny.wcx.dexkit.abc.IResolveDex
-import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.getTopMostActivity
+import com.Johnny.wcx.utils.reflection.ClassLoaders
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 
 /**
- * 禁止朋友圈信息流里的视频自动播放，点开 / 点播放按钮仍可正常播放。
+ * 禁止朋友圈信息流里的视频自动播放：滑动、停留、封面动画结束都不播；
+ * 只有用户点播放按钮（或点开全屏播放页）之后才播。
  *
- * ## 为什么旧实现（只 hook `resumeByDataGain`）在 8.0.80 上没效果
+ * ## 旧实现在 8.0.80 上为什么完全没效果
  *
- * 旧实现假定信息流自动播放一定走 `OnlineVideoView#resumeByDataGain`（数据就绪后恢复播放）。
- * 但在 8.0.80 上实测，能触发播放的入口至少有三条（全 dex 扫 invoke 目标得到）：
- *
- * - `OnlineVideoViewHelper#r` → `OnlineVideoView#J()`（resumeByDataGain，数据就绪）
- * - `SnsTimelineVideoView#K()`（improve 时间线包装层）→ `OnlineVideoView#K()`（resumePlay）
- * - `ik4.* / wf4.* / dm4.q0` 等时间线 UIC / 协程回调 → `SnsTimelineVideoView#K()`
- *
- * 也就是说，可见性变化 / 封面动画结束这些「自动播放」场景是直接调 `resumePlay` 的，
- * 和用户点播放按钮走同一个方法 —— 只 hook resumeByDataGain 自然拦不住。
+ * 旧实现用 DexKit 的字符串锚点定位 `resumePlay` / `resumeByDataGain`。
+ * 8.0.80 实测这两个串已不作为方法内的字符串常量存在（`resumeByDataGain` 只剩 `"%d resumeByDataGain"`，
+ * `resumePlay` 干脆没有），三个 dexMethod 委托全部变占位 → 一个 hook 都没装上，所以滑动照播。
  *
  * ## 现在的做法
  *
- * 1. 三条播放入口（resumeByDataGain / OnlineVideoView#resumePlay / SnsTimelineVideoView#resumePlay）
- *    全部挂 hook，全屏播放页（SnsOnlineVideoActivity / 图集 / 视频详情）白名单放行。
- * 2. 放行条件只有一条：**当前 Activity 是全屏播放页**（点开视频后的 SnsOnlineVideoActivity /
- *    图集 SnsGalleryUI / 视频详情 SnsVideoDetailUI）。信息流（SnsTimeLineUI、ImproveSnsTimelineUI、
- *    单条详情 SnsCommentDetailUI）里一律不播 —— 不管用户怎么滑动、有没有点播放按钮，
- *    信息流只会显示封面和播放按钮，要看必须点进全屏页。
+ * 朋友圈视频播放器的类名在 8.0.80 上没有混淆（微信自己用类名做埋点），因此直接用类名 + 方法特征定位：
  *
- * 这样不依赖任何一个混淆类的方法语义，也不会因为微信换播放器而失效。
+ * - `OnlineVideoView#K()V` —— resumePlay，信息流可见性变化 / 滚动停止 / 封面动画结束都走它
+ * - `OnlineVideoView#J()Z` —— resumeByDataGain，数据就绪后自动恢复播放
+ * - `SnsTimelineVideoView#K()V` —— 时间线包装层覆盖了 K()，必须单独 hook
+ * - `CardOnlineVideoView#K()V` —— 广告卡里的视频
+ *
+ * 放行条件只有两个：
+ * 1. 当前页面是全屏播放页（用户点开后才有的 Activity）；
+ * 2. 用户刚刚点过屏幕（1.2 秒窗口内）—— 点播放按钮触发的 resumePlay 都落在这个窗口里。
+ *
+ * 滑动不会产生「点击」信号（位移/时长超阈值），所以滑动永远不放行。
  */
 @Feature(
     name = "禁止自动播放视频",
     categories = ["朋友圈"],
-    description = "禁止朋友圈信息流中的视频自动播放，点开或点播放按钮仍可正常播放"
+    description = "朋友圈信息流里的视频不再随滑动自动播放，点播放按钮或点开全屏才播放"
 )
-object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
+object DisableVideosAutoPlay : SwitchFeature() {
 
     private const val TAG = "DisableVideosAutoPlay"
 
-    /** 埋点里的类名常量（微信自己写的字符串，未混淆）。 */
-    private const val ANCHOR_CLASS = "com.tencent.mm.plugin.sns.ui.OnlineVideoView"
+    /** 点击后的放行窗口：点播放按钮到真正 resumePlay 通常只有几十毫秒。 */
+    private const val TAP_WINDOW_MS = 900L
 
-    /** improve 时间线的视频包装层，播放请求会先经过它。 */
-    private const val ANCHOR_TIMELINE_CLASS = "com.tencent.mm.plugin.sns.ui.video.SnsTimelineVideoView"
+    /** 判定「点击」而不是滑动：位移与按住时长的上限。 */
+    private const val TAP_SLOP_PX = 30
+    private const val TAP_MAX_MS = 400L
 
-    /** 视频数据就绪后自动恢复播放的方法名（埋点常量）。 */
-    private const val ANCHOR_RESUME_BY_DATA_GAIN = "resumeByDataGain"
+    /** 8.0.80 实测未混淆的朋友圈视频 View 类名。 */
+    private val videoClassNames = arrayOf(
+        "com.tencent.mm.plugin.sns.ui.OnlineVideoView",
+        "com.tencent.mm.plugin.sns.ui.video.SnsTimelineVideoView",
+        "com.tencent.mm.plugin.sns.ad.timeline.video.online.CardOnlineVideoView",
+    )
 
-    /** 从暂停恢复播放的方法名（埋点常量）。 */
-    private const val ANCHOR_RESUME_PLAY = "resumePlay"
-
-    /** 视频数据就绪 → 自动恢复播放（`OnlineVideoView#J()Z`）。 */
-    private val methodResumeByDataGain by dexMethod(allowMultiple = true, allowFailure = true) {
-        matcher {
-            usingEqStrings(ANCHOR_RESUME_BY_DATA_GAIN, ANCHOR_CLASS)
-        }
-    }
-
-    /** 信息流 resumePlay（`OnlineVideoView#K()V`）；可见性变化、封面动画结束都会走这里。 */
-    private val methodResumePlay by dexMethod(allowMultiple = true, allowFailure = true) {
-        matcher {
-            declaredClass(ANCHOR_CLASS)
-            paramTypes()
-            returnType("void")
-            usingEqStrings(ANCHOR_RESUME_PLAY)
-        }
-    }
-
-    /** improve 时间线的 resumePlay（`SnsTimelineVideoView#K()V`）。 */
-    private val methodTimelineResumePlay by dexMethod(allowMultiple = true, allowFailure = true) {
-        matcher {
-            declaredClass(ANCHOR_TIMELINE_CLASS)
-            paramTypes()
-            returnType("void")
-            usingEqStrings(ANCHOR_RESUME_PLAY)
-        }
-    }
-
-    /** 全屏播放页：这里的播放都是用户主动点开的，必须放行。 */
+    /** 全屏播放页：用户主动点进来的，一律放行。 */
     private val playerPages = arrayOf(
         "SnsOnlineVideoActivity",
         "SnsGalleryUI",
@@ -93,55 +70,56 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
         "SnsImageViewUI",
     )
 
+    @Volatile
+    private var lastTapAt = 0L
+
     override fun onEnable() {
+        val classes = videoClassNames.mapNotNull { name ->
+            val clazz = runCatching { Class.forName(name, false, ClassLoaders.HOST) }.getOrNull()
+            if (clazz == null) {
+                WeLogger.w(TAG, "未找到 $name（微信版本变化）")
+            }
+            clazz
+        }
+        if (classes.isEmpty()) {
+            WeLogger.e(TAG, "朋友圈视频类全部未找到，禁止自动播放不可用")
+            return
+        }
+
+        hookTapSignals(classes)
+
         var installed = 0
-
-        if (methodResumeByDataGain.isPlaceholder) {
-            WeLogger.w(TAG, "未定位到 $ANCHOR_RESUME_BY_DATA_GAIN（锚点失效）")
-        } else {
-            runCatching {
-                methodResumeByDataGain.hookBefore {
-                    val view = thisObject as? View ?: return@hookBefore
-                    if (isPlayerPage(view.context)) return@hookBefore
-                    result = false
+        classes.forEach { clazz ->
+            clazz.declaredMethods.forEach { method ->
+                if (method.parameterTypes.isNotEmpty()) return@forEach
+                val isResumePlay = method.name == "K" && method.returnType == Void.TYPE
+                val isResumeByDataGain =
+                    method.name == "J" && method.returnType == java.lang.Boolean.TYPE
+                if (!isResumePlay && !isResumeByDataGain) return@forEach
+                runCatching {
+                    XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                            val view = param.thisObject as? View ?: return
+                            if (isPlayerPage(view.context)) return
+                            if (SystemClock.elapsedRealtime() - lastTapAt < TAP_WINDOW_MS) return
+                            param.result = if (isResumePlay) null else false
+                            WeLogger.d(
+                                TAG,
+                                "拦截信息流自动播放：${clazz.simpleName}#${method.name}",
+                            )
+                        }
+                    })
+                    installed++
+                }.onFailure {
+                    WeLogger.e(TAG, "hook ${clazz.simpleName}#${method.name} 失败", it)
                 }
-                installed++
-            }.onFailure { WeLogger.e(TAG, "安装 resumeByDataGain 拦截失败", it) }
-        }
-
-        if (methodResumePlay.isPlaceholder) {
-            WeLogger.w(TAG, "未定位到 OnlineVideoView#resumePlay（锚点失效）")
-        } else {
-            runCatching {
-                methodResumePlay.hookBefore {
-                    val view = thisObject as? View ?: return@hookBefore
-                    if (isPlayerPage(view.context)) return@hookBefore
-                    // void 方法：result = null 即跳过原方法（XposedBridge 视为提前返回）
-                    result = null
-                    WeLogger.d(TAG, "拦截信息流播放（OnlineVideoView#resumePlay）")
-                }
-                installed++
-            }.onFailure { WeLogger.e(TAG, "安装 OnlineVideoView#resumePlay 拦截失败", it) }
-        }
-
-        if (methodTimelineResumePlay.isPlaceholder) {
-            WeLogger.w(TAG, "未定位到 SnsTimelineVideoView#resumePlay（锚点失效）")
-        } else {
-            runCatching {
-                methodTimelineResumePlay.hookBefore {
-                    val view = thisObject as? View ?: return@hookBefore
-                    if (isPlayerPage(view.context)) return@hookBefore
-                    result = null
-                    WeLogger.d(TAG, "拦截信息流播放（SnsTimelineVideoView#resumePlay）")
-                }
-                installed++
-            }.onFailure { WeLogger.e(TAG, "安装 SnsTimelineVideoView#resumePlay 拦截失败", it) }
+            }
         }
 
         if (installed == 0) {
-            WeLogger.e(TAG, "三个播放锚点全部失效，禁止自动播放不生效")
+            WeLogger.e(TAG, "播放方法一个都没 hook 上，禁止自动播放不生效")
         } else {
-            WeLogger.i(TAG, "已安装 $installed 个播放拦截点：仅全屏播放页放行")
+            WeLogger.i(TAG, "已安装 $installed 个播放拦截点：点播放按钮/全屏页放行，滑动不播")
         }
     }
 
@@ -150,11 +128,65 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
     }
 
     /**
+     * 记录「用户刚刚点过」。
+     *
+     * 一路是 View.performClick —— 播放按钮这类子控件被点都会走它；
+     * 另一路是视频 View 自己的 onTouchEvent，兜住自定义触摸（没有 setOnClickListener 的控件）。
+     */
+    private fun hookTapSignals(classes: List<Class<*>>) {
+        runCatching {
+            val performClick = View::class.java.getDeclaredMethod("performClick")
+            XposedBridge.hookMethod(performClick, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                    // 只在朋友圈相关页面的点击才记为「视频点击」，否则在聊天页点赞也会误放行。
+                    val view = param.thisObject as? View ?: return
+                    if (isSnsPage(view.context) == false) return
+                    lastTapAt = SystemClock.elapsedRealtime()
+                }
+            })
+        }.onFailure { WeLogger.e(TAG, "hook View.performClick 失败", it) }
+
+        classes.forEach { clazz ->
+            runCatching {
+                val onTouch = clazz.getDeclaredMethod("onTouchEvent", MotionEvent::class.java)
+                onTouch.isAccessible = true
+                XposedBridge.hookMethod(onTouch, object : XC_MethodHook() {
+                    private var downAt = 0L
+                    private var downX = 0f
+                    private var downY = 0f
+
+                    override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                        val event = param.args.firstOrNull() as? MotionEvent ?: return
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                downAt = SystemClock.elapsedRealtime()
+                                downX = event.x
+                                downY = event.y
+                            }
+
+                            MotionEvent.ACTION_UP -> {
+                                val duration = SystemClock.elapsedRealtime() - downAt
+                                val dx = (event.x - downX).toDouble()
+                                val dy = (event.y - downY).toDouble()
+                                val distance = Math.hypot(dx, dy)
+                                if (downAt > 0L && duration < TAP_MAX_MS && distance < TAP_SLOP_PX) {
+                                    lastTapAt = SystemClock.elapsedRealtime()
+                                }
+                            }
+                        }
+                    }
+                })
+            }.onFailure {
+                WeLogger.w(TAG, "hook ${clazz.simpleName}.onTouchEvent 失败：${it.message}")
+            }
+        }
+    }
+
+    /**
      * 当前是否处在全屏播放页。
      *
-     * 先沿 View 的 ContextWrapper 链找 Activity；播放器是用 application context 构造的时候链上
-     * 没有 Activity，再用 ActivityThread 里的栈顶 Activity 兜底 —— 否则全屏页也会被拦，
-     * 表现为「点进去也播不了」。
+     * 先沿 View 的 ContextWrapper 链找 Activity；播放器用 application context 构造时链上没有 Activity，
+     * 再用 ActivityThread 里的栈顶 Activity 兜底 —— 否则全屏页也会被拦，表现为「点进去也播不了」。
      */
     private fun isPlayerPage(context: Context?): Boolean {
         var ctx = context
@@ -168,4 +200,21 @@ object DisableVideosAutoPlay : SwitchFeature(), IResolveDex {
     }
 
     private fun isPlayerPageName(name: String): Boolean = playerPages.any { name.contains(it) }
+
+    /**
+     * 当前 Context 是否属于朋友圈（Sns）页面。
+     *
+     * 解析不出 Activity（播放器可能是用 application context 构造的）时返回 null，
+     * 调用方按「无法判断」处理 —— 宁可放行，也不要出现「点了播放按钮却不播」。
+     */
+    private fun isSnsPage(context: Context?): Boolean? {
+        var ctx = context
+        var guard = 0
+        while (ctx != null && guard++ < 8) {
+            if (ctx is Activity) return ctx.javaClass.name.contains("Sns")
+            ctx = (ctx as? ContextWrapper)?.baseContext
+        }
+        val top = getTopMostActivity() ?: return null
+        return top.javaClass.name.contains("Sns")
+    }
 }
