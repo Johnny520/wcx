@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.drawable.Drawable
 import android.view.ContextMenu
+import android.view.View
 import de.robv.android.xposed.XC_MethodHook
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.Modifiers
@@ -22,18 +23,21 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
 
     private const val TAG = "WeMomentsContextMenuApi"
 
+    /** 朋友圈单条动态的存储对象；不混淆，可直接按类名找。 */
+    private const val SNS_INFO_CLASS = "com.tencent.mm.plugin.sns.storage.SnsInfo"
+
     fun interface IMenuItemsProvider {
         fun getMenuItems(): List<MenuItem>
     }
 
-    private val menuItems = mutableMapOf<String, List<MenuItem>>()
+    private val menuItems = MenuRegistry<MenuItem>()
 
     fun addProvider(provider: IMenuItemsProvider) {
-        menuItems[provider.javaClass.name] = provider.getMenuItems()
+        menuItems.register(provider, provider.getMenuItems())
     }
 
     fun removeProvider(provider: IMenuItemsProvider) {
-        menuItems.remove(provider.javaClass.name)
+        menuItems.unregister(provider)
     }
 
     data class MenuItem(
@@ -158,12 +162,37 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
     }
 
     private fun handleCreateMenu(param: XC_MethodHook.MethodHookParam) {
-        val menu = param.args.getOrNull(0) as? ContextMenu? ?: return
+        val menu = param.args.getOrNull(0) as? ContextMenu ?: return
         val context = resolveContext(param.thisObject)
+        // 拿不到菜单上下文（连 Activity 都找不到）时**一项都不加**。
+        // 原来的写法是「context 为 null 就不判断 shouldShow，照常添加」，结果是：
+        // 关闭开关后菜单项照样出现（开关看起来失灵），且点下去也拿不到 snsInfo。
+        if (context == null) {
+            if (menuItems.snapshot().isNotEmpty()) {
+                WeLogger.d(TAG, "菜单上下文解析失败，跳过注入（listener=${param.thisObject?.javaClass?.name}）")
+            }
+            return
+        }
 
-        for (item in menuItems.values.flatten()) {
+        // snsInfo 为 null 时再找出路：新版朋友圈信息流的监听器（Improve 系列）里既没有
+        // TimeLineObject 也没有 localId 字符串，但被长按的 View 上通常挂着 SnsInfo。
+        val resolved = if (context.snsInfo == null) {
+            resolveSnsInfoFromArgs(param.args)?.let { context.copy(snsInfo = it) } ?: context
+        } else {
+            context
+        }
+        if (resolved.snsInfo == null) {
+            // 一行诊断：args 类型 + 监听器字段，下一次遇到新的页面结构能直接看出该往哪找。
+            WeLogger.w(
+                TAG,
+                "菜单参数里也没有 SnsInfo，listener=${param.thisObject?.javaClass?.name}, " +
+                        "args=${describeArgs(param.args)}, fields=${readFieldTypes(param.thisObject ?: return)}"
+            )
+        }
+
+        for (item in menuItems.snapshot()) {
             try {
-                if (context != null && !item.shouldShow(context, item.id)) continue
+                if (!item.shouldShow(resolved, item.id)) continue
                 menu.reflekt()
                     .firstMethod {
                         parameters(Int::class, CharSequence::class, Drawable::class)
@@ -175,10 +204,40 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         }
     }
 
+    /**
+     * 从菜单参数里找 SnsInfo：被长按的 View 往往把它挂在 `tag` 上。
+     *
+     * 沿 View 树往上找几层 —— 长按落点常常是文字气泡，SnsInfo 在整条 item 的根上。
+     * tag 是别的包装对象时，再看它的一层字段。
+     */
+    private fun resolveSnsInfoFromArgs(args: Array<Any?>): Any? {
+        for (arg in args) {
+            var view = arg as? View ?: continue
+            var depth = 0
+            while (depth++ < 10) {
+                val tag = runCatching { view.tag }.getOrNull()
+                if (tag != null) {
+                    if (tag.javaClass.name == SNS_INFO_CLASS) return tag
+                    if (tag.javaClass.name.startsWith("com.tencent.mm.")) {
+                        findObjectInFields(tag) { it.javaClass.name == SNS_INFO_CLASS }?.let { return it }
+                    }
+                }
+                view = view.parent as? View ?: break
+            }
+        }
+        return null
+    }
+
+    /** 诊断用：参数列表的运行时类型。 */
+    private fun describeArgs(args: Array<Any?>): String =
+        args.joinToString(", ") { arg ->
+            arg?.javaClass?.simpleName ?: "null"
+        }
+
     private fun handleSelectMenu(param: XC_MethodHook.MethodHookParam) {
         val menuItem = param.args.getOrNull(0) as? android.view.MenuItem ?: return
         val clickedId = menuItem.itemId
-        if (menuItems.values.flatten().none { it.id == clickedId }) return
+        if (menuItems.snapshot().none { it.id == clickedId }) return
 
         val context = resolveContext(param.thisObject)
         if (context == null) {
@@ -186,7 +245,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
             return
         }
 
-        for (item in menuItems.values.flatten()) {
+        for (item in menuItems.snapshot()) {
             try {
                 if (item.id == clickedId) {
                     item.onClick(context)
@@ -209,9 +268,23 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         resolveImproveContext(listener)?.let { return it }
 
         val reflected = listener.reflekt()
+        // Activity 不一定在直接字段上：有的监听器把它包在内部对象里，或者只存了一个 Context。
+        // 依次试「直接字段 → 一层子对象 / Context 链 → ActivityThread 的 mActivities」，
+        // 全都拿不到才算解析失败（那时才跳过注入，否则开关会看起来失灵）。
         val activity = reflected.firstFieldOrNull {
             type = Activity::class
-        }?.get() as? Activity ?: return null
+        }?.get() as? Activity
+            ?: findActivityInFields(listener)
+            ?: topActivityOrNull()
+
+        if (activity == null) {
+            WeLogger.w(
+                TAG,
+                "菜单上下文里没有 Activity，listener=${listener.javaClass.name}, " +
+                        "fields=${readFieldTypes(listener)}"
+            )
+            return null
+        }
 
         val timeLineObject = reflected.firstFieldOrNull {
             type = "com.tencent.mm.protocal.protobuf.TimeLineObject"
@@ -227,6 +300,107 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         }
         return MomentsContext(activity, snsInfo, timeLineObject, listener)
     }
+
+    /**
+     * 从 listener 的字段里找 Activity。
+     *
+     * 两步：字段本身就是 Activity / Context（沿 `baseContext` 链解包），
+     * 或者字段是微信自己的对象（把 Activity 存在里面），再往下看一层。
+     * 只看一层子对象 —— 深挖会触发大量类加载，长按菜单扛不住。
+     */
+    private fun findActivityInFields(target: Any): Activity? {
+        var current: Class<*>? = target.javaClass
+        var depth = 0
+        while (current != null && current != Any::class.java && depth++ < 6) {
+            for (field in current.declaredFields) {
+                if (Modifier.isStatic(field.modifiers)) continue
+                val type = field.type
+                val interesting = Activity::class.java.isAssignableFrom(type) ||
+                    Context::class.java.isAssignableFrom(type) ||
+                    type.name.startsWith("com.tencent.mm.")
+                if (!interesting) continue
+                val value = runCatching {
+                    field.isAccessible = true
+                    field.get(target)
+                }.getOrNull() ?: continue
+
+                unwrapActivity(value)?.let { return it }
+                if (value.javaClass.name.startsWith("com.tencent.mm.")) {
+                    findActivityOneLevelDown(value)?.let { return it }
+                }
+            }
+            current = current.superclass
+        }
+        return null
+    }
+
+    /** 在 [target] 的直接字段里找 Activity / Context（不再递归）。 */
+    private fun findActivityOneLevelDown(target: Any): Activity? {
+        var current: Class<*>? = target.javaClass
+        var depth = 0
+        while (current != null && current != Any::class.java && depth++ < 6) {
+            for (field in current.declaredFields) {
+                if (Modifier.isStatic(field.modifiers)) continue
+                if (!Activity::class.java.isAssignableFrom(field.type) &&
+                    !Context::class.java.isAssignableFrom(field.type)
+                ) {
+                    continue
+                }
+                val value = runCatching {
+                    field.isAccessible = true
+                    field.get(target)
+                }.getOrNull() ?: continue
+                unwrapActivity(value)?.let { return it }
+            }
+            current = current.superclass
+        }
+        return null
+    }
+
+    /** `ContextWrapper` 链一路解到 Activity；普通 Context 原样返回 null。 */
+    private fun unwrapActivity(value: Any?): Activity? {
+        if (value is Activity) return value
+        var context = value as? Context ?: return null
+        var guard = 0
+        while (guard++ < 8) {
+            if (context is Activity) return context
+            context = (context as? android.content.ContextWrapper)?.baseContext ?: break
+        }
+        return context as? Activity
+    }
+
+    /** 最后一道兜底：`ActivityThread.mActivities` 里最近的一个 Activity。 */
+    private fun topActivityOrNull(): Activity? = runCatching {
+        val thread = Class.forName("android.app.ActivityThread")
+            .getMethod("currentActivityThread")
+            .invoke(null) ?: return@runCatching null
+        val activities = thread.javaClass.getDeclaredField("mActivities")
+            .apply { isAccessible = true }
+            .get(thread) as? Map<*, *> ?: return@runCatching null
+        activities.values.asSequence()
+            .mapNotNull { record ->
+                runCatching {
+                    record?.javaClass?.getDeclaredField("activity")
+                        ?.apply { isAccessible = true }
+                        ?.get(record) as? Activity
+                }.getOrNull()
+            }
+            .lastOrNull()
+    }.getOrNull()
+
+    /** 解析失败时把字段类型列出来，下一次遇到新的 listener 能直接看出该往哪儿找。 */
+    private fun readFieldTypes(target: Any): String = runCatching {
+        val names = mutableListOf<String>()
+        var current: Class<*>? = target.javaClass
+        var depth = 0
+        while (current != null && current != Any::class.java && depth++ < 3) {
+            current.declaredFields
+                .filterNot { Modifier.isStatic(it.modifiers) }
+                .forEach { names += it.name + ":" + it.type.simpleName }
+            current = current.superclass
+        }
+        names.take(24).joinToString(", ")
+    }.getOrDefault("?")
 
     private fun resolveImproveContext(listener: Any): MomentsContext? {
         val click = findObjectInFields(listener) { obj -> hasImproveInfoField(obj) } ?: return null
