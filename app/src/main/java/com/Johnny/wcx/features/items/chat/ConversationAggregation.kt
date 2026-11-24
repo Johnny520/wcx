@@ -1738,19 +1738,10 @@ object ConversationAggregation : ClickableFeature(),
         }.onFailure { WeLogger.w(TAG, "hook execSQL failed", it) }
     }
 
-    private val methodRecyclerOnBind by dexMethod(allowFailure = true, allowMultiple = true) {
-        matcher {
-            name = "onBindViewHolder"
-            paramTypes("androidx.recyclerview.widget.RecyclerView\$ViewHolder", "int")
-        }
-    }
-
-    private val methodSupportRecyclerOnBind by dexMethod(allowFailure = true, allowMultiple = true) {
-        matcher {
-            name = "onBindViewHolder"
-            paramTypes("android.support.v7.widget.RecyclerView\$ViewHolder", "int")
-        }
-    }
+    // 早期版本留下的两个 onBindViewHolder 委托已删除：
+    // 它们在任何微信版本上都没有调用点，却会因为「缓存缺 key」把整个「对话归拢」判成
+    // incomplete cache 从而跳过启动（日志：skipping 对话归拢 — incomplete cache）。
+    // 现在没有这两个必然失配的 key，功能可以正常加载。
 
     private val methodTextViewSetText by dexMethod(allowFailure = true, allowMultiple = true) {
         matcher {
