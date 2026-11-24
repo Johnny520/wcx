@@ -20,6 +20,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -380,5 +384,73 @@ fun AiTextInput(
             cursorBrush = androidx.compose.ui.graphics.SolidColor(WxPalette.Primary),
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/**
+ * 列表末尾的「＋ 添加」行。
+ *
+ * 右上角不再放添加胶囊，空列表时用空状态卡里的按钮，有数据时用这一行 ——
+ * 入口始终存在，且同屏只出现一次。
+ */
+@Composable
+fun AiAddListRow(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(WxPalette.primarySoft())
+            .clickable { onClick() }
+            .padding(vertical = 13.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "+ $text",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = WxPalette.Primary,
+        )
+    }
+}
+
+/**
+ * 会自动折叠的长文本：超过 [collapsedLines] 行就截断并显示「展开 / 收起」。
+ *
+ * 文案短的时候（不溢出）不会出现「展开」，所以可以直接替换普通 Text 使用。
+ */
+@Composable
+fun AiExpandableText(
+    text: String,
+    modifier: Modifier = Modifier,
+    fontSize: TextUnit = 11.sp,
+    lineHeight: TextUnit = 16.sp,
+    color: Color = WxPalette.textSecondary(),
+    collapsedLines: Int = 2,
+) {
+    var expanded by remember(text) { mutableStateOf(false) }
+    var overflows by remember(text) { mutableStateOf(false) }
+    Column(modifier) {
+        Text(
+            text = text,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            color = color,
+            maxLines = if (expanded) Int.MAX_VALUE else collapsedLines,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { layout ->
+                overflows = layout.lineCount > collapsedLines || layout.hasVisualOverflow
+            },
+        )
+        if (overflows) {
+            Text(
+                text = if (expanded) "收起" else "展开全部",
+                fontSize = 11.sp,
+                color = WxPalette.Primary,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .clickable { expanded = !expanded },
+            )
+        }
     }
 }

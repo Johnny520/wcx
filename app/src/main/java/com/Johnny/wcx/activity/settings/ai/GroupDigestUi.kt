@@ -46,13 +46,20 @@ internal fun GroupDigestList(
     groups: List<GroupSummary>,
     onOpen: (String) -> Unit,
     onLongPress: (GroupSummary) -> Unit,
+    onAdd: () -> Unit,
 ) {
     if (groups.isEmpty()) {
-        // 添加入口只有右上角一个，这里不再放按钮，避免同一动作出现两次。
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        // 空状态靠上对齐：铺满高度，否则卡片会被居中，看起来像「飘在屏幕中间、上下全白」。
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
             AiEmptyCard(
                 title = "还没有群总结",
-                body = "点右上角「添加群」选一个群，每隔一段时间自动整理成一条摘要。",
+                body = "选一个群，每隔一段时间自动整理成一条摘要。",
+                action = "添加群聊",
+                onAction = onAdd,
             )
         }
         return
@@ -67,6 +74,10 @@ internal fun GroupDigestList(
                 onOpen = { onOpen(group.groupId) },
                 onLongPress = { onLongPress(group) },
             )
+        }
+        // 列表底部常驻添加入口（右上角已不再放「添加群」）。
+        item(key = "add_group") {
+            AiAddListRow(text = "添加群聊", onClick = onAdd)
         }
     }
 }

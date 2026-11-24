@@ -56,7 +56,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.materialsymbols.MaterialSymbols
-import com.composables.icons.materialsymbols.outlined.Add
 import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Bug_report
 import com.Johnny.wcx.activity.settings.CONTENT_BOTTOM_INSET
@@ -156,7 +155,6 @@ internal fun AiPager(
                     tab = index
                     scope.launch { pagerState.animateScrollToPage(index) }
                 },
-                onAdd = { if (tab == 1) showAddGroup = true else showAddFriend = true },
                 onPrompts = if (BuildConfig.DEBUG) {
                     { showPrompts = true }
                 } else {
@@ -188,6 +186,7 @@ internal fun AiPager(
                             groups = groupSummaries,
                             onOpen = { openGroupId = it },
                             onLongPress = { deleteGroupTarget = it },
+                            onAdd = { showAddGroup = true },
                         )
                     }
 
@@ -215,6 +214,7 @@ internal fun AiPager(
                                 summaries = summaries,
                                 onOpen = { openWxId = it },
                                 onLongPress = { deleteTarget = it },
+                                onAdd = { showAddFriend = true },
                             )
                         }
                     }
@@ -354,7 +354,6 @@ private fun AiHeader(
     tab: Int,
     onBack: (() -> Unit)? = null,
     onTabChange: (Int) -> Unit,
-    onAdd: () -> Unit,
     /** debug 专用：null 表示不显示入口（release 包）。 */
     onPrompts: (() -> Unit)? = null,
 ) {
@@ -397,13 +396,6 @@ private fun AiHeader(
                 icon = MaterialSymbols.Outlined.Bug_report,
                 text = "提示词",
                 onClick = onPrompts,
-            )
-        }
-        if (tab == 0 || tab == 1) {
-            AiIconPill(
-                icon = MaterialSymbols.Outlined.Add,
-                text = if (tab == 1) "添加群" else "添加",
-                onClick = onAdd,
             )
         }
     }
@@ -504,13 +496,20 @@ private fun AiFriendList(
     summaries: List<AiProfileSummary>,
     onOpen: (String) -> Unit,
     onLongPress: (AiProfileSummary) -> Unit,
+    onAdd: () -> Unit,
 ) {
     if (summaries.isEmpty()) {
-        // 添加入口只有右上角一个，这里不再放按钮，避免同一动作出现两次。
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        // 空状态靠上对齐，避免卡片飘在屏幕中间、上下都是白的。
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
             AiEmptyCard(
                 title = "还没有好友档案",
-                body = "点右上角「添加」选一个好友，让 AI 先读懂你们的聊天，之后才能给建议。",
+                body = "选一个好友，让 AI 先读懂你们的聊天，之后才能给建议。",
+                action = "添加好友",
+                onAction = onAdd,
             )
         }
         return
@@ -563,6 +562,11 @@ private fun AiFriendList(
                         onLongPress = { onLongPress(summary) },
                     )
                 }
+            }
+
+            // 列表底部常驻添加入口（右上角已不再放「添加」）。
+            item(key = "add_friend") {
+                AiAddListRow(text = "添加好友", onClick = onAdd)
             }
         }
 

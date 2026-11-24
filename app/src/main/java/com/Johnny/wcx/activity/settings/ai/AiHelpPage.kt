@@ -200,11 +200,9 @@ private fun HelpRow(
                     fontSize = 13.sp,
                     color = WxPalette.textPrimary(),
                 )
-                Text(
+                AiExpandableText(
                     text = item.detail,
-                    fontSize = 11.sp,
-                    color = WxPalette.textSecondary(),
-                    lineHeight = 16.sp,
+                    collapsedLines = 2,
                 )
             }
         }
