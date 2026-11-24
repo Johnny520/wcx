@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.reflekt.utils.isSubclassOf
-import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.api.core.WeMessageApi
@@ -247,7 +246,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                 if (mergeEnabled) {
                     // collapse everything into a single zhiyou entry backed by a Compose dialog
                     if (applicableItems.isNotEmpty()) {
-                        addMenuItem.invoke(MERGED_MENU_ITEM_ID, BuildConfig.BRAND, ExtensionIcon)
+                        addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
                     }
                 } else {
                     for (item in applicableItems) {
@@ -338,7 +337,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     }
 
                 // collapse everything into a single zhiyou entry backed by a Compose dialog
-                addMenuItem.invoke(MERGED_MENU_ITEM_ID, BuildConfig.BRAND, ExtensionIcon)
+                addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
             } catch (ex: Throwable) {
                 WeLogger.e(
                     TAG,
@@ -386,7 +385,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
     ) {
         showComposeDialog(view.context) {
             AlertDialogContent(
-                title = { Text(BuildConfig.BRAND) },
+                title = { Text("WCX") },
                 text = {
                     LazyColumn(
                         Modifier
@@ -463,13 +462,13 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
 
         if (adaptedRows.isEmpty() && autoRows.isEmpty()) {
-            showToast("没有可用于所选消息的${BuildConfig.BRAND}菜单项")
+            showToast("没有可用于所选消息的${"WCX"}菜单项")
             return
         }
 
         showComposeDialog(view.context) {
             AlertDialogContent(
-                title = { Text("${BuildConfig.BRAND} (${msgInfos.size} 条消息)") },
+                title = { Text("${"WCX"} (${msgInfos.size} 条消息)") },
                 text = {
                     LazyColumn(
                         Modifier
