@@ -21,7 +21,6 @@ import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.Johnny.wcx.utils.reflection.BBool
 import com.Johnny.wcx.utils.reflection.BInt
 import com.Johnny.wcx.utils.reflection.BString
-import java.util.concurrent.CopyOnWriteArrayList
 
 @Feature(name = "首页菜单服务", categories = ["API"], description = "提供向首页右上角菜单添加菜单项的能力")
 object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
@@ -38,14 +37,14 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
         val fakeResId get() = id + text.hashCode()
     }
 
-    private val providers = CopyOnWriteArrayList<IMenuItemsProvider>()
+    private val providers = ProviderRegistry<IMenuItemsProvider>()
 
     fun addProvider(provider: IMenuItemsProvider) {
-        providers.addIfAbsent(provider)
+        providers.register(provider)
     }
 
     fun removeProvider(provider: IMenuItemsProvider) {
-        providers.remove(provider)
+        providers.unregister(provider)
     }
 
     private const val TAG = "WeHomeScreenPopupMenuApi"
@@ -145,7 +144,7 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
                 }
             }
 
-            for (provider in providers) {
+            for (provider in providers.snapshot()) {
                 try {
                     for (item in provider.getMenuItems(this)) {
                         fakeResIdToResMap[item.fakeResId] = item.drawable
@@ -195,7 +194,7 @@ object WeHomeScreenPopupMenuApi : ApiFeature(), IResolveDex {
             val id = itemData.reflekt()
                 .fields { type = Int::class }[1].get()!! as Int
 
-            for (provider in providers) {
+            for (provider in providers.snapshot()) {
                 for (item in provider.getMenuItems(this)) {
                     if (item.id == id) {
                         try {

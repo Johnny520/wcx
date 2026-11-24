@@ -54,14 +54,18 @@ object WeChatInputBarMenuApi : ApiFeature(), IResolveDex {
     )
 
     private const val TAG = "WeChatInputBarMenuApi"
-    private val providers = mutableSetOf<IActionItemsProvider>()
+    private val providers = ProviderRegistry<IActionItemsProvider>()
+
+    /** 是否至少有一个功能注册了菜单项 —— 长按入口据此决定要不要弹菜单。 */
+    val hasProviders: Boolean
+        get() = !providers.isEmpty()
 
     fun addProvider(provider: IActionItemsProvider) {
-        providers += provider
+        providers.register(provider)
     }
 
     fun removeProvider(provider: IActionItemsProvider) {
-        providers -= provider
+        providers.unregister(provider)
     }
 
     val methodSendMessage by dexMethod {
@@ -102,7 +106,7 @@ object WeChatInputBarMenuApi : ApiFeature(), IResolveDex {
     }
 
     fun showMenu(context: Context, chatFooter: ChatFooter) {
-        val applicableItems = providers
+        val applicableItems = providers.snapshot()
             .flatMap { it.getActionItems() }
             .filter { it.isSupported(context, chatFooter) }
 
