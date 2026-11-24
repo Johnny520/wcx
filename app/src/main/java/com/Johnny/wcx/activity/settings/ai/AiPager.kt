@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -83,6 +85,9 @@ import kotlinx.coroutines.withContext
  * 数据全部来自 [AiProfileStore] 的两个文件（`index.json` + `friends.json`），
  * 页面本身不查数据库 —— 查库只在「添加好友」「初始化」这些明确的动作里发生。
  */
+/** 顶部分段数量：好友 / 群组 / 总结 / 说明 / 设置。 */
+private const val AI_TAB_COUNT = 5
+
 @Composable
 internal fun AiPager(
     /** 外部（例如从别处回到本页）触发的刷新计数：变化即重读索引。 */
@@ -110,6 +115,13 @@ internal fun AiPager(
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    // 五个分段支持左右滑动切换；tab 仍作为顶部胶囊与右上角「添加」的依据。
+    val pagerState = rememberPagerState(pageCount = { AI_TAB_COUNT })
+    // 手势滑动停下后把胶囊状态对齐到落定的页；点击胶囊时 tab 已在回调里先行更新。
+    LaunchedEffect(pagerState.settledPage) {
+        tab = pagerState.settledPage
+    }
 
     // 列表只读 index.json：好友快照由「添加好友」浮层自己按需刷新，页面不该为它卡住。
     LaunchedEffect(refreshKey, externalRefresh) {
@@ -140,7 +152,10 @@ internal fun AiPager(
             AiHeader(
                 tab = tab,
                 onBack = onBack,
-                onTabChange = { tab = it },
+                onTabChange = { index ->
+                    tab = index
+                    scope.launch { pagerState.animateScrollToPage(index) }
+                },
                 onAdd = { if (tab == 1) showAddGroup = true else showAddFriend = true },
                 onPrompts = if (BuildConfig.DEBUG) {
                     { showPrompts = true }
@@ -149,46 +164,61 @@ internal fun AiPager(
                 },
             )
 
-            // 总结 / 说明 / 设置都不依赖好友档案索引，不进「载入中」这条分支。
-            if (tab == 2) {
-                AiReportPage()
-            } else if (tab == 3) {
-                AiHelpPage()
-            } else if (tab == 4) {
-                AiCueSettings(
-                    onOpenConfig = { showConfig = true },
-                    onMomentsCopy = { AiMomentsCopy.showDialog(context) },
-                )
-            } else if (loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("载入中…", fontSize = 13.sp, color = WxPalette.textSecondary())
-                }
-            } else if (tab == 1) {
-                GroupDigestList(
-                    groups = groupSummaries,
-                    onOpen = { openGroupId = it },
-                    onLongPress = { deleteGroupTarget = it },
-                )
-            } else {
-                val alerts = remember(refreshKey) { AiImportantAlerts.pending() }
-                if (alerts.isNotEmpty()) {
-                    ImportantAlertCard(
-                        alerts = alerts,
-                        onDismiss = {
-                            AiImportantAlerts.markAllRead()
-                            toast = "已标记全部重要信息为「知道了」"
-                            reload()
-                        },
+            // 五个分段放进横向 pager：点胶囊切页、左右滑动也切页。
+            // 页面内部都是垂直滚动（列表 / 说明 / 设置），与横向滑动不冲突。
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                // 总结 / 说明 / 设置都不依赖好友档案索引，不进「载入中」这条分支。
+                when (page) {
+                    2 -> AiReportPage()
+                    3 -> AiHelpPage()
+                    4 -> AiCueSettings(
+                        onOpenConfig = { showConfig = true },
+                        onMomentsCopy = { AiMomentsCopy.showDialog(context) },
                     )
+
+                    1 -> if (loading) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("载入中…", fontSize = 13.sp, color = WxPalette.textSecondary())
+                        }
+                    } else {
+                        GroupDigestList(
+                            groups = groupSummaries,
+                            onOpen = { openGroupId = it },
+                            onLongPress = { deleteGroupTarget = it },
+                        )
+                    }
+
+                    else -> if (loading) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("载入中…", fontSize = 13.sp, color = WxPalette.textSecondary())
+                        }
+                    } else {
+                        Column(Modifier.fillMaxSize()) {
+                            val alerts = remember(refreshKey) { AiImportantAlerts.pending() }
+                            if (alerts.isNotEmpty()) {
+                                ImportantAlertCard(
+                                    alerts = alerts,
+                                    onDismiss = {
+                                        AiImportantAlerts.markAllRead()
+                                        toast = "已标记全部重要信息为「知道了」"
+                                        reload()
+                                    },
+                                )
+                            }
+                            if (!AiConfig.isConfigured) {
+                                ConfigureBanner(onClick = { showConfig = true })
+                            }
+                            AiFriendList(
+                                summaries = summaries,
+                                onOpen = { openWxId = it },
+                                onLongPress = { deleteTarget = it },
+                            )
+                        }
+                    }
                 }
-                if (!AiConfig.isConfigured) {
-                    ConfigureBanner(onClick = { showConfig = true })
-                }
-                AiFriendList(
-                    summaries = summaries,
-                    onOpen = { openWxId = it },
-                    onLongPress = { deleteTarget = it },
-                )
             }
         }
 
