@@ -25,7 +25,7 @@ import java.io.FileNotFoundException
  * 外层包成 `Resources$NotFoundException`，随后 CheckBox 构造失败 → 「通话中来电」界面直接崩。
  * 所以兜底范围从「只有 raw svg」扩到「raw svg + 所有 .xml drawable」。
  *
- * 兜底策略（只保护 res/raw/*.svg 与 *.xml）:
+ * 兜底策略（只保护 res/raw 下的 svg 与 xml）:
  * - 其余 drawable 加载：类型检查后立即放行，**不改变原调用路径、零额外开销**；
  * - 命中 `res/raw/xxx.svg`：调用原实现，只有确实抛「资源/文件找不到」时才降级为 null
  *   （ImageView 的 src 为空，界面继续渲染，不闪退）；其它异常原样抛出，不掩盖真实问题。
@@ -55,7 +55,7 @@ object ResourceFallbackGuard {
                         // 版本是 (Resources, TypedValue, int, int) / (Resources, TypedValue, int, int, String)，
                         // 0 号参数一直是 Resources wrapper —— 原来按 args[0] 取 TypedValue 恒为 null，
                         // 于是整段兜底一次都没命中过（日志里 332 次 installed、0 次 missing raw svg），
-                        // 微信照样因为 res/raw/*.svg 缺失 inflate 失败而闪退。
+                        // 微信照样因为 res/raw 下的 svg 缺失 inflate 失败而闪退。
                         val value = param.args.firstOrNull { it is TypedValue } as? TypedValue ?: return
                         val path = value.string ?: return
                         // 只对 raw svg 与 xml drawable 走兜底，图片等其它资源直接放行，零额外开销。
