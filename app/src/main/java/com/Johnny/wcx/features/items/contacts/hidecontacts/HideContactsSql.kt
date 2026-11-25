@@ -29,7 +29,7 @@ internal fun HideContacts.installSqlHooks() {
     // wrapper 是所有列表查询的公共咽喉，只要有任意一个查询型面开着就得装。
     if (surfaceOn(SURFACE_CONVERSATIONS) || surfaceOn(SURFACE_CONTACTS) ||
         surfaceOn(SURFACE_MOMENTS_INLINE) || surfaceOn(SURFACE_NEW_FRIENDS) ||
-        surfaceOn(SURFACE_UNREAD)
+        surfaceOn(SURFACE_UNREAD) || surfaceOn(SURFACE_SEARCH)
     ) {
         installWrapperHook()
     }
@@ -42,6 +42,7 @@ private fun ruleSurface(ruleName: String): String = when (ruleName) {
     "unread-count" -> HideContacts.SURFACE_UNREAD
     "new-friends" -> HideContacts.SURFACE_NEW_FRIENDS
     "moments-comments" -> HideContacts.SURFACE_MOMENTS_INLINE
+    "conversation-search" -> HideContacts.SURFACE_SEARCH
     else -> HideContacts.SURFACE_CONTACTS
 }
 
@@ -63,6 +64,13 @@ private class SqlRule(
 
 private val WRAPPER_RULES = listOf(
     SqlRule("conversation-list", ::looksLikeConversationListQuery) {
+        "rconversation.username NOT IN (${it.toSqlList()})"
+    },
+    // 搜索框实时匹配会话名（首页搜索下拉、搜索页「会话」结果）。
+    // 这类查询是 `select * from rconversation where username like ? ...`，
+    // 没有主页列表那三列（conversationtime / unreadcount / digestuser），
+    // 上面那条规则匹配不到 —— 密友会话名照样会被搜出来。
+    SqlRule("conversation-search", ::looksLikeConversationSearchQuery) {
         "rconversation.username NOT IN (${it.toSqlList()})"
     },
     // Qualify as rcontact.username: several of these queries are joins (e.g. "from rcontact,
@@ -215,6 +223,23 @@ private fun looksLikeConversationListQuery(lower: String): Boolean {
 }
 
 /**
+ * 搜索型 rconversation 查询：`select * from rconversation where username like ? and ...`。
+ *
+ * 只认带 `like` 的语句，并排除「按 username 精确定位单行」的 getter —— 后者若被注入
+ * `username NOT IN (...)` 会让会话查找返回 null，密友的临时显示、消息入库都会受影响。
+ */
+private fun looksLikeConversationSearchQuery(lower: String): Boolean {
+    if (!lower.contains("select")) return false
+    if (!lower.contains("from rconversation")) return false
+    if (!lower.contains(" like ")) return false
+    if (!lower.contains(" where ")) return false
+    if (lower.contains("username = ?") || lower.contains("username=?")) return false
+    if (lower.contains("username='") || lower.contains("username = '")) return false
+    if (lower.contains("username not in")) return false
+    return true
+}
+
+/**
  * Recognises full contact-list queries (contact selector, 群聊 list, 标签 members, OpenIM, 公众号).
  * The table must be rcontact and the query must select pyinitial / quanpin.
  *
@@ -354,10 +379,54 @@ internal fun rewriteFtsSql(sql: String, hidden: Set<String>): String? {
             sql.startsWith(SQL_SELECT_MESSAGE) ||
             sql.startsWith(SQL_SELECT_MESSAGES_BY_KEYWORD) ||
             sql.startsWith(SQL_SELECT_CHATROOM_BY_INDEX)
-    if (!matchesAuxIndexShape) return null
-    if (AUX_INDEX_PINNED_REGEX.containsMatchIn(sql)) return null
+    if (matchesAuxIndexShape) {
+        if (AUX_INDEX_PINNED_REGEX.containsMatchIn(sql)) return null
+        return wrapWithNotIn(sql, "aux_index", hidden)
+    }
 
-    return wrapWithNotIn(sql, "aux_index", hidden)
+    // 8.0.80 起微信不再硬编码 FTS 表名: 全部走 `String.format` 模板
+    //   SELECT ... FROM %s NOT INDEXED JOIN %s ON (%s.docid = %s.rowid) WHERE ...
+    // 而且字段顺序也变了 (docid 不在首位, 多了 record_content)。
+    // 上面那些按完整语句前缀写的常量因此在 8.0.80 全线匹配不上, 表现就是
+    // 「搜索结果隐藏」失效 —— 搜关键词照样把密友的聊天记录/联系人搜出来。
+    // 这里改为按「select 语句 + 出现 FTS5MetaXxx 表名 + 含 aux_index 列」识别, 不看字段顺序。
+    val lower = sql.lowercase()
+    if (looksLikeFormattedFtsMetaQuery(lower)) {
+        // 会话内搜索 (aux_index 已被钉成某个会话) 不动, 否则临时显示时搜不到任何东西
+        if (AUX_INDEX_PINNED_REGEX.containsMatchIn(sql)) return null
+        return injectCondition(sql, "aux_index NOT IN (${hidden.toSqlList()})")
+    }
+
+    // 服务通知搜索的表没有 aux_index 语义, 联系人列是 talker
+    if (lower.startsWith("select") &&
+        lower.contains("from fts5metaservicenotify") &&
+        lower.contains("talker") &&
+        !lower.contains("talker not in")
+    ) {
+        if (AUX_INDEX_PINNED_REGEX.containsMatchIn(sql)) return null
+        return injectCondition(sql, "talker NOT IN (${hidden.toSqlList()})")
+    }
+
+    return null
+}
+
+/**
+ * 8.0.80+ 的 FTS 查询模板识别。
+ *
+ * 只认 `select` 开头：同一批表还会出现在 `CREATE INDEX ... ON %s(aux_index, subtype)`、
+ * `DELETE FROM %s WHERE aux_index=?` 里，往删除语句里注入条件会留下删不掉的残留消息。
+ * SOSHistory 没有 aux_index 列; ServiceNotify 单独处理, 这里都排除。
+ */
+private val FTS_META_TABLE_IN_SQL = Regex("\\bfrom\\s+fts5meta[a-z0-9_]+")
+
+private fun looksLikeFormattedFtsMetaQuery(lower: String): Boolean {
+    if (!lower.startsWith("select")) return false
+    if (!lower.contains("aux_index")) return false
+    if (!FTS_META_TABLE_IN_SQL.containsMatchIn(lower)) return false
+    if (lower.contains("fts5metaservicenotify")) return false
+    if (lower.contains("fts5metasoshistory")) return false
+    if (lower.contains("aux_index not in")) return false
+    return true
 }
 
 /**

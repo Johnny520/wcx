@@ -5,11 +5,14 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.TargetProcesses
+import com.Johnny.wcx.utils.WeLogger
 
 @Feature(name = "跳过启动页面", categories = ["小程序"], description = "跳过小程序启动页面, 变相去广告 (实验性)")
 object SkipSplash : SwitchFeature(), IResolveDex {
 
-    private val methodShowSplash by dexMethod {
+    private const val TAG = "SkipSplash"
+
+    private val methodShowSplash by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.appbrand")
         matcher {
             declaredClass = "com.tencent.mm.plugin.appbrand.AppBrandRuntime"
@@ -22,18 +25,18 @@ object SkipSplash : SwitchFeature(), IResolveDex {
     override val shouldLoadInCurrentProcess get() = TargetProcesses.isInMain || TargetProcesses.currentType == TargetProcesses.PROC_APPBRAND
 
     override fun onEnable() {
-        methodShowSplash.hookBefore {
-            try {
-                // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException
-                if (method is java.lang.reflect.Method) {
-                    val returnType = (method as java.lang.reflect.Method).returnType
-                    if (returnType == Void.TYPE) {
-                        result = null
-                    }
-                }
-            } catch (e: Throwable) {
-                // 兜底异常捕获，防止单条 Hook 异常导致微信主线程崩溃
-            }
+        if (methodShowSplash.isPlaceholder) {
+            WeLogger.w(TAG, "未定位到 AppBrandRuntime 启动页方法（锚点失效，微信版本变化）")
+            return
         }
+        runCatching {
+            methodShowSplash.hookBefore {
+                runCatching {
+                    val m = method as? java.lang.reflect.Method ?: return@runCatching
+                    if (m.returnType == Void.TYPE) result = null
+                }.onFailure { WeLogger.w(TAG, "启动页拦截处理失败: ${it.message}") }
+            }
+            WeLogger.i(TAG, "已安装启动页拦截")
+        }.onFailure { WeLogger.e(TAG, "hook 启动页方法失败", it) }
     }
 }

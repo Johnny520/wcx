@@ -110,7 +110,7 @@ private fun HideContacts.installVoipMpHooks() {
 
     // Foreground service. Suppressing it here rather than letting VoipForegroundService start and
     // then calling stopSelf() avoids a ForegroundServiceDidNotStartInTimeException on Android 12+.
-    methodVoipMpStartFgs.hookBefore {
+    if (!methodVoipMpStartFgs.isPlaceholder) methodVoipMpStartFgs.hookBefore {
         val wxId = args[0] as? String ?: return@hookBefore
         if (!isHiddenNow(wxId)) return@hookBefore
         result = null
@@ -281,7 +281,7 @@ private fun HideContacts.installLegacyVoipHooks() {
         result = false
     }
 
-    methodVoipStartAcceptVoip.hookBefore {
+    if (!methodVoipStartAcceptVoip.isPlaceholder) methodVoipStartAcceptVoip.hookBefore {
         val callerWxId = legacyCallerWxId() ?: return@hookBefore
         if (!isHiddenNow(callerWxId)) return@hookBefore
         result = null

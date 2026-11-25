@@ -5,6 +5,7 @@ import android.util.TypedValue
 import com.Johnny.wcx.utils.WeLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
+import org.xmlpull.v1.XmlPullParserException
 import java.io.FileNotFoundException
 
 /**
@@ -18,7 +19,13 @@ import java.io.FileNotFoundException
  * 该异常与模块无关（资源属于 com.tencent.mm），但崩溃发生在微信内部、用户无法自救，
  * 因此这里做最小化兜底。
  *
- * 兜底策略（只保护 res/raw/ 目录下的 .svg）:
+ * 崩溃不止这一条：8.0.80 的 `drawable/aoe`（CheckBox 的 background selector）第 4 行
+ * `<item>` 引用了一个同样缺失的 raw svg，解析 selector 时抛的是
+ * `XmlPullParserException: <item> tag requires a 'drawable' attribute`，
+ * 外层包成 `Resources$NotFoundException`，随后 CheckBox 构造失败 → 「通话中来电」界面直接崩。
+ * 所以兜底范围从「只有 raw svg」扩到「raw svg + 所有 .xml drawable」。
+ *
+ * 兜底策略（只保护 res/raw 下的 svg 与 xml）:
  * - 其余 drawable 加载：类型检查后立即放行，**不改变原调用路径、零额外开销**；
  * - 命中 `res/raw/xxx.svg`：调用原实现，只有确实抛「资源/文件找不到」时才降级为 null
  *   （ImageView 的 src 为空，界面继续渲染，不闪退）；其它异常原样抛出，不掩盖真实问题。
@@ -28,6 +35,7 @@ object ResourceFallbackGuard {
     private const val TAG = "ResourceFallbackGuard"
     private const val RAW_SVG_PREFIX = "res/raw/"
     private const val SVG_SUFFIX = ".svg"
+    private const val XML_SUFFIX = ".xml"
 
     @Volatile
     private var installed = false
@@ -43,9 +51,17 @@ object ResourceFallbackGuard {
                 "loadDrawableForCookie",
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        val value = param.args.getOrNull(0) as? TypedValue ?: return
+                        // 注意：不能写死 args[0]。loadDrawableForCookie 的签名在不同 Android
+                        // 版本是 (Resources, TypedValue, int, int) / (Resources, TypedValue, int, int, String)，
+                        // 0 号参数一直是 Resources wrapper —— 原来按 args[0] 取 TypedValue 恒为 null，
+                        // 于是整段兜底一次都没命中过（日志里 332 次 installed、0 次 missing raw svg），
+                        // 微信照样因为 res/raw 下的 svg 缺失 inflate 失败而闪退。
+                        val value = param.args.firstOrNull { it is TypedValue } as? TypedValue ?: return
                         val path = value.string ?: return
-                        if (!path.startsWith(RAW_SVG_PREFIX) || !path.endsWith(SVG_SUFFIX)) return
+                        // 只对 raw svg 与 xml drawable 走兜底，图片等其它资源直接放行，零额外开销。
+                        val isRawSvg = path.startsWith(RAW_SVG_PREFIX) && path.endsWith(SVG_SUFFIX)
+                        val isXml = path.endsWith(XML_SUFFIX)
+                        if (!isRawSvg && !isXml) return
 
                         try {
                             param.result = XposedBridge.invokeOriginalMethod(
@@ -55,7 +71,7 @@ object ResourceFallbackGuard {
                             )
                         } catch (t: Throwable) {
                             if (t.isMissingResource()) {
-                                WeLogger.w(TAG, "missing raw svg, degrade to null: $path")
+                                WeLogger.w(TAG, "missing resource, degrade to null: $path")
                                 param.result = null
                             } else {
                                 throw t
@@ -75,6 +91,12 @@ object ResourceFallbackGuard {
         var depth = 0
         while (current != null && depth < 8) {
             if (current is Resources.NotFoundException || current is FileNotFoundException) return true
+            // selector / state-list 里 item 引用的子 drawable 缺失时抛的是这个，
+            // 不是 NotFoundException，必须一起兜住（通话中来电界面的 CheckBox 崩溃就是它）。
+            if (current is XmlPullParserException) {
+                val message = current.message.orEmpty()
+                if (message.contains("requires a 'drawable' attribute")) return true
+            }
             current = current.cause
             depth++
         }

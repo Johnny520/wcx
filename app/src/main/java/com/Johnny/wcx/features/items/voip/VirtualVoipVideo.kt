@@ -53,7 +53,7 @@ import com.Johnny.wcx.utils.reflection.BInt
 import kotlin.io.path.div
 
 @Feature(
-    name = "虚拟视频通话", categories = ["聊天", "音视频通话"],
+    name = "虚拟视频通话", categories = ["音视频通话"],
     description = "在微信视频通话相机预览中播放本地视频或网络直播流"
 )
 object VirtualVoipVideo : ClickableFeature(), IResolveDex {

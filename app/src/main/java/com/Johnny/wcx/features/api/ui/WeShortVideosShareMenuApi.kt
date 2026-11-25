@@ -24,14 +24,14 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
         val onClick: (XC_MethodHook.MethodHookParam, Int, List<JSONObject>) -> Unit
     )
 
-    private val menuItems = mutableMapOf<String, List<MenuItem>>()
+    private val menuItems = MenuRegistry<MenuItem>()
 
     fun addProvider(provider: IMenuItemsProvider) {
-        menuItems[provider.javaClass.name] = provider.getMenuItems()
+        menuItems.register(provider, provider.getMenuItems())
     }
 
     fun removeProvider(provider: IMenuItemsProvider) {
-        menuItems.remove(provider.javaClass.name)
+        menuItems.unregister(provider)
     }
 
     private val methodCreateMenu1 by dexMethod {
@@ -125,7 +125,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
     private fun handleCreateMenu(
         menu: ContextMenu
     ) {
-        for (item in menuItems.values.flatten()) {
+        for (item in menuItems.snapshot()) {
             menu.reflekt()
                 .firstMethod {
                     parameters(Int::class, CharSequence::class, Drawable::class)
@@ -164,7 +164,7 @@ object WeShortVideosShareMenuApi : ApiFeature(), IResolveDex {
                 }.invoke()!! as JSONObject
         }
 
-        for (item in menuItems.values.flatten()) {
+        for (item in menuItems.snapshot()) {
             if (item.id == itemId) {
                 item.onClick(param, mediaType, mediaJsonList)
                 try {

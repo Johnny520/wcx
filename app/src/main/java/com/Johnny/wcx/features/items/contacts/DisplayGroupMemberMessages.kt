@@ -12,7 +12,7 @@ import com.Johnny.wcx.utils.strings.isGroupChatWxId
 
 @Feature(
     name = "查看群成员消息历史",
-    categories = ["联系人与群组", "联系人详情页面"],
+    categories = ["联系人详情页面"],
     description = "在联系人与群组详情页面添加入口, 可查看任意群成员的全部历史消息"
 )
 object DisplayGroupMemberMessages : SwitchFeature(), WeContactPrefsScreenApi.IContactInfoProvider {

@@ -57,10 +57,15 @@ object LaunchInternalUrls : ClickableFeature(), IResolveDex {
         }
     }
 
-    private val methodOpenUrl by dexMethod {
+    private val methodOpenUrl by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.app.plugin")
         matcher {
-            usingEqStrings("MicroMsg.MMURIJumpHandler", "openSpecificUI, context is null")
+            // 8.0.80："openSpecificUI, context is null" 已成孤儿串（无任何方法引用）。
+            // TAG "MicroMsg.MMURIJumpHandler" 仍被 com.tencent.mm.app.plugin.j 的 b/c/d 三个方法引用，
+            // 用调用处实际传入的 3 参签名 (Context, String, Object[]) → boolean 收敛到 d。
+            usingEqStrings("MicroMsg.MMURIJumpHandler")
+            paramTypes("android.content.Context", "java.lang.String", "java.lang.Object[]")
+            returnType("boolean")
         }
     }
 }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -32,7 +33,9 @@ fun AlertDialogContent(
     title: @Composable (() -> Unit)?,
     text: @Composable (() -> Unit)?,
     confirmButton: (@Composable () -> Unit)? = null,
-    dismissButton: (@Composable () -> Unit)? = null
+    dismissButton: (@Composable () -> Unit)? = null,
+    /** true 时卡片铺满整屏、内容区不再限制 400dp 高（联系人选择器等长列表场景）。 */
+    fillHeight: Boolean = false,
 ) {
     // 全局弹窗外壳：大圆角 + 极浅马卡龙渐变，所有功能弹窗共用一套观感。
     Surface(
@@ -41,12 +44,14 @@ fun AlertDialogContent(
         tonalElevation = 0.dp,
         modifier = modifier
             .fillMaxWidth()
-            .wrapContentHeight()
+            .then(if (fillHeight) Modifier.fillMaxSize() else Modifier.wrapContentHeight())
     ) {
         Column(
             modifier = Modifier
-                .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFF4FAF7))))
-                .padding(20.dp),
+                // 深色下必须跟着换：原先写死白→浅绿渐变，模块深色时文字已变白，白底白字整框看不见
+                .background(WxPalette.cardBrush())
+                .padding(20.dp)
+                .then(if (fillHeight) Modifier.fillMaxSize() else Modifier),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -78,12 +83,12 @@ fun AlertDialogContent(
 
             text?.let {
                 val bodyStyle = MaterialTheme.typography.bodyMedium
-                val bodyColor = MaterialTheme.colorScheme.onSurface
+                val bodyColor = WxPalette.textPrimary()
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 400.dp)
+                        .then(if (fillHeight) Modifier.weight(1f) else Modifier.heightIn(max = 400.dp))
                 ) {
                     CompositionLocalProvider(
                         LocalTextStyle provides bodyStyle,

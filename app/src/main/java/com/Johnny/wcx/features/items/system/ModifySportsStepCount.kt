@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.ujhhgtg.reflekt.utils.createInstance
+import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.ClickableFeature
@@ -33,9 +34,11 @@ import com.Johnny.wcx.utils.android.showToast
 @Feature(name = "修改运动步数", categories = ["系统与隐私"], description = "修改微信获取到的或手动上传运动步数")
 object ModifySportsStepCount : ClickableFeature(), IResolveDex {
 
+    private const val TAG = "ModifySportsStepCount"
+
     enum class PassiveMode { FIXED, MULTIPLIER }
 
-    private val methodGetSteps by dexMethod {
+    private val methodGetSteps by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.sport.model")
         matcher {
             // 8.0.80: "MicroMsg.Sport.DeviceStepManager" 被 a::onChanged / b::a / c::a / d::a / d::d 共用，
@@ -46,7 +49,7 @@ object ModifySportsStepCount : ClickableFeature(), IResolveDex {
             )
         }
     }
-    private val methodUploadSteps by dexMethod {
+    private val methodUploadSteps by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.sport.model")
         matcher {
             usingEqStrings("update device Step time: %s stepCount: %s")
@@ -146,6 +149,12 @@ object ModifySportsStepCount : ClickableFeature(), IResolveDex {
                                 onClick = {
                                     val count = activeInput.toLongOrNull() ?: run {
                                         showToast("格式不正确!")
+                                        return@Button
+                                    }
+                                    // 8.0.80：上传步数的日志串已成孤儿串，方法解析不到。
+                                    // 直接取 .method 会抛异常把设置页带崩，这里显式提示。
+                                    if (methodUploadSteps.isPlaceholder) {
+                                        showToast("当前微信版本已不支持该操作（上传接口未定位到）")
                                         return@Button
                                     }
                                     val sportsMan =

@@ -10,7 +10,7 @@ import com.Johnny.wcx.utils.android.copyToClipboard
 import com.Johnny.wcx.utils.android.currentWxId
 import com.Johnny.wcx.utils.android.showToast
 
-@Feature(name = "显示微信 ID", categories = ["联系人与群组", "联系人详情页面"], description = "在联系人与群组详情页面显示微信 ID")
+@Feature(name = "显示微信 ID", categories = ["联系人详情页面"], description = "在联系人与群组详情页面显示微信 ID")
 object ShowWxIdInContactDetails : SwitchFeature(), IContactInfoProvider {
 
     private const val PREF_KEY = "wxid_display"

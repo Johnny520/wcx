@@ -97,7 +97,9 @@ object ForwardMessages : SwitchFeature(),
 
                             onDismiss()
                             onConfirm(selectedWxIds)
-                        }
+                        },
+                        // 转发常要挑很多人：放弃居中一小窗，直接整屏（群友反馈窗口太小只能看到几个人）
+                        fullScreen = true,
                     )
                 }
             }

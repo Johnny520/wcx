@@ -20,11 +20,14 @@ import java.lang.reflect.Method
  * com.tencent.mm.voipmp.helper.DeviceOccupyHelper，混淆名 Lpq/b;），不再依赖任何锚点。
  * 微信改类名/挪包都不影响，只有日志串变化才会失效——失效时日志会明确写出来。
  */
-@Feature(name = "移除通话时聊天限制", categories = ["聊天", "音视频通话"], description = "绕过正在通话时聊天限制")
+@Feature(name = "移除通话时聊天限制", categories = ["音视频通话"], description = "绕过正在通话时聊天限制")
 object RemoveLimitsDuringCalls : SwitchFeature(), IResolveDex {
 
     private const val TAG = "RemoveLimitsDuringCalls"
     private const val OC = "MicroMsg.DeviceOccupy"
+
+    /** 微信 8.0.80 起从 DeviceOccupyHelper 彻底删除的三个占用检查（串已不存在）。 */
+    private val REMOVED_IN_8_0_80 = listOf("checkDeviceUsing", "checkAudioDeviceUsing", "checkSpeakerUsing")
 
     override fun onEnable() {
         var hooked = 0
@@ -72,11 +75,29 @@ object RemoveLimitsDuringCalls : SwitchFeature(), IResolveDex {
         if (hooked == 0) {
             WeLogger.w(TAG, "一个都没 hook 上，功能不会生效（微信可能改了这个类的日志串）")
         }
+        // 微信 8.0.80 起这三项的特征串被整条删除（string_ids 里都不存在，不是孤儿串），
+        // 无法重描锚点；这里显式告警，避免用户以为"开了没效果"是模块 bug。
+        val removedIn8080 = skipped.filter { label ->
+            REMOVED_IN_8_0_80.any { label.startsWith(it) }
+        }
+        if (removedIn8080.isNotEmpty()) {
+            WeLogger.w(
+                TAG,
+                "微信 8.0.80 已删除 ${removedIn8080.joinToString("、")}（DeviceOccupyHelper 里这三条日志串在 dex " +
+                        "string_ids 中完全不存在，其余 ${targets().size - removedIn8080.size} 项不受影响，正常生效）"
+            )
+        }
     }
 
     /**
-     * 目标方法清单。字符串取自微信 8.0.79 实测（classes15.dex → DeviceOccupyHelper）。
+     * 目标方法清单。字符串取自微信 8.0.79 实测（classes15.dex → DeviceOccupyHelper，
+     * 8.0.80 = `com.tencent.mm.voipmp.helper.DeviceOccupyHelper` / `Lsq/b;`）。
      * 参数个数一并作为约束，避免同一个串命中同族的另一个重载。
+     *
+     * 8.0.80 复核：`isCameraUsing`、`checkAppBrand*Using*` 这些串仍活着（`Lsq/b.h` / `Lsq/b.i` /
+     * `Lsq/b.a/c/d/e/f`），但最后三项（[methodCheckDeviceUsing] / [methodCheckAudioDeviceUsing] /
+     * [methodCheckSpeakerUsing]）的串已被微信整条删除，属于**真失效**，只能 allowFailure 降级
+     * —— 详见各委托的注释与 onEnable 里的告警日志。
      */
     private fun targets(): List<Pair<String, DexMethodDelegate>> = listOf(
         "isMultiTalking(1)" to methodIsMultiTalking1,
@@ -163,6 +184,21 @@ object RemoveLimitsDuringCalls : SwitchFeature(), IResolveDex {
         }
     }
 
+    // ── 8.0.80 已无法定位的三项（真失效，保留 matcher 只为 ≤8.0.79 兼容）───────────────────
+    //
+    // 判定依据（8.0.80 = 0x28005032，18 个 dex 全量扫描）：
+    //   * `checkDeviceUsing` / `checkAudioDeviceUsing` / `checkSpeakerUsing` 三串在 string_ids 里
+    //     **完全不存在**（连"孤儿串"都不是），子串搜索同样 0 命中；
+    //   * 承载类还在：`com.tencent.mm.voipmp.helper.DeviceOccupyHelper`（`Lsq/b;`，34 个方法），
+    //     说明不是类改名而是这三条日志被 R8 删掉了；
+    //   * 同类的其它占用检查（isCameraUsing / checkAppBrandVoiceUsing / checkAppBrandCameraUsing /
+    //     checkTingChatRoomStateExist / checkFinderLive* / checkMutePlay）串都还在，抓得到 ⇒ 失效只限这三项。
+    //
+    // 为什么不用「TAG + 签名」兜底：`Lsq/b` 里只剩 `MicroMsg.DeviceOccupy` 一个 TAG 的 boolean
+    // 无参方法有 `p()` / `r()` / `A()` 三个（还有 `y()` = checkMutePlay），彼此没有任何可判别特征，
+    // 猜错就会把某个正常谓词钉成 false（比如把「正在多通话」判成 false），风险远大于收益。
+    //
+    // 兜底：allowFailure=true → 占位符 → targets() 里跳过，并在 onEnable 末尾打一条专门的 W 日志。
     private val methodCheckDeviceUsing by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(OC, "checkDeviceUsing")

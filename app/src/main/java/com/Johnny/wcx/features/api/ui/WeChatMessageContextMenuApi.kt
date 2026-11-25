@@ -27,7 +27,6 @@ import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
-import com.Johnny.wcx.features.items.chat.MergeChatMessageContextMenuItems
 import com.Johnny.wcx.ui.content.AlertDialogContent
 import com.Johnny.wcx.ui.content.Button
 import com.Johnny.wcx.ui.utils.ExtensionIcon
@@ -84,14 +83,22 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
     // id of the single merged entry shown when MergeChatMessageContextMenuItems is enabled
     private const val MERGED_MENU_ITEM_ID = 777000
 
-    private val menuItems = mutableMapOf<String, List<MenuItem>>()
+    private val menuItems = MenuRegistry<MenuItem>()
+
+    /**
+     * 是否把多个模块菜单项合并成一个入口。
+     *
+     * 由「消息长按菜单项合并展示」在启用/停用时写入；API 层不再反向 import 那个功能类。
+     */
+    @Volatile
+    var mergeEnabled: Boolean = false
 
     fun addProvider(provider: IMenuItemsProvider) {
-        menuItems[provider.javaClass.name] = provider.getMenuItems()
+        menuItems.register(provider, provider.getMenuItems())
     }
 
     fun removeProvider(provider: IMenuItemsProvider) {
-        menuItems.remove(provider.javaClass.name)
+        menuItems.unregister(provider)
     }
 
     private val methodCreateMenu by dexMethod {
@@ -233,17 +240,26 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                         returnType = android.view.MenuItem::class
                     }
 
-                val applicableItems = menuItems.values.flatten()
+                val applicableItems = menuItems.snapshot()
                     .filter { it.isSupported(msgInfoWrapper) }
 
-                if (MergeChatMessageContextMenuItems.isEnabled) {
-                    // collapse everything into a single "WCX" entry backed by a Compose dialog
+                if (mergeEnabled) {
+                    // collapse everything into a single zhiyou entry backed by a Compose dialog
                     if (applicableItems.isNotEmpty()) {
                         addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
                     }
                 } else {
                     for (item in applicableItems) {
-                        addMenuItem.invoke(item.id, "${item.text} [K]", item.drawable)
+                        // 逐项兜底：某一项被宿主拒绝（图标/ID/数量限制）时只丢它自己，
+                        // 不能让后面的项跟着一起消失。
+                        runCatching {
+                            addMenuItem.invoke(item.id, "${item.text} [K]", item.drawable)
+                        }.onFailure {
+                            WeLogger.w(
+                                TAG,
+                                "添加菜单项失败：${item.text}：${it.javaClass.simpleName}: ${it.message}",
+                            )
+                        }
                     }
                 }
             } catch (ex: Throwable) {
@@ -270,7 +286,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
             val context = getChattingContextFromOnSelectHandler(thisObject)
             try {
                 if (menuItem.itemId == MERGED_MENU_ITEM_ID) {
-                    val applicableItems = menuItems.values.flatten()
+                    val applicableItems = menuItems.snapshot()
                         .filter { it.isSupported(msgInfoWrapper) }
                     showMergedMenuDialog(curView, context, msgInfoWrapper, applicableItems)
                     // 仅当原方法返回 void 时才设置 result = null
@@ -283,7 +299,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     return@hookBefore
                 }
 
-                for (item in menuItems.values.flatten()) {
+                for (item in menuItems.snapshot()) {
                     if (item.id == menuItem.itemId) {
                         item.onClick(curView, context, msgInfoWrapper)
                         // 仅当原方法返回 void 时才设置 result = null
@@ -310,7 +326,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
 
             try {
                 // nothing to offer if no provider supports multi-select
-                val hasMultiSelectItem = menuItems.values.flatten()
+                val hasMultiSelectItem = menuItems.snapshot()
                     .any { it.multiSelect !is MultiSelectSupport.Unsupported }
                 if (!hasMultiSelectItem) return@hookBefore
 
@@ -320,7 +336,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                         returnType = android.view.MenuItem::class
                     }
 
-                // collapse everything into a single "WCX" entry backed by a Compose dialog
+                // collapse everything into a single zhiyou entry backed by a Compose dialog
                 addMenuItem.invoke(MERGED_MENU_ITEM_ID, "WCX", ExtensionIcon)
             } catch (ex: Throwable) {
                 WeLogger.e(
@@ -421,7 +437,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         chattingContext: ChattingContext,
         msgInfos: List<MessageInfo>
     ) {
-        val allItems = menuItems.values.flatten()
+        val allItems = menuItems.snapshot()
 
         val adaptedRows = allItems.mapNotNull { item ->
             val support = item.multiSelect as? MultiSelectSupport.Adapted ?: return@mapNotNull null
@@ -446,13 +462,13 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         }
 
         if (adaptedRows.isEmpty() && autoRows.isEmpty()) {
-            showToast("没有可用于所选消息的 WCX 菜单项")
+            showToast("没有可用于所选消息的${"WCX"}菜单项")
             return
         }
 
         showComposeDialog(view.context) {
             AlertDialogContent(
-                title = { Text("WCX (${msgInfos.size} 条消息)") },
+                title = { Text("${"WCX"} (${msgInfos.size} 条消息)") },
                 text = {
                     LazyColumn(
                         Modifier

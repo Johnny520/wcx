@@ -32,7 +32,7 @@ object DisableResumeWatchingToast : SwitchFeature(), IResolveDex {
     }
 
     override fun onEnable() {
-        methodShowRecoveryToast.hookBefore {
+        if (!methodShowRecoveryToast.isPlaceholder) methodShowRecoveryToast.hookBefore {
             result = null
         }
     }

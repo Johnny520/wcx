@@ -83,12 +83,16 @@ object SendSecMsg : ClickableFeature(), IResolveDex {
     @Volatile
     private var pendingSecSend = false
 
-    // 消息入库方法 (文本发送 NetSceneSendMsg 构造时调用), (msgInfo, boolean) -> long
+    // 消息入库方法 (文本发送 NetSceneSendMsg 构造时调用)。
+    // 8.0.79 = storage.f9.Nb(msgInfo, boolean) -> long（2 参，8.0.76 同族）；
+    // 8.0.80 = storage.g9.a(msgInfo, boolean, boolean) -> long（3 参）。
+    // 同一串的另两个候选是 1 参（g9.mc / g9.qc），故用 2..3 的区间：既排除 1 参候选，
+    // 又保留旧版本兼容。hook 侧只读 args[0]，两种参数表都适用。
     private val methodInsertMessage by dexMethod {
         searchPackages("com.tencent.mm.storage")
         matcher {
             usingEqStrings("Error insert message msg:%s talker:%s")
-            paramCount(2)
+            paramCount(3)  // 8.0.80：入库方法 2 参扩为 3 参 (f9,Z,Z)
             returnType("long")
         }
     }

@@ -26,7 +26,6 @@ import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Close
 import com.composables.icons.materialsymbols.outlined.Search
-import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.features.items.easter_egg.AprilFools
 import com.Johnny.wcx.features.items.easter_egg.isAprilFools
@@ -107,7 +106,7 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
     // 设置页搜索**显式排除「密友功能」分类**：避免随便搜一个词就把密友入口暴露出来。
     // 密友入口固定在分类列表最后一项；直接进入分类仍可看到其中的开关。
     val searchableItems = remember {
-        FeaturesProvider.ALL_HOOK_ITEMS
+        VisibleHookItems
             .filterIsInstance<SwitchFeature>()
             .filter { item -> "密友功能" !in item.categories }
             // 当前微信版本上已被微信移除/改版、开了也不会生效的功能：直接不出现，
@@ -126,7 +125,7 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
     // 每个分类的启用概况（已启用 / 总数），用于分类卡片副标题
     val categoryStat = remember {
         FEATURE_CATEGORIES.associate { entry ->
-            val all = FeaturesProvider.ALL_HOOK_ITEMS
+            val all = VisibleHookItems
                 .filter { entry.first in it.categories && it.unavailableReason == null }
             entry.first to (all.count { WePrefs.getBoolOrFalse(it.name) } to all.size)
         }
@@ -168,8 +167,8 @@ fun FeaturesPager(onOpenCategory: (String) -> Unit) {
 
         if (!searching) {
             item {
-                val total = FeaturesProvider.ALL_HOOK_ITEMS.size
-                val enabled = FeaturesProvider.ALL_HOOK_ITEMS.count { WePrefs.getBoolOrFalse(it.name) }
+                val total = VisibleHookItems.size
+                val enabled = VisibleHookItems.count { WePrefs.getBoolOrFalse(it.name) }
                 val ratio = if (total > 0) enabled.toFloat() / total else 0f
                 Column(modifier = Modifier.padding(top = 10.dp)) {
                     SoftCard(contentPadding = 16, glow = true) {
@@ -401,7 +400,7 @@ fun CategoryDetailScreen(
 ) {
     val items = remember(categoryName) {
         // 当前微信版本已不支持的功能不进列表（隐藏，而不是显示「失效」）
-        FeaturesProvider.ALL_HOOK_ITEMS
+        VisibleHookItems
             .filter { categoryName in it.categories && it.unavailableReason == null }
     }
     val switchStates = remember(categoryName) {

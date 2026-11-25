@@ -61,6 +61,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import coil3.compose.AsyncImage
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Account_circle
+import com.composables.icons.materialsymbols.outlined.Article
 import com.composables.icons.materialsymbols.outlined.Arrow_back
 import com.composables.icons.materialsymbols.outlined.Auto_delete
 import com.composables.icons.materialsymbols.outlined.Block
@@ -166,6 +167,7 @@ import com.Johnny.wcx.ui.style.fxReveal
 
 @Composable
 fun SettingsPager(
+    onOpenAi: () -> Unit = {},
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
     onBack: (() -> Unit)? = null,
@@ -206,6 +208,22 @@ fun SettingsPager(
                 modifier = Modifier.fillMaxWidth().fxReveal(0),
             ) {
                 ThemeSection()
+            }
+        }
+
+        // 实验室
+        item {
+            MiuixSmallTitle(text = "实验室", modifier = Modifier.padding(top = 12.dp))
+            SoftCard(
+                contentPadding = 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                PrefArrow(
+                    title = "AI 助手",
+                    summary = "好友档案 · 智能建议 · 自动回复 · 群聊总结",
+                    icon = MaterialSymbols.Outlined.Article,
+                    onClick = onOpenAi,
+                )
             }
         }
 

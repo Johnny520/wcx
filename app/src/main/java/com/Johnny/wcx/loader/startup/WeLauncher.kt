@@ -19,6 +19,7 @@ import com.Johnny.wcx.utils.MainThreadWatchdog
 import com.Johnny.wcx.utils.RuntimeConfig
 import com.Johnny.wcx.utils.TargetProcesses
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.ai.AiProfileInitializer
 import com.Johnny.wcx.utils.crash.ExitReasonRecorder
 import com.Johnny.wcx.utils.crash.JavaCrashHandler
 import com.Johnny.wcx.utils.crash.NativeCrashHandler
@@ -49,6 +50,11 @@ object WeLauncher {
                 // 启动时间线 + 上次退出原因：用于判断「后台被杀」是偶发还是周期性。
                 runCatching { ProcessTimeline.recordStartup(appCtx) }
                 runCatching { ExitReasonRecorder.recordOnStartup(appCtx) }
+                // AI 档案的初始化是内存态：进程重启后还能读到 initializing 的档案，
+                // 说明上一次被中断了，必须复位成失败态，否则档案弹窗会永远停在「准备中」。
+                if (TargetProcesses.isInMain) {
+                    runCatching { AiProfileInitializer.recoverInterrupted() }
+                }
             }, "WCX-ExitReason").apply { isDaemon = true }.start()
         }
 
@@ -74,6 +80,12 @@ object WeLauncher {
             LocalAdaptationEngine.init(appContext)
             SelfHealingMonitor.init()
 
+            // 主线程卡死取证：心跳停摆 3 秒即抓主线程堆栈落盘（同时写 WCX 运行日志与
+            // SharedPreferences，进程被杀后仍能在「模块自检」里看到）。此前这个看门狗
+            // 只有实现、从未被安装，所以「点会话整个微信卡死」这种故障现场毫无证据。
+            runCatching { MainThreadWatchdog.install() }
+                .onFailure { WeLogger.w(TAG, "main thread watchdog install failed: ${it.message}") }
+
             val prefs =
                 context.getSharedPreferences("${PackageNames.WECHAT}_preferences", Context.MODE_PRIVATE)
             RuntimeConfig.mmPrefs = prefs
@@ -91,9 +103,17 @@ object WeLauncher {
 
         // Hchat 脚本子系统（可插拔）：独立后台引导，失败不影响 WCX 既有功能。
         // 移除本调用即完全下线脚本子系统。
-        runCatching {
-            com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
-        }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
+        //
+        // 只在主进程引导：脚本插件全部跑在微信主进程（消息监听、UI、打开设置页都在这里），
+        // 而小程序 / 插件 / 推送等子进程会被系统频繁起停。之前每个进程都跑一遍
+        // 「加载 native 库 + 建 DexKitBridge + 全量 DexFinder 解析 + 装 2 个 Feature」，
+        // 实测 17 小时内完成 330 次引导（与 ModuleLoader 的 333 次进程加载几乎 1:1），
+        // 是持续的 CPU/IO 峰值来源（表现为刷朋友圈、切小程序时卡顿）。
+        if (TargetProcesses.isInMain) {
+            runCatching {
+                com.Johnny.wcx.features.hchat.HchatBootstrap.install(context)
+            }.onFailure { WeLogger.e(TAG, "hchat bootstrap failed", it) }
+        }
 
     }
 

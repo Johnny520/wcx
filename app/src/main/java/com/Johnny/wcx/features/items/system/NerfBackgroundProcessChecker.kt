@@ -4,6 +4,7 @@ import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.WeLogger
 
 @Feature(
     name = "禁用微信进程状态检测器",
@@ -12,13 +13,25 @@ import com.Johnny.wcx.features.core.SwitchFeature
 )
 object NerfBackgroundProcessChecker : SwitchFeature(), IResolveDex {
 
-    private val methodPerformProcessCheck by dexMethod {
+    private const val TAG = "NerfBackgroundProcessChecker"
+
+    /**
+     * 8.0.80 实测：字符串 "pass this check,because request is null! ????" 已成孤儿串
+     * （无任何方法引用），全 APK 只剩 "[onUserVisibleFocused] pass this check"
+     * —— 后者在 finder 的 za0.onUserVisibleFocused，语义是页面可见性而不是进程状态检测，
+     * 不能拿来顶替。这里保留锚点 + allowFailure，解析不到就安全跳过并留痕。
+     */
+    private val methodPerformProcessCheck by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("pass this check,because request is null! ????")
         }
     }
 
     override fun onEnable() {
+        if (methodPerformProcessCheck.isPlaceholder) {
+            WeLogger.w(TAG, "锚点在当前微信版本已不存在（进程状态检测实现被移除或改名），跳过")
+            return
+        }
         methodPerformProcessCheck.hookBefore {
             try {
                 // 仅当原方法返回 void 时才设置 result = null，避免对非 void 方法（如 getInstance）造成 ClassCastException

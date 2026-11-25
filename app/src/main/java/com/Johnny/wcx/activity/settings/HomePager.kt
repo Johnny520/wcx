@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
@@ -61,7 +60,6 @@ import com.composables.icons.materialsymbols.outlined.Sports_esports
 import com.Johnny.wcx.BuildConfig
 import com.Johnny.wcx.constants.PackageNames
 import com.Johnny.wcx.constants.Preferences
-import com.Johnny.wcx.features.core.FeaturesProvider
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.style.SoftCard
 import com.Johnny.wcx.ui.style.SoftDivider
@@ -89,6 +87,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.composables.icons.materialsymbols.outlined.Refresh
 import com.composables.icons.materialsymbols.outlined.Chat
 import com.composables.icons.materialsymbols.outlined.Code
+import com.Johnny.wcx.ui.style.GradientIcon
 import com.Johnny.wcx.ui.style.fxReveal
 import com.Johnny.wcx.ui.style.rememberGrowNumber
 import kotlin.math.roundToInt
@@ -243,7 +242,7 @@ fun HomePager(
     onOpenScript: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val allItems = FeaturesProvider.ALL_HOOK_ITEMS
+    val allItems = VisibleHookItems
     // 单页模式：功能搜索（分类网格上方）——输入即过滤，点结果直达所属分类
     var featureQuery by remember { mutableStateOf("") }
     val enabledCount = remember {
@@ -289,7 +288,8 @@ fun HomePager(
                         val cause = result.cause
                         val message = cause?.message.orEmpty()
                         if (message.contains("403") || message.contains("rate limit", true)) {
-                            WeLogger.w("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
+                            // 未认证接口 60 次/小时/IP 共享限流，403 是常态：降到 D，用户日志里不该出现。
+                            WeLogger.d("HomePager", "检查更新被 GitHub 限流（403），稍后再试")
                         } else {
                             WeLogger.w(
                                 "HomePager",
@@ -301,7 +301,7 @@ fun HomePager(
                     }
                 }
             }.onFailure {
-                WeLogger.e("HomePager", "Update check exception", it)
+                WeLogger.w("HomePager", "更新检查异常：${it.javaClass.simpleName} ${it.message.orEmpty().take(120)}")
                 latestVersion = null
                 isLatest = false
             }
@@ -311,36 +311,19 @@ fun HomePager(
     LaunchedEffect(Unit) { checkUpdateNow(force = true) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-    MiuixListScaffold(title = "") {
-        // ---- 标题区域 ----
-        // fillMaxWidth + wrapContentHeight 防止无限高度约束导致灰色渲染
-        // background 设置与 TopAppBar 毛玻璃相同的背景色，避免滚动时出现灰色色块
-        item {
-            Column(
-                modifier = Modifier
-                    .fxReveal(0)
-                    .fillMaxWidth()
-                    .wrapContentHeight()
-                    .padding(top = 8.dp, start = 18.dp, end = 18.dp, bottom = 2.dp),
-            ) {
-                Text(
-                    text = "WCX",
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = WxPalette.textPrimary(),
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "微信，解锁超能力，重构你的使用体验",
-                    fontSize = 13.sp,
-                    color = WxPalette.TextSecondary,
-                )
-            }
-        }
-
+    // 「WCX」大标题 + 副标题交给顶栏渲染（与「功能」「日志」页同一套折叠行为）：
+    // 展开时贴状态栏显示在左上角，上滑时大小标题一起收起、title 淡入顶栏中间，下滑再展开。
+    // 原来标题写成列表的第一个 item，顶栏另占一层高度，所以 WCX 离状态栏很远、也不会折叠。
+    MiuixListScaffold(
+        title = "WCX",
+        subtitle = "微信，解锁超能力，重构你的使用体验",
+    ) {
         // ---- 样式开关：经典四 Tab ⇄ 单页 Dashboard ----
         item {
-            SoftCard(contentPadding = 12, modifier = Modifier.fxReveal(1)) {
+            SoftCard(
+                contentPadding = 12,
+                modifier = Modifier.padding(top = 12.dp).fxReveal(0),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -660,11 +643,10 @@ private fun ActivationCard(
                     .background(accentColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
+                GradientIcon(
                     imageVector = MaterialSymbols.Outlined.Check_circle,
                     contentDescription = null,
-                    tint = accentColor,
-                    modifier = Modifier.size(26.dp),
+                    size = 26.dp,
                 )
             }
             Spacer(Modifier.width(12.dp))
@@ -910,7 +892,7 @@ private fun FeatureSearchResult(
     // 与「功能」页同一口径：当前微信版本不支持的功能不出现
     val matched = remember(q) {
         if (q.isEmpty()) emptyList()
-        else FeaturesProvider.ALL_HOOK_ITEMS
+        else VisibleHookItems
             .filter { it.unavailableReason == null }
             .filter { it.name.contains(q, ignoreCase = true) || it.description.contains(q, ignoreCase = true) }
             .take(60)
@@ -1016,7 +998,7 @@ private fun CategoryGrid(onOpenCategory: (String) -> Unit) {
                     val colorIndex = FEATURE_CATEGORIES.indexOfFirst { it.first == entry.first }
                     val tint = CATEGORY_COLORS[colorIndex.coerceAtLeast(0) % CATEGORY_COLORS.size]
                     val stat = runCatching {
-                        val all = FeaturesProvider.ALL_HOOK_ITEMS.filter { entry.first in it.categories }
+                        val all = VisibleHookItems.filter { entry.first in it.categories }
                         all.count { WePrefs.getBoolOrFalse(it.name) } to all.size
                     }.getOrDefault(0 to 0)
                     Column(

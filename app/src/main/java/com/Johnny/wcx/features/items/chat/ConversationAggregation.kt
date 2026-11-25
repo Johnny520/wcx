@@ -195,7 +195,7 @@ object ConversationAggregation : ClickableFeature(),
     private val methodSqliteWrapperRawQuery by dexMethod(allowFailure = true) {
         matcher {
             modifiers = JavaModifier.PUBLIC
-            usingEqStrings("sql is null ", "DB IS CLOSED ! {%s}")
+            usingEqStrings("DB IS CLOSED ! {%s}")
             paramTypes("java.lang.String", "java.lang.String[]", "int")
             returnType("android.database.Cursor")
         }
@@ -334,7 +334,8 @@ object ConversationAggregation : ClickableFeature(),
 
         startRefreshThread()
 
-        hookMainUiRefresh()
+        runCatching { hookMainUiRefresh() }
+            .onFailure { WeLogger.e(TAG, "hookMainUiRefresh failed（不中断其余 hook 注册）", it) }
         WeLogger.i(TAG, "onEnable: after hookMainUiRefresh")
         diagFile("onEnable: after hookMainUiRefresh")
         hookColdStartResidualRecovery()
@@ -496,16 +497,15 @@ object ConversationAggregation : ClickableFeature(),
                 }
             }
 
-            if (folderRows.isEmpty()) return@runCatching
-
             val foldedCount = withQueryRewriteSuppressed {
                 WeDatabaseApi.rawQuery(
                     "SELECT COUNT(*) FROM ${ConversationTable.NAME} WHERE ${ConversationTable.PARENT_REF} LIKE ?",
                     arrayOf("$FOLDER_PREFIX%")
                 ).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
             }
-
-            if (foldedCount == 0) return@runCatching
+            // 文件夹行可能已被删、但 parentRef 绑定残留（旧版本释放中断）：
+            // 这批会话因 parentRef 非空被微信挡在主页之外，必须照常清理，否则永久不可见。
+            if (folderRows.isEmpty() && foldedCount == 0) return@runCatching
 
             WeLogger.w(
                 TAG,
@@ -795,7 +795,17 @@ object ConversationAggregation : ClickableFeature(),
     }
 
     private fun hookMainUiRefresh() {
-        MainUI::class.reflekt().firstMethod("onResume").hookAfter {
+        // 8.0.78+ 生命周期方法可能不在 MainUI 里声明，reflekt 按名匹配失败会直接抛异常；
+        // 这里必须解析失败降级，否则 onEnable 第一站就中断，后面所有 hook 都不会注册，
+        // 表现就是「归拢彻底失效且日志只有 onEnable: begin」。
+        val onResume = runCatching { MainUI::class.reflekt().firstMethod("onResume") }
+            .onFailure { WeLogger.e(TAG, "MainUI.onResume 解析失败，归拢失去 onResume 触发器", it) }
+            .getOrNull()
+        if (onResume == null) {
+            WeLogger.w(TAG, "MainUI.onResume not found; 归拢将依赖数据库监听与手动重进微信触发")
+            return
+        }
+        onResume.hookAfter {
             syncFoldersToDatabase()
         }
     }
@@ -1728,19 +1738,10 @@ object ConversationAggregation : ClickableFeature(),
         }.onFailure { WeLogger.w(TAG, "hook execSQL failed", it) }
     }
 
-    private val methodRecyclerOnBind by dexMethod(allowFailure = true, allowMultiple = true) {
-        matcher {
-            name = "onBindViewHolder"
-            paramTypes("androidx.recyclerview.widget.RecyclerView\$ViewHolder", "int")
-        }
-    }
-
-    private val methodSupportRecyclerOnBind by dexMethod(allowFailure = true, allowMultiple = true) {
-        matcher {
-            name = "onBindViewHolder"
-            paramTypes("android.support.v7.widget.RecyclerView\$ViewHolder", "int")
-        }
-    }
+    // 早期版本留下的两个 onBindViewHolder 委托已删除：
+    // 它们在任何微信版本上都没有调用点，却会因为「缓存缺 key」把整个「对话归拢」判成
+    // incomplete cache 从而跳过启动（日志：skipping 对话归拢 — incomplete cache）。
+    // 现在没有这两个必然失配的 key，功能可以正常加载。
 
     private val methodTextViewSetText by dexMethod(allowFailure = true, allowMultiple = true) {
         matcher {
@@ -1796,18 +1797,44 @@ object ConversationAggregation : ClickableFeature(),
 
     private fun launchFolderContainer(source: Any?, folderId: String) {
         val context = source as? Context ?: return
+        // 8.0.80 上微信的会话盒子页对自定义 parentRef 支持不稳定：文件夹里已经没有成员时
+        // 打开只会得到空白页，看起来像「点开没反应」甚至「被当成联系人」。
+        // 这种情况直接说清楚，不要进空白页。查询失败（-1）时不拦，交给微信自己处理。
+        val folded = runCatching {
+            withQueryRewriteSuppressed {
+                WeDatabaseApi.rawQuery(
+                    "SELECT COUNT(*) FROM ${ConversationTable.NAME} WHERE ${ConversationTable.PARENT_REF} = ?",
+                    arrayOf(folderId)
+                ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+            }
+        }.getOrDefault(-1)
+        if (folded == 0) {
+            showToast(context, "这个收纳盒子是空的：会话可能已被移出或删除")
+            WeLogger.w(TAG, "打开空文件夹已拦截：$folderId")
+            return
+        }
         val intent = Intent().apply {
             setClassName(context, CONTAINER_UI_NAME)
             applyFolderContainerIntent(this, folderId)
         }
-        context.startActivity(intent)
+        runCatching { context.startActivity(intent) }
+            .onFailure { error ->
+                WeLogger.e(TAG, "打开收纳盒子失败：$folderId", error)
+                showToast(context, "打开收纳盒子失败：${error.message ?: "未知错误"}")
+            }
     }
 
     private fun applyFolderContainerIntent(intent: Intent, folderId: String) {
+        // 只传「这个盒子叫什么」。之前把 folderId 同时塞进 Contact_ChatRoomId / room_name，
+        // 微信会拿它去当群聊 / 联系人查，查不到就是一页空白 —— 8.0.80 上尤其明显。
+        // 标题由 configureFolderActivity 用 setTitle 覆盖，不依赖这些 extra。
         intent.putExtra(WeChatIntentExtra.CONTACT_USER, folderId)
-        intent.putExtra(WeChatIntentExtra.CONTACT_CHAT_ROOM_ID, folderId)
-        intent.putExtra(WeChatIntentExtra.ROOM_NAME, folderId)
+        intent.putExtra(WeChatIntentExtra.ROOM_NAME, folderTitleOf(folderId).ifBlank { "收纳盒子" })
     }
+
+    /** 盒子标题：优先用户起的名，取不到时给个中性词，避免把 folderId 露在标题上。 */
+    private fun folderTitleOf(folderId: String): String =
+        runCatching { folderById(folderId)?.name }.getOrNull().orEmpty()
 
     private fun configureFolderActivity(activity: BaseConversationUI) {
         val folder = folderById(activeFolderId ?: return) ?: return
@@ -2479,6 +2506,12 @@ object ConversationAggregation : ClickableFeature(),
                 }
             }.onFailure { WeLogger.w(TAG, "list tables failed", it) }
             val contactColumns = tableColumns(ContactTable.NAME)
+            // 空列集说明 PRAGMA 没真正执行（启动早期 / 切库瞬间）。此时 REQUIRED - empty
+            // 会误判成 schema mismatch 并被 latch 成永久 false，归拢从此静默跳过直到重启。
+            if (conversationColumns.isEmpty() || contactColumns.isEmpty()) {
+                WeLogger.w(TAG, "schema probe returned empty columns; treat as transient, will retry")
+                return@runCatching null
+            }
             val missingConversationColumns = ConversationTable.REQUIRED_COLUMNS - conversationColumns
             val missingContactColumns = ContactTable.REQUIRED_COLUMNS - contactColumns
             if (missingConversationColumns.isNotEmpty() || missingContactColumns.isNotEmpty()) {

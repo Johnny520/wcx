@@ -139,8 +139,27 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
     private val ctorVerifyUserAcceptReady: Boolean
         get() = runCatching { ctorVerifyUserAccept.constructor }.isSuccess
 
-    // 好友验证页面的 initView — 用于检测用户手动进入验证页面时提取信息
-    // 备用：如果 NetScene 方法无法匹配，通过验证页面输入来触发
+    /**
+     * 「用户在好友验证页面点了确定」这个信号 —— 原锚点 `MicroMsg.VerifyUserUtil` + `verify ok clicked`。
+     *
+     * **8.0.80 判定：真失效，且无法重描锚点。** 排查过程（18 个 dex 全量扫描 0x28005032）：
+     *   - `MicroMsg.VerifyUserUtil`、`verify ok clicked` 两条串在 string_ids 里**完全不存在**
+     *     （不是孤儿串），子串搜索 `VerifyUserUtil` / `verify ok clicked` 同样 0 命中；
+     *   - `VerifyUserUtil` 这个类型名在所有方法描述符（参数/返回类型）里也 0 出现 ⇒ 承载类已被移除；
+     *   - 尝试过的替代串：`verifyok` / `VerifyOk`（只剩 `lastVerifyOkTime: %d…`、
+     *     `onDownloadComplete, verifyOk=false`，语义是"输密码/下载校验"，不是页面点击）；
+     *     `MM_VERIFYUSER_*` 系列全部指向 NetSceneVerifyUser 的构造器与 onSceneEnd —— 那正是
+     *     [methodVerifyAccept] 已经覆盖的接受入口，不是"按钮点击"；
+     *     `SayHi*` 页面类（`SayHiWithSnsPermissionUI` 等）仍在，但没有任何可定位的点确定日志。
+     *   - 上游 WeKit 已删除该功能文件，没有可借鉴的新锚点。
+     *
+     * 兜底（不静默跳过）：
+     *   - `allowFailure = true` ⇒ 解析失败只置占位符，不抛异常；
+     *   - 该委托**没有 hook 消费方**（全仓库仅在这里与 onEnable 的可用性判定里出现），
+     *     真正的接受语录用 [methodVerifyAccept] / `ctorVerifyUserAcceptExecutable` 的
+     *     `hookAfter` 触发，所以失效只影响可用性判定；
+     *   - 因此 onEnable 把「是否可用」改成以接受入口为准，并在占位时打一条 W 日志明确告知。
+     */
     private val methodVerifyOkClick by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings(
@@ -215,9 +234,23 @@ object AutoAcceptFriendRequests : ClickableFeature(), IResolveDex,
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
 
-        // 检查 DexKit 方法是否成功解析
-        val verifyUnavailable = methodVerifyAccept.isPlaceholder
+        // 检查 DexKit 方法是否成功解析。
+        // 注意：methodVerifyOkClick 自 8.0.80 起恒为占位符（`MicroMsg.VerifyUserUtil` /
+        // `verify ok clicked` 两条串已被微信从 dex 里彻底删除，见该委托的注释），且它只参与本判定、
+        // 没有任何 hook 消费方；所以「是否可用」必须以接受入口为准：8.0.77+ 的构造器路径
+        // （p3.<init>）或旧版 NetSceneVerifyUser 方法，任一解析成功即算可用。
+        val verifyUnavailable = methodVerifyAccept.isPlaceholder && ctorVerifyUserAcceptExecutable == null
         val verifyOkUnavailable = methodVerifyOkClick.isPlaceholder
+
+        if (verifyOkUnavailable) {
+            WeLogger.w(
+                TAG,
+                "verify ok clicked 锚点已失效（8.0.80 起 MicroMsg.VerifyUserUtil 日志串被删除，无法重描）；" +
+                        "接受入口由" +
+                        (if (ctorVerifyUserAcceptExecutable != null) " NetSceneVerifyUser 构造器" else "旧版 NetSceneVerifyUser 方法") +
+                        "提供，欢迎语逻辑不受影响"
+            )
+        }
 
         if (verifyUnavailable && verifyOkUnavailable) {
             WeLogger.w(TAG, "当前微信版本暂不支持自动同意好友申请 — DexKit 方法均未匹配")

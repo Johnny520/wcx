@@ -5,6 +5,7 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.WeLogger
 import org.luckypray.dexkit.DexKitBridge
 
 /**
@@ -24,7 +25,9 @@ import org.luckypray.dexkit.DexKitBridge
 )
 object BypassRiskFileBlocking : SwitchFeature(), IResolveDex {
 
-    private val methodRiskFileFlag by dexMethod {
+    private const val TAG = "BypassRiskFileBlocking"
+
+    private val methodRiskFileFlag by dexMethod(allowFailure = true) {
         matcher {
             declaredClass {
                 usingEqStrings(
@@ -39,11 +42,11 @@ object BypassRiskFileBlocking : SwitchFeature(), IResolveDex {
                     "block-range",
                     "bubble-type",
                     "preview-type",
-                    "url-click-type",
+                    // "url-click-type" / "unread-media-expired" 在 8.0.80 已成孤儿串
+                    //（存在于字符串表但无任何方法引用），保留会让整组 AND 永不命中。
                     "risk-file-flag",
                     "risk-file-md5-list",
-                    "risk-warning-url",
-                    "unread-media-expired"
+                    "risk-warning-url"
                 )
             }
             paramCount = 0
@@ -52,6 +55,10 @@ object BypassRiskFileBlocking : SwitchFeature(), IResolveDex {
     }
 
     override fun onEnable() {
+        if (methodRiskFileFlag.isPlaceholder) {
+            WeLogger.w(TAG, "risk-file 白名单类未定位到，功能不生效")
+            return
+        }
         methodRiskFileFlag.hookBefore {
             result = 0
         }

@@ -139,7 +139,10 @@ public final class WeChatVersionApi {
     }
 
     public static String buildCacheKey(Context context, ClassLoader loader) {
-        return build(context, loader).cacheKey;
+        // 追加模块版本段：定位缓存只按微信侧身份判断，模块更新（锚点修复/新功能）后
+        // 旧缓存会被误复用，导致修复在新版本上不生效。带上模块 versionCode 后，
+        // 每次模块升级缓存自动全部失效重建。
+        return build(context, loader).cacheKey + "|" + com.Johnny.wcx.BuildConfig.VERSION_CODE;
     }
 
     private static String buildCacheKey(String packageName,

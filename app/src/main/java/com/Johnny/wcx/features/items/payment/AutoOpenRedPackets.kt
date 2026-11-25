@@ -1,5 +1,6 @@
 package com.Johnny.wcx.features.items.payment
 
+import com.Johnny.wcx.utils.strings.isGroupChatWxId
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
@@ -23,6 +24,7 @@ import dev.ujhhgtg.reflekt.utils.createInstance
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexClass
 import com.Johnny.wcx.dexkit.dsl.dexMethod
+import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.api.core.WeDatabaseApi
 import com.Johnny.wcx.features.api.core.WeDatabaseListenerApi
 import com.Johnny.wcx.features.api.core.WeMessageApi
@@ -30,7 +32,6 @@ import com.Johnny.wcx.features.api.core.models.MessageInfo
 import com.Johnny.wcx.features.api.core.models.MessageType
 import com.Johnny.wcx.features.api.net.WeNetSceneApi
 import com.Johnny.wcx.features.core.ClickableFeature
-import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.items.payment.stats.RedPacketStatsManager
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ui.content.AlertDialogContent
@@ -41,7 +42,6 @@ import com.Johnny.wcx.ui.content.TextButton
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
 import com.Johnny.wcx.utils.android.showToast
-import com.Johnny.wcx.utils.strings.isGroupChatWxId
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
@@ -122,7 +122,9 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
         val msgType: Int,
         val channelId: Int,
         val headImg: String = "",
-        val nickName: String = ""
+        val nickName: String = "",
+        /** 这个红包是不是自己发的：自己发的红包即使被抢（「抢自己的红包」开启）也不自动回复、不计入统计。 */
+        val isSelfSender: Boolean = false,
     )
 
     override fun onEnable() {
@@ -220,7 +222,7 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
 
             // 抢红包金额统计：开关开启才写入（关闭时不执行任何读写）；
             // 金额<=0/解析异常已在上方短路；任一异常仅记日志，绝不影响抢红包核心流程。
-            if (RedPacketStatsManager.isEnabled()) {
+            if (RedPacketStatsManager.isEnabled() && !info.isSelfSender) {
                 RedPacketStatsManager.addSuccessRecord(
                     senderName = info.nickName,
                     chatName = runCatching { WeDatabaseApi.getDisplayName(info.talker) }.getOrDefault(""),
@@ -235,8 +237,12 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
             // 注意 Kotlin 字符串转义：字面的 "$amount" 必须写成 "\$amount"，
             // 写成 "\\$amount" 会被解析成「反斜杠 + amount 变量的值」，
             // 导致 replace 永远匹配不到用户填的占位符（历史 bug：回复内容原样带着 $amount 发出去）。
+            // 自己发的红包不自动回复：回复是「感谢别人发红包」，谢自己毫无意义且会刷屏。
             val reply = packetAutoReply
-            if (reply.isNotBlank()) {
+            if (reply.isNotBlank() && info.isSelfSender) {
+                WeLogger.i(TAG, "skip auto-reply: red packet was sent by myself (sendId=${info.sendId})")
+            }
+            if (reply.isNotBlank() && !info.isSelfSender) {
                 val replyTalker = info.talker
                 val replyChatName = runCatching { WeDatabaseApi.getDisplayName(replyTalker) }.getOrDefault("")
                 val replyText = reply
@@ -370,8 +376,24 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
             val sendId = uri.getQueryParameter("sendid") ?: ""
             val headImg = extractXmlParam(xmlContent, "headimgurl")
             val nickName = extractXmlParam(xmlContent, "sendertitle")
+            // 祝福语过滤用到的字段：<wishing> 是红包祝福语，<title> 是 appmsg 标题，
+            // <sceneid> 仅用于日志（1/2 表示群聊/私聊的来源区分由 talker 判定，不依赖它）。
+            val wishing = extractXmlParam(xmlContent, "wishing")
+            val title = extractXmlParam(xmlContent, "title")
+            val sceneId = extractXmlParam(xmlContent, "sceneid")
 
             if (sendId.isEmpty()) return
+
+            // ── 关键词过滤（默认关闭；命中则跳过，且不占用 sendId 去重槽位）────────
+            // 放在去重之前：用户改关键词配置后，之前被关键词跳过的红包仍可在下次被正常判定。
+            if (RedPacketAdvanced.shouldSkipByKeyword(wishing, title)) {
+                WeLogger.i(
+                    TAG,
+                    "skipping packet by keyword filter (mode=${RedPacketAdvanced.keywordMode.name}, " +
+                        "wishing=${wishing.take(40)}, sendId=$sendId)"
+                )
+                return
+            }
 
             // ── 去重：同一 sendId 只处理一次 ──────────────────────────────────────
             if (!processedSendIds.add(sendId)) {
@@ -379,7 +401,7 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                 return
             }
 
-            WeLogger.i(TAG, "detected red packet (sendId=$sendId)")
+            WeLogger.i(TAG, "detected red packet (sendId=$sendId, sceneId=$sceneId)")
 
             currentRedPacketMap[sendId] = RedPacketInfo(
                 sendId = sendId,
@@ -388,28 +410,22 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                 msgType = msgType,
                 channelId = channelId,
                 headImg = headImg,
+                isSelfSender = msgInfo.isSelfSender,
                 nickName = nickName
             )
 
             // ── 延迟计算：私聊/群聊分离 + 极速模式 + 内置最小延迟保护 ─────────────
-            val delayTime = if (packetSpeedMode) {
+            // 随机化细节（含「按秒填写」开关）统一在 RedPacketAdvanced.resolveDelayMs 内实现，
+            // 未开启新开关时的取值区间与改造前完全一致。
+            val delayTime = RedPacketAdvanced.resolveDelayMs(isGroupChat, packetSpeedMode, MIN_DELAY_MS)
+            if (packetSpeedMode) {
                 WeLogger.i(TAG, "speed mode enabled, using min delay (${MIN_DELAY_MS}ms)")
-                MIN_DELAY_MS
             } else {
-                val (minDelay, maxDelay) = if (isGroupChat) {
-                    (packetDelayMinGroup.toLongOrNull() ?: 300L) to (packetDelayMaxGroup.toLongOrNull() ?: 800L)
-                } else {
-                    (packetDelayMinPrivate.toLongOrNull() ?: 200L) to (packetDelayMaxPrivate.toLongOrNull() ?: 500L)
-                }
-                val safeMin = maxOf(minDelay, MIN_DELAY_MS)
-                val safeMax = maxOf(maxDelay, safeMin)
-                val delay = if (safeMax > safeMin) {
-                    Random.nextLong(safeMin, safeMax)
-                } else {
-                    safeMin
-                }
-                WeLogger.i(TAG, "delay: isGroup=$isGroupChat, min=$safeMin, max=$safeMax, chosen=$delay")
-                delay
+                WeLogger.i(
+                    TAG,
+                    "delay: isGroup=$isGroupChat, secondMode=${RedPacketAdvanced.delaySecondMode}, " +
+                        "chosen=${delayTime}ms"
+                )
             }
 
             thread(name = "ReceiveRedPacketThread") {
@@ -518,6 +534,24 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                         )
                         ListItem(
                             modifier = Modifier.clickable {
+                                RedPacketAdvanced.showListManagerDialog(context, useWhitelist)
+                            },
+                            supportingContent = {
+                                Text("手工增删 wxid / 群 ID（含企业微信群 @im.chatroom），支持查看与删除")
+                            },
+                            headlineContent = { Text("手动管理名称列表") },
+                        )
+                        ListItem(
+                            modifier = Modifier.clickable {
+                                RedPacketAdvanced.showKeywordFilterDialog(context)
+                            },
+                            supportingContent = {
+                                Text("按红包祝福语关键词决定抢/不抢（默认关闭）；可切换延迟单位秒/毫秒")
+                            },
+                            headlineContent = { Text("关键词过滤与延时") },
+                        )
+                        ListItem(
+                            modifier = Modifier.clickable {
                                 RedPacketGroupMemberFilter.showManagerDialog(context)
                             },
                             supportingContent = { Text("为指定群聊按发送成员设置黑/白名单") },
@@ -532,7 +566,7 @@ object AutoOpenRedPackets : ClickableFeature(), WeDatabaseListenerApi.IInsertLis
                         ListItem(
                             modifier = Modifier.clickable { self = !self },
                             trailingContent = { Switch(checked = self, onCheckedChange = { self = it }) },
-                            supportingContent = { Text("默认情况下不抢自己发出的红包") },
+                            supportingContent = { Text("默认情况下不抢自己发出的红包；即使开启也不会自动回复、不计入金额统计") },
                             headlineContent = { Text("抢自己的红包") },
                         )
                         TextField(

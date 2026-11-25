@@ -25,9 +25,15 @@ object UnlockCustomEmojiLimit : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodComputeEmojiStorageState by dexMethod {
+    /**
+     * `tr.w.a(boolean)` —— 表情存储状态计算。
+     *
+     * 8.0.80 起 `normal_custom_size` 已成孤儿串（字符串表里有、没有任何方法引用），
+     * 双串 AND 恒不命中，因此只用仍被 `tr.w` 引用的 TAG；void + 1 参把它收敛到 `a(Z)V`。
+     */
+    private val methodComputeEmojiStorageState by dexMethod(allowFailure = true) {
         matcher {
-            usingEqStrings("MicroMsg.EmojiStorageState", "normal_custom_size")
+            usingEqStrings("MicroMsg.EmojiStorageState")
             returnType(Void.TYPE)
             paramCount(1)
         }
@@ -58,13 +64,13 @@ object UnlockCustomEmojiLimit : SwitchFeature(), IResolveDex {
         }
     }
 
-    private val methodChattingUiEmoji by dexMethod {
+    private val methodChattingUiEmoji by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("addToCustom. over max size.")
         }
     }
 
-    private val methodConditionallyShowDialog by dexMethod {
+    private val methodConditionallyShowDialog by dexMethod(allowFailure = true) {
         matcher {
             declaredClass {
                 usingEqStrings("uninstallEmoticon Failed to send net scene: ")
@@ -94,11 +100,13 @@ object UnlockCustomEmojiLimit : SwitchFeature(), IResolveDex {
             }
         }
 
+        // 逐个跳过未解析到的锚点：原来任一 placeholder 都会在 hook 时抛异常，
+        // 把整段「重置 custom_full」逻辑一起带挂（8.0.80 上正常表情仍然会被判超限）。
         listOf(
             methodComputeEmojiStorageState,
             methodChattingUiEmoji,
             methodConditionallyShowDialog
-        ).forEach {
+        ).filter { !it.isPlaceholder }.forEach {
             it.hookBefore {
                 putCustomFullFalseInMmkv()
             }

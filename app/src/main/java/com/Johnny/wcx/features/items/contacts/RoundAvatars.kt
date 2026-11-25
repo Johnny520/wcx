@@ -22,7 +22,7 @@ import com.Johnny.wcx.ui.utils.showComposeDialog
 import org.luckypray.dexkit.DexKitBridge
 
 @Feature(
-    name = "圆角头像", categories = ["联系人与群组", "界面美化"],
+    name = "圆角头像", categories = ["界面美化"],
     description = "自定义微信全局头像渲染的圆角弧度"
 )
 object RoundAvatars : ClickableFeature(), IResolveDex {

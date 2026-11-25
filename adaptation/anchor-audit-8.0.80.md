@@ -1,141 +1,124 @@
-# 微信 8.0.80 适配体检报告
+# 8.0.80 锚点审计（对 236 组 DexKit 锚点的全量离线校验）
 
-> 生成方式：离线复现 DexKit 匹配语义，对源码全部 DexKit 委托逐项验证（不是跑日志）。
-> 工具：`adaptation/tools/`（`extract_props.py` → `verify_props.py` → `classify_fail.py` → `suggest2.py`）。
+> 承接 [anchor-audit-8.0.79.md](./anchor-audit-8.0.79.md)。上一轮按 8.0.79 arm64 APK 做的校验，
+> 但用户实机日志显示跑的是 **微信 8.0.80（versionCode 3220）**，于是用 8.0.80 APK 重跑一遍。
+>
+> APK：`weixin8080 arm64`（285 MB，18 dex，254508 类，943179 个方法，876378 个字符串常量）
 
-## 一、三版本总体对比
+## 结论
 
-| 版本 | 委托数 | OK | WARN(类级命中但无单方法共现) | SIG(串命中但签名不符) | FAIL | SKIP(无串锚点) |
-|---|---|---|---|---|---|---|
-| 8.0.76 | 515 | 253 | 33 | 10 | 118 | 101 |
-| 8.0.79 | 515 | 259 | 33 | 9 | 113 | 101 |
-| 8.0.80 | 515 | 240 | 37 | 9 | 128 | 101 |
-
-说明：`WARN` 按 DexKit 的方法级 AND 语义视为**实际会失败**（已由 `classChattingDataAdapter` 的线上日志实证）。
-
-## 二、核心功能体检（8.0.80）
-
-| 功能 | key | .76 | .79 | .80 |
-|---|---|---|---|---|
-| 发消息 | `WeMessageApi:classNetSceneSendMsg` | OK | OK | OK |
-| 发消息 | `WeMessageApi:classMsgInfo` | FAIL | FAIL | OK |
-| 发消息 | `WeMessageApi:classMsgInfoStorage` | FAIL | FAIL | OK |
-| 数据库 | `WeMessageApi:classMmKernel` | FAIL | FAIL | WARN |
-| 数据库 | `WeDatabaseApi:classMmKernel` | WARN | FAIL | WARN |
-| 数据库 | `WeDatabaseApi:methodGetStorage` | OK | OK | OK |
-| 朋友圈 | `WeMomentsApi:classUploadPackHelper` | OK | OK | OK |
-| 朋友圈 | `WeMomentsApi:methodCommit` | OK | OK | OK |
-| 朋友圈 | `WeMomentsApi:methodAddImageMediaObjByPath` | OK | OK | WARN |
-| 朋友圈 | `WeMomentsApi:classSnsMediaObj` | OK | OK | OK |
-| 会话 | `WeConversationApi:classConversationStorage` | OK | OK | OK |
-| 消息 | `WeMessageApi:classChattingDataAdapter` | OK | OK | OK |
-| 多视频 | `WeMessageApi:classImportMultiVideo` | OK | OK | OK |
-| 平板 | `ForceTabletMode:methodIsTablet` | OK | OK | OK |
-| 主题 | `Themes:classEnterpriseBizViewItem` | OK | OK | OK |
-| 密友 | `HideContacts:methodNormalContactCount` | FAIL | WARN | WARN |
-| 脚本 | `PipVoip:methodMultiTalkMic` | OK | FAIL | FAIL |
-
-## 三、8.0.80 相对 8.0.79 的回归清单
-
-共 **47** 项。根因分布：{'A_分散': 6, 'C_孤儿串': 41}
-
-| key | 79 → 80 | 根因 | 缺失/孤儿串 |
-|---|---|---|---|
-| `BlockVoipRingtone:methodStartRing` | WARN → FAIL | C_孤儿串 | startRing() called with: username =  |
-| `CustomSourceApp:methodSnsUploadUIInitView` | OK → FAIL | C_孤儿串 | customizeInputView |
-| `DisableLowAvailableStorageDetection:classStaticValuesHolder` | OK → FAIL | A_分散 |  |
-| `DisablePinnedChatsCollapsing:methodIfShouldAddCollapseChatItem` | OK → FAIL | C_孤儿串 | checkIfShowFoldItem, ifShow: |
-| `DisplayDetails:classImproveInteractionLayout` | OK → FAIL | C_孤儿串 | MicroMsg.Improve.InteractionLayout |
-| `HideContacts:methodFinderLikeDrawerLoadMore` | WARN → FAIL | A_分散 |  |
-| `HideContacts:methodFinderLikeDrawerRefresh` | OK → FAIL | A_分散 |  |
-| `HideContacts:methodVoipAcceptIncomingCall` | WARN → FAIL | C_孤儿串 | acceptIncomingCal, roomInfo: |
-| `HideContacts:methodVoipMpLaunchIncomingCard` | OK → FAIL | C_孤儿串 | launchInComingCardAsync:  |
-| `HideContacts:methodVoipMpStartRing` | WARN → FAIL | C_孤儿串 | startRing() called with: username =  |
-| `HideContacts:methodVoipServiceExSetInviteContent` | OK → FAIL | C_孤儿串 | Failed to setInviteContent during calling, status = |
-| `HideContacts:methodVoipStartAcceptVoip` | OK → FAIL | C_孤儿串 | startAcceptVoIP, roomInfo: |
-| `MentionMembers:methodMergeMsgSourceNode` | OK → FAIL | C_孤儿串 | (?s)<alnode[^>]*>.*?</alnode> |
-| `MonitorGroupMemberOperations:methodHandleSpanClick` | OK → FAIL | C_孤儿串 | LuckyMoneyUriSpanHandler handleSpanClick() clickCallback == null |
-| `PipVoip:classFlutterVoipManager` | WARN → FAIL | C_孤儿串 | qipeng, enableMute. |
-| `PipVoip:fieldVoipMuted` | OK → FAIL | C_孤儿串 | qipeng, enableMute.; qipeng, disableMute. |
-| `PipVoip:methodFlutterVoipAttachedToActivity` | OK → FAIL | C_孤儿串 | init flutter voip mgr |
-| `PipVoip:methodFlutterVoipReattachedToActivity` | OK → FAIL | C_孤儿串 | onReattachedToActivityForConfigChanges: |
-| `PipVoip:methodSetVoipMuted` | OK → FAIL | C_孤儿串 | qipeng, enableMute.; qipeng, disableMute. |
-| `QuotedMessageDirectJump:classEnumQuoteJumpToPositionSource` | OK → FAIL | C_孤儿串 | QuoteLongClickFromQuoteView; QuoteClickFromTextPreviewLocateView |
-| `SpoofHostVersion:ctorCgiLaunchWxaAppFunc1122` | WARN → FAIL | C_孤儿串 | <init> cgiHash[%d], username[%s] appId[%s] sync[%b] sessionId[%s] inst |
-| `SuperConversationPinning:classConversation` | OK → FAIL | C_孤儿串 | [%s}]get mmkv editmsg is [%s],get conv editmsg is [%s] |
-| `UnlockCustomEmojiLimit:classCgiBack` | OK → FAIL | C_孤儿串 | CgiBack{errType= |
-| `VoiceMessagePlaybackOptimization:classAutoPlay` | OK → FAIL | C_孤儿串 | onSensorEvent, isON: |
-| `VoiceMessagePlaybackOptimization:methodSensorCallback` | OK → FAIL | C_孤儿串 | onSensorEvent, isON: |
-| `WeAuthApi:classNetSceneJSLogin` | OK → FAIL | A_分散 |  |
-| `WeChatMessageContextMenuApi:methodMultiSelectMenuItem` | OK → FAIL | C_孤儿串 | MicroMsg.ChattingForwardMultiMsgLogic; sendMultiMsg fromTalker: |
-| `WeChatMessageViewApi:methodChatItemOnBindView` | OK → FAIL | A_分散 |  |
-| `WeContactLabelApi:classNetSceneAddContactLabel` | OK → FAIL | C_孤儿串 | /cgi-bin/micromsg-bin/addcontactlabel |
-| `WeContactLabelApi:classNetSceneModifyContactLabelList` | WARN → FAIL | C_孤儿串 | /cgi-bin/micromsg-bin/modifycontactlabellist |
-| `WeConversationApi:methodBuildModContactOplog` | OK → FAIL | C_孤儿串 | oplog modContact user:%s remark:%s BitVal:%d BitValue2:%s isInConvBox: |
-| `WeConversationApi:methodGetConversationByTalker` | OK → FAIL | C_孤儿串 | get null with username: |
-| `WeConversationApi:methodSetNoDnd` | OK → FAIL | C_孤儿串 | OpenImOpLogLogic OpenIMModContactMuteOplog username:%s switch cancel |
-| `WeConversationApi:methodUpdateUnreadByTalker` | OK → FAIL | C_孤儿串 | updateUnreadByTalker %s |
-| `WeMessageApi:ctorNetSceneSendMsgLocation` | OK → FAIL | A_分散 |  |
-| `WeMessageApi:methodRunVoiceService` | OK → FAIL | C_孤儿串 | run() %s |
-| `WeMomentsApi:classImproveInteractionLayout` | OK → FAIL | C_孤儿串 | MicroMsg.Improve.InteractionLayout |
-| `WeMomentsApi:classSnsSourceScene` | OK → FAIL | C_孤儿串 | comment_detail |
-| `WeMomentsApi:classSnsUploadUi` | WARN → FAIL | C_孤儿串 | customizeInputView |
-| `WeMomentsApi:classXs4` | OK → FAIL | C_孤儿串 | musicOperationUrl |
-| `WeServiceApi:methodSaveEmojiThumb` | OK → FAIL | C_孤儿串 | save emoji thumb error |
-| `WeShortVideosShareMenuApi:methodCreateMenu1` | OK → FAIL | C_孤儿串 | pos is error  |
-| `WeShortVideosShareMenuApi:methodCreateMenu3` | OK → FAIL | C_孤儿串 | getCreateSecondMoreMenuListener: username= |
-| `WeShortVideosShareMenuApi:methodOnSelectMenuItem1` | OK → FAIL | C_孤儿串 | [getMoreMenuItemSelectedListener] feed  |
-| `WeShortVideosShareMenuApi:methodOnSelectMenuItem2` | WARN → FAIL | C_孤儿串 | getMoreMenuItemSelectedListener feed  |
-| `WeTextStatusApi:methodSetTextStatusIcon` | OK → FAIL | C_孤儿串 | Super calls with default arguments not supported in this target, funct |
-| `WeTextStatusApi:methodTextStatusTopicInfo` | OK → FAIL | C_孤儿串 | Super calls with default arguments not supported in this target, funct |
-
-## 四、根因专题：微信在持续裁剪日志串
-
-自 8.0.76 起，微信大量**删除日志调用但残留 string_ids 条目**，形成「孤儿串」：
-字符串在 dex 里查得到，但没有任何 `const-string` 指令引用它。
-
-这直接打穿了所有 `TAG + 日志串` 形式的锚点（本项目绝大多数 matcher 都是这种写法）。
-
-判定方法（必须照做）：
-1. 先确认串在 `string_ids` 存在（旧做法到此为止，误判为有效）
-2. **再确认串被某个方法的 `const-string` 引用**（`adaptation/tools/dumcls.py` / `verify_props.py`）
-3. 只有「被引用」的串才能当锚点
-
-已据此批量修复 20 处（删除孤儿串，仅保留存活串，且保证三版本仍唯一命中），另有 1 处因精简后
-误命中无关 lambda 而回滚（`DisableResumeWatchingToast`）。
-
-### 锚点写法建议（长期）
-
-| 优先级 | 锚点类型 | 理由 |
+| | 8.0.79 | 8.0.80 |
 |---|---|---|
-| 高 | 协议/XML 关键字（`<finderFeed>`、`<msgsource>`、`/cgi-bin/xxx`） | 业务必需，不会被裁 |
-| 高 | 方法名/字段名 + 签名（`paramTypes`/`returnType`/`addInvoke`） | 结构稳定，不受日志裁剪影响 |
-| 中 | 类 TAG 单串 + 结构约束 | TAG 是类静态常量，通常保留 |
-| 低 | TAG + 普通日志串 | 日志随时被裁，跨版本必坏 |
+| 失效锚点组 | 16 | **57** |
+| 新增失效 | — | **41**（另有 0 组「在 8.0.80 恢复」） |
 
-## 五、本轮已完成的修复
+**41 组新增失效全部不是「类/方法没了」，而是「用来定位的字符串没了」。**
+所有被判失效的串在 8.0.80 的 string 表里**都还在**（孤儿串），只是**没有任何方法再引用它**。
 
-1. 朋友圈 8.0.79 整链修复（`classUploadPackHelper` 锚点被 `BackgroundVideoFinishUploader` 抢占）
-2. `classNetSceneSendMsg`：`markMsgFailed for id:%d` 在 8.0.79 起消失 → 改 `MicroMsg.NetSceneSendMsg` + `Req MsgSource %s`
-3. `classImportMultiVideo`：`RemuxInfo`/`OriginMediaInfo` 是孤儿串 → 改单 TAG + 多候选择优
-4. `classChattingDataAdapter`：两串跨方法 AND 恒失败 + 旧串成孤儿 → 改 TAG + `[setShowHistoryMsgTipId]`
-5. `ForceTabletMode`：`eebbk`/`isRoyoleFoldableDevice!!!` 孤儿 → 单串 `Lenovo TB-9707F`
-6. `PipVoip`：`onMicClick, cur state: ` 孤儿 → `onMicClick, need notify iLink Engine`
-7. 清理 `DisableMainPagePullDown` 两个死锚点（其中 `methodOnTouchEvent` 是从未使用的僵尸代码）
-8. `CustomLocalFriendAvatars`：8.0.79 移除 `View.invalidate` → 改 allowMultiple 全候选
-9. 20 处孤儿串批量精简（见台账 3.4 节）
-10. 锚点迁移第一批（auto_probe 自动探查「存活串+原签名」三版唯一解）：19 项
-    —— 朋友圈 SnsVideoFullPath / 导出相册、会话删除与 parentRef / UpdateUnread、主题地址项与聊天宫格、
-    开屏广告跳过、WebView 特性、运动步数、进程检查、FlutterVoip 最小化、自定义头像 mvvm 加载、
-    QueryByParent 真实 5 参签名、ContextMenu 创建、跳过广告等
-11. 引擎修正 3 处系统性偏差（此前会批量误判）：
-    · `iter_insns` 未跳过 switch/fill-array 的 payload 伪指令 → 指令流错位，const-string 批量漏检
-    · `sig_params` 把描述符分隔符逗号当成参数类型 → 所有多参方法被误判「签名不符」
-    · `declaredClass{}` / `superClass{}` 块内的串被当成方法体内串 → 类级约束被误用为方法级条件
+这是因为微信自 8.0.76 起持续做「删日志调用、保留常量池条目」的裁剪：R8/D8 只删调用点，
+字符串常量仍被 string_ids 引用。DexKit 的 `usingEqStrings` 按「方法内 const-string 引用」匹配，
+所以对孤儿串永远是 0 命中。**判断锚点是否有效不能用「串是否存在」，必须看「有没有方法引用它」。**
 
-## 六、待办（按优先级）
+## 四类根因
 
-1. 8.0.80 回归 62 项：逐项找「存活串 + 结构约束」替代锚点（当前工具 `suggest2.py` 只能给出 8 项唯一解）
-2. `WARN` 类项（40~46 个/版本）多为「串分散在不同方法」，需要拆成单串 + 签名约束
-3. `SKIP` 76 项（无串锚点，全靠 `declaredClass` 链）需要单独建依赖图验证
-4. `h/Hchat` 侧 DexFinder 特征串未纳入本报告（另一套定位链），需单独复核
+1. **日志文案改格式**（最好修）
+   例：`updateMainTabUnread %d` → `[updateMainTabUnread] unread : `
+   （与同类 Friend/Contact/Settings 三个未读更新方法统一格式）
+   例：`put stack into pool: `（孤儿）→ `MicroMsg.AvatarGetContactServiceHelper`（仍被引用）
+2. **日志串彻底删除**（需重新逆向，找同类另一条仍在的串或结构化约束）
+   例：`speakerOn has been set %s`、`switchSpeaker, isSpeakerOn: %b, isPlaying: %b`、
+   `jacks dealNotify, ...`、`updateStatusBar %s`、`setCommentDelFlag`、`gotoNotifyMsgUI`、
+   `openSpecificUI, context is null`、`update device Step time: %s stepCount: %s`
+3. **类被整体混淆改名**（类名字符串直接失效）
+   8.0.80 已不存在的类：`SnsComment`、`SnsInfoStorage`、`SnsUtil`、`NetSceneSnsSync`、
+   `UploadPackHelper`、`MMProgressDialog$Builder`、`MMToolBar`、`SettingsPersonalInfoUI`、
+   `MvvmSelectContactUI`、`FinderLikeDrawerBuilder`、`LauncherUITabView`（→ `LauncherUIBottomTabView`）
+4. **TAG 串被多个类共用**（单串做 `declaredClass` 会多命中）
+   例：`MicroMsg.AutoPlay` 在 8.0.80 被 20+ 个聊天页类引用；
+   `MicroMsg.AvatarDrawable` 被 3 个类/方法引用。
+   必须叠加「该类独有的另一条串」收窄。
+
+## 本次已修
+
+| 功能 | 锚点 | 8.0.80 新锚点 | commit |
+|---|---|---|---|
+| 对话归拢 / 对话分组 / 隐藏联系人 | `methodSqliteWrapperRawQuery` | `usingEqStrings("sql is null ", "DB IS CLOSED ! {%s}")` → 只用后者（前者成孤儿串，后者仍被 22 个方法引用） | 03ce0544 |
+| 解除风险文件拦截 | `methodRiskFileFlag` | 16 串 AND 里去掉已成孤儿串的 `url-click-type`、`unread-media-expired`；补 `allowFailure` + placeholder 守卫 | 03ce0544 |
+| 解除单个表情数量上限 | `methodComputeEmojiStorageState` | 去掉孤儿串 `normal_custom_size`，单串 `MicroMsg.EmojiStorageState`（void+1 参唯一收敛 `tr/w.a(Z)V`） | 03ce0544 |
+| 美化首页底部导航栏 | `methodUpdateTabUnread` | `[updateMainTabUnread] unread : `（`LauncherUIBottomTabView.k(I)V`） | 5354034c |
+| 自定义好友本地头像 | `methodMvvmLoadAvatar1/2` | 孤儿串 `put stack into pool: ` → `MicroMsg.AvatarGetContactServiceHelper`（`zs1.s.Gj(ImageView,String,String,float)V`） | 5354034c |
+| 自定义好友本地头像 | `methodConversationAvatar` | 去掉漂走的 `imageView is null`，单串 `MicroMsg.AvatarDrawable`；4 参 + void + `View.invalidate` 三个约束在 `pluginsdk.ui.u.b` 上仍全部满足（已 dump 字节码确认） | 5354034c |
+| 语音消息播放逻辑优化 | `methodSetSpeakerOn` / `methodSwitchSpeaker` | 两条旧串全成孤儿串。真 AutoPlay = `com.tencent.mm.ui.chatting.x0`，用类内独有串 `isHeadsetPlugged: %b, isBluetoothOn: %b` 锁类；`setSpeakerOn` = `x0.G(Z)V`（调 `platformtools.Log.c` 与同类 d/F/J 区分），`switchSpeaker` = `x0.K()V`（调 `modelbase.d1.g(Z)`） | b2925d2d |
+
+## 待修清单（按影响面排序）
+
+| 功能 | 失效锚点 | 现状 / 下一步线索 |
+|---|---|---|
+| 通知进化 | `methodDealNotify` | 串 `jacks dealNotify, ...` 已删；8.0.80 只剩 `hasTryDealNotifyByLightPush`，需重找通知聚合入口 |
+| 朋友圈评论防撤回 | `methodSnsCommentSetCommentDelFlag` | `setCommentDelFlag` 无引用且 `SnsComment` 类已混淆改名，需从 `sns.storage` 包内找「(String,...)→」评论 DAO |
+| 常驻互动消息入口 | `methodShowNotifyBar` / `methodHideNotifyBar` / `methodGotoNotifyMsgUI` | 依赖的 lambda 类名（`ImproveHeaderUIC$onNotifyChange$1$1`）已变；`ImproveHeaderUIC` 类本身还在（classes6） |
+| 自定义尾巴 | `methodSetSdkAppId` / `methodSetSdkAppName` / `methodSnsUploadUIInitView` | `UploadPackHelper` 已混淆（8.0.80 ≈ `sns.model.i8`）；`SnsUploadUI` 类仍在 classes6 |
+| 隐藏联系人（6 项） | `methodFinderLikeDrawerRefresh` / `methodSnsInfoToSnsStruct` / `methodSnsSyncUpdateRedDotCache` / `methodVoipMpStartFgs` / `methodVoipShowFinishCard` / `methodVoipStartAcceptVoip` | `SnsUtil`、`NetSceneSnsSync`、`FinderLikeDrawerBuilder` 类名全部消失；VoIP 两条日志串被删 |
+| 主题 | `methodHomeUiUpdateStatusBar` | `HomeUI` 类仍在（classes15），但类内已无任何 `updateStatusBar` 相关串，只剩 `actionBarContainerMarginTarget35Fix, statusBarHeight: %d` |
+| 恢复旧版「我」界面卡包 | `methodGetOrderAndCardEntranceInfo` / `methodMoreTabUIHandlePrefOnClick` | `MicroMsg.EcsOrderService`、`MoreTabUI` 相关串需重新定位（`MoreTabUI` 类仍在 classes9） |
+| 音视频通话使用画中画 | `classFlutterVoipPlugin` / `methodFlutterVoipMinimize` | `MicroMsg.FlutterVoipPlugin` 与两条提示串均无引用 |
+| 移除通话时聊天限制 | `methodIsVoiceUsing1/2` | `isVoiceUsing` 无引用 |
+| 修改运动步数 | `methodUploadSteps` | 日志串被删，需从 `com.tencent.mm.plugin.sport` 里找上传入口 |
+| 禁用微信进程状态检测器 | `methodPerformProcessCheck` | `pass this check,because request is null! ????` 无引用 |
+| 启用内部 URL | `methodOpenUrl` | `MMURIJumpHandler` 类已混淆（`openSpecificUI, context is null` 无引用） |
+| 禁用「刚刚在看」提醒 / 「转发截图」提示 | `methodShowRecoveryToast` / `methodDisplayToast` | 两组都是多串 AND，其中一条成孤儿串 |
+| 自动启用合并发送媒体 | `methodUpdateSendAsMediaGroupViews` | 纯方法名锚点，8.0.80 方法名已混淆 |
+| 对话框窗口级背景模糊 | `classMmProgressDialog` | `MMProgressDialog$Builder` 类已混淆 |
+
+> 以上各组均带 `allowFailure` 或已有 placeholder 守卫，**不会因为解析失败拖挂同功能其它 hook**，
+> 表现是「该功能静默不生效」，不会崩。
+
+## 复用工具
+
+`anchor/tools/` 下（沙箱内）：
+
+- `clsdex80.py` — 建「类名 → dex 文件」索引（39 秒）
+- `scanfull80.py` — 建全量方法/字符串 sqlite 索引 `/tmp/wx80.db`（89 秒，943179 方法）
+- `qs.py <串...>` — 按精确串查引用方法（类/方法/描述符/dex）
+- `qk.py <关键词...>` — 按关键词模糊查串（找新日志文案最快的手段）
+- `dump80.py <类> [--sig]` — dump 类的全部方法 + 方法内 const-string
+- `inv80.py <类> [方法]` — dump 方法的 invoke 目标与 const-string（判断 addInvoke 约束是否还成立）
+
+典型流程：`qk.py <旧串关键词>` 找新文案 → `qs.py <新串>` 拿引用方法 → `inv80.py` 验证签名/invoke 约束
+→ 写进 `dexMethod` matcher（多串 AND 里剔除孤儿串，必要时换类内独有串收窄）。
+
+## 第二轮处理结果（commit 5080030b / 待推）
+
+41 组新增失效里，能确定语义映射的已经按新串重描；语义无法确定的统一改为
+「安全降级」——补 `allowFailure` + placeholder 守卫 + `WeLogger.w` 留痕，
+不再因为一个锚点失效把整个 Feature 连同同文件其它 hook 一起装挂。
+
+### 按新串重描
+
+| 功能 | 新锚点 |
+|---|---|
+| 启用内部 URL | `MicroMsg.MMURIJumpHandler` + `(Context, String, Object[]) → boolean`（收敛 `app.plugin.j.d`） |
+| 对话框窗口级背景模糊 | 单串 `com/tencent/mm/ui/widget/dialog/MMProgressDialog$Builder`（类已混淆成 `u3`，类名字符串仍被 `u3.d(...)` 引用）；`onEnable` 的 `listOf` 改 `listOfNotNull(runCatching{}.getOrNull())`，避免一个 placeholder 抛异常把后面几个对话框类的 hook 全带走 |
+
+### 安全降级（串彻底消失 / 语义无法映射）
+
+| 功能 | 处理 |
+|---|---|
+| 禁用微信进程状态检测器 | `pass this check,because request is null! ????` 成孤儿串；全 APK 只剩 finder 的 `[onUserVisibleFocused] pass this check`，语义是页面可见性 ≠ 进程检测，不顶替 → 跳过并留痕 |
+| 恢复旧版「我」界面卡包 | EcsOrderService / MoreTabUI 相关串全失效 → 整体跳过 |
+| 自定义尾巴 | UploadPackHelper 已混淆改名、SnsUploadUI 埋点串成孤儿串 → 整体跳过 |
+| 通知进化 `dealNotify` | 单处守卫 |
+| 朋友圈评论防撤回 `setCommentDelFlag` | 单处守卫 |
+| 禁用「刚刚在看」提醒 | 单处守卫 |
+| 修改运动步数 | 单处守卫；「上传」按钮处显式 Toast「当前微信版本已不支持该操作（上传接口未定位到）」，不再点一下就抛 |
+| 常驻互动消息入口 | 3 个失效锚点逐个前置 `isPlaceholder` 判断（另外 3 个仍有效，功能部分可用） |
+| 主题 `updateStatusBar` | 降级；状态栏透明还有 `methodHomeUiSetActionBarColor` 兜住 |
+| 隐藏联系人 4 处 | 朋友圈 `SnsInfoToSnsStruct` / `SnsSyncUpdateRedDotCache`、VoIP `VoipMpStartFgs` / `VoipStartAcceptVoip` 原来都没有 `allowFailure`，任一失效会连带 SQL 拦截等核心 hook 一起装不上 → 补 `allowFailure` + 守卫 |
+| 自动启用合并发送媒体 | 已有 placeholder 守卫，补 `WeLogger.w` 留痕 |
+
+### 已确认无需改动
+
+- 语音/视频通话画中画（PipVoip）：已有 `allowFailure` + `if (!methodFlutterVoipMinimize.isPlaceholder)` 守卫
+- 移除通话时聊天限制：`targets()` 遍历处已判 `delegate.isPlaceholder` → 记入 skipped
+- 解除单个表情数量上限：上一批已改成 `filter { !it.isPlaceholder }.forEach`
+- 超级对话置顶：rawQuery 锚点整段是注释（功能走 HideContacts 的公共实现）

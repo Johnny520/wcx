@@ -3,8 +3,14 @@ package com.Johnny.wcx.features.items.chat
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
 import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.LinearLayout
@@ -105,6 +111,8 @@ import com.Johnny.wcx.ui.utils.iterable
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.android.getTopMostActivity
 import com.Johnny.wcx.utils.now
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -131,6 +139,9 @@ private enum class ToolbarDisplayMode(val preferenceValue: String, val label: St
 object ChatToolbar : ClickableFeature(), IResolveDex {
 
     private const val TAG = "ChatToolbar"
+
+    /** 我们注入的那层 ComposeView 的标记：判断「有没有注入过」只认它。 */
+    private const val TOOLBAR_TAG = "WCX_CHAT_TOOLBAR"
 
     private val NAME_TO_ICON_MAP = mapOf(
         "相册" to MaterialSymbols.Outlined.Photo_library,
@@ -173,29 +184,191 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
     /**
      * 一个原生工具项。
      *
-     * 不再缓存微信 GridView 上的 OnItemClickListener / OnItemLongClickListener 字段：
-     * 那是反射私有字段，字段类型或名字一变就是 NPE（整轮采集直接失败、工具栏空白）。
-     * 改成记录「所在 GridView + 该项 View + 位置」，点击时走 View 的公开 API
-     * （GridView.performItemClick / View.performLongClick），与用户手指点原生图标同一条路径。
+     * 8.0.80 实测：只调 `GridView.performItemClick` 不会触发微信的处理（adapter 层没有走
+     * ItemClick 分发），所以点击做成多级兜底，并且每级都留日志 —— 用户报「点了没反应」时
+     * 能直接看出走的是哪条路径、卡在哪一级：
+     * ① **采集时缓存的** OnItemClickListener（旧版实现，实测有效）→ 直调
+     * ② 现场从 AdapterView 私有字段 `mOnItemClickListener` 取 → 直调
+     * ③ `GridView.performItemClick`
+     * ④ 真实挂载 child 的 `performClick`
+     * ⑤ 给 GridView 派发一对 DOWN/UP（坐标换算到格子中心，和手指点完全同一条路径）
+     * ⑥ 采集时那份 item view 的 `performClick`
+     * ⑦ 直接给 View 派发 DOWN/UP
      */
     private data class MenuItem(
         val name: String,
         val gridView: WeakReference<GridView>,
         val itemView: WeakReference<View>,
         val indexInGrid: Int,
+        /** 采集时缓存的微信 OnItemClickListener —— 旧版就是靠它才「点了有反应」，见 click() 说明。 */
+        val onClickListener: AdapterView.OnItemClickListener? = null,
+        val onLongClickListener: AdapterView.OnItemLongClickListener? = null,
     ) {
         fun click() {
-            val grid = gridView.get() ?: return
-            val item = itemView.get() ?: return
-            val id = runCatching { grid.adapter?.getItemId(indexInGrid) }.getOrNull() ?: indexInGrid.toLong()
-            runCatching { grid.performItemClick(item, indexInGrid, id) }
-                .onFailure { WeLogger.e(TAG, "触发工具项失败：$name", it) }
+            val grid = gridView.get() ?: return fail("原生面板已重建，请重新展开工具面板再点")
+            val position = indexInGrid
+            // 采集时的 itemView 是 adapter.getView() 造出来的游离 View，只被弱引用持有，
+            // 面板收起后很容易被 GC（日志：工具项 View 已失效）。这里现场重建 / 取真实 child 兜底，
+            // 微信的 OnItemClickListener 基本只用 position，view 传一个可用实例即可。
+            val item = resolveItemView(grid)
+            val id = runCatching { grid.adapter?.getItemId(position) }.getOrNull() ?: position.toLong()
+
+            // ① 采集时缓存的 listener（旧版实现，实测有效）：
+            //    微信在面板收起 / 重建后会把 GridView 上的 listener 清掉，
+            //    所以「点击时再去 grid 上取」经常已经是 null —— 现场 performItemClick 就会静默什么都不做。
+            onClickListener?.let { cached ->
+                val ok = runCatching { cached.onItemClick(grid, item, position, id) }
+                    .onFailure { WeLogger.w(TAG, "缓存的 OnItemClickListener 调用异常：$name", it) }
+                    .isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "tap '$name' via cached mOnItemClickListener")
+                    return
+                }
+            }
+
+            // ② 现场从系统类字段取 OnItemClickListener
+            val listener = runCatching {
+                AdapterView::class.java
+                    .getDeclaredField("mOnItemClickListener")
+                    .apply { isAccessible = true }
+                    .get(grid) as? AdapterView.OnItemClickListener
+            }.getOrNull()
+            if (listener != null) {
+                val ok = runCatching { listener.onItemClick(grid, item, position, id) }
+                    .onFailure { WeLogger.w(TAG, "mOnItemClickListener 调用异常：$name", it) }
+                    .isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "tap '$name' via mOnItemClickListener")
+                    return
+                }
+            }
+
+            // ③ GridView.performItemClick
+            if (runCatching { grid.performItemClick(item, position, id) }.getOrDefault(false)) {
+                WeLogger.i(TAG, "tap '$name' via performItemClick")
+                return
+            }
+
+            // ④ 真实挂载的 child
+            val liveIndex = position - grid.firstVisiblePosition
+            val live = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
+            if (live != null && runCatching { live.performClick() }.getOrDefault(false)) {
+                WeLogger.i(TAG, "tap '$name' via live performClick")
+                return
+            }
+
+            // ⑤ 给 GridView 派发一对 DOWN/UP（坐标换算到格子中心）：和手指点完全一致，
+            //    微信无论用 OnItemClickListener 还是自己的触摸处理都能吃下
+            if (dispatchTapToGrid(grid, position)) {
+                WeLogger.i(TAG, "tap '$name' via grid synthetic touch")
+                return
+            }
+
+            // ⑥ 采集时的 item view
+            if (runCatching { item.performClick() }.getOrDefault(false)) {
+                WeLogger.i(TAG, "tap '$name' via item performClick")
+                return
+            }
+
+            // ⑦ 直接给某个 View 派发触摸
+            if (dispatchTap(live ?: item)) {
+                WeLogger.i(TAG, "tap '$name' via view synthetic touch")
+                return
+            }
+
+            fail("五种点击方式都没触发微信的处理")
         }
 
         fun longClick() {
-            val item = itemView.get() ?: return
-            runCatching { item.performLongClick() }
-                .onFailure { WeLogger.e(TAG, "长按工具项失败：$name", it) }
+            val grid = gridView.get() ?: return fail("原生面板已重建，请重新展开工具面板再长按")
+            val item = resolveItemView(grid)
+
+            onLongClickListener?.let { cached ->
+                val ok = runCatching {
+                    cached.onItemLongClick(grid, item, indexInGrid, indexInGrid.toLong())
+                }.onFailure { WeLogger.w(TAG, "缓存的 OnItemLongClickListener 调用异常：$name", it) }.isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "long-press '$name' via cached mOnItemLongClickListener")
+                    return
+                }
+            }
+
+            val listener = runCatching {
+                AdapterView::class.java
+                    .getDeclaredField("mOnItemLongClickListener")
+                    .apply { isAccessible = true }
+                    .get(grid) as? AdapterView.OnItemLongClickListener
+            }.getOrNull()
+            if (listener != null) {
+                val ok = runCatching {
+                    listener.onItemLongClick(grid, item, indexInGrid, indexInGrid.toLong())
+                }.onFailure { WeLogger.w(TAG, "mOnItemLongClickListener 调用异常：$name", it) }.isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "long-press '$name' via mOnItemLongClickListener")
+                    return
+                }
+            }
+            if (runCatching { item.performLongClick() }.getOrDefault(false)) {
+                WeLogger.i(TAG, "long-press '$name' via item performLongClick")
+                return
+            }
+            fail("长按没触发微信的处理")
+        }
+
+        /**
+         * 取一个可用于点击的 item View：
+         * 采集时那份（弱引用，可能已被回收）→ 当前真实挂载的 child → 现场让 adapter 重建一个。
+         */
+        private fun resolveItemView(grid: GridView): View {
+            itemView.get()?.let { return it }
+            val liveIndex = indexInGrid - grid.firstVisiblePosition
+            if (liveIndex in 0 until grid.childCount) {
+                grid.getChildAt(liveIndex)?.let { return it }
+            }
+            runCatching { grid.adapter?.getView(indexInGrid, null, grid) }.getOrNull()?.let { return it }
+            return grid
+        }
+
+        /** 给 GridView 派发一对 DOWN/UP（坐标换成该格子的中心点），等价于手指点一下。 */
+        private fun dispatchTapToGrid(grid: GridView, position: Int): Boolean = runCatching {
+            val liveIndex = position - grid.firstVisiblePosition
+            val child = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
+                ?: return@runCatching false
+            val childLoc = IntArray(2)
+            val gridLoc = IntArray(2)
+            child.getLocationInWindow(childLoc)
+            grid.getLocationInWindow(gridLoc)
+            val x = (childLoc[0] - gridLoc[0]) + child.width / 2f
+            val y = (childLoc[1] - gridLoc[1]) + child.height / 2f
+            if (x <= 0f || y <= 0f) return@runCatching false
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(downTime, downTime + 80, MotionEvent.ACTION_UP, x, y, 0)
+            grid.dispatchTouchEvent(down)
+            val handled = grid.dispatchTouchEvent(up)
+            down.recycle()
+            up.recycle()
+            handled
+        }.getOrDefault(false)
+
+        /** 给真实挂载的 View 派发一对 DOWN/UP，等价于手指点一下。 */
+        private fun dispatchTap(target: View): Boolean = runCatching {
+            if (target.width <= 0 || target.height <= 0) return@runCatching false
+            val downTime = SystemClock.uptimeMillis()
+            val x = target.width / 2f
+            val y = target.height / 2f
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(downTime, downTime + 60, MotionEvent.ACTION_UP, x, y, 0)
+            val handled = target.dispatchTouchEvent(down) and target.dispatchTouchEvent(up)
+            down.recycle()
+            up.recycle()
+            handled
+        }.getOrDefault(false)
+
+        private fun fail(reason: String) {
+            WeLogger.w(TAG, "触发工具项失败：$name（$reason）")
+            healthIssue = "工具项「$name」点击无效：$reason"
+            runCatching { showToast("聊天工具栏：$name 点击无效，请重新展开工具面板后重试") }
         }
     }
 
@@ -263,13 +436,70 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
 
     private var lastToolListUpdateTime = now()
 
+    /** 补注入的限流：AppPanel 初始化会频繁触发，没必要每次都走一遍 View 树。 */
+    private var lastInjectAttemptTime = now()
+
     override fun onEnable() {
         try {
             registerHooks()
+            // footer 复用 / 开关在聊天页里打开时，构造器不会再跑，靠这个回调补注入。
+            ChatFooterHooks.addFooterListener(footerListener)
+            // 从设置页打开开关再退回会话时，footer 早已初始化；这里主动找一次。
+            scheduleSelfHeal()
         } catch (t: Throwable) {
             // 绝不静默：工具栏不显示时必须能从日志看出是「安装失败」还是「注入被跳过」
             WeLogger.e(TAG, "聊天工具栏安装失败（工具栏将不显示）：${t.message}", t)
         }
+    }
+
+    /**
+     * 开启后的自愈窗口：每 1.5 秒在当前页面树里找一次 ChatFooter，最多 15 秒。
+     *
+     * 场景是「在设置页打开开关 → 按返回回到刚才的会话」：那个 footer 早就构造完了，
+     * 构造器不会再跑；AppPanel 也可能因为面板已初始化而不再触发。找不到就静默退出，
+     * 不常驻、不轮询。
+     */
+    private fun scheduleSelfHeal() {
+        val handler = Handler(Looper.getMainLooper())
+        val started = SystemClock.uptimeMillis()
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                val injected = runCatching { injectIntoVisibleChat() }.getOrDefault(false)
+                if (injected) return
+                if (SystemClock.uptimeMillis() - started < 15_000L) handler.postDelayed(this, 1_500L)
+            }
+        }, 800L)
+    }
+
+    private fun injectIntoVisibleChat(): Boolean {
+        val activity = getTopMostActivity() ?: return false
+        val decor = activity.window?.decorView as? ViewGroup ?: return false
+        val footer = findChatFooter(decor) ?: return false
+        injectToolbar(footer)
+        return true
+    }
+
+    /** 广度优先找页面里的 ChatFooter，限层数与节点数，避免在大页面上扫太久。 */
+    private fun findChatFooter(root: ViewGroup): ChatFooter? {
+        val queue = ArrayDeque<View>()
+        queue.add(root)
+        var visited = 0
+        while (queue.isNotEmpty() && visited++ < 400) {
+            val view = queue.removeFirst()
+            if (view is ChatFooter) return view
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) queue.add(view.getChildAt(index))
+            }
+        }
+        return null
+    }
+
+    private val footerListener: (ChatFooter) -> Unit = { footer ->
+        runCatching { injectToolbar(footer) }
+            .onFailure {
+                healthIssue = "工具栏注入异常：${it.message}"
+                WeLogger.e(TAG, "工具栏注入异常（工具栏将不显示）：${it.message}", it)
+            }
     }
 
     /** 递归收集面板内所有 GridView：微信 8.x 把工具格放在自定义 MMFlipper 里，层级会随版本变。 */
@@ -288,6 +518,58 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
 
         walk(root)
         return out
+    }
+
+    /**
+     * 采集原生工具项，填充 [toolsState]。返回采到的条数。
+     *
+     * 从任意容器出发（AppPanel 或 ChatFooter 本身）都用同一套：递归找 GridView、
+     * 枚举 adapter。注入时先采一次，避免「已注入但工具列表为空 → 行高 0 → 看起来没生效」。
+     */
+    private fun collectTools(root: View): Int {
+        val tools = mutableListOf<Pair<String, MenuItem>>()
+        collectGrids(root).forEach { grid ->
+            val adapter = grid.adapter ?: return@forEach
+            // 采集时就把 listener 缓存下来：面板重建后 grid 上的监听器会被清空，
+            // 点击时再去取往往已经是 null（这是「点了没反应」的根因，见 click() 注释）。
+            val onClickListener = readGridListener<AdapterView.OnItemClickListener>(grid, "mOnItemClickListener")
+            val onLongClickListener =
+                readGridListener<AdapterView.OnItemLongClickListener>(grid, "mOnItemLongClickListener")
+            for (index in 0 until adapter.count) {
+                val itemView = runCatching { adapter.getView(index, null, grid) }.getOrNull()
+                    ?: continue
+                val name = toolNameOf(itemView) ?: continue
+                tools.add(
+                    name to MenuItem(
+                        name = name,
+                        gridView = WeakReference(grid),
+                        itemView = WeakReference(itemView),
+                        indexInGrid = index,
+                        onClickListener = onClickListener,
+                        onLongClickListener = onLongClickListener,
+                    ),
+                )
+            }
+        }
+        WeLogger.i(TAG, "采集到 ${tools.size} 个原生工具项")
+        toolsState.value = tools
+        return tools.size
+    }
+
+    /**
+     * 读 GridView 上的点击/长按监听。
+     *
+     * 优先用系统类字段名（`AdapterView.mOnItemClickListener` 是 AOSP 私有字段，名字稳定、不会被混淆），
+     * 取不到再退回按类型找。两条都失败返回 null，不影响其它功能。
+     */
+    private inline fun <reified T> readGridListener(grid: GridView, fieldName: String): T? {
+        val fromField = runCatching {
+            AdapterView::class.java.getDeclaredField(fieldName).apply { isAccessible = true }.get(grid) as? T
+        }.getOrNull()
+        if (fromField != null) return fromField
+        return runCatching {
+            grid.reflekt().firstFieldOrNull { type = T::class.java }?.get() as? T
+        }.getOrNull()
     }
 
     /** 工具项显示名：tag 里挂着持有名字 TextView 的对象；tag 结构变了就退回在 item 里直接找 TextView。 */
@@ -356,33 +638,22 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             }
 
             hookAfter {
+                // 补注入放在限流之前：ChatFooter 会被复用，只靠构造器注入的话，
+                // 「在聊天页里打开开关」与「切回已初始化过的会话」都拿不到工具栏。
+                // AppPanel 就在 footer 内部，往上找到 footer 补一次，幂等由 tag 保证。
+                runCatching { ensureInjectedFromPanel(args[0] as? View) }
+                    .onFailure { WeLogger.w(TAG, "补注入失败（不影响已有工具栏）：${it.message}") }
+
                 val now = now()
                 if (now - lastToolListUpdateTime < 2.seconds) return@hookAfter
 
                 // 采集失败必须留痕：工具栏「什么都不显示」时要能从日志看出是没找到 GridView、
                 // adapter 拿不到项，还是取不到工具名——而不是一律静默成空白。
                 runCatching {
-                    val tools = mutableListOf<Pair<String, MenuItem>>()
-
-                    // 不再依赖 AppPanel 内部固定的 child 索引链（0,0,0）：微信每个版本都可能挪层级，
-                    // 递归找出面板里所有 GridView，只要能拿到 adapter 就能枚举工具项。
                     val appPanel = args[0] as? View ?: return@runCatching
-                    collectGrids(appPanel).forEach { grid ->
-                        val adapter = grid.adapter ?: return@forEach
-                        for (index in 0 until adapter.count) {
-                            val itemView = runCatching { adapter.getView(index, null, grid) }.getOrNull()
-                                ?: continue
-                            val name = toolNameOf(itemView) ?: continue
-                            tools.add(
-                                name to MenuItem(name, WeakReference(grid), WeakReference(itemView), index)
-                            )
-                        }
-                    }
-
-                    WeLogger.i(TAG, "采集到 ${tools.size} 个原生工具项")
-                    toolsState.value = tools
-                    healthIssue = if (tools.isEmpty()) {
-                        "已注入聊天页，但没采集到任何原生工具项（AppPanel 结构变化），工具栏是空的"
+                    collectTools(appPanel)
+                    healthIssue = if (toolsState.value.isEmpty()) {
+                        "没采集到任何原生工具项（AppPanel 结构变化），工具栏是空的"
                     } else null
                 }.onFailure {
                     healthIssue = "采集原生工具项失败：${it.message}（工具栏是空的）"
@@ -401,85 +672,12 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         var hookedConstructors = 0
         ChatFooter::class.java.declaredConstructors.forEach { ctor ->
             ctor.hookAfter {
-            val chatFooter = thisObject as FrameLayout
-            val activity = chatFooter.context as Activity
-
-            val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(activity)
-
-            chatFooter.setLifecycleOwner(lifecycleOwner)
-            // 主路径：ChatFooter 第 0 个子节点的第 1 层容器；失败再退化到「直接子节点里的第一个 LinearLayout」。
-            val linearLayout = chatFooter.findViewByChildIndexes<LinearLayout>(0, 1)
-                ?: (0 until chatFooter.childCount).firstNotNullOfOrNull { chatFooter.getChildAt(it) as? LinearLayout }
-            if (linearLayout == null) {
-                // 微信调整了 ChatFooter 内部层级：跳过本次注入（不再 NPE 中断整个 hook），并打印层级便于适配
-                healthIssue = "聊天页找不到注入容器（ChatFooter 层级变化），工具栏没有显示"
-                WeLogger.w(
-                    TAG,
-                    "ChatFooter 层级变化，找不到注入容器（子节点数=${chatFooter.childCount}）：${describeChildren(chatFooter)}"
-                )
-                return@hookAfter
-            }
-            linearLayout.setLifecycleOwner(lifecycleOwner)
-            if (linearLayout.findViewWhich<View> { it is ComposeView } != null) return@hookAfter
-            activity.window.decorView.setLifecycleOwner(lifecycleOwner)
-
-            linearLayout.addView(ComposeView(activity).apply {
-                setLifecycleOwner(lifecycleOwner)
-
-                setContent {
-                    InjectedUiTheme {
-                        val tools by toolsState.collectAsStateWithLifecycle()
-                        val itemsOrder = remember { itemsOrder }
-                        val enabledItems = remember { enabledItems }
-                        val displayMode = remember { ToolbarDisplayMode.fromPreference(displayModeValue) }
-
-                        val sortedVisibleItems = remember(tools) {
-                            if (tools.isEmpty()) return@remember emptyList()
-
-                            val firstTool = tools[0].second
-                            val orderList = normalizeOrder(itemsOrder.split(",").filter { it.isNotEmpty() })
-                            val list = mutableListOf<Pair<String, () -> Unit>>()
-
-                            list.add(QUICK_REPLY_NAME to {
-                                showQuickReplyPicker(activity)
-                            })
-
-                            list.add("相册" to { firstTool.click() })
-                            list.add("系统拍摄" to { firstTool.longClick() })
-
-                            tools.forEach { (name, menuItem) ->
-                                if (name in NAME_TO_ICON_MAP && name != "相册" && name != "系统拍摄") {
-                                    list.add(name to { menuItem.click() })
-                                }
-                            }
-
-                            list.distinctBy { it.first }
-                                .filter { it.first in enabledItems }
-                                .sortedBy { item ->
-                                    val idx = orderList.indexOf(item.first)
-                                    if (idx == -1) Int.MAX_VALUE else idx
-                                }
-                        }
-
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                        ) {
-                            items(sortedVisibleItems, key = { it.first }) { (name, onClick) ->
-                                val icon = iconFor(name)
-                                FeatureChip(name, icon, displayMode, onClick)
-                            }
-                        }
+                val chatFooter = thisObject as? FrameLayout ?: return@hookAfter
+                runCatching { injectToolbar(chatFooter) }
+                    .onFailure {
+                        healthIssue = "工具栏注入异常：${it.message}"
+                        WeLogger.e(TAG, "工具栏注入异常（工具栏将不显示）：${it.message}", it)
                     }
-                }
-            }, 0)
-            // 注入成功：采集结果由 AppPanel 的 hookAfter 决定（那里会把 0 项也回报上来）
-            if (toolsState.value.isEmpty()) {
-                healthIssue = "工具栏已注入聊天页，但当前没采集到原生工具项（AppPanel 结构变化）"
-            } else {
-                healthIssue = null
-            }
-            WeLogger.i(TAG, "聊天工具栏已注入聊天页（容器子 View 数=${linearLayout.childCount}）")
             }
             hookedConstructors++
         }
@@ -489,7 +687,140 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         WeLogger.i(TAG, "聊天工具栏 hook 已安装（$hookedConstructors 个构造器，聊天页创建时注入）")
     }
 
+    /**
+     * 往 ChatFooter 里注入工具栏，**可重复调用**。
+     *
+     * 两条入口：构造器（新会话）与 AppPanel 初始化（footer 被复用、开关在会话里打开）。
+     * 幂等靠 [TOOLBAR_TAG]：不能用「容器里有 ComposeView」判断，微信自己也可能在容器里放
+     * ComposeView，那样会把我们的注入当成已存在而静默跳过。
+     */
+    private fun injectToolbar(chatFooter: FrameLayout) {
+        val activity = chatFooter.context.findActivity() ?: run {
+            healthIssue = "聊天页取不到 Activity，工具栏没有显示"
+            WeLogger.w(TAG, "取不到 Activity：context=${chatFooter.context.javaClass.name}")
+            return
+        }
+        val lifecycleOwner = LifecycleOwnerProvider.getOrCreate(activity)
+        chatFooter.setLifecycleOwner(lifecycleOwner)
+
+        // 主路径：ChatFooter 第 0 个子节点的第 1 层容器；失败再退化到「直接子节点里的第一个 LinearLayout」。
+        val linearLayout = chatFooter.findViewByChildIndexes<LinearLayout>(0, 1)
+            ?: (0 until chatFooter.childCount).firstNotNullOfOrNull { chatFooter.getChildAt(it) as? LinearLayout }
+        if (linearLayout == null) {
+            // 微信调整了 ChatFooter 内部层级：跳过本次注入（不再 NPE 中断整个 hook），并打印层级便于适配
+            healthIssue = "聊天页找不到注入容器（ChatFooter 层级变化），工具栏没有显示"
+            WeLogger.w(
+                TAG,
+                "ChatFooter 层级变化，找不到注入容器（子节点数=${chatFooter.childCount}）：${describeChildren(chatFooter)}"
+            )
+            return
+        }
+        linearLayout.setLifecycleOwner(lifecycleOwner)
+        if (linearLayout.findViewWhich<View> { it.tag == TOOLBAR_TAG } != null) return
+        activity.window.decorView.setLifecycleOwner(lifecycleOwner)
+
+        linearLayout.addView(ComposeView(activity).apply {
+            tag = TOOLBAR_TAG
+            setLifecycleOwner(lifecycleOwner)
+
+            setContent {
+                InjectedUiTheme {
+                    val tools by toolsState.collectAsStateWithLifecycle()
+                    val itemsOrder = remember { itemsOrder }
+                    val enabledItems = remember { enabledItems }
+                    val displayMode = remember { ToolbarDisplayMode.fromPreference(displayModeValue) }
+
+                    val sortedVisibleItems = remember(tools) {
+                        if (tools.isEmpty()) return@remember emptyList()
+
+                        val firstTool = tools[0].second
+                        val orderList = normalizeOrder(itemsOrder.split(",").filter { it.isNotEmpty() })
+                        val list = mutableListOf<Pair<String, () -> Unit>>()
+
+                        list.add(QUICK_REPLY_NAME to {
+                            showQuickReplyPicker(activity)
+                        })
+
+                        list.add("相册" to { firstTool.click() })
+                        list.add("系统拍摄" to { firstTool.longClick() })
+
+                        tools.forEach { (name, menuItem) ->
+                            if (name in NAME_TO_ICON_MAP && name != "相册" && name != "系统拍摄") {
+                                list.add(name to { menuItem.click() })
+                            }
+                        }
+
+                        list.distinctBy { it.first }
+                            .filter { it.first in enabledItems }
+                            .sortedBy { item ->
+                                val idx = orderList.indexOf(item.first)
+                                if (idx == -1) Int.MAX_VALUE else idx
+                            }
+                    }
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) {
+                        items(sortedVisibleItems, key = { it.first }) { (name, onClick) ->
+                            val icon = iconFor(name)
+                            FeatureChip(name, icon, displayMode, onClick)
+                        }
+                    }
+                }
+            }
+        }, 0)
+        // 注入完立刻采一次：工具列表为空时 LazyRow 高度是 0，用户会以为注入失败。
+        // 采集失败不影响注入本身，交给 AppPanel 回调重试。
+        if (toolsState.value.isEmpty()) {
+            runCatching { collectTools(chatFooter) }
+        }
+        // 注入成功：采集结果由 AppPanel 的 hookAfter 决定（那里会把 0 项也回报上来）
+        if (toolsState.value.isEmpty()) {
+            healthIssue = "工具栏已注入聊天页，但当前没采集到原生工具项（AppPanel 结构变化）"
+        } else {
+            healthIssue = null
+        }
+        WeLogger.i(TAG, "聊天工具栏已注入聊天页（容器子 View 数=${linearLayout.childCount}）")
+    }
+
+    /**
+     * 从 AppPanel 往上找 ChatFooter 并补一次注入。
+     *
+     * 微信会复用 ChatFooter：同一个 ChattingUI 里切换会话不会再走构造器，
+     * 开关又是在设置页打开的（那一刻页面上没有 footer）。只靠构造器注入，
+     * 表现就是「开关开着、日志里 hook 也装了，但当前会话什么都没有」。
+     */
+    private fun ensureInjectedFromPanel(panel: View?) {
+        // 1 秒一次：兜底路径，不需要比这更灵敏；真正的入口仍是构造器。
+        val now = now()
+        if (now - lastInjectAttemptTime < 1.seconds) return
+        lastInjectAttemptTime = now
+
+        var view: View? = panel
+        var guard = 0
+        while (view != null && guard++ < 16) {
+            if (view is ChatFooter) {
+                injectToolbar(view)
+                return
+            }
+            view = view.parent as? View
+        }
+    }
+
+    /** Context 可能被包了一层（ContextThemeWrapper），逐层解包到 Activity。 */
+    private fun Context.findActivity(): Activity? {
+        var context: Context? = this
+        var guard = 0
+        while (context != null && guard++ < 8) {
+            if (context is Activity) return context
+            context = (context as? ContextWrapper)?.baseContext
+        }
+        return null
+    }
+
     override fun onDisable() {
+        ChatFooterHooks.removeFooterListener(footerListener)
         toolsState.value = emptyList()
     }
 

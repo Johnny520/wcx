@@ -45,7 +45,9 @@ object ApplyDialogBackgroundBlur : ClickableFeature(), IResolveDex {
     }
     private val classMmProgressDialog by dexClass {
         matcher {
-            usingEqStrings($$"com/tencent/mm/ui/widget/dialog/MMProgressDialog$Builder", "show")
+            // 8.0.80：MMProgressDialog$Builder 本身被混淆成 ui.widget.dialog.u3，
+            // 类内已无 "show" 这条串；只保留类名字符串（仍被 u3.d(...) 引用）即唯一收敛。
+            usingEqStrings($$"com/tencent/mm/ui/widget/dialog/MMProgressDialog$Builder")
         }
     }
     private val classMmQuickDialog by dexClass {
@@ -68,10 +70,12 @@ object ApplyDialogBackgroundBlur : ClickableFeature(), IResolveDex {
     }
 
     override fun onEnable() {
-        listOf(
-            classMmAlertDialog.clazz,
-            classMmProgressDialog.clazz,
-            classMmQuickDialog.clazz,
+        // 解析失败的委托（微信改版）直接跳过：对 placeholder 取 clazz 会抛异常，
+        // 一旦抛在 listOf 里，后面几个对话框类的 hook 全部装不上。
+        listOfNotNull(
+            runCatching { classMmAlertDialog.clazz }.getOrNull(),
+            runCatching { classMmProgressDialog.clazz }.getOrNull(),
+            runCatching { classMmQuickDialog.clazz }.getOrNull(),
             HalfScreenTransparentActivity::class.java,
             Dialog::class.java
         ).forEach {

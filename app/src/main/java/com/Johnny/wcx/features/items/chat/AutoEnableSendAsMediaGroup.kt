@@ -9,6 +9,7 @@ import com.Johnny.wcx.dexkit.dsl.dexMethod
 import com.Johnny.wcx.features.core.Feature
 
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.utils.WeLogger
 
 @Feature(
     name = "自动启用合并发送媒体",
@@ -16,6 +17,8 @@ import com.Johnny.wcx.features.core.SwitchFeature
     description = "发送媒体时自动勾选「发送后合并展示」选项"
 )
 object AutoEnableSendAsMediaGroup : SwitchFeature(), IResolveDex {
+
+    private const val TAG = "AutoEnableSendAsMediaGroup"
 
     private const val ALBUM_PREVIEW_UI = "com.tencent.mm.plugin.gallery.ui.AlbumPreviewUI"
     private const val IMAGE_PREVIEW_UI = "com.tencent.mm.plugin.gallery.ui.ImagePreviewUI"
@@ -73,6 +76,10 @@ object AutoEnableSendAsMediaGroup : SwitchFeature(), IResolveDex {
             sendAsMediaGroupField.isPlaceholder ||
             sendAsMediaGroupCheckBoxField.isPlaceholder
         ) {
+            // 8.0.80：埋点串 updateSendAsMediaGroupViews 迁到内部 lambda 类、不再被
+            // AlbumPreviewUI 的方法引用，methodUpdateSendAsMediaGroupViews 与依赖它的
+            // sendAsMediaGroupField 都解析不到 → 整功能不可用。显式留痕，别静默。
+            WeLogger.w(TAG, "锚点在当前微信版本已失效（相册合并发送埋点已改版），跳过")
             return
         }
 

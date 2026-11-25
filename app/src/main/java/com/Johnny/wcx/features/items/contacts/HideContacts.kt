@@ -836,14 +836,26 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
         }
     }
 
-    // WeChat's SQLite wrapper query: d95.b0.f(String sql, String[] args, int) -> Cursor. The
-    // homepage conversation-list cursor (com.tencent.mm.storage.m4.A/B) is built through this
-    // wrapper, NOT the standard SQLiteDatabase.rawQuery path WeDatabaseListenerApi hooks, so we
-    // intercept it directly — the same chokepoint ConversationGrouping/AggregateChats use.
+    // WeChat's SQLite wrapper query: `ai5.d0.f(String sql, String[] args, int) -> Cursor` on 8.0.80
+    // (`d95.b0.f` on <=8.0.79). The homepage conversation-list cursor
+    // (com.tencent.mm.storage.m4.A/B) is built through this wrapper, NOT the standard
+    // SQLiteDatabase.rawQuery path WeDatabaseListenerApi hooks, so we intercept it directly — the
+    // same chokepoint ConversationGrouping/AggregateChats use.
+    //
+    // 8.0.80 复核结论：离线校验器把这一项报成 SIG，实为**误报**，matcher 不需要改。
+    //   - 串 `DB IS CLOSED ! {%s}` 在 8.0.80 dex 里由 `Lai5/d0;` 的 22 个方法引用（同一个 SQLite
+    //     包装类，8.0.79 是 `ii5/b0`）；
+    //   - 其中参数表恰为 `(String, String[], int)` 且返回 `android.database.Cursor` 的只有 `f`
+    //     （`U(String, String[], int, CancellationSignal)` / `V(String, String[], CancellationSignal)`
+    //     被第 3 参排除，`o(CursorFactory, ...)` 被第 1 参排除）；
+    //   - `f` 的 access_flags = 0x001 (PUBLIC)，与 `modifiers = JavaModifier.PUBLIC` 一致。
+    // 校验器报 SIG 的根因是它不把 `java.lang.String[]` 归一到 `[Ljava/lang/String;`
+    // （见 SIG-FIX-REPORT.md §2），不是锚点漂移。与 ConversationAggregation/ConversationGrouping
+    // 的同名委托是同一结论。
     internal val methodSqliteWrapperRawQuery by dexMethod(allowFailure = true) {
         matcher {
             modifiers = JavaModifier.PUBLIC
-            usingEqStrings("sql is null ", "DB IS CLOSED ! {%s}")
+            usingEqStrings("DB IS CLOSED ! {%s}")
             paramTypes("java.lang.String", "java.lang.String[]", "int")
             returnType("android.database.Cursor")
         }
@@ -930,19 +942,48 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
     /**
      * The 视频号 like-drawer *refresh* callback — `jd.call(Object)` on 8.0.76
-     * (`plugin/finder/feed/jd.java:50`), `zc.call(Object)` on 8.0.69.
+     * (`plugin/finder/feed/jd.java:50`), `zc.call(Object)` on 8.0.69, **`ed.call(Object)` on 8.0.80**
+     * (`Lcom/tencent/mm/plugin/finder/feed/ed;->call(Ljava/lang/Object;)Ljava/lang/Object;`).
      *
-     * Two methods on each tree pair `"Finder.DrawerPresenter"` with `"[refreshData] Cost="`
+     * ≤8.0.79: two methods on each tree pair `"Finder.DrawerPresenter"` with `"[refreshData] Cost="`
      * (8.0.76: `feed/jd` + `feed/s5`; 8.0.69: `feed/zc` + `feed/t5`) — the like drawer and the
-     * comment drawer. They are told apart by the builder whose retry-view they drive: the like
-     * drawer carries `"…/FinderLikeDrawerBuilder"`, the comment drawer
-     * `"…/FinderTimelineDrawerBuilder"`. All three strings together resolve to exactly one method on
-     * each tree. Strings are preferred over a structural discriminator here because `allowFailure`
-     * only guards the 0-hit case — a multi-hit would `error(...)` and take the whole feature down.
+     * comment drawer — and the builder whose retry-view they drive tells them apart
+     * (`…/FinderLikeDrawerBuilder` vs `…/FinderTimelineDrawerBuilder`). All three strings together
+     * resolve to exactly one method on each tree.
+     *
+     * 8.0.80（本次修复）：三串 AND 归零 —— 喜欢抽屉的回调**不再引用** `FinderLikeDrawerBuilder`，
+     * 因为 R8 把两个抽屉的 loading/retry/no-tips 视图逻辑抽到了共享助手 `o43/n`
+     * （串实测只剩 `o43/n.r/s/t`、`view/bg`、`ui/promotion/e` 五处，全都不在本回调里）。
+     * 剩下的两个候选是 `feed/ed`（喜欢抽屉）与 `feed/a6`（评论抽屉，串里带
+     * `FinderCommentDrawerPresenter$refreshFromGetFinderFeedCommentList$2` 与 `(…CommentResp;)V`）。
+     * 二者的结构差异：只有喜欢抽屉会给每条点赞打 feed id ⇒ `invoke FinderItem.getUnsignedId()`。
+     * 所以 8.0.80 分支 = 两串 + `invoke getUnsignedId`，dex 实测**唯一命中** `feed/ed`
+     * （它另外还 invoke `o43/n.k()LFinderLikeDrawer;`、`RecyclerViewDrawer.l(Z)V`，评论抽屉没有）。
+     *
+     * 两条分支并存（DexKit 的 `anyOf` 是 OR）：旧版走三串精确匹配，新版走结构匹配。
+     * `allowFailure = true` 同时兜住 0 命中与多命中（多命中时 DexMethodDelegate 只 warn + 取
+     * results[0]，不会 error），所以新版即使将来两分支都命中也不会把 feature 拖挂。
      */
     internal val methodFinderLikeDrawerRefresh by dexMethod(allowFailure = true) {
         matcher {
-            usingEqStrings("Finder.DrawerPresenter", "com/tencent/mm/plugin/finder/view/builder/FinderLikeDrawerBuilder")
+            anyOf(
+                // ≤8.0.79：三串同方法，唯一命中喜欢抽屉的 refresh 回调。
+                MethodMatcher().apply {
+                    usingEqStrings(
+                        "Finder.DrawerPresenter",
+                        "[refreshData] Cost=",
+                        "com/tencent/mm/plugin/finder/view/builder/FinderLikeDrawerBuilder",
+                    )
+                },
+                // 8.0.80+：builder 串被抽走，用「invoke FinderItem.getUnsignedId」区分评论抽屉。
+                MethodMatcher().apply {
+                    usingEqStrings("Finder.DrawerPresenter", "[refreshData] Cost=")
+                    invokeMethods {
+                        add { name = "getUnsignedId" }
+                        matchType = MatchType.Contains
+                    }
+                },
+            )
         }
     }
 
@@ -1043,7 +1084,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
      * struct for every Moments renderer. See hidecontacts/HideContactsMoments.kt for why this is
      * the right chokepoint for a hidden contact's inline likes/comments on someone else's post.
      */
-    internal val methodSnsInfoToSnsStruct by dexMethod {
+    internal val methodSnsInfoToSnsStruct by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("snsInfoToSnsStruct", "com.tencent.mm.plugin.sns.data.SnsUtil", "mSnsInfo is null, why?")
         }
@@ -1068,7 +1109,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
      * method shape — `static void (c3, SnsObject)` — is identical on both trees, so the hook body
      * needs no per-version branching.
      */
-    internal val methodSnsSyncUpdateRedDotCache by dexMethod {
+    internal val methodSnsSyncUpdateRedDotCache by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("updateSyncDataCache", "com.tencent.mm.plugin.sns.model.NetSceneSnsSync")
         }
@@ -1121,68 +1162,79 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
     }
 
     /** `xp5.b.d(String username, boolean, boolean, boolean)` — starts the VoIP foreground service. */
-    internal val methodVoipMpStartFgs by dexMethod {
+    internal val methodVoipMpStartFgs by dexMethod(allowFailure = true) {
         matcher {
             usingEqStrings("MicroMsg.VoIPMPVoIPNotificationHelper", "startFGS isBindVoIPForegroundService ")
         }
     }
 
-    /** `mp5.q2.Ii(String toUser, ...)` — VoIPMP call-record insertion (未接听 / 已取消 / duration). */
+    /**
+     * VoIPMP 通话记录消息（未接听 / 已取消 / duration）的本地插入入口。
+     *
+     * ≤8.0.79: `mp5.q2.Ii(String toUser, boolean, int, long, long, long, int)`。
+     * 8.0.80 : `nx5.n3.Ji(String, boolean, int, long, long, long, int)` —— **签名没变**，
+     *          但方法里那行参数日志从 `"insertMsg() called with: toUser = "` 改成了
+     *          `"insertMsg() called with: roomType = "`，所以旧的两条精确串分支全部归零。
+     *
+     * 8.0.80 实测（dex）：
+     *   - `"insertMsg() called with: toUser = "` 全 dex 只剩
+     *     `voipmp/platform/ZIDL_DVO6HrxwB.ZIDL_DCV(J, [B, Z, I, I, J, J, I, I, I)V` 一处，而它第 1 参是
+     *     long —— hook 里 `args[0] as? String` 会立刻返回、`voipMpLauncher = thisObject` 还会被写成一个
+     *     错误的对象（后面 `rejectByShortCut` 会拿它去 invoke），所以**不能**拿它当目标；
+     *   - 真正的目标 `nx5/n3.Ji` 带 `MicroMsg.VoIPMP.Launcher` +
+     *     `insertMsg() called with: roomType = ` / `insertILinkVoIPMsg() called with: voipInfo = ` /
+     *     `innerInsertMsg: insert msg result ` / `markMissedMultiTalkMsg: feature disabled, roomId=`，
+     *     且 `MicroMsg.VoIPMP.Launcher` 这个 TAG 在 8.0.80 依然存活（29 处引用）。
+     *
+     * 因此改成「签名 + 类 TAG 子串 + 参数日志子串」，两条都用 `usingStrings`（同名 API 在仓库里
+     * 有多个串的先例），同时覆盖 ≤8.0.79 的 `toUser = ` 与 8.0.80 的 `roomType = ` 两种写法；
+     * 第 1 参始终是 String，hook 侧语义（`args[0]` 当 wxId、`thisObject` 当 launcher）保持不变。
+     * 8.0.80 dex 实测：两条子串同方法 ⇒ 全 dex 唯一 `nx5/n3.Ji(String, Z, I, J, J, J, I)V`
+     * （签名约束只是二次保险）。
+     */
     internal val methodVoipMpInsertMsg by dexMethod(allowFailure = true) {
         matcher {
-            // 多版本兼容（签名/ TAG 都按版本分支，DexKit 的 anyOf 是 OR）：
-            //   ≤8.0.79 : (String,boolean,int,long,long,long,int) + TAG "MicroMsg.VoIPMP.Launcher"
-            //   8.0.80+  : (long,byte[],boolean,int,int,long,long,int,int,int) + TAG "MicroMsg.VoIPMP.CoreV2"
-            // 8.0.80 把 VoIPMP 重构成 v2 并把日志 TAG 改成 CoreV2、参数扩到 10 个，
-            // 旧的两条分支在新版匹配不到；这里四条分支并存，任意一版命中即可。
-            // 全部不命中时 allowFailure 保证静默降级（不装挂、不闪退）。
-            anyOf(
-                MethodMatcher().apply {
-                    paramTypes(
-                        "java.lang.String", "boolean", "int", "long", "long", "long", "int",
-                    )
-                    returnType("void")
-                    usingEqStrings(
-                        "MicroMsg.VoIPMP.Launcher",
-                        "insertMsg() called with: toUser = ",
-                    )
-                },
-                MethodMatcher().apply {
-                    paramTypes(
-                        "java.lang.String", "boolean", "int", "long", "long", "long", "int",
-                    )
-                    returnType("void")
-                    declaredClass {
-                        usingEqStrings("MicroMsg.VoIPMP.Launcher", "closeReceiverBanner")
-                    }
-                },
-                MethodMatcher().apply {
-                    paramTypes(
-                        "long", "byte[]", "boolean", "int", "int", "long", "long", "int", "int", "int",
-                    )
-                    returnType("void")
-                    usingEqStrings(
-                        "MicroMsg.VoIPMP.CoreV2",
-                        "insertMsg() called with: toUser = ",
-                    )
-                },
-                MethodMatcher().apply {
-                    paramTypes(
-                        "long", "byte[]", "boolean", "int", "int", "long", "long", "int", "int", "int",
-                    )
-                    returnType("void")
-                    declaredClass {
-                        usingEqStrings("MicroMsg.VoIPMP.CoreV2", "closeReceiverBanner")
-                    }
-                },
-            )
+            paramTypes("java.lang.String", "boolean", "int", "long", "long", "long", "int")
+            returnType("void")
+            // 两条都用子串匹配（方法级 AND）：
+            //   8.0.79 及更早: "…MicroMsg.VoIPMP.Launcher…" + "insertMsg() called with: toUser = "
+            //   8.0.80      : "…MicroMsg.VoIPMP.Launcher…" + "insertMsg() called with: roomType = "
+            usingStrings("MicroMsg.VoIPMP.Launcher", "insertMsg() called with: ")
         }
     }
 
     // ── multitalk (群通话), used when the VoIPMP multitalk experiment is off ───────────────────
 
-    /** `v0.G(MultiTalkGroup)` — MultiTalkManager.onInviteMultiTalk. */
+    /**
+     * `v0.G(MultiTalkGroup)` — MultiTalkManager.onInviteMultiTalk（经典 ILink 群通话栈）。
+     *
+     * **微信 8.0.80 起无法定位，已确认是真失效，不是校验器误报。** 排查过程（全部为 8.0.80
+     * `0x28005032` 全量 dex 实测）：
+     *   - 原锚点串 `MicroMsg.MT.MultiTalkManager`、`onInviteMultiTalk All Var Value:…`、
+     *     `exitCurrentMultiTalk: isReject …` 在 18 个 dex 的 string_ids 里**完全不存在**
+     *     （不只是"孤儿串"，是整条串被删）；
+     *   - 子串搜索 `onInviteMultiTalk` / `exitCurrentMultiTalk` / `MultiTalkManager` 均为 0；
+     *   - 承载类 `com.tencent.mm.modeltalkroom.MultiTalkGroup`、`MultiTalkManager` 在方法描述符
+     *     （参数/返回类型）里也 0 出现 ⇒ 类本身已被移除，不只是日志被删；
+     *   - `MicroMsg.MT.*` 只剩 MTR（美颜/GL 渲染线程池，`MicroMsg.MTR.*`）19 条，与群通话无关；
+     *     群通话已迁到 `com.tencent.mm.voipmp.v2`（Flutter 内嵌，见 8.0.80 架构变化报告）。
+     *
+     * 结论：没有等价锚点可以重描 —— 8.0.80 的群通话邀请不再走 `MultiTalkManager.onInviteMultiTalk`，
+     * 新路径是 VoIPMP v2 的 Pigeon/ILink 回调，既没有 `MultiTalkGroup` 形参（hook 里的
+     * `args[0]` + `readMultiTalkInvite()` 取 chatroom/inviter 的字段布局全部失效），
+     * 也没有可无参调用的 `exitCurrentMultiTalk` 重载可以替我们挂断。
+     * 强行按结构（TAG + 签名）猜一个方法风险极高：`MicroMsg.DeviceOccupy` 那类「只剩 TAG」的方法
+     * 无法区分语义，误 hook 会把正常通话钉死。
+     *
+     * 兜底：`allowFailure = true` ⇒ 解析失败只置占位符，`installMultiTalkHooks()` 会打
+     * W 级日志「onInviteMultiTalk wasn't resolved; multitalk invite hiding unavailable」，
+     * 单聊 VoIP/视频通话以及 VoIPMP 路径的隐藏逻辑不受影响。
+     * 本仓库（WCX dev）的 Feature 基类暂无 `unavailableReason` 钩子（全树 grep 0 命中），
+     * 因此可见性靠这条 W 日志；若将来接入 fork 的 `unavailableReason`，应在这里抛出
+     * 「8.0.80 群通话改版，隐藏群通话邀请不可用」。
+     */
     internal val methodMultiTalkOnInvite by dexMethod(allowFailure = true) {
+        // 8.0.80 无锚点（见上方排查）；保留原 matcher 只为 8.0.65–8.0.79 兼容。
         matcher {
             usingEqStrings(
                 "MicroMsg.MT.MultiTalkManager",
@@ -1193,9 +1245,13 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
 
     /**
      * `v0.g(isReject, isMissCall, isPhoneCall, isNetworkError, boolean, boolean)` —
-     * exitCurrentMultiTalk. Declared on the same `v0` (MultiTalkManager) as [methodMultiTalkOnInvite],
-     * so the invite hook's `thisObject` is the receiver to invoke this on — no separate singleton
-     * lookup needed.
+     * exitCurrentMultiTalk（与 [methodMultiTalkOnInvite] 同属 `MultiTalkManager`，
+     * hook 时 `thisObject` 直接就是 receiver）。
+     *
+     * 与 [methodMultiTalkOnInvite] 同一结论：8.0.80 里 `exitCurrentMultiTalk: isReject …` 串、
+     * `MultiTalkManager` 类、`MultiTalkGroup` 类型全部消失，无法重描锚点。
+     * 兜底同上：`allowFailure = true` + `installMultiTalkHooks()` 的 W 日志
+     * 「exitCurrentMultiTalk wasn't resolved; cannot auto-reject group call」。
      */
     internal val methodExitMultiTalk by dexMethod(allowFailure = true) {
         matcher {
@@ -1236,7 +1292,7 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
             usingEqStrings("MicroMsg.VoipIncomingCallManager", "acceptIncomingCal, roomInfo:")
         }
     }
-    internal val methodVoipStartAcceptVoip by dexMethod {
+    internal val methodVoipStartAcceptVoip by dexMethod(allowFailure = true) {
         searchPackages("com.tencent.mm.plugin.voip")
         matcher {
             usingEqStrings("MicroMsg.VoipIncomingCallManager", "startAcceptVoIP, roomInfo:")
@@ -1272,7 +1328,9 @@ object HideContacts : ClickableFeature(), IResolveDex, WeChatInputBarApi.IInputB
     internal val methodVoipLegacyInsertMsg by dexMethod(allowFailure = true) {
         matcher {
             declaredClass {
-                usingEqStrings("MicroMsg.VoipPluginManager", "weixin://voip/callagain/?username=")
+                // 8.0.79 起这条 URL 只以 HTML 片段形式内联在 b2 里（"<a href=\"weixin://voip/callagain/?username=..."），
+                // 精确匹配的短串已不存在 → 整个 val 恒为 placeholder。改用包含匹配（usingStrings 默认 Contains）。
+                usingStrings("weixin://voip/callagain/?username=")
             }
             paramCount = 8
             returnType("void")

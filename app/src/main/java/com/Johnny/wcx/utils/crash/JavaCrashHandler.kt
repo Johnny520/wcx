@@ -46,6 +46,9 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
             )
             WeLogger.e(TAG, "Exception: " + throwable.javaClass.name)
             WeLogger.e(TAG, "Message: " + throwable.message)
+            runCatching {
+                WeLogger.e(TAG, "Classification: " + CrashInfoCollector.classificationSummary(throwable))
+            }
             WeLogger.e(TAG, "========================================")
 
             // 收集崩溃信息
@@ -76,6 +79,18 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
             // The logger is asynchronous; make the crash details durable before the process exits.
             runCatching { WeLogger.flush() }
 
+            // 宿主 RecyclerView 的 "Inconsistency detected" 由微信自己在布局过程中改数据触发：
+            // 重进页面即可恢复，但主线程抛出去会把整个微信带走（用户看到的是「用着用着就闪退」）。
+            // 这里记录一条 W 后让宿主继续跑。
+            if (isHostRecyclerInconsistency(throwable)) {
+                WeLogger.w(
+                    TAG,
+                    "host RecyclerView inconsistency suppressed, main thread kept alive: " +
+                        throwable.message.orEmpty().take(160),
+                )
+                return
+            }
+
             // 模块自己的后台线程/协程抛异常时只记录、不结束宿主进程。
             // Android 上任意线程的未捕获异常都会结束整个进程，用户看到的就是「微信像被强行停止」。
             if (isModuleBackgroundCrash(thread, throwable)) {
@@ -92,6 +107,28 @@ object JavaCrashHandler : Thread.UncaughtExceptionHandler {
                 exitProcess(1)
             }
         }
+    }
+
+    /**
+     * 判定是否为「宿主 RecyclerView 布局不一致」。
+     *
+     * 典型信息：`Inconsistency detected. Invalid view holder adapter positionViewHolder{...}`，
+     * 异常类型是 IndexOutOfBoundsException，栈里全是 androidx.recyclerview 与微信自己的
+     * LayoutManager —— 说明微信在一次布局过程中改了数据，重进页面即可恢复。
+     */
+    private fun isHostRecyclerInconsistency(throwable: Throwable): Boolean {
+        var current: Throwable? = throwable
+        var depth = 0
+        while (current != null && depth < 6) {
+            if (current is IndexOutOfBoundsException &&
+                current.message.orEmpty().contains("Inconsistency detected")
+            ) {
+                return true
+            }
+            current = current.cause
+            depth++
+        }
+        return false
     }
 
     private val MODULE_PACKAGE_PREFIXES = arrayOf(

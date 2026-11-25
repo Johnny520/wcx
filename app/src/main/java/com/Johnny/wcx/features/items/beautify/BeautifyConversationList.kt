@@ -54,7 +54,7 @@ private enum class ConversationListPreset(
 
 @Feature(
     name = "美化对话列表",
-    categories = ["聊天", "界面美化"],
+    categories = ["界面美化"],
     description = "为主页会话列表提供卡片布局、未读突出和分隔线设置"
 )
 object BeautifyConversationList : ClickableFeature() {

@@ -88,7 +88,13 @@ object ViewStickerAsImage : SwitchFeature(), IResolveDex {
                 paramTypes(methodEmojiClickEntry.data.paramTypeNames[2])
                 returnType = "com.tencent.mm.storage.emotion.EmojiInfo"
             }
-        }.single { !Modifier.isStatic(it.modifiers) }
+        }.let { list ->
+            // 优先实例方法；没有实例方法时退回唯一候选（多命中不再抛异常）
+            list.firstOrNull { !Modifier.isStatic(it.modifiers) } ?: list.singleOrNull()
+        } ?: run {
+            WeLogger.e(TAG, "定位表情信息解析方法失败, 表情存图功能不可用")
+            return
+        }
         methodResolveEmojiInfo.setDescriptor(resolveEmojiInfo)
 
         methodEmojiResolverGetter.find(dexKit) {

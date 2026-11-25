@@ -126,7 +126,10 @@ object WeSettingsInjector : ApiFeature(), IResolveDex, WeChatInputBarApi.IInputB
     override fun resolveDex(dexKit: DexKitBridge) {
         val prefClass = dexKit.findClass {
             matcher { className = PREFERENCE_CLASS_NAME }
-        }.single()
+        }.firstOrNull() ?: run {
+            WeLogger.e(TAG, "定位 Preference 类失败, 微信设置入口不可用")
+            return
+        }
 
         methodSetKey.find(dexKit, allowMultiple = true) {
             searchPackages("com.tencent.mm.ui.base.preference")

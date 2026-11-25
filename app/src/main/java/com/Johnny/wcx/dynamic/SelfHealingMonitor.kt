@@ -30,7 +30,12 @@ object SelfHealingMonitor {
     // 监控配置
     // 3 秒一次会在主线程持续遍历 View 树（hasVisibleChild 递归 + Tab 检查），
     // 是微信卡顿的常驻开销来源；15 秒足够发现「页面空白」这类问题。
-    private const val POLL_INTERVAL_MS = 15_000L
+    /**
+     * 轮询间隔。原先 15 秒就会在主线程跑一遍「找 Activity → 判空白 → 找底部栏」，
+     * 其中找底部栏是无上限 BFS 全树遍历（见下方注释），在会话列表这种大 View 树上
+     * 每 15 秒出现一次几十毫秒的卡顿尖峰。空白页自愈本身就是兜底逻辑，30 秒足够。
+     */
+    private const val POLL_INTERVAL_MS = 30_000L
     private const val MAX_SCAN_DEPTH = 10
     private const val MAX_SCAN_NODES = 400
     private const val BLANK_PAGE_THRESHOLD_MS = 10_000L
@@ -127,8 +132,10 @@ object SelfHealingMonitor {
             }
         }
 
-        // 检查四大 Tab
-        checkTabs(launcher, pageKey)
+        // 原来这里还有 checkTabs()：它依赖 findBottomBar() 的返回值判断「底部 Tab 少于 4 个」，
+        // 而 findBottomBar() 的筛选条件本身就要求 childCount in 4..5 → 判定恒为 false，
+        // 属于每轮白跑一次「无上限 BFS 整个 decorView + 每个节点做一次 javaClass.name.lowercase()」
+        // 的死逻辑，已整段移除。
     }
 
     /**
@@ -192,11 +199,6 @@ object SelfHealingMonitor {
             contentView?.requestLayout()
             contentView?.invalidate()
 
-            // 策略 2: 触发 ViewPager 刷新
-            if (contentView is ViewGroup) {
-                triggerViewPagerRefresh(contentView)
-            }
-
             // 策略 3: 触发 Activity 重新测量
             activity.window?.decorView?.requestLayout()
             activity.window?.decorView?.invalidate()
@@ -210,50 +212,47 @@ object SelfHealingMonitor {
         }
     }
 
-    /**
-     * 检查四大 Tab 是否正常加载。
-     * 微信底部导航栏应有 4 个 Tab：微信、通讯录、发现、我。
-     */
-    private fun checkTabs(activity: Activity, pageKey: String) {
-        try {
-            val decorView = activity.window?.decorView as? ViewGroup ?: return
-
-            // 查找底部导航栏
-            val bottomBar = findBottomBar(decorView) ?: return
-
-            // 检查 Tab 数量
-            if (bottomBar.childCount < 4) {
-                val retries = retryCounts.getOrDefault("tabs_$pageKey", 0)
-                if (retries < MAX_RETRY_COUNT) {
-                    retryCounts["tabs_$pageKey"] = retries + 1
-                    WeLogger.w(TAG, "tabs count abnormal: ${bottomBar.childCount}, healing")
-
-                    // 触发 ViewPager 刷新以重新加载 Tab
-                    triggerViewPagerRefresh(decorView)
-                }
-            }
-        } catch (e: Throwable) {
-            WeLogger.d(TAG, "tab check error: ${e.message}")
-        }
-    }
-
     // ==================== 工具方法 ====================
 
     /**
      * 查找当前可见的 LauncherUI Activity。
      */
+    /**
+     * 反射句柄缓存。
+     *
+     * 原实现每次轮询都重新 Class.forName + getDeclaredMethod + getDeclaredField（外加每个
+     * ActivityRecord 一次 getDeclaredField("activity")），全部在主线程。反射查找本身不便宜，
+     * 30 秒一次的常驻开销没必要每次都付，这里把句柄缓存下来。
+     */
+    private var atClass: Class<*>? = null
+    private var atCurrentMethod: java.lang.reflect.Method? = null
+    private var atActivitiesField: java.lang.reflect.Field? = null
+    private val activityFieldCache = HashMap<Class<*>, java.lang.reflect.Field?>()
+
     private fun findLauncherUI(): Activity? {
         try {
-            val atClass = Class.forName("android.app.ActivityThread")
-            val at = atClass.getDeclaredMethod("currentActivityThread").invoke(null)
-            val activitiesField = atClass.getDeclaredField("mActivities")
-            activitiesField.isAccessible = true
-            val activities = activitiesField.get(at) as? Map<*, *> ?: return null
+            val cls = atClass ?: Class.forName("android.app.ActivityThread").also { atClass = it }
+            val current = atCurrentMethod ?: cls.getDeclaredMethod("currentActivityThread")
+                .apply { isAccessible = true }
+                .also { atCurrentMethod = it }
+            val at = current.invoke(null)
+            val field = atActivitiesField ?: cls.getDeclaredField("mActivities")
+                .apply { isAccessible = true }
+                .also { atActivitiesField = it }
+            val activities = field.get(at) as? Map<*, *> ?: return null
 
+            atClass = cls
             for (record in activities.values) {
-                val activity = record?.javaClass?.getDeclaredField("activity")
-                    ?.apply { isAccessible = true }
-                    ?.get(record) as? Activity ?: continue
+                if (record == null) continue
+                val recordClass = record.javaClass
+                val f = if (activityFieldCache.containsKey(recordClass)) {
+                    activityFieldCache[recordClass]
+                } else {
+                    runCatching { recordClass.getDeclaredField("activity") }
+                        .getOrNull()?.apply { isAccessible = true }
+                        .also { activityFieldCache[recordClass] = it }
+                } ?: continue
+                val activity = f.get(record) as? Activity ?: continue
                 if (activity.javaClass.name == "com.tencent.mm.ui.LauncherUI" && !activity.isFinishing) {
                     return activity
                 }
@@ -262,50 +261,5 @@ object SelfHealingMonitor {
             WeLogger.d(TAG, "findLauncherUI error: ${e.message}")
         }
         return null
-    }
-
-    /**
-     * 查找底部导航栏 ViewGroup。
-     */
-    private fun findBottomBar(parent: ViewGroup): ViewGroup? {
-        val queue = ArrayDeque<View>()
-        queue.add(parent)
-        while (queue.isNotEmpty()) {
-            val v = queue.removeFirst()
-            val className = v.javaClass.name.lowercase()
-            if ((className.contains("bottomnavigation") || className.contains("tablayout")) &&
-                v is ViewGroup && v.childCount in 4..5) {
-                return v
-            }
-            if (v is ViewGroup) {
-                for (i in 0 until v.childCount) {
-                    v.getChildAt(i)?.let { queue.add(it) }
-                }
-            }
-        }
-        return null
-    }
-
-    /**
-     * 触发 ViewPager 刷新。
-     */
-    private fun triggerViewPagerRefresh(parent: ViewGroup) {
-        for (i in 0 until parent.childCount) {
-            val child = parent.getChildAt(i) ?: continue
-            val className = child.javaClass.name
-            if (className.contains("ViewPager") || className.contains("ViewPager2")) {
-                try {
-                    val method = child.javaClass.getMethod("getCurrentItem")
-                    val currentItem = method.invoke(child) as Int
-                    val setMethod = child.javaClass.getMethod("setCurrentItem", Int::class.javaPrimitiveType!!)
-                    setMethod.invoke(child, currentItem)
-                    WeLogger.i(TAG, "triggered ViewPager refresh at index $currentItem")
-                } catch (e: Throwable) {
-                    WeLogger.w(TAG, "ViewPager refresh failed: ${e.message}")
-                }
-            } else if (child is ViewGroup) {
-                triggerViewPagerRefresh(child)
-            }
-        }
     }
 }

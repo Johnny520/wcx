@@ -22,6 +22,9 @@ import com.Johnny.wcx.utils.strings.isGroupChatWxId
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.coroutines.resume
 
 object WeChatService {
@@ -57,6 +60,10 @@ object WeChatService {
         val sender: String,
         val content: String,
         val type: String,
+        /** 消息时间（格式化自 message 表 createTime，秒）：AI 助手处理上下文依赖它排序与判断时效。 */
+        val time: String = "",
+        /** 原始时间戳（毫秒），便于程序化比较。 */
+        val timeMs: Long = 0L,
     )
 
     @Serializable
@@ -518,10 +525,16 @@ object WeChatService {
                 val content = if (isText) msg.content else "<type:$typeStr>"
                 sender to content
             }
-            MessageInfo(sender, content, typeStr)
+            MessageInfo(sender, content, typeStr, formatMessageTime(msg.createTime), msg.createTime * 1000L)
         }
         return Result.Success(messages)
     }
+
+    private val messageTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+
+    /** 微信 message 表 createTime 是秒级；格式化为本地时间字符串供 API/MCP 消费者阅读。 */
+    private fun formatMessageTime(createTimeSeconds: Long): String =
+        if (createTimeSeconds <= 0) "" else messageTimeFormat.format(Date(createTimeSeconds * 1000L))
 
     fun listGroupMembers(groupId: String): Result<List<ContactInfo>> =
         Result.Success(WeDatabaseApi.getGroupMembers(groupId).map {

@@ -38,7 +38,7 @@ object RemoveMomentsAds : SwitchFeature(), WeDatabaseListenerApi.IInsertListener
                 .firstConstructor { parameters(String::class) }
                 .hookBefore {
                     try {
-                        WeLogger.i(TAG, "数据源层拦截: 阻断 ADInfo 构造")
+                        WeLogger.d(TAG, "数据源层拦截: 阻断 ADInfo 构造")
                         if (method is java.lang.reflect.Method) {
                             val returnType = (method as java.lang.reflect.Method).returnType
                             if (returnType == Void.TYPE) {
@@ -103,7 +103,7 @@ object RemoveMomentsAds : SwitchFeature(), WeDatabaseListenerApi.IInsertListener
             }
 
             if (WeMomentsApi.isAd(snsInfo)) {
-                WeLogger.i(TAG, "数据源层: 检测到广告 snsId=$snsId，已通过 ADInfo 构造拦截")
+                WeLogger.d(TAG, "数据源层: 检测到广告 snsId=$snsId，已通过 ADInfo 构造拦截")
             } else {
                 WeLogger.d(TAG, "数据源层: snsId=$snsId 非广告，正常放行")
             }
@@ -165,7 +165,7 @@ object RemoveMomentsAds : SwitchFeature(), WeDatabaseListenerApi.IInsertListener
                             itemView.layoutParams = lp
                         }
                         blockedCount++
-                        WeLogger.i(TAG, "View层兜底: 隐藏广告 View, index=$i, snsId=${getSnsId(snsInfo)}")
+                        WeLogger.d(TAG, "View层兜底: 隐藏广告 View, index=$i, snsId=${getSnsId(snsInfo)}")
                     }
                 } catch (e: Throwable) {
                     WeLogger.d(TAG, "View层: 检查 item[$i] 异常，跳过: ${e.message}")

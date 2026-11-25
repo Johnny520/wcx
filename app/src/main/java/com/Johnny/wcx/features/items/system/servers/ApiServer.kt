@@ -367,7 +367,7 @@ object ApiServer : ClickableFeature() {
             val pageIndex = args["page-index"]?.jsonPrimitive?.intOrNull ?: 1
             val pageSize = args["page-size"]?.jsonPrimitive?.intOrNull ?: 20
             WeChatService.listMessages(convId, pageIndex, pageSize).toCallToolResult { messages ->
-                CallToolResult(messages.map { TextContent("${it.sender}: '${it.content}'") })
+                CallToolResult(messages.map { TextContent("[${it.time}] ${it.sender}: '${it.content}'") })
             }
         }
 

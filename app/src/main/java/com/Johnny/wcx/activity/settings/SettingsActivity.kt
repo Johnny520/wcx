@@ -1,5 +1,6 @@
 package com.Johnny.wcx.activity.settings
 
+import com.Johnny.wcx.activity.settings.ai.AiPager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
@@ -93,6 +94,7 @@ import com.Johnny.wcx.ui.content.MiuixStackNavigator
 import com.Johnny.wcx.ui.content.liquid.vibrancy
 import com.Johnny.wcx.ui.utils.CommonContextWrapper
 import com.Johnny.wcx.ui.style.AtmosphereBackground
+import com.Johnny.wcx.ui.style.GradientIcon
 import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.theme.ModuleTheme
 import com.Johnny.wcx.utils.WeLogger
@@ -187,6 +189,7 @@ internal sealed interface SettingsNavTarget {
     data object ModuleHealth : SettingsNavTarget
     data object Logs : SettingsNavTarget
     data object Settings : SettingsNavTarget
+    data object Ai : SettingsNavTarget
 }
 
 /**
@@ -238,6 +241,7 @@ private fun SettingsRoot(onFinish: () -> Unit) {
         when (screen) {
             SettingsNavTarget.Main -> MainPagerScreen(
                 onOpenCategory = { push(SettingsNavTarget.Category(it)) },
+                onOpenAi = { push(SettingsNavTarget.Ai) },
                 onOpenLicense = { push(SettingsNavTarget.License) },
                 onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
                 onOpenModuleHealth = { push(SettingsNavTarget.ModuleHealth) },
@@ -276,7 +280,9 @@ private fun SettingsRoot(onFinish: () -> Unit) {
             // 单页模式没有 pager，日志/设置通过子页面进入，返回即回到单页主页
             SettingsNavTarget.Logs -> LogsScreen(onBack = pop)
 
+            SettingsNavTarget.Ai -> AiPager(onBack = pop)
             SettingsNavTarget.Settings -> SettingsPager(
+                onOpenAi = { push(SettingsNavTarget.Ai) },
                 onOpenLicense = { push(SettingsNavTarget.License) },
                 onOpenAcknowledgements = { push(SettingsNavTarget.Acknowledgements) },
                 onBack = pop,
@@ -288,6 +294,7 @@ private fun SettingsRoot(onFinish: () -> Unit) {
 @Composable
 private fun MainPagerScreen(
     onOpenCategory: (String) -> Unit,
+    onOpenAi: () -> Unit,
     onOpenLicense: () -> Unit,
     onOpenAcknowledgements: () -> Unit,
     onOpenModuleHealth: () -> Unit,
@@ -374,7 +381,11 @@ private fun MainPagerScreen(
                         )
                         1 -> FeaturesPager(onOpenCategory = onOpenCategory)
                         2 -> LogsPager()
-                        else -> SettingsPager(onOpenLicense = onOpenLicense, onOpenAcknowledgements = onOpenAcknowledgements)
+                        else -> SettingsPager(
+                            onOpenAi = onOpenAi,
+                            onOpenLicense = onOpenLicense,
+                            onOpenAcknowledgements = onOpenAcknowledgements,
+                        )
                     }
                 }
             }
@@ -426,10 +437,20 @@ private fun MainPagerScreen(
                         animationSpec = tween(200),
                         label = "navIcon",
                     ) { selected ->
-                        M3Icon(
-                            imageVector = if (selected) item.filled else item.outlined,
-                            contentDescription = item.label,
-                        )
+                        // 只有当前选中的 Tab 用品牌渐变（参考 LSPosed 底栏）；
+                        // 未选中的保持灰色描边，突出焦点、避免整条底栏都在渐变。
+                        if (selected) {
+                            GradientIcon(
+                                imageVector = item.filled,
+                                contentDescription = item.label,
+                                size = 24.dp,
+                            )
+                        } else {
+                            M3Icon(
+                                imageVector = item.outlined,
+                                contentDescription = item.label,
+                            )
+                        }
                     }
                     M3Text(
                         text = item.label,
@@ -471,6 +492,10 @@ fun MiuixListScaffold(
     blurTopBar: Boolean = true,
     // 内容左右内边距。脚本 Tab 内嵌 Hchat 内容（其 SettingsCard 自带 12dp），此处传 0 避免双重内边距。
     horizontalPadding: Dp = 12.dp,
+    // 展开态显示在左上角的大标题与其下方副标题：默认大标题 = title、无副标题。
+    // 上滑时大标题与副标题一起收起，title 淡入顶栏中间；下滑再展开（「功能」「主页」同一套行为）。
+    largeTitle: String = title,
+    subtitle: String = "",
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
@@ -506,6 +531,8 @@ fun MiuixListScaffold(
                 // Transparent so the miuix bar's own opaque surface doesn't hide the blur.
                 color = if (blurTopBar) Color.Transparent else MiuixTheme.colorScheme.surface,
                 title = title,
+                largeTitle = largeTitle,
+                subtitle = subtitle,
                 scrollBehavior = scrollBehavior,
                 navigationIcon = { navigationIcon?.invoke() },
             )
@@ -651,6 +678,7 @@ fun FeatureRow(
         )
     }
 }
+
 
 
 

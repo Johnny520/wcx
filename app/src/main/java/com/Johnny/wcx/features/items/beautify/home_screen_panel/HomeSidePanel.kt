@@ -693,10 +693,14 @@ object HomeSidePanel : SwitchFeature() {
          */
         private fun contentBottomGapToDecor(): Int {
             var bottom = contentWrapper.bottom
-            var ancestor = contentWrapper.parent as View
-            while (ancestor !== decorRoot) {
+            var ancestor: View? = contentWrapper.parent as? View
+            // 会话销毁 / View 被移出窗口时 parent 链会断，原来无条件 `as View`
+            // 会对 null 强转抛 NPE（实测崩溃在 syncNativeContentBottomInset 的
+            // post 回调里，主线程直接把微信带走）。加空值防护 + 深度上限。
+            var guard = 0
+            while (ancestor != null && ancestor !== decorRoot && guard++ < 16) {
                 bottom += ancestor.top
-                ancestor = ancestor.parent as View
+                ancestor = ancestor.parent as? View
             }
             return (decorRoot.height - bottom).coerceAtLeast(0)
         }

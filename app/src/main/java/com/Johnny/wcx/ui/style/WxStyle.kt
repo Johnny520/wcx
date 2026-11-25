@@ -34,12 +34,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -85,21 +90,21 @@ object WxPalette {
     /** 页面底色（跟随深浅色）。深色用冷调近黑，不用死黑。 */
     @Composable
     fun pageBackground(): Color =
-        if (isSystemInDarkTheme()) DarkBackground else Background
+        if (isWxDark()) DarkBackground else Background
 
     /** 卡片底色（跟随深浅色）。深色比底板亮一档，靠明度差拉出层次。 */
     @Composable
     fun cardBackground(): Color =
-        if (isSystemInDarkTheme()) Color(0xFF1A1D24) else Color.White
+        if (isWxDark()) Color(0xFF1A1D24) else Color.White
 
     /** 主文字色（跟随深浅色） */
     @Composable
     fun textPrimary(): Color =
-        if (isSystemInDarkTheme()) Color(0xFFF2F2F7) else TextPrimary
+        if (isWxDark()) Color(0xFFF2F2F7) else TextPrimary
 
-    /** 次文字色 */
+    /** 次文字色（跟随深浅色）。曾经固定返回浅色值，导致深色下文字发暗。 */
     @Composable
-    fun textSecondary(): Color = TextSecondary
+    fun textSecondary(): Color = if (isWxDark()) TextSecondaryDark else TextSecondary
 
     // ── 高科技增强令牌 ──────────────────────────────────────────────────────
     /** 强调渐变两端：青绿 → 电光蓝。用于选中态、进度、关键按钮。 */
@@ -114,7 +119,7 @@ object WxPalette {
 
     /** 页面氛围底：深色为冷调纵向渐变，浅色为中性微渐变。 */
     @Composable
-    fun pageBackgroundBrush(): Brush = if (isSystemInDarkTheme()) {
+    fun pageBackgroundBrush(): Brush = if (isWxDark()) {
         Brush.linearGradient(listOf(Color(0xFF0A0B0F), Color(0xFF11141A), Color(0xFF0A0B0F)))
     } else {
         Brush.linearGradient(listOf(Color(0xFFF7F8FB), Color(0xFFEFF2F7)))
@@ -122,7 +127,7 @@ object WxPalette {
 
     /** 卡片底：深色为「上亮下暗」冷调玻璃，浅色为白到极淡灰。 */
     @Composable
-    fun cardBrush(): Brush = if (isSystemInDarkTheme()) {
+    fun cardBrush(): Brush = if (isWxDark()) {
         Brush.linearGradient(listOf(Color(0xFF1E222B), Color(0xFF161A21)))
     } else {
         Brush.linearGradient(listOf(Color.White, Color(0xFFFCFCFE)))
@@ -130,7 +135,7 @@ object WxPalette {
 
     /** 卡片描边：左上亮、右下透明的渐变，勾出玻璃边缘高光。 */
     @Composable
-    fun cardBorderBrush(): Brush = if (isSystemInDarkTheme()) {
+    fun cardBorderBrush(): Brush = if (isWxDark()) {
         Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x0AFFFFFF)))
     } else {
         Brush.linearGradient(listOf(Color(0x14000000), Color(0x05000000)))
@@ -147,7 +152,7 @@ object WxPalette {
      */
     @Composable
     fun darkenGradient(gradient: List<Color>): List<Color> {
-        if (!isSystemInDarkTheme()) return gradient
+        if (!isWxDark()) return gradient
         return when (gradient) {
             GradBlue -> listOf(Color(0xFF16233A), Color(0xFF121C2C))
             GradMint -> listOf(Color(0xFF122A24), Color(0xFF0F2019))
@@ -160,7 +165,90 @@ object WxPalette {
     /** 卡片描边：浅色下几乎不可见，深色下一层极淡白边 */
     @Composable
     fun cardBorder(): Color =
-        if (isSystemInDarkTheme()) Color(0x1AFFFFFF) else Color(0x0D000000)
+        if (isWxDark()) Color(0x1AFFFFFF) else Color(0x0D000000)
+
+    // ── 以下令牌随知友（AARCNoa/zhiyou）的 AI 模块一并移植进来 ──────────────
+    // 命名与知友保持一致，AI 页面整套 UI 直接可用；WCX 原有页面不受影响。
+
+    /** 语义成功色（等同品牌绿）。 */
+    val Ok = Primary
+
+    /** 关闭态圆点。 */
+    val DotOff = Color(0x33999999)
+
+    /** 深色模式三级文字（浅色是「越次要越淡」，深色必须「越次要越暗」）。 */
+    val TextPrimaryDark = Color(0xFFF2F2F7)
+    val TextSecondaryDark = Color(0xFF98989F)
+    val TextTertiaryDark = Color(0xFF6B6B72)
+
+    /** 统一强调色（电光蓝）：强调文字、进度、选中描边、主按钮。 */
+    val Accent = Color(0xFF3D7EFF)
+
+    /**
+     * 卡片内的次级小块（统计格、内嵌按钮底）：浅色用页面灰，深色比卡片再亮一档。
+     * 只用于「卡片内部还需要再分一层」的场景，不要拿它当页面或卡片底色。
+     */
+    @Composable
+    fun insetSurface(): Color =
+        if (isWxDark()) DarkSurfaceHigh else Background
+
+    /** 三级文字色（跟随深浅色）：提示、占位、不可用状态。 */
+    @Composable
+    fun textTertiary(): Color =
+        if (isWxDark()) TextTertiaryDark else TextTertiary
+
+    /** 分割线：比描边再明显一点，用于卡片内的列表/栏位分隔。 */
+    @Composable
+    fun divider(): Color =
+        if (isWxDark()) Color(0x1FFFFFFF) else Color(0x14000000)
+
+    /** 品牌绿浅底（选中行、徽标、胶囊）。 */
+    @Composable
+    fun primarySoft(): Color =
+        if (isWxDark()) Primary.copy(alpha = 0.16f) else PrimarySoft
+
+    @Composable
+    fun dangerSoft(): Color =
+        if (isWxDark()) Danger.copy(alpha = 0.16f) else DangerSoft
+
+    @Composable
+    fun warningSoft(): Color =
+        if (isWxDark()) Warning.copy(alpha = 0.16f) else WarningSoft
+
+    @Composable
+    fun infoSoft(): Color =
+        if (isWxDark()) Info.copy(alpha = 0.16f) else InfoSoft
+}
+
+/**
+ * 渐变着色的矢量图标（与 [WxPalette.accentBrush] 品牌渐变一致）。
+ *
+ * `Icon` 的 tint 只接受纯色，不支持 Brush：这里先用 `tint = Unspecified` 原样绘制，
+ * 再在离屏图层上用 `SrcIn` 把渐变「盖」进图标的 alpha 区域，得到一张真正的渐变图标。
+ * [size] 传 null 时沿用调用方的 Modifier 尺寸。
+ */
+@Composable
+fun GradientIcon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    brush: Brush = WxPalette.accentBrush(),
+    size: Dp? = null,
+) {
+    Icon(
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+        tint = Color.Unspecified,
+        modifier = modifier
+            .then(if (size != null) Modifier.size(size) else Modifier)
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            .drawWithCache {
+                onDrawWithContent {
+                    drawContent()
+                    drawRect(brush, blendMode = BlendMode.SrcIn)
+                }
+            },
+    )
 }
 
 /**
@@ -170,16 +258,39 @@ object WxPalette {
  * 不堆阴影。可点击时自带 0.972 按压回弹（spring），全局统一手感。
  * [glow] = true 时叠一圈强调渐变描边，用于「当前状态/主操作」卡片。
  */
+/**
+ * 模块当前生效主题是否为深色，由 [com.Johnny.wcx.ui.utils.theme.ModuleTheme] 提供。
+ *
+ * 设置里的「主题模式」可以强制深色/浅色，而系统开关可能还是浅色（反之亦然）。
+ * 所有配色都必须读这个值：直接用 `isWxDark()` 会导致「模块深色 + 系统浅色」
+ * 时底板仍是白色、文字却已切成白色，白底白字整页看不见（用户反馈）。
+ */
+val LocalWxDarkMode = androidx.compose.runtime.staticCompositionLocalOf<Boolean?> { null }
+
+/**
+ * 模块主题的深色状态；配色判断统一用它。
+ *
+ * 没有 provider 时回退系统判断：注入到微信里的 Compose 内容（聊天工具栏、悬浮栏等）
+ * 不走 ModuleTheme，保持与系统深色开关一致的行为。
+ */
+@Composable
+fun isWxDark(): Boolean = LocalWxDarkMode.current ?: isSystemInDarkTheme()
+
 @Composable
 fun SoftCard(
     modifier: Modifier = Modifier,
     gradient: List<Color> = WxPalette.GradPlain,
+    /**
+     * 纯色底（知友 AI 页面按这个参数调用）。给出时覆盖 [gradient]，
+     * 用于「浅底提示卡」这类需要语义色（warningSoft 等）的场景。
+     */
+    background: Color? = null,
     contentPadding: Int = 16,
     glow: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val plain = gradient.isEmpty() || gradient == WxPalette.GradPlain
+    val plain = background != null || gradient.isEmpty() || gradient == WxPalette.GradPlain
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -206,8 +317,11 @@ fun SoftCard(
         Column(
             modifier = Modifier
                 .background(
-                    if (plain) WxPalette.cardBrush()
-                    else Brush.linearGradient(WxPalette.darkenGradient(gradient)),
+                    when {
+                        background != null -> SolidColor(background)
+                        plain -> WxPalette.cardBrush()
+                        else -> Brush.linearGradient(WxPalette.darkenGradient(gradient))
+                    },
                     shape,
                 )
                 .border(if (glow) 1.2.dp else 1.dp, if (glow) WxPalette.accentBrush() else WxPalette.cardBorderBrush(), shape)
@@ -229,7 +343,7 @@ fun AtmosphereBackground(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val dark = isSystemInDarkTheme()
+    val dark = isWxDark()
     val glowBlue = if (dark) Color(0x243D7EFF) else Color(0x123D7EFF)
     val glowMint = if (dark) Color(0x1C00D4A0) else Color(0x0E00D4A0)
     Box(modifier.fillMaxSize().background(WxPalette.pageBackgroundBrush())) {
@@ -385,7 +499,7 @@ fun SoftDivider(modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 2.dp)
             .height(1.dp)
-            .background(if (isSystemInDarkTheme()) Color(0x1FFFFFFF) else Color(0x14000000)),
+            .background(if (isWxDark()) Color(0x1FFFFFFF) else Color(0x14000000)),
     )
 }
 

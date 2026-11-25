@@ -80,9 +80,9 @@ import java.util.Collections
 
 @SuppressLint("SetTextI18n")
 @Feature(
-    name = "AI 自动回复",
+    name = "AI 自动回复（独立接口）",
     categories = ["聊天"],
-    description = "接入 AI 大模型自动回复消息，支持 OpenAI 兼容接口，可选择触发条件和指定群聊"
+    description = "旧版自动回复：按群聊 / 白名单 / 关键词触发。AI 接口与「AI 助手」共用一份配置"
 )
 object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 

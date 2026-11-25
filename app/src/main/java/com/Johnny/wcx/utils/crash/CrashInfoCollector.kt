@@ -42,6 +42,10 @@ object CrashInfoCollector {
                 "Crash Time: " + currentTime + "\n" +
                 "Crash Type: " + crashType + "\n\n" +
                 "========================================\n" +
+                "Crash Classification\n" +
+                "========================================\n" +
+                classifyCrash(throwable).render() + "\n" +
+                "========================================\n" +
                 "Device Information\n" +
                 "========================================\n" +
                 collectDeviceInfo() + "\n" +
@@ -281,5 +285,113 @@ object CrashInfoCollector {
             WeLogger.e("CrashInfoCollector", "error while getting process name", e)
         }
         return "Unknown"
+    }
+
+    // ==================== 崩溃分类 ====================
+    // 目的：在报告头部直接给出「是否模块导致」的初判，避免拿到日志后无从分辨。
+    // 判定只依赖异常类型与调用栈是否出现模块包名，属于客观事实，不做模糊猜测。
+
+    private data class CrashClass(
+        val code: String,
+        val title: String,
+        val reason: String,
+        val advice: String,
+    ) {
+        fun render(): String = buildString {
+            appendLine("Category: $code")
+            appendLine("Title: $title")
+            appendLine("Reason: $reason")
+            if (advice.isNotEmpty()) appendLine("Advice: $advice")
+        }
+    }
+
+    /** 供 JavaCrashHandler 打日志用的一行分类摘要。 */
+    fun classificationSummary(throwable: Throwable): String {
+        val c = classifyCrash(throwable)
+        return c.code + " | " + c.title
+    }
+
+    private val MODULE_FRAME_PREFIXES = arrayOf(
+        "com.Johnny.wcx", "h.Hchat", "me.hd.wauxv", "bsh.", "org.luckypray.dexkit",
+    )
+
+    /** 沿 cause 链收集异常（最多 16 层，防自引用死循环）。 */
+    private fun causeChain(t: Throwable): List<Throwable> {
+        val out = ArrayList<Throwable>(4)
+        var cur: Throwable? = t
+        var guard = 0
+        while (cur != null && guard < 16) {
+            out.add(cur)
+            cur = cur.cause
+            guard++
+        }
+        return out
+    }
+
+    /** 异常链上是否出现模块相关包名。 */
+    private fun stackContainsModuleFrame(t: Throwable): Boolean = causeChain(t).any { c ->
+        c.stackTrace.any { e -> MODULE_FRAME_PREFIXES.any { p -> e.className.startsWith(p) } }
+    }
+
+    /**
+     * 崩溃分类：
+     * - MODULE         栈中含模块代码，属模块问题
+     * - SYSTEM_RESTART system_server 已重启（DeadSystemException），崩溃是连带结果
+     * - HOST_RESOURCE  宿主资源加载失败（资源 ID 与文件在运行时不匹配）
+     * - HOST_ASSERT    宿主内部主动断言失败（数据/状态校验）
+     * - HOST_OTHER     宿主自身其它异常
+     */
+    private fun classifyCrash(throwable: Throwable): CrashClass = try {
+        val classNames = causeChain(throwable).map { it.javaClass.name }
+        val hasModuleFrame = stackContainsModuleFrame(throwable)
+        when {
+            hasModuleFrame -> CrashClass(
+                code = "MODULE",
+                title = "调用栈包含模块代码，属模块相关问题",
+                reason = "崩溃调用栈出现 com.Johnny.wcx / h.Hchat / 脚本运行时等模块包名。",
+                advice = "请把完整日志反馈给维护者。",
+            )
+
+            classNames.any {
+                it.endsWith("DeadSystemException") || it.endsWith("DeadSystemRuntimeException")
+            } -> CrashClass(
+                code = "SYSTEM_RESTART",
+                title = "系统核心进程已重启，本崩溃是连带结果，非模块导致",
+                reason = "DeadSystemException 表示 system_server 已死亡；崩溃发生时手机通常正在系统重启或异常中，所有应用的窗口通信都会受影响。",
+                advice = "无需处理。如需排查重启原因，请查看系统侧记录（tombstone / dropbox），应用侧日志无法定位。",
+            )
+
+            classNames.any { it.contains("Resources\$NotFoundException") } -> CrashClass(
+                code = "HOST_RESOURCE",
+                title = "宿主资源加载失败，非模块导致",
+                reason = "栈中无模块代码；宿主 APK 的资源 ID 与文件在运行时对不上，常见于系统深色模式资源重映射、主题包异常或非官方安装包。",
+                advice = "可尝试：关闭系统深色模式对微信的适配、重启手机、使用微信自带修复工具（我-设置-帮助与反馈-扳手）。",
+            )
+
+            classNames.any {
+                it.endsWith("UnsupportedOperationException") ||
+                    it.endsWith("IllegalStateException") ||
+                    it.endsWith("IllegalArgumentException")
+            } -> CrashClass(
+                code = "HOST_ASSERT",
+                title = "宿主内部断言失败，非模块导致",
+                reason = "栈中无模块代码；属于宿主自身的数据或状态校验失败（例如消息数据不完整）。",
+                advice = "可尝试微信自带修复工具；若稳定复现，可临时关闭模块作用域对比验证。",
+            )
+
+            else -> CrashClass(
+                code = "HOST_OTHER",
+                title = "宿主自身异常，非模块导致",
+                reason = "栈中未出现模块代码。",
+                advice = "如怀疑与模块相关，可临时关闭模块作用域对比验证。",
+            )
+        }
+    } catch (e: Throwable) {
+        CrashClass(
+            code = "UNKNOWN",
+            title = "自动分类失败",
+            reason = "分类过程异常：" + e.message,
+            advice = "",
+        )
     }
 }

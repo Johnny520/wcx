@@ -25,7 +25,7 @@ import com.Johnny.wcx.utils.WeLogger
 import de.robv.android.xposed.XC_MethodHook
 import org.luckypray.dexkit.query.enums.StringMatchType
 
-@Feature(name = "屏蔽铃声", categories = ["聊天", "音视频通话"], description = "屏蔽音视频通话铃声")
+@Feature(name = "屏蔽铃声", categories = ["音视频通话"], description = "屏蔽音视频通话铃声")
 object BlockVoipRingtone : ClickableFeature(), IResolveDex {
 
     // 默认关闭：这两条 hook 会跳过微信 VoIP 自己的铃声播放流程，少数机型上会让通话
