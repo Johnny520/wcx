@@ -3,9 +3,20 @@ package com.Johnny.wcx.features.items.moments
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.RelativeLayout
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
 import com.Johnny.wcx.utils.WeLogger
@@ -55,6 +66,12 @@ object DisableVideosAutoPlay : SwitchFeature() {
     private const val TAP_SLOP_PX = 30
     private const val TAP_MAX_MS = 400L
 
+    /** 自绘播放标识挂在视频 View 上的 tag key（任意 int，不占资源 id）。 */
+    private const val BADGE_TAG = 0x7E0BA9D1
+
+    /** 播放标识直径（dp）。 */
+    private const val BADGE_SIZE_DP = 44
+
     /** 8.0.80 实测未混淆的朋友圈视频 View 类名。 */
     private val videoClassNames = arrayOf(
         "com.tencent.mm.plugin.sns.ui.OnlineVideoView",
@@ -88,6 +105,7 @@ object DisableVideosAutoPlay : SwitchFeature() {
 
         hookTapSignals(classes)
         hookProbe(classes)
+        hookPauseBadge(classes)
 
         var installed = 0
         classes.forEach { clazz ->
@@ -111,6 +129,7 @@ object DisableVideosAutoPlay : SwitchFeature() {
                                 val paused = runCatching {
                                     view.javaClass.getMethod("F").invoke(view)
                                 }.isSuccess
+                                attachBadge(view)
                                 WeLogger.i(
                                     TAG,
                                     "onPrepared 后立即暂停：${clazz.simpleName} paused=$paused",
@@ -127,8 +146,15 @@ object DisableVideosAutoPlay : SwitchFeature() {
                     XposedBridge.hookMethod(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
                             val view = param.thisObject as? View ?: return
-                            if (isPlayerPage(view.context)) return
-                            if (SystemClock.elapsedRealtime() - lastTapAt < TAP_WINDOW_MS) return
+                            if (isPlayerPage(view.context)) {
+                                hideBadge(view)
+                                return
+                            }
+                            if (SystemClock.elapsedRealtime() - lastTapAt < TAP_WINDOW_MS) {
+                                // 用户自己点播放：把播放标识收起来，交给微信自己的进度环
+                                hideBadge(view)
+                                return
+                            }
                             param.result = if (isResumeByDataGain) false else null
                             WeLogger.i(
                                 TAG,
@@ -156,6 +182,91 @@ object DisableVideosAutoPlay : SwitchFeature() {
 
     /** 探针节流：2 秒内最多 30 条，避免滑一下刷爆日志。 */
     private val probeTimes = java.util.ArrayDeque<Long>()
+
+    /**
+     * 暂停时补一个「播放」标识。
+     *
+     * 微信朋友圈信息流里的视频 View 没有「播放三角」这个控件 —— 正常未播放时它显示的就是
+     * 封面/首帧，跟照片长得一样。我们把自动播放拦掉之后，用户就分不清哪张是视频。
+     *
+     * 这里在微信自己的暂停方法 `F()V`（日志串 `%d pause play`）执行后，往视频 View 中央
+     * 挂一个半透明圆底 + 白色三角；用户点播放（K/J 放行）时再收起来。
+     */
+    private fun hookPauseBadge(classes: List<Class<*>>) {
+        classes.forEach { clazz ->
+            val pause = runCatching {
+                clazz.getDeclaredMethod("F").takeIf {
+                    it.returnType == Void.TYPE && it.parameterTypes.isEmpty()
+                }
+            }.getOrNull() ?: return@forEach
+            runCatching {
+                XposedBridge.hookMethod(pause, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                        val view = param.thisObject as? View ?: return
+                        if (isPlayerPage(view.context)) return
+                        attachBadge(view)
+                    }
+                })
+            }.onFailure { WeLogger.w(TAG, "hook ${clazz.simpleName}#F 失败", it) }
+        }
+    }
+
+    /** 在视频 View 中央挂播放三角；已挂过就只恢复可见。 */
+    private fun attachBadge(view: View) {
+        val host = view as? ViewGroup ?: return
+        val existing = host.getTag(BADGE_TAG) as? View
+        if (existing != null && existing.parent === host) {
+            existing.visibility = View.VISIBLE
+            return
+        }
+        val size = dp(view.context, BADGE_SIZE_DP)
+        val badge = ImageView(view.context).apply {
+            setImageDrawable(badgeDrawable(view.context, size))
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        val lp: ViewGroup.LayoutParams = when (host) {
+            is FrameLayout -> FrameLayout.LayoutParams(size, size, Gravity.CENTER)
+            is RelativeLayout -> RelativeLayout.LayoutParams(size, size).apply {
+                addRule(RelativeLayout.CENTER_IN_PARENT)
+            }
+            else -> ViewGroup.LayoutParams(size, size)
+        }
+        runCatching {
+            host.addView(badge, lp)
+            host.setTag(BADGE_TAG, badge)
+            WeLogger.d(TAG, "已挂上播放标识：${host.javaClass.simpleName}")
+        }.onFailure { WeLogger.w(TAG, "挂播放标识失败", it) }
+    }
+
+    /** 收起播放三角（用户开始播放 / 进入全屏页时）。 */
+    private fun hideBadge(view: View) {
+        val host = view as? ViewGroup ?: return
+        (host.getTag(BADGE_TAG) as? View)?.let { it.visibility = View.GONE }
+    }
+
+    private fun dp(context: Context, value: Int): Int =
+        (value * context.resources.displayMetrics.density + 0.5f).toInt()
+
+    /** 半透明圆底 + 白色三角，尺寸与微信自己的圆形按钮接近。 */
+    private fun badgeDrawable(context: Context, size: Int): Drawable {
+        val safe = size.coerceAtLeast(24)
+        val bitmap = Bitmap.createBitmap(safe, safe, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = 0x66000000
+        canvas.drawCircle(safe / 2f, safe / 2f, safe / 2f, paint)
+        paint.color = 0xFFFFFFFF.toInt()
+        val path = Path().apply {
+            moveTo(safe * 0.40f, safe * 0.29f)
+            lineTo(safe * 0.73f, safe * 0.50f)
+            lineTo(safe * 0.40f, safe * 0.71f)
+            close()
+        }
+        canvas.drawPath(path, paint)
+        return BitmapDrawable(context.resources, bitmap)
+    }
 
     /**
      * 探针：只记录、不拦截。
