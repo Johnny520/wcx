@@ -87,6 +87,7 @@ object DisableVideosAutoPlay : SwitchFeature() {
         }
 
         hookTapSignals(classes)
+        hookProbe(classes)
 
         var installed = 0
         classes.forEach { clazz ->
@@ -95,15 +96,18 @@ object DisableVideosAutoPlay : SwitchFeature() {
                 val isResumePlay = method.name == "K" && method.returnType == Void.TYPE
                 val isResumeByDataGain =
                     method.name == "J" && method.returnType == java.lang.Boolean.TYPE
-                if (!isResumePlay && !isResumeByDataGain) return@forEach
+                // A()V 是 J/K 的公共前置（J、K 里都会先调它），拦住它覆盖面更广：
+                // 8.0.80 上实测只拦 K/J 时，信息流里滑动仍会起播。
+                val isPreStart = method.name == "A" && method.returnType == Void.TYPE
+                if (!isResumePlay && !isResumeByDataGain && !isPreStart) return@forEach
                 runCatching {
                     XposedBridge.hookMethod(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
                             val view = param.thisObject as? View ?: return
                             if (isPlayerPage(view.context)) return
                             if (SystemClock.elapsedRealtime() - lastTapAt < TAP_WINDOW_MS) return
-                            param.result = if (isResumePlay) null else false
-                            WeLogger.d(
+                            param.result = if (isResumeByDataGain) false else null
+                            WeLogger.i(
                                 TAG,
                                 "拦截信息流自动播放：${clazz.simpleName}#${method.name}",
                             )
@@ -125,6 +129,46 @@ object DisableVideosAutoPlay : SwitchFeature() {
 
     override fun onDisable() {
         // Hook 由框架自动解除
+    }
+
+    /** 探针节流：2 秒内最多 30 条，避免滑一下刷爆日志。 */
+    private val probeTimes = java.util.ArrayDeque<Long>()
+
+    /**
+     * 探针：只记录、不拦截。
+     *
+     * `A/J/K` 之外，朋友圈视频 View 上还有别的短名方法参与起播。这里把它们的调用序列打到
+     * 日志里（仅朋友圈信息流页、带节流），用户再报「还在自动播」时能直接看出走的是哪个方法。
+     */
+    private fun hookProbe(classes: List<Class<*>>) {
+        classes.forEach { clazz ->
+            clazz.declaredMethods.forEach { method ->
+                if (method.name.length > 2) return@forEach
+                if (method.name == "K" || method.name == "J" || method.name == "A") return@forEach
+                runCatching {
+                    XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                            val view = param.thisObject as? View ?: return
+                            if (isPlayerPage(view.context)) return
+                            if (isSnsPage(view.context) != true) return
+                            probeLog("${clazz.simpleName}#${method.name}")
+                        }
+                    })
+                }
+            }
+        }
+    }
+
+    private fun probeLog(label: String) {
+        val now = SystemClock.elapsedRealtime()
+        synchronized(probeTimes) {
+            while (probeTimes.isNotEmpty() && now - (probeTimes.peekFirst() ?: now) > 2000L) {
+                probeTimes.pollFirst()
+            }
+            if (probeTimes.size >= 30) return
+            probeTimes.addLast(now)
+        }
+        WeLogger.i(TAG, "[probe] $label")
     }
 
     /**
