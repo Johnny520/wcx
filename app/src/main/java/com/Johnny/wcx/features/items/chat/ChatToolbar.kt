@@ -187,17 +187,22 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
      * 8.0.80 实测：只调 `GridView.performItemClick` 不会触发微信的处理（adapter 层没有走
      * ItemClick 分发），所以点击做成多级兜底，并且每级都留日志 —— 用户报「点了没反应」时
      * 能直接看出走的是哪条路径、卡在哪一级：
-     * ① AdapterView 私有字段 `mOnItemClickListener`（系统类字段，不会被混淆）→ 直调
-     * ② `GridView.performItemClick`
-     * ③ 真实挂载 child 的 `performClick`
-     * ④ 采集时那份 item view 的 `performClick`
-     * ⑤ 给真实 child 派发一对 DOWN/UP（和手指点完全同一条路径）
+     * ① **采集时缓存的** OnItemClickListener（旧版实现，实测有效）→ 直调
+     * ② 现场从 AdapterView 私有字段 `mOnItemClickListener` 取 → 直调
+     * ③ `GridView.performItemClick`
+     * ④ 真实挂载 child 的 `performClick`
+     * ⑤ 给 GridView 派发一对 DOWN/UP（坐标换算到格子中心，和手指点完全同一条路径）
+     * ⑥ 采集时那份 item view 的 `performClick`
+     * ⑦ 直接给 View 派发 DOWN/UP
      */
     private data class MenuItem(
         val name: String,
         val gridView: WeakReference<GridView>,
         val itemView: WeakReference<View>,
         val indexInGrid: Int,
+        /** 采集时缓存的微信 OnItemClickListener —— 旧版就是靠它才「点了有反应」，见 click() 说明。 */
+        val onClickListener: AdapterView.OnItemClickListener? = null,
+        val onLongClickListener: AdapterView.OnItemLongClickListener? = null,
     ) {
         fun click() {
             val grid = gridView.get() ?: return fail("原生面板已重建，请重新展开工具面板再点")
@@ -205,7 +210,20 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
             val position = indexInGrid
             val id = runCatching { grid.adapter?.getItemId(position) }.getOrNull() ?: position.toLong()
 
-            // ① 系统类字段里的 OnItemClickListener
+            // ① 采集时缓存的 listener（旧版实现，实测有效）：
+            //    微信在面板收起 / 重建后会把 GridView 上的 listener 清掉，
+            //    所以「点击时再去 grid 上取」经常已经是 null —— 现场 performItemClick 就会静默什么都不做。
+            onClickListener?.let { cached ->
+                val ok = runCatching { cached.onItemClick(grid, item, position, id) }
+                    .onFailure { WeLogger.w(TAG, "缓存的 OnItemClickListener 调用异常：$name", it) }
+                    .isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "tap '$name' via cached mOnItemClickListener")
+                    return
+                }
+            }
+
+            // ② 现场从系统类字段取 OnItemClickListener
             val listener = runCatching {
                 AdapterView::class.java
                     .getDeclaredField("mOnItemClickListener")
@@ -222,13 +240,13 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                 }
             }
 
-            // ② GridView.performItemClick
+            // ③ GridView.performItemClick
             if (runCatching { grid.performItemClick(item, position, id) }.getOrDefault(false)) {
                 WeLogger.i(TAG, "tap '$name' via performItemClick")
                 return
             }
 
-            // ③ 真实挂载的 child
+            // ④ 真实挂载的 child
             val liveIndex = position - grid.firstVisiblePosition
             val live = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
             if (live != null && runCatching { live.performClick() }.getOrDefault(false)) {
@@ -236,20 +254,20 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                 return
             }
 
-            // ④ 给 GridView 派发一对 DOWN/UP（坐标换算到格子中心）：和手指点完全一致，
+            // ⑤ 给 GridView 派发一对 DOWN/UP（坐标换算到格子中心）：和手指点完全一致，
             //    微信无论用 OnItemClickListener 还是自己的触摸处理都能吃下
             if (dispatchTapToGrid(grid, position)) {
                 WeLogger.i(TAG, "tap '$name' via grid synthetic touch")
                 return
             }
 
-            // ⑤ 采集时的 item view
+            // ⑥ 采集时的 item view
             if (runCatching { item.performClick() }.getOrDefault(false)) {
                 WeLogger.i(TAG, "tap '$name' via item performClick")
                 return
             }
 
-            // ⑥ 直接给某个 View 派发触摸
+            // ⑦ 直接给某个 View 派发触摸
             if (dispatchTap(live ?: item)) {
                 WeLogger.i(TAG, "tap '$name' via view synthetic touch")
                 return
@@ -261,6 +279,18 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         fun longClick() {
             val grid = gridView.get()
             val item = itemView.get() ?: return fail("工具项 View 已失效，请重新展开工具面板再长按")
+
+            onLongClickListener?.let { cached ->
+                if (grid != null) {
+                    val ok = runCatching {
+                        cached.onItemLongClick(grid, item, indexInGrid, indexInGrid.toLong())
+                    }.onFailure { WeLogger.w(TAG, "缓存的 OnItemLongClickListener 调用异常：$name", it) }.isSuccess
+                    if (ok) {
+                        WeLogger.i(TAG, "long-press '$name' via cached mOnItemLongClickListener")
+                        return
+                    }
+                }
+            }
 
             val listener = runCatching {
                 AdapterView::class.java
@@ -485,16 +515,46 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         val tools = mutableListOf<Pair<String, MenuItem>>()
         collectGrids(root).forEach { grid ->
             val adapter = grid.adapter ?: return@forEach
+            // 采集时就把 listener 缓存下来：面板重建后 grid 上的监听器会被清空，
+            // 点击时再去取往往已经是 null（这是「点了没反应」的根因，见 click() 注释）。
+            val onClickListener = readGridListener<AdapterView.OnItemClickListener>(grid, "mOnItemClickListener")
+            val onLongClickListener =
+                readGridListener<AdapterView.OnItemLongClickListener>(grid, "mOnItemLongClickListener")
             for (index in 0 until adapter.count) {
                 val itemView = runCatching { adapter.getView(index, null, grid) }.getOrNull()
                     ?: continue
                 val name = toolNameOf(itemView) ?: continue
-                tools.add(name to MenuItem(name, WeakReference(grid), WeakReference(itemView), index))
+                tools.add(
+                    name to MenuItem(
+                        name = name,
+                        gridView = WeakReference(grid),
+                        itemView = WeakReference(itemView),
+                        indexInGrid = index,
+                        onClickListener = onClickListener,
+                        onLongClickListener = onLongClickListener,
+                    ),
+                )
             }
         }
         WeLogger.i(TAG, "采集到 ${tools.size} 个原生工具项")
         toolsState.value = tools
         return tools.size
+    }
+
+    /**
+     * 读 GridView 上的点击/长按监听。
+     *
+     * 优先用系统类字段名（`AdapterView.mOnItemClickListener` 是 AOSP 私有字段，名字稳定、不会被混淆），
+     * 取不到再退回按类型找。两条都失败返回 null，不影响其它功能。
+     */
+    private inline fun <reified T> readGridListener(grid: GridView, fieldName: String): T? {
+        val fromField = runCatching {
+            AdapterView::class.java.getDeclaredField(fieldName).apply { isAccessible = true }.get(grid) as? T
+        }.getOrNull()
+        if (fromField != null) return fromField
+        return runCatching {
+            grid.reflekt().firstFieldOrNull { type = T::class.java }?.get() as? T
+        }.getOrNull()
     }
 
     /** 工具项显示名：tag 里挂着持有名字 TextView 的对象；tag 结构变了就退回在 item 里直接找 TextView。 */
