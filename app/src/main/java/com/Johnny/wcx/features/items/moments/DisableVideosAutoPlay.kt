@@ -93,18 +93,36 @@ object DisableVideosAutoPlay : SwitchFeature() {
         classes.forEach { clazz ->
             clazz.declaredMethods.forEach { method ->
                 if (method.parameterTypes.isNotEmpty()) return@forEach
-                // 8.0.80 实测会真正起播的方法（都 invoke 了播放器 start）：
-                //   A()V         —— J/K 的公共前置
-                //   K()V         —— resumePlay（可见性变化/滚动停稳/封面动画结束）
-                //   J()Z         —— resumeByDataGain（数据就绪）
-                //   S(Z I Z)V    —— 内部起播（静音/有声两条路）
-                //   onPrepared()V—— 视频准备完成后的自动 start（不经过上面任何一个！）
-                val isVoidTarget = method.returnType == Void.TYPE &&
-                    (method.name == "K" || method.name == "A" ||
-                        method.name == "S" || method.name == "onPrepared")
+                val isResumePlay = method.name == "K" && method.returnType == Void.TYPE
                 val isResumeByDataGain =
                     method.name == "J" && method.returnType == java.lang.Boolean.TYPE
-                if (!isVoidTarget && !isResumeByDataGain) return@forEach
+                val isPrepared = method.name == "onPrepared" && method.returnType == Void.TYPE
+
+                // onPrepared 不能拦：拦掉它微信会一直停在「准备中」，界面上就是加载圈一直转
+                //（下载由 S()V 负责、准备由 A()V 负责，这两个也一并放行）。
+                // 正确做法是放行它、执行完立即暂停（F()V 的日志串是 "%d pause play"）。
+                if (isPrepared) {
+                    runCatching {
+                        XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                            override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                                val view = param.thisObject as? View ?: return
+                                if (isPlayerPage(view.context)) return
+                                if (SystemClock.elapsedRealtime() - lastTapAt < TAP_WINDOW_MS) return
+                                val paused = runCatching {
+                                    view.javaClass.getMethod("F").invoke(view)
+                                }.isSuccess
+                                WeLogger.i(
+                                    TAG,
+                                    "onPrepared 后立即暂停：${clazz.simpleName} paused=$paused",
+                                )
+                            }
+                        })
+                        installed++
+                    }.onFailure { WeLogger.e(TAG, "hook ${clazz.simpleName}#onPrepared 失败", it) }
+                    return@forEach
+                }
+
+                if (!isResumePlay && !isResumeByDataGain) return@forEach
                 runCatching {
                     XposedBridge.hookMethod(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
