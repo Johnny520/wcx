@@ -7,8 +7,10 @@ import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
 import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.LinearLayout
@@ -109,6 +111,7 @@ import com.Johnny.wcx.ui.utils.iterable
 import com.Johnny.wcx.ui.utils.setLifecycleOwner
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.android.getTopMostActivity
 import com.Johnny.wcx.utils.now
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -181,10 +184,14 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
     /**
      * 一个原生工具项。
      *
-     * 不再缓存微信 GridView 上的 OnItemClickListener / OnItemLongClickListener 字段：
-     * 那是反射私有字段，字段类型或名字一变就是 NPE（整轮采集直接失败、工具栏空白）。
-     * 改成记录「所在 GridView + 该项 View + 位置」，点击时走 View 的公开 API
-     * （GridView.performItemClick / View.performLongClick），与用户手指点原生图标同一条路径。
+     * 8.0.80 实测：只调 `GridView.performItemClick` 不会触发微信的处理（adapter 层没有走
+     * ItemClick 分发），所以点击做成多级兜底，并且每级都留日志 —— 用户报「点了没反应」时
+     * 能直接看出走的是哪条路径、卡在哪一级：
+     * ① AdapterView 私有字段 `mOnItemClickListener`（系统类字段，不会被混淆）→ 直调
+     * ② `GridView.performItemClick`
+     * ③ 真实挂载 child 的 `performClick`
+     * ④ 采集时那份 item view 的 `performClick`
+     * ⑤ 给真实 child 派发一对 DOWN/UP（和手指点完全同一条路径）
      */
     private data class MenuItem(
         val name: String,
@@ -193,17 +200,130 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         val indexInGrid: Int,
     ) {
         fun click() {
-            val grid = gridView.get() ?: return
-            val item = itemView.get() ?: return
-            val id = runCatching { grid.adapter?.getItemId(indexInGrid) }.getOrNull() ?: indexInGrid.toLong()
-            runCatching { grid.performItemClick(item, indexInGrid, id) }
-                .onFailure { WeLogger.e(TAG, "触发工具项失败：$name", it) }
+            val grid = gridView.get() ?: return fail("原生面板已重建，请重新展开工具面板再点")
+            val item = itemView.get() ?: return fail("工具项 View 已失效，请重新展开工具面板再点")
+            val position = indexInGrid
+            val id = runCatching { grid.adapter?.getItemId(position) }.getOrNull() ?: position.toLong()
+
+            // ① 系统类字段里的 OnItemClickListener
+            val listener = runCatching {
+                AdapterView::class.java
+                    .getDeclaredField("mOnItemClickListener")
+                    .apply { isAccessible = true }
+                    .get(grid) as? AdapterView.OnItemClickListener
+            }.getOrNull()
+            if (listener != null) {
+                val ok = runCatching { listener.onItemClick(grid, item, position, id) }
+                    .onFailure { WeLogger.w(TAG, "mOnItemClickListener 调用异常：$name", it) }
+                    .isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "tap '$name' via mOnItemClickListener")
+                    return
+                }
+            }
+
+            // ② GridView.performItemClick
+            if (runCatching { grid.performItemClick(item, position, id) }.getOrDefault(false)) {
+                WeLogger.i(TAG, "tap '$name' via performItemClick")
+                return
+            }
+
+            // ③ 真实挂载的 child
+            val liveIndex = position - grid.firstVisiblePosition
+            val live = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
+            if (live != null && runCatching { live.performClick() }.getOrDefault(false)) {
+                WeLogger.i(TAG, "tap '$name' via live performClick")
+                return
+            }
+
+            // ④ 给 GridView 派发一对 DOWN/UP（坐标换算到格子中心）：和手指点完全一致，
+            //    微信无论用 OnItemClickListener 还是自己的触摸处理都能吃下
+            if (dispatchTapToGrid(grid, position)) {
+                WeLogger.i(TAG, "tap '$name' via grid synthetic touch")
+                return
+            }
+
+            // ⑤ 采集时的 item view
+            if (runCatching { item.performClick() }.getOrDefault(false)) {
+                WeLogger.i(TAG, "tap '$name' via item performClick")
+                return
+            }
+
+            // ⑥ 直接给某个 View 派发触摸
+            if (dispatchTap(live ?: item)) {
+                WeLogger.i(TAG, "tap '$name' via view synthetic touch")
+                return
+            }
+
+            fail("五种点击方式都没触发微信的处理")
         }
 
         fun longClick() {
-            val item = itemView.get() ?: return
-            runCatching { item.performLongClick() }
-                .onFailure { WeLogger.e(TAG, "长按工具项失败：$name", it) }
+            val grid = gridView.get()
+            val item = itemView.get() ?: return fail("工具项 View 已失效，请重新展开工具面板再长按")
+
+            val listener = runCatching {
+                AdapterView::class.java
+                    .getDeclaredField("mOnItemLongClickListener")
+                    .apply { isAccessible = true }
+                    .get(grid) as? AdapterView.OnItemLongClickListener
+            }.getOrNull()
+            if (listener != null && grid != null) {
+                val ok = runCatching {
+                    listener.onItemLongClick(grid, item, indexInGrid, indexInGrid.toLong())
+                }.onFailure { WeLogger.w(TAG, "mOnItemLongClickListener 调用异常：$name", it) }.isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "long-press '$name' via mOnItemLongClickListener")
+                    return
+                }
+            }
+            if (runCatching { item.performLongClick() }.getOrDefault(false)) {
+                WeLogger.i(TAG, "long-press '$name' via item performLongClick")
+                return
+            }
+            fail("长按没触发微信的处理")
+        }
+
+        /** 给 GridView 派发一对 DOWN/UP（坐标换成该格子的中心点），等价于手指点一下。 */
+        private fun dispatchTapToGrid(grid: GridView, position: Int): Boolean = runCatching {
+            val liveIndex = position - grid.firstVisiblePosition
+            val child = if (liveIndex in 0 until grid.childCount) grid.getChildAt(liveIndex) else null
+                ?: return@runCatching false
+            val childLoc = IntArray(2)
+            val gridLoc = IntArray(2)
+            child.getLocationInWindow(childLoc)
+            grid.getLocationInWindow(gridLoc)
+            val x = (childLoc[0] - gridLoc[0]) + child.width / 2f
+            val y = (childLoc[1] - gridLoc[1]) + child.height / 2f
+            if (x <= 0f || y <= 0f) return@runCatching false
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(downTime, downTime + 80, MotionEvent.ACTION_UP, x, y, 0)
+            grid.dispatchTouchEvent(down)
+            val handled = grid.dispatchTouchEvent(up)
+            down.recycle()
+            up.recycle()
+            handled
+        }.getOrDefault(false)
+
+        /** 给真实挂载的 View 派发一对 DOWN/UP，等价于手指点一下。 */
+        private fun dispatchTap(target: View): Boolean = runCatching {
+            if (target.width <= 0 || target.height <= 0) return@runCatching false
+            val downTime = SystemClock.uptimeMillis()
+            val x = target.width / 2f
+            val y = target.height / 2f
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(downTime, downTime + 60, MotionEvent.ACTION_UP, x, y, 0)
+            val handled = target.dispatchTouchEvent(down) and target.dispatchTouchEvent(up)
+            down.recycle()
+            up.recycle()
+            handled
+        }.getOrDefault(false)
+
+        private fun fail(reason: String) {
+            WeLogger.w(TAG, "触发工具项失败：$name（$reason）")
+            healthIssue = "工具项「$name」点击无效：$reason"
+            runCatching { showToast("聊天工具栏：$name 点击无效，请重新展开工具面板后重试") }
         }
     }
 
