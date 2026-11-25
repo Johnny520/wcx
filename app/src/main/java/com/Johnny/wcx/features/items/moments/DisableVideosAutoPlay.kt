@@ -93,13 +93,18 @@ object DisableVideosAutoPlay : SwitchFeature() {
         classes.forEach { clazz ->
             clazz.declaredMethods.forEach { method ->
                 if (method.parameterTypes.isNotEmpty()) return@forEach
-                val isResumePlay = method.name == "K" && method.returnType == Void.TYPE
+                // 8.0.80 实测会真正起播的方法（都 invoke 了播放器 start）：
+                //   A()V         —— J/K 的公共前置
+                //   K()V         —— resumePlay（可见性变化/滚动停稳/封面动画结束）
+                //   J()Z         —— resumeByDataGain（数据就绪）
+                //   S(Z I Z)V    —— 内部起播（静音/有声两条路）
+                //   onPrepared()V—— 视频准备完成后的自动 start（不经过上面任何一个！）
+                val isVoidTarget = method.returnType == Void.TYPE &&
+                    (method.name == "K" || method.name == "A" ||
+                        method.name == "S" || method.name == "onPrepared")
                 val isResumeByDataGain =
                     method.name == "J" && method.returnType == java.lang.Boolean.TYPE
-                // A()V 是 J/K 的公共前置（J、K 里都会先调它），拦住它覆盖面更广：
-                // 8.0.80 上实测只拦 K/J 时，信息流里滑动仍会起播。
-                val isPreStart = method.name == "A" && method.returnType == Void.TYPE
-                if (!isResumePlay && !isResumeByDataGain && !isPreStart) return@forEach
+                if (!isVoidTarget && !isResumeByDataGain) return@forEach
                 runCatching {
                     XposedBridge.hookMethod(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
@@ -144,7 +149,11 @@ object DisableVideosAutoPlay : SwitchFeature() {
         classes.forEach { clazz ->
             clazz.declaredMethods.forEach { method ->
                 if (method.name.length > 2) return@forEach
-                if (method.name == "K" || method.name == "J" || method.name == "A") return@forEach
+                if (method.name == "K" || method.name == "J" || method.name == "A" ||
+                    method.name == "S" || method.name == "onPrepared"
+                ) {
+                    return@forEach
+                }
                 runCatching {
                     XposedBridge.hookMethod(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
