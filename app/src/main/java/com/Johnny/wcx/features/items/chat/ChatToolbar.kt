@@ -206,8 +206,11 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
     ) {
         fun click() {
             val grid = gridView.get() ?: return fail("原生面板已重建，请重新展开工具面板再点")
-            val item = itemView.get() ?: return fail("工具项 View 已失效，请重新展开工具面板再点")
             val position = indexInGrid
+            // 采集时的 itemView 是 adapter.getView() 造出来的游离 View，只被弱引用持有，
+            // 面板收起后很容易被 GC（日志：工具项 View 已失效）。这里现场重建 / 取真实 child 兜底，
+            // 微信的 OnItemClickListener 基本只用 position，view 传一个可用实例即可。
+            val item = resolveItemView(grid)
             val id = runCatching { grid.adapter?.getItemId(position) }.getOrNull() ?: position.toLong()
 
             // ① 采集时缓存的 listener（旧版实现，实测有效）：
@@ -277,18 +280,16 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
         }
 
         fun longClick() {
-            val grid = gridView.get()
-            val item = itemView.get() ?: return fail("工具项 View 已失效，请重新展开工具面板再长按")
+            val grid = gridView.get() ?: return fail("原生面板已重建，请重新展开工具面板再长按")
+            val item = resolveItemView(grid)
 
             onLongClickListener?.let { cached ->
-                if (grid != null) {
-                    val ok = runCatching {
-                        cached.onItemLongClick(grid, item, indexInGrid, indexInGrid.toLong())
-                    }.onFailure { WeLogger.w(TAG, "缓存的 OnItemLongClickListener 调用异常：$name", it) }.isSuccess
-                    if (ok) {
-                        WeLogger.i(TAG, "long-press '$name' via cached mOnItemLongClickListener")
-                        return
-                    }
+                val ok = runCatching {
+                    cached.onItemLongClick(grid, item, indexInGrid, indexInGrid.toLong())
+                }.onFailure { WeLogger.w(TAG, "缓存的 OnItemLongClickListener 调用异常：$name", it) }.isSuccess
+                if (ok) {
+                    WeLogger.i(TAG, "long-press '$name' via cached mOnItemLongClickListener")
+                    return
                 }
             }
 
@@ -298,7 +299,7 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                     .apply { isAccessible = true }
                     .get(grid) as? AdapterView.OnItemLongClickListener
             }.getOrNull()
-            if (listener != null && grid != null) {
+            if (listener != null) {
                 val ok = runCatching {
                     listener.onItemLongClick(grid, item, indexInGrid, indexInGrid.toLong())
                 }.onFailure { WeLogger.w(TAG, "mOnItemLongClickListener 调用异常：$name", it) }.isSuccess
@@ -312,6 +313,20 @@ object ChatToolbar : ClickableFeature(), IResolveDex {
                 return
             }
             fail("长按没触发微信的处理")
+        }
+
+        /**
+         * 取一个可用于点击的 item View：
+         * 采集时那份（弱引用，可能已被回收）→ 当前真实挂载的 child → 现场让 adapter 重建一个。
+         */
+        private fun resolveItemView(grid: GridView): View {
+            itemView.get()?.let { return it }
+            val liveIndex = indexInGrid - grid.firstVisiblePosition
+            if (liveIndex in 0 until grid.childCount) {
+                grid.getChildAt(liveIndex)?.let { return it }
+            }
+            runCatching { grid.adapter?.getView(indexInGrid, null, grid) }.getOrNull()?.let { return it }
+            return grid
         }
 
         /** 给 GridView 派发一对 DOWN/UP（坐标换成该格子的中心点），等价于手指点一下。 */
