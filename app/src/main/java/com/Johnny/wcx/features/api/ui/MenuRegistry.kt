@@ -66,16 +66,30 @@ internal class MenuRegistry<T> {
     }
 }
 
+/** AI 菜单项是否保留在宿主菜单里（false = 只走 AI 工作台）。 */
+private const val AI_MENU_ITEMS_IN_HOST_MENU = false
+
 /**
- * AI 助手总开关关闭时，AI 助手提供的菜单项一律不出现在宿主菜单里。
+ * AI 菜单项要不要出现在宿主菜单里。
+ *
+ * 聊天相关的 AI 项从 v349 起统一收进「聊天页双击 → AI 工作台」，宿主菜单里不再出现；
+ * 朋友圈的（写文案 / 帮我评论）保留，因为它不属于聊天场景。总开关关闭时全部不出现。
  *
  * 判定按类名约定（模块内 AI 工具都在 features/items 下，且类名带 AI 前缀）：
  * `AiTodoExtract` / `AiMessagePolish` / `AiMomentsComment` → Ai 开头；
  * `ChatAiSummary` → ChatAi 开头；输入栏那批共用一个匿名 provider，
  * 其类名来自 `AiChatToolsKt`。非 AI 的菜单 provider 不会命中这三条。
  */
-internal fun aiMenuOwnerAllowed(owner: Any): Boolean =
-    AiConfig.isMasterEnabled || !looksLikeAiOwner(owner)
+internal fun aiMenuOwnerAllowed(owner: Any): Boolean {
+    if (!looksLikeAiOwner(owner)) return true
+    // 朋友圈不属于聊天，工作台管不到，朋友圈的 AI 项保留（只看总开关）。
+    val simple = owner.javaClass.name.substringAfterLast('.')
+    if (simple.startsWith("AiMoments")) return AiConfig.isMasterEnabled
+    // AI 项是否还留在宿主菜单里。v349 起统一收进「聊天页双击 → AI 工作台」，
+    // 宿主菜单里不再出现 —— 之前散在输入栏长按/消息长按/朋友圈长按三处，用户记不住哪个在哪。
+    // 要恢复菜单入口，把这里改成 true。
+    return AI_MENU_ITEMS_IN_HOST_MENU && AiConfig.isMasterEnabled
+}
 
 private fun looksLikeAiOwner(owner: Any): Boolean {
     // 注意不能用 Class.getSimpleName()：输入栏那批 provider 是匿名对象，

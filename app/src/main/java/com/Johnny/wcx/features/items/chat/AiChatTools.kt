@@ -57,7 +57,8 @@ import kotlinx.coroutines.withContext
 
 // ── 共用：读最近消息 ─────────────────────────────────────────────────────────
 
-private object AiChatContext {
+/** 聊天上下文读取（工作台与各工具共用）。 */
+internal object AiChatContext {
 
     private const val TAG = "AiChatContext"
 

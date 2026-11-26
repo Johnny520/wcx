@@ -276,8 +276,8 @@ internal fun AiCueSettings(
         var summaryEnabled by remember { mutableStateOf(ChatAiSummary.isEnabled) }
         SoftCard(contentPadding = 0) {
             AiSwitchRow(
-                title = "双击建议",
-                subtitle = "聊天页双击屏幕弹出 AI 建议卡（关掉后双击不响应）",
+                title = "双击打开 AI 工作台",
+                subtitle = "聊天页（群聊/私聊）双击空白处弹出 AI 工作台（关掉后双击不响应）",
                 enabled = masterEnabled,
                 checked = gestureEnabled,
                 onCheckedChange = {

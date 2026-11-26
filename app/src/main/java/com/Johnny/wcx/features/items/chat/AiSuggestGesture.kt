@@ -15,6 +15,7 @@ import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.strings.isGroupChatWxId
 import com.Johnny.wcx.utils.hookBeforeDirectly
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import de.robv.android.xposed.XC_MethodHook
@@ -169,60 +170,18 @@ object AiSuggestGesture : ApiFeature() {
             WeLogger.d(TAG, "双击：没有解析到会话（输入栏=${footer != null}）")
             return
         }
-        if (AiSuggestOverlay.isShowingFor(talker)) return
-        // 切换会话后上一张卡片还挂在同一个 Activity 上，先收起，避免串到别人身上。
-        if (AiSuggestOverlay.isShowingOtherThan(talker)) AiSuggestOverlay.dismiss()
-
         lastTriggerAt = now
-        WeLogger.d(TAG, "双击：$talker")
+        WeLogger.d(TAG, "双击打开 AI 工作台：$talker")
 
+        // 会话名与是否群聊要读库，放后台算，算完回主线程弹面板。
+        // 不再要求好友档案已就绪：工作台对私聊、群聊都可用。
         worker.execute(
             Runnable {
-                val profile = AiProfileStore.readProfile(talker)
-                if (profile == null) {
-                    // 没有档案就不响应：这是「对已有档案的好友补一句话」的快捷入口，不是建档入口。
-                    WeLogger.d(TAG, "$talker 没有 AI 档案，忽略")
-                    return@Runnable
-                }
-                // 整理 / 审查期间档案只读，建议与解读都会读一份写了一半的档案，必须拒绝。
-                // 但双击不能「毫无反应」—— 在那个位置弹一枚胶囊，说清楚现在为什么不可用。
-                //
-                // 判定走 AiRunState：它额外看内存里的 running 集合。写流水线是「先占位、
-                // 再落盘 auditing/state」，只看档案字段会漏掉中间那几毫秒 —— 那时双击会先
-                // 弹一个加载胶囊，随后才被建议引擎拒掉。
-                if (AiRunState.isBusy(talker, profile)) {
-                    val auditing = profile.auditing || AiProfileAudit.isRunning(talker)
-                    val text = if (auditing) "正在审查档案，暂不可用" else "正在整理档案，暂不可用"
-                    WeLogger.d(TAG, "双击：$talker 忙碌中（$text）")
-                    activity.runOnUiThread {
-                        if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
-                        AiSuggestOverlay.showNotice(activity, text)
-                    }
-                    return@Runnable
-                }
-                if (profile.state != AiProfileState.READY) {
-                    WeLogger.d(TAG, "$talker 档案未就绪（${profile.state}）")
-                    toast(activity, "档案还没整理好，先在 AI 页开始整理")
-                    return@Runnable
-                }
-                // 智能建议是按好友开启的：没开就什么都不做（连胶囊都不弹，避免变相提醒）。
-                if (!profile.smartSuggest) {
-                    WeLogger.d(TAG, "$talker 未开启智能建议，忽略")
-                    return@Runnable
-                }
-                // 胶囊里显示对方名字：双击后第一眼就能确认绑到了哪个会话。
-                val title = profile.remark.ifBlank { profile.nickname }.ifBlank { talker }
-                activity.runOnUiThread {
-                    if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
-                    if (AiSuggestOverlay.isShowingFor(talker)) return@runOnUiThread
-                    // 提示音放在确认要弹卡片之后：没档案、档案未就绪时不该响。
-                    AiCueSound.play()
-                    AiSuggestOverlay.show(
-                        activity = activity,
-                        talker = talker,
-                        title = title,
-                    )
-                }
+                val isGroup = talker.isGroupChatWxId
+                val title = runCatching { AiDigestSource.displayName(talker) }
+                    .getOrNull()?.takeIf { it.isNotBlank() } ?: talker
+                AiCueSound.play()
+                AiWorkbench.show(activity, talker, title, isGroup)
             },
         )
     }
