@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.ai.group.GroupDigestStore
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Summarize
@@ -72,6 +73,25 @@ object GroupDigestEntry {
      *
      * 侧边栏关闭时它的 400ms 轮询不会启动，所以这里必须自己跟 resume / pause。
      */
+    /**
+     * 首页这枚按钮自己的开关（默认开，只在 AI 助手总开关打开后才有意义）。
+     *
+     * 有人觉得它挡在标题栏右侧很碍事，又不想关掉整个 AI 助手，所以给它一个独立开关。
+     */
+    private const val KEY_ENTRY = "ai_group_digest_entry_enabled"
+
+    val isEntryEnabled: Boolean
+        get() = runCatching { WePrefs.getBoolOrDef(KEY_ENTRY, true) }.getOrDefault(true)
+
+    fun setEntryEnabled(enabled: Boolean) {
+        runCatching { WePrefs.putBool(KEY_ENTRY, enabled) }
+            .onFailure { WeLogger.e(TAG, "保存群总结入口开关失败", it) }
+        if (!enabled) detach()
+    }
+
+    /** 能不能挂：AI 助手总开关开着，且这枚按钮自己的开关也开着。 */
+    private fun canShowEntry(): Boolean = AiConfig.isMasterEnabled && isEntryEnabled
+
     fun register(app: Application) {
         if (callbacks != null) return
         val created = object : Application.ActivityLifecycleCallbacks {
@@ -102,6 +122,10 @@ object GroupDigestEntry {
 
     private fun onResume(act: Activity) {
         if (act.javaClass.name != LAUNCHER) return
+        if (!canShowEntry()) {
+            detach()
+            return
+        }
         attach(act)
         startPolling(act)
     }
@@ -137,8 +161,8 @@ object GroupDigestEntry {
     }
 
     fun sync(act: Activity, visible: Boolean) {
-        if (!AiConfig.isMasterEnabled) {
-            // AI 助手总开关关闭：首页的群总结入口整体撤掉，不留一个点了没反应的按钮。
+        if (!canShowEntry()) {
+            // 总开关关闭（或用户单独关掉了这枚按钮）：整体撤掉，不留一个点了没反应的按钮。
             if (root != null) detach()
             return
         }

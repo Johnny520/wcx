@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.Johnny.wcx.features.items.ai.GroupDigestEntry
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.ai.AutoIncrementalScheduler
 import com.Johnny.wcx.features.items.chat.AiCueSound
@@ -60,6 +61,7 @@ internal fun AiCueSettings(
     var selectedId by remember { mutableStateOf(AiConfig.cueSoundId) }
     val selectedIndex = AiCueSound.Style.indexOf(selectedId)
     var masterEnabled by remember { mutableStateOf(AiConfig.isMasterEnabled) }
+    var groupEntryEnabled by remember { mutableStateOf(GroupDigestEntry.isEntryEnabled) }
 
     Column(
         modifier = Modifier
@@ -175,6 +177,21 @@ internal fun AiCueSettings(
                     }
                 }
             }
+        }
+
+        // 首页群总结入口：有人觉得它挡在标题栏右侧很碍事，但不想关掉整个 AI 助手。
+        SoftCard(contentPadding = 0) {
+            AiSwitchRow(
+                title = "首页群总结入口",
+                subtitle = "聊天首页标题栏右侧的群总结按钮；关掉后只用 AI 页「群组」里的入口",
+                checked = groupEntryEnabled,
+                enabled = masterEnabled,
+                onCheckedChange = {
+                    groupEntryEnabled = it
+                    GroupDigestEntry.setEntryEnabled(it)
+                },
+                showDivider = false,
+            )
         }
 
         // 档案自动整理：每天补一次新增聊天（默认关，会花额度）。

@@ -87,6 +87,10 @@ import kotlinx.coroutines.withContext
 /** 顶部分段数量：好友 / 群组 / 总结 / 说明 / 设置。 */
 private const val AI_TAB_COUNT = 5
 
+/** 五个分段的下标，顺序与顶部胶囊一致。 */
+private const val AI_TAB_HELP = 3
+private const val AI_TAB_SETTINGS = 4
+
 @Composable
 internal fun AiPager(
     /** 外部（例如从别处回到本页）触发的刷新计数：变化即重读索引。 */
@@ -168,11 +172,17 @@ internal fun AiPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
+                // 总开关关着时，AI 页只留「说明」（纯文字）和「设置」（总开关所在），
+                // 好友 / 群组 / 总结 三个页面的内容一个都不出现 —— 和没这个功能一样。
+                if (!AiConfig.isMasterEnabled && page != AI_TAB_HELP && page != AI_TAB_SETTINGS) {
+                    AiMasterOffNotice()
+                    return@HorizontalPager
+                }
                 // 总结 / 说明 / 设置都不依赖好友档案索引，不进「载入中」这条分支。
                 when (page) {
                     2 -> AiReportPage()
-                    3 -> AiHelpPage()
-                    4 -> AiCueSettings(
+                    AI_TAB_HELP -> AiHelpPage()
+                    AI_TAB_SETTINGS -> AiCueSettings(
                         onOpenConfig = { showConfig = true },
                         onMomentsCopy = { AiMomentsCopy.showDialog(context) },
                     )
@@ -384,11 +394,14 @@ private fun AiHeader(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SegmentPill("好友", tab == 0) { onTabChange(0) }
-            SegmentPill("群组", tab == 1) { onTabChange(1) }
-            SegmentPill("总结", tab == 2) { onTabChange(2) }
-            SegmentPill("说明", tab == 3) { onTabChange(3) }
-            SegmentPill("设置", tab == 4) { onTabChange(4) }
+            // 总开关关着时只留「说明」（纯文字）和「设置」（总开关所在）两个分段。
+            if (AiConfig.isMasterEnabled) {
+                SegmentPill("好友", tab == 0) { onTabChange(0) }
+                SegmentPill("群组", tab == 1) { onTabChange(1) }
+                SegmentPill("总结", tab == 2) { onTabChange(2) }
+            }
+            SegmentPill("说明", tab == AI_TAB_HELP) { onTabChange(AI_TAB_HELP) }
+            SegmentPill("设置", tab == AI_TAB_SETTINGS) { onTabChange(AI_TAB_SETTINGS) }
         }
         // 顺序：提示词（仅 debug）在左，添加在右。
         if (onPrompts != null) {
@@ -793,6 +806,35 @@ private fun AiToast(message: String, onDismiss: () -> Unit) {
                 .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
             Text(message, fontSize = 13.sp, color = WxPalette.pageBackground())
+        }
+    }
+}
+
+/**
+ * 总开关关闭时 AI 页的占位：不放任何入口，只告诉用户去哪儿打开。
+ *
+ * 默认就是关着的 —— 新装/升级后进 AI 页看到的就是这一张卡。
+ */
+@Composable
+private fun AiMasterOffNotice() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SoftCard {
+            Text(
+                text = "AI 助手总开关已关闭",
+                fontSize = 16.sp,
+                color = WxPalette.textPrimary(),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "现在所有 AI 功能都不出现、也不会发任何请求。\n到「设置」里打开总开关后，再按各项自己的开关使用。",
+                fontSize = 12.sp,
+                color = WxPalette.textSecondary(),
+            )
         }
     }
 }

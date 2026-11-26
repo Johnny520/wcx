@@ -113,20 +113,23 @@ object AiConfig {
     const val KEY_CUE_STYLE_NAME = "ai_global_cue_style_name"
 
     /**
-     * AI 助手总开关（默认开）。
+     * AI 助手总开关（**默认关**）。
      *
-     * 关掉后所有 AI 能力一起停用：双击建议、输入栏与长按菜单里的 AI 工具、自动回复、
-     * 重要信息提醒、好友档案整理与每日总结的定时任务全部失效，[chatWithTools] 直接拒绝请求。
-     * 它与各功能自己的开关是「与」关系 —— 总开关关着时单独打开某个功能也不会跑。
+     * 它相当于整个 AI 能力的总闸：默认关着时，所有 AI 入口都不出现（长按菜单里的 AI 项、
+     * 首页群总结按钮、双击建议）、后台任务也不跑（自动回复、重要信息提醒、档案整理、
+     * 每日总结、群总结），[chatWithTools] 直接拒绝请求 —— 效果和模块里没有 AI 助手一样。
+     *
+     * 打开之后相当于开了一座大门：各项功能再按自己的开关决定要不要用，
+     * 有独立开关的（双击建议、聊天记录总结、首页群总结入口 …）可以单独关掉。
      */
     const val KEY_MASTER = "ai_master_enabled"
 
     /** 总开关关闭时统一给用户看的文案。 */
     const val MASTER_DISABLED_MESSAGE = "AI 助手总开关已关闭，请到「AI 助手 → 设置」里打开"
 
-    /** AI 助手是否处于启用状态（默认开）。 */
+    /** AI 助手是否处于启用状态（默认关）。 */
     val isMasterEnabled: Boolean
-        get() = runCatching { WePrefs.getBoolOrDef(KEY_MASTER, true) }.getOrDefault(true)
+        get() = runCatching { WePrefs.getBoolOrDef(KEY_MASTER, false) }.getOrDefault(false)
 
     /** 切换 AI 助手总开关。各功能在每次调用时读它，所以关掉立即生效，不用重启微信。 */
     fun setMasterEnabled(enabled: Boolean) {

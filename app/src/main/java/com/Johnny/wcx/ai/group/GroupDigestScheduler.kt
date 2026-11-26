@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.utils.HostInfo
 import com.Johnny.wcx.utils.WeLogger
 import kotlinx.coroutines.CancellationException
@@ -44,6 +45,8 @@ object GroupDigestScheduler {
     private var receiver: BroadcastReceiver? = null
 
     fun onEnable() {
+        // AI 助手总开关关着就不排任何定时：群总结一次都不跑。
+        if (!AiConfig.isMasterEnabled) return
         registerReceiver()
         scope.launch { catchUp() }
     }
@@ -119,6 +122,7 @@ object GroupDigestScheduler {
      * 「正在总结」时重排会在 2 秒后再触发一次，形成空转。
      */
     private fun handleTrigger(groupId: String) {
+        if (!AiConfig.isMasterEnabled) return
         val config = GroupDigestStore.readConfig(groupId) ?: return
         if (!config.enabled) return
         scope.launch {
