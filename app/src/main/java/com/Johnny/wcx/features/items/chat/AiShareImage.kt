@@ -151,7 +151,8 @@ object AiShareImage {
         contentHeight += 120 // 页脚
 
         val height = (PADDING * 2 + contentHeight + skin.frameWidth * 2)
-            .coerceIn(MIN_HEIGHT, MAX_HEIGHT)
+            .coerceIn(MIN_HEIGHT.toFloat(), MAX_HEIGHT.toFloat())
+            .toInt()
 
         val bitmap = Bitmap.createBitmap(WIDTH, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -170,7 +171,8 @@ object AiShareImage {
 
         if (skin.frameWidth > 0) {
             val framePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
+                // 用 setStyle 而不是 `style =`：文件里有个同名的 Style 枚举，属性写法会被解析错。
+                setStyle(Paint.Style.STROKE)
                 strokeWidth = skin.frameWidth.toFloat()
                 color = skin.frame
             }
