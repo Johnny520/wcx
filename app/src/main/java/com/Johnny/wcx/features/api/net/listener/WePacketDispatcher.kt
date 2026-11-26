@@ -57,7 +57,8 @@ object WePacketDispatcher : ApiFeature(), IResolveDex {
         wrapper.reflekt().setField("a", parsed)
         parsed
     }.onFailure {
-        WeLogger.w(TAG, "apply parsed pb failed: ${it.javaClass.simpleName} ${it.message}")
+        // 每个 cgi 都可能失败一次（同类 pb 类没有对应 parseFrom），W 级会把日志刷满 —— 降为 D。
+        WeLogger.d(TAG, "apply parsed pb failed: ${it.javaClass.simpleName} ${it.message}")
     }.getOrNull()
 
     private fun warnNotSerializable(uri: String?, cgiId: Int, className: String) {
