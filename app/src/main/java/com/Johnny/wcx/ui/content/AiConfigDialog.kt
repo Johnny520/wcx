@@ -56,6 +56,42 @@ import kotlinx.coroutines.withContext
  * 失败只把原因显示在面板里，不覆盖现有配置。
  */
 @OptIn(ExperimentalLayoutApi::class)
+/**
+ * 常用服务商预设：点一下就把地址和模型填好，仍然可以继续手改。
+ *
+ * 全部是 OpenAI 兼容的 chat/completions 地址，所以走同一套请求逻辑。
+ */
+internal data class AiProviderPreset(
+    val label: String,
+    val url: String,
+    val model: String,
+    val visionModel: String = "",
+)
+
+internal val AI_PROVIDER_PRESETS = listOf(
+    AiProviderPreset("DeepSeek", "https://api.deepseek.com/chat/completions", "deepseek-chat"),
+    AiProviderPreset("OpenAI", "https://api.openai.com/v1/chat/completions", "gpt-4o-mini", "gpt-4o"),
+    AiProviderPreset(
+        "通义千问",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "qwen-plus",
+        "qwen-vl-max",
+    ),
+    AiProviderPreset(
+        "智谱 GLM",
+        "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "glm-4-flash",
+        "glm-4v",
+    ),
+    AiProviderPreset("Kimi", "https://api.moonshot.cn/v1/chat/completions", "moonshot-v1-8k"),
+    AiProviderPreset(
+        "硅基流动",
+        "https://api.siliconflow.cn/v1/chat/completions",
+        "deepseek-ai/DeepSeek-V3",
+    ),
+    AiProviderPreset("本地 Ollama", "http://127.0.0.1:11434/v1/chat/completions", "llama3.1"),
+)
+
 @Composable
 fun AiConfigPanel(
     onDismiss: () -> Unit,
@@ -73,6 +109,8 @@ fun AiConfigPanel(
     var maxTokens by remember { mutableStateOf(AiConfig.maxTokens.toString()) }
     var temperature by remember { mutableStateOf(AiConfig.temperature.toString()) }
     var recognizeImages by remember { mutableStateOf(AiConfig.recognizeImages) }
+    // 识图模型草稿要提到这里：服务商预设也会写它，不能只在高级参数区里声明。
+    var visionModelDraft by remember { mutableStateOf(AiConfig.rawVisionModel) }
 
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
     var loadingModels by remember { mutableStateOf(false) }
@@ -168,8 +206,36 @@ fun AiConfigPanel(
         }
 
         SoftCard(contentPadding = 14) {
+            // 服务商：点一下就填好地址和模型；不选就用下面的输入框自己填（任意地址都行）。
+            Text("选择服务商", fontSize = 12.sp, color = WxPalette.textSecondary())
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AI_PROVIDER_PRESETS.forEach { preset ->
+                    val selected = url.trim().trimEnd('/').equals(preset.url, ignoreCase = true)
+                    CfgChip(
+                        label = preset.label,
+                        selected = selected,
+                        onClick = {
+                            url = preset.url
+                            model = preset.model
+                            if (preset.visionModel.isNotBlank()) visionModelDraft = preset.visionModel
+                            error = null
+                        },
+                    )
+                }
+                CfgChip(
+                    label = "自定义",
+                    selected = AI_PROVIDER_PRESETS.none {
+                        url.trim().trimEnd('/').equals(it.url, ignoreCase = true)
+                    },
+                    onClick = { /* 自定义状态：不动输入框，用户自己填地址 */ },
+                )
+            }
+            Spacer(Modifier.size(4.dp))
             AiInputField(
-                label = "API 地址（留空用默认）",
+                label = "API 地址（可随意填，含端口/子路径）",
                 value = url,
                 placeholder = AiConfig.DEFAULT_URL,
                 onChange = { url = it; error = null },
@@ -303,7 +369,6 @@ fun AiConfigPanel(
                     },
                 )
                 // 识图单独一个模型：主模型可能不支持视觉，填个 gpt-4o / qwen-vl 之类即可。
-                var visionModelDraft by remember { mutableStateOf(AiConfig.rawVisionModel) }
                 AiInputField(
                     label = "识图模型（留空 = 跟主模型相同）",
                     value = visionModelDraft,
