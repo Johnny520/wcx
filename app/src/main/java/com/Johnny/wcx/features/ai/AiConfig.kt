@@ -586,24 +586,20 @@ object AiConfig {
         if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
             trimmed = "https://$trimmed"
         }
-        trimmed = trimmed.trimEnd('/')
-        val lower = trimmed.lowercase()
-        return when {
-            lower.endsWith("/chat/completions") -> trimmed
-            lower.endsWith("/models") -> trimmed.dropLast("/models".length) + "/chat/completions"
-            Regex("/v\\d+$").containsMatchIn(lower) -> "$trimmed/chat/completions"
-            // 只给「协议 + 域名」补默认路径；用户填了自定义路径（中转站、网关）就原样用，
-            // 否则会被拼成 .../custom/path/v1/chat/completions 直接 404。
-            Regex("^https?://[^/]+$").containsMatchIn(lower) -> "$trimmed/v1/chat/completions"
-            else -> trimmed
-        }
+        // **原样使用用户填的地址**：不补 /v1、不补 /chat/completions、不动子路径与端口。
+        // 中转站、自建网关、带自定义端口 / 子路径的地址都能直接用；
+        // 默认地址（DEFAULT_URL）本身是完整路径，所以留空时也不会缺东西。
+        return trimmed.trimEnd('/')
     }
 
     /** 由 chat/completions 地址推导 OpenAI 兼容的 /models 地址。 */
     fun modelsUrl(raw: String): String {
         val trimmed = normalizeChatUrl(raw).trimEnd('/')
+        if (trimmed.isEmpty()) return ""
         val lower = trimmed.lowercase()
         return when {
+            // 只有「.../chat/completions」这种完整路径才能安全推导出 /models；
+            // 自定义路径不去猜（猜错就是 404），返回空让界面提示用户手动填模型名。
             lower.endsWith("/chat/completions") ->
                 trimmed.dropLast("/chat/completions".length) + "/models"
             lower.endsWith("/models") -> trimmed
