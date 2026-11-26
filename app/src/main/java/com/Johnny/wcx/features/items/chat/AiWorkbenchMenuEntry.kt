@@ -1,7 +1,7 @@
 package com.Johnny.wcx.features.items.chat
 
 import com.Johnny.wcx.features.ai.AiConfig
-import com.Johnny.wcx.features.api.core.WeCurrentConversationApi
+import com.Johnny.wcx.features.api.ui.WeCurrentConversationApi
 import com.Johnny.wcx.features.api.ui.WeChatMessageContextMenuApi
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
