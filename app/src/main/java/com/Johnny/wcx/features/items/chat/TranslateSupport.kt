@@ -97,7 +97,13 @@ object TranslateSupport {
 
     // ─── AI 配置 ──────────────────────────────────────────────────────────────
 
-    data class AiConfig(val apiUrl: String, val apiKey: String, val model: String) {
+    data class AiConfig(
+        val apiUrl: String,
+        val apiKey: String,
+        val model: String,
+        /** 图片请求用的模型；空 = 用 [model]。 */
+        val visionModel: String = "",
+    ) {
         val isUsable: Boolean get() = apiKey.isNotBlank() && apiUrl.isNotBlank()
     }
 
@@ -111,7 +117,12 @@ object TranslateSupport {
     fun aiConfig(): AiConfig {
         val unified = runCatching {
             if (AiSettings.isConfigured) {
-                AiConfig(apiUrl = AiSettings.chatUrl, apiKey = AiSettings.apiKey, model = AiSettings.model)
+                AiConfig(
+                    apiUrl = AiSettings.chatUrl,
+                    apiKey = AiSettings.apiKey,
+                    model = AiSettings.model,
+                    visionModel = AiSettings.visionModel,
+                )
             } else {
                 null
             }
@@ -279,7 +290,7 @@ object TranslateSupport {
         val base64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
         val body = runCatching {
             buildJsonObject {
-                put("model", config.model.ifBlank { "deepseek-chat" })
+                put("model", config.visionModel.ifBlank { config.model }.ifBlank { "gpt-4o" })
                 put("temperature", 0.2)
                 put("messages", buildJsonArray {
                     if (systemPrompt.isNotBlank()) {

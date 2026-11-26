@@ -88,3 +88,5 @@ WCX 是一个功能丰富的微信 Xposed 模块, 提供大量微信增强功能
 [FingerprintPay](https://github.com/eritpchy/FingerprintPay)
 
 [WADN](https://github.com/Johnny520/wauxv_deobf_new) [WAD](https://github.com/Johnny520/wauxv_deobf)
+
+[AARCNoa/zhiyou](https://github.com/AARCNoa/zhiyou)（AI 好友档案 / 群聊总结的早期实现参考自该项目）

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -296,6 +297,17 @@ fun AiConfigPanel(
                         AiConfig.setRecognizeImages(it)
                     },
                 )
+                // 识图单独一个模型：主模型可能不支持视觉，填个 gpt-4o / qwen-vl 之类即可。
+                var visionModelDraft by remember { mutableStateOf(AiConfig.rawVisionModel) }
+                AiInputField(
+                    label = "识图模型（留空 = 跟主模型相同）",
+                    value = visionModelDraft,
+                    placeholder = "例如 gpt-4o / qwen-vl-max / glm-4v",
+                    onChange = {
+                        visionModelDraft = it
+                        AiConfig.setVisionModel(it)
+                    },
+                )
             }
         }
 
@@ -443,13 +455,20 @@ fun AiInputField(
             if (value.isEmpty() && placeholder.isNotEmpty()) {
                 Text(placeholder, fontSize = 14.sp, color = WxPalette.textTertiary())
             }
+            // 多行显示：接口地址、Key、模型名这类长文本以前只能看到第一行开头，
+            // 后面被截断又没法滑（用户反馈「像卡死一样」）。现在按宽度自动折行，
+            // 最多 4 行高度，超过就在框内上下滚动。
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
-                singleLine = true,
+                singleLine = false,
+                maxLines = 4,
                 textStyle = TextStyle(fontSize = 14.sp, color = WxPalette.textPrimary()),
                 cursorBrush = SolidColor(WxPalette.Primary),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 96.dp)
+                    .verticalScroll(rememberScrollState()),
             )
         }
     }

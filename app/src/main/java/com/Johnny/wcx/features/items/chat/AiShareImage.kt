@@ -299,8 +299,8 @@ object AiShareImage {
     private fun looksLikeHeading(line: String): Boolean {
         val value = line.trim()
         if (value.isEmpty() || value.length > 40) return false
-        val numbered = Regex("^\d{1,2}[.、)）]").containsMatchIn(value)
-        val chinese = Regex("^[一二三四五六七八九十]{1,3}、").containsMatchIn(value)
+        val numbered = Regex("""^\d{1,2}[.、)）]""").containsMatchIn(value)
+        val chinese = Regex("""^[一二三四五六七八九十]{1,3}、""").containsMatchIn(value)
         return numbered || chinese
     }
 

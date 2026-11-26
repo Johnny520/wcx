@@ -1465,6 +1465,13 @@ fun AcknowledgementsScreen(onBack: () -> Unit) {
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         lineHeight = 22.sp,
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "AI 好友档案与群聊总结的早期实现参考自 AARCNoa/zhiyou。",
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        lineHeight = 22.sp,
+                    )
                 }
             }
         }

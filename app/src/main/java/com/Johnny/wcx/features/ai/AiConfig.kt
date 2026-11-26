@@ -93,6 +93,27 @@ object AiConfig {
      */
     const val KEY_RECOGNIZE_IMAGES = "ai_recognize_images"
 
+    /**
+     * 识图模型：图片相关请求（读图翻译、看图理解）单独指定一个支持视觉的模型。
+     * 留空表示跟主模型相同 —— 主模型本身支持识图时不用填。
+     */
+    const val KEY_VISION_MODEL = "ai_global_vision_model"
+
+    /** 用户填的原始识图模型名（界面上要显示用户输入，不能显示回落后的值）。 */
+    val rawVisionModel: String
+        get() = readString(KEY_VISION_MODEL)
+
+    /** 实际用于图片请求的模型名（没单独配置就用主模型）。 */
+    val visionModel: String
+        get() = readString(KEY_VISION_MODEL).trim().ifBlank { model }
+
+    /** 保存识图模型（空 = 跟随主模型）。 */
+    fun setVisionModel(name: String) {
+        if (!prefsAvailable) return
+        runCatching { WePrefs.putString(KEY_VISION_MODEL, name.trim()) }
+            .onFailure { WeLogger.e(TAG, "save vision model failed", it) }
+    }
+
     /** 默认输出上限：393216。服务商支持多少就是多少，超出它会自己报错，我们降级重试。 */
     const val DEFAULT_MAX_TOKENS = 393_216
 
