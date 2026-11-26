@@ -30,6 +30,7 @@ import com.Johnny.wcx.ui.content.m3.SegmentedColumn
 import com.Johnny.wcx.ui.content.m3.TextFieldDialogWidget
 import com.Johnny.wcx.ui.utils.showComposeDialog
 import com.Johnny.wcx.utils.android.showToast
+import com.Johnny.wcx.utils.WeLogger
 
 /**
  * 安全消息发送器。
@@ -61,6 +62,8 @@ import com.Johnny.wcx.utils.android.showToast
     description = "在自己发出的文本消息 msgsource 中注入 sec_msg_node 标记，双方长按该消息只剩「删除」选项。被动模式：对所有发出的文本消息生效；主动模式：长按发送按钮或使用触发前缀，仅对特定消息生效"
 )
 object SendSecMsg : ClickableFeature(), IResolveDex {
+
+    private const val TAG = "SendSecMsg"
 
     /** 被动模式: 所有自己发出的文本消息一律注入标记 */
     private const val MODE_PASSIVE = 0
@@ -131,7 +134,11 @@ object SendSecMsg : ClickableFeature(), IResolveDex {
 
     override fun onEnable() {
         methodInsertMessage.hookBefore {
-            val msgInfo = MessageInfo(args[0]!!)
+            // 只读 args[0] 的前提是「这个重载一定有参数」。实测 8.0.80 会被同串的无参/少参
+            // 重载命中，args 为空时 args[0] 直接抛 ArrayIndexOutOfBoundsException:
+            // length=0; index=0，表现为「安全消息发送开不了」。所以一律走安全取值。
+            val raw = args.getOrNull(0) ?: return@hookBefore
+            val msgInfo = runCatching { MessageInfo(raw) }.getOrNull() ?: return@hookBefore
 
             // 只处理自己发送的文本消息 (isSend=1, type=1)
             if (msgInfo.isSend != 1 || msgInfo.typeCode != 1) return@hookBefore
@@ -144,15 +151,16 @@ object SendSecMsg : ClickableFeature(), IResolveDex {
             if (!shouldInject) return@hookBefore
 
             // z=false: 只改内存 msgsource, 随入库方法写入
-            methodMergeSecNode.method.invoke(null, args[0], SEC_XML, false)
+            runCatching { methodMergeSecNode.method.invoke(null, raw, SEC_XML, false) }
+                .onFailure { WeLogger.w(TAG, "注入安全消息标记失败", it) }
         }
 
         WeChatInputBarMenuApi.methodSendMessage.hookBefore {
             if (mode != MODE_ACTIVE_PREFIX) return@hookBefore
 
-            val chatFooter = thisObject!!.reflekt().firstField {
-                type = ChatFooter::class
-            }.get()!! as ChatFooter
+            val chatFooter = runCatching {
+                thisObject?.reflekt()?.firstField { type = ChatFooter::class }?.get() as? ChatFooter
+            }.getOrNull() ?: return@hookBefore
 
             val text = chatFooter.lastText
 
