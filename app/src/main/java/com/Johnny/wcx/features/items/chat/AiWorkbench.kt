@@ -432,6 +432,10 @@ private fun AiWorkbenchDialog(
                     showToast("已复制")
                 }
                 PillButton("生成图片", enabled = content.isNotBlank()) { showImagePanel = true }
+                PillButton("每天自动发", enabled = content.isNotBlank()) {
+                    AiAutoDigestSender.enable(talker, title)
+                    showToast("已设置：每天 ${AiAutoDigestSender.hour} 点把总结图发到本会话")
+                }
                 PillButton("发送到本会话", enabled = content.isNotBlank()) {
                     val text = content
                     scope.launch {

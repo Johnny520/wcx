@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.Johnny.wcx.features.items.chat.AiAutoDigestSender
 import com.Johnny.wcx.features.items.ai.GroupDigestEntry
 import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.ai.AutoIncrementalScheduler
@@ -62,6 +63,8 @@ internal fun AiCueSettings(
     val selectedIndex = AiCueSound.Style.indexOf(selectedId)
     var masterEnabled by remember { mutableStateOf(AiConfig.isMasterEnabled) }
     var groupEntryEnabled by remember { mutableStateOf(GroupDigestEntry.isEntryEnabled) }
+    var autoDigestOn by remember { mutableStateOf(AiAutoDigestSender.isEnabled) }
+    var autoDigestHour by remember { mutableStateOf(AiAutoDigestSender.hour) }
 
     Column(
         modifier = Modifier
@@ -192,6 +195,65 @@ internal fun AiCueSettings(
                 },
                 showDivider = false,
             )
+        }
+
+        // 每天自动发总结：目标会话在工作台里选，这里只负责看状态 / 改时间 / 关掉。
+        var showAutoHour by remember { mutableStateOf(false) }
+        SoftCard(contentPadding = 0) {
+            AiSwitchRow(
+                title = "每天自动发总结",
+                subtitle = if (autoDigestOn) {
+                    "每天 $autoDigestHour 点把「${AiAutoDigestSender.targetTitle}」的总结图发进该会话"
+                } else {
+                    "想开启：到那个聊天里双击 → 工作台 →「每天自动发」"
+                },
+                checked = autoDigestOn,
+                enabled = masterEnabled,
+                onCheckedChange = { on ->
+                    autoDigestOn = on
+                    if (!on) AiAutoDigestSender.disable()
+                },
+                showDivider = autoDigestOn,
+            )
+            if (autoDigestOn) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showAutoHour = true }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("发送时间", fontSize = 13.sp, color = WxPalette.textPrimary())
+                    Spacer(Modifier.weight(1f))
+                    Text("$autoDigestHour 点", fontSize = 13.sp, color = WxPalette.Accent)
+                    Text("  ›", fontSize = 13.sp, color = WxPalette.textTertiary())
+                }
+            }
+        }
+
+        if (showAutoHour) {
+            ScrimDialog(show = true, onDismissRequest = { showAutoHour = false }, title = "发送时间") {
+                AiAutoDigestSender.HOUR_OPTIONS.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                autoDigestHour = option
+                                AiAutoDigestSender.setHour(option)
+                                showAutoHour = false
+                            }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "${option}点",
+                            fontSize = 14.sp,
+                            color = if (option == autoDigestHour) WxPalette.Primary else WxPalette.textPrimary(),
+                        )
+                    }
+                }
+            }
         }
 
         // 档案自动整理：每天补一次新增聊天（默认关，会花额度）。

@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.ai
 
 import com.Johnny.wcx.ai.group.GroupDigestScheduler
+import com.Johnny.wcx.features.items.chat.AiAutoDigestSender
 import com.Johnny.wcx.features.core.ApiFeature
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.utils.HostInfo
@@ -20,11 +21,14 @@ object AiGroupDigestFeature : ApiFeature() {
 
     override fun onEnable() {
         GroupDigestScheduler.onEnable()
+        // 每日自动总结发图（默认关，用户在工作台里开启后才有动作）。
+        AiAutoDigestSender.start()
         // 入口跟着 Activity 生命周期走，不依赖侧边栏功能是否开启。
         GroupDigestEntry.register(HostInfo.application)
     }
 
     override fun onDisable() {
+        AiAutoDigestSender.stop()
         GroupDigestEntry.unregister()
         GroupDigestScheduler.onDisable()
     }
