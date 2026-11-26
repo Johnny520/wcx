@@ -97,18 +97,15 @@ object AiSuggestGesture : ApiFeature() {
     /** 消息类型 → 是否带 `field_talker`。 */
     private val messageTypes = HashMap<Class<*>, Boolean>()
 
+    /**
+     * 双击手势已整体取消（v349）。
+     *
+     * 用户反馈：聊天页双击会和微信自己的操作打架（选词、放大图片），而且「双击建议」
+     * 只是针对好友档案的一个场景，不如统一收进长按菜单。现在 AI 工作台从
+     * 「长按任意消息 → 菜单 → AI 助手」进入，这里不再挂任何 hook。
+     */
     override fun onEnable() {
-        hookTouch("android.app.Activity")
-        hookTouch(MMF_ACTIVITY_CLASS)
-
-        // 切换会话时收起上一张卡片：聊天页是同一个 Activity 里的 Fragment，换会话不触发
-        // Activity 的 pause，浮层不会自己消失，否则会一直盖在新会话上。
-        // 输入栏每次进会话都会重新附着（QuickBackToBottom 依赖同一行为），用它做信号。
-        runCatching {
-            ChatFooter::class.reflekt().firstMethodOrNull { name = "onAttachedToWindow" }?.hookAfter {
-                if (thisObject is ChatFooter) AiSuggestOverlay.dismiss()
-            }
-        }.onFailure { WeLogger.w(TAG, "ChatFooter.onAttachedToWindow hook 失败", it) }
+        WeLogger.i(TAG, "双击手势已取消，AI 工作台改由消息长按菜单打开")
     }
 
     private fun hookTouch(className: String) {

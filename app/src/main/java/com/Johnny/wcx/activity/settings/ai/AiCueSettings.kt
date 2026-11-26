@@ -334,19 +334,24 @@ internal fun AiCueSettings(
         }
 
         // 需要用户决定的开关都在这一张卡里，不再散落在功能列表。
-        var gestureEnabled by remember { mutableStateOf(AiConfig.isSuggestGestureEnabled) }
         var summaryEnabled by remember { mutableStateOf(ChatAiSummary.isEnabled) }
         SoftCard(contentPadding = 0) {
-            AiSwitchRow(
-                title = "双击打开 AI 工作台",
-                subtitle = "聊天页（群聊/私聊）双击空白处弹出 AI 工作台（关掉后双击不响应）",
-                enabled = masterEnabled,
-                checked = gestureEnabled,
-                onCheckedChange = {
-                    gestureEnabled = it
-                    AiConfig.setSuggestGestureEnabled(it)
-                },
-            )
+            // 双击已取消：容易和微信自己的选词 / 放大图片冲突，统一走消息长按菜单。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("AI 工作台入口", fontSize = 15.sp, color = WxPalette.textPrimary())
+                    Text(
+                        text = "长按任意一条消息（文字/图片/语音/视频/小程序）→ 菜单里点「AI 助手」。双击已取消。",
+                        fontSize = 11.sp,
+                        color = WxPalette.textSecondary(),
+                    )
+                }
+            }
             AiSwitchRow(
                 title = "聊天记录 AI 总结",
                 subtitle = "聊天输入栏长按菜单里总结最近消息，接口同上",

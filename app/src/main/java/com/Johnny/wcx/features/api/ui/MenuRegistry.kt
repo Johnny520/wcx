@@ -85,6 +85,8 @@ internal fun aiMenuOwnerAllowed(owner: Any): Boolean {
     // 朋友圈不属于聊天，工作台管不到，朋友圈的 AI 项保留（只看总开关）。
     val simple = owner.javaClass.name.substringAfterLast('.')
     if (simple.startsWith("AiMoments")) return AiConfig.isMasterEnabled
+    // 聊天消息长按菜单里的唯一入口：总开关开着就出现（双击取消后这是进入工作台的唯一方式）。
+    if (simple.startsWith("AiWorkbenchMenu")) return AiConfig.isMasterEnabled
     // AI 项是否还留在宿主菜单里。v349 起统一收进「聊天页双击 → AI 工作台」，
     // 宿主菜单里不再出现 —— 之前散在输入栏长按/消息长按/朋友圈长按三处，用户记不住哪个在哪。
     // 要恢复菜单入口，把这里改成 true。

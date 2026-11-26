@@ -20,6 +20,7 @@ internal object InternalFeatureGroups {
     /** 父入口 -> 归属它的子功能 @Feature name 列表。 */
     private val groups: Map<String, List<String>> = mapOf(
         AI_ASSISTANT to listOf(
+            "AI 助手入口",
             "AI 自动回复",
             "AI 建议双击",
             "群聊总结",
