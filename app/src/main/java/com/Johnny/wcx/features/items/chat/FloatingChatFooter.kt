@@ -15,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import com.tencent.mm.ui.chatting.ChattingUI
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import dev.ujhhgtg.reflekt.reflekt
 import com.Johnny.wcx.dexkit.abc.IResolveDex
 import com.Johnny.wcx.dexkit.dsl.dexMethod
@@ -73,33 +75,55 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     override fun onEnable() {
         val reflekt = ChatFooter::class.reflekt()
 
-        // Outline + elevation can be set immediately after construction (no LayoutParams needed)
-        ChatFooter::class.constructor.hookAfter {
-            applyDrawingStyle(thisObject as ChatFooter)
-        }
+        // Outline + elevation can be set immediately after construction (no LayoutParams needed).
+        //
+        // 不能用 ChatFooter::class.constructor：reflekt 默认按「无参构造器」匹配，而 ChatFooter
+        // 只有 (Context, AttributeSet) / (Context, AttributeSet, int)，会抛
+        // "No constructor matching conditions" —— onEnable 直接失败，整个悬浮输入框就不生效。
+        // 这里直接遍历所有构造器逐个挂（和聊天工具栏那次踩的是同一个坑）。
+        runCatching {
+            ChatFooter::class.java.declaredConstructors.forEach { ctor ->
+                runCatching {
+                    XposedBridge.hookMethod(
+                        ctor,
+                        object : XC_MethodHook() {
+                            override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                                (param.thisObject as? ChatFooter)?.let { applyDrawingStyle(it) }
+                            }
+                        },
+                    )
+                }
+            }
+        }.onFailure { com.Johnny.wcx.utils.WeLogger.w(TAG, "挂 ChatFooter 构造器失败", it) }
 
         // Side margins must wait until onAttachedToWindow: LayoutParams is set by the parent
         // ViewGroup (ChattingScrollLayout) when it calls addView(), which happens after the
         // constructor returns. It is guaranteed to be non-null by the time the view attaches.
-        reflekt.firstMethod { name = "onAttachedToWindow" }.hookAfter {
-            applySideMargins(thisObject as ChatFooter)
-        }
+        runCatching {
+            reflekt.firstMethod { name = "onAttachedToWindow" }.hookAfter {
+                applySideMargins(thisObject as ChatFooter)
+            }
+        }.onFailure { com.Johnny.wcx.utils.WeLogger.w(TAG, "挂 onAttachedToWindow 失败", it) }
 
         // Shift the footer upward after WeChat writes its negative bottomMargin so the
         // rounded bottom corners clear the keyboard edge
-        methodRefreshBottomHeight.hookAfter {
-            applyBottomGap(thisObject as ChatFooter)
-        }
+        runCatching {
+            methodRefreshBottomHeight.hookAfter {
+                applyBottomGap(thisObject as ChatFooter)
+            }
+        }.onFailure { com.Johnny.wcx.utils.WeLogger.w(TAG, "挂 refreshBottomHeight 失败", it) }
 
         // Notification jump (and other non-standard entry paths) can bypass the normal
         // ChatFooter creation lifecycle. Re-check on every ChattingUI.onResume and re-apply
         // the floating style if the footer exists but hasn't been styled yet.
+        runCatching {
         ChattingUI::class.reflekt().firstMethod { name = "onResume" }.hookAfter {
             val activity = thisObject as? ChattingUI ?: return@hookAfter
             val footer = findChatFooter(activity) ?: return@hookAfter
             applyDrawingStyle(footer)
             applySideMargins(footer)
         }
+        }.onFailure { com.Johnny.wcx.utils.WeLogger.w(TAG, "挂 ChattingUI.onResume 失败", it) }
     }
 
     /** Sets the outline provider, corner clipping, and elevation — all drawing properties
