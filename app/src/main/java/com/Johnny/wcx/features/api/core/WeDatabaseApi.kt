@@ -140,8 +140,12 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
         if (now - lastInitAttemptAt < INIT_RETRY_COOLDOWN_MS) return isReady
         lastInitAttemptAt = now
 
-        // 1) DexKit 锚点（部分版本可用），失败不影响下一步
+        // 1) DexKit 锚点（部分版本可用），失败不影响下一步。
+        //    必须校验类型：8.0.80 上这个锚点会落到 MMKernel 的另一个静态无参方法，
+        //    返回的是 UI 实例（线上日志 CoreStorage(com.tencent.mm.ui.LauncherUI)），
+        //    拿它去找 SqliteDB 永远找不到，于是数据库整天都是未就绪 —— AI 读不到任何聊天记录。
         val fromAnchor = runCatching { methodGetStorage.method.invoke(null) }.getOrNull()
+            ?.takeIf { runCatching { classCoreStorage.clazz.isInstance(it) }.getOrDefault(false) }
 
         // 2) 反射兜底：MMKernel 里「静态 + 无参 + 返回 CoreStorage」的方法
         val storage = fromAnchor ?: runCatching {
@@ -509,6 +513,10 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
         // 兜底：DexKit 的 methodGetStorage（部分版本仍可用），失败不影响上面的反射路径。
         runCatching { methodGetStorage.method }.getOrNull()?.hookAfter {
             val storageObj = result ?: return@hookAfter
+            // 同上：锚点可能落到返回 UI 实例的静态方法，类型不对就丢掉。
+            if (!runCatching { classCoreStorage.clazz.isInstance(storageObj) }.getOrDefault(false)) {
+                return@hookAfter
+            }
             if (lastStorageRef?.get() === storageObj) return@hookAfter
             initializeDatabase(storageObj)
         }
@@ -574,7 +582,9 @@ object WeDatabaseApi : ApiFeature(), IResolveDex {
         if (wrapperObj == null) {
             lastFailedStorageClass = storageClassName
             lastFailedAt = nowMs
-            WeLogger.w(
+            // 一天会走到几千次（getCoreStorage 被高频调用），W 级会把日志刷满，
+            // 真正的错误反而看不到 —— 降成 D，只在诊断页看。
+            WeLogger.d(
                 TAG,
                 "initializeDatabase: CoreStorage(${storageObj.javaClass.name}) 中未找到 SqliteDB wrapper，本次跳过"
             )
