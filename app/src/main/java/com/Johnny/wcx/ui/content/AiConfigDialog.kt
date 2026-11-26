@@ -62,9 +62,11 @@ fun AiConfigPanel(
     onSaved: (AiConfig.Status) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var url by remember { mutableStateOf(AiConfig.rawUrl.ifBlank { AiConfig.DEFAULT_URL }) }
+    // 不预填默认值：默认地址只作为灰色占位提示，用户直接输自己的就能覆盖，
+    // 否则要先手动删掉一大串默认地址，容易以为「地址改不了」。
+    var url by remember { mutableStateOf(AiConfig.rawUrl) }
     var key by remember { mutableStateOf(AiConfig.rawApiKey) }
-    var model by remember { mutableStateOf(AiConfig.rawModel.ifBlank { AiConfig.DEFAULT_MODEL }) }
+    var model by remember { mutableStateOf(AiConfig.rawModel) }
     var thinking by remember { mutableStateOf(AiConfig.status.thinking) }
     var thinkingLevel by remember { mutableStateOf(AiConfig.thinkingLevel) }
     var advanced by remember { mutableStateOf(false) }
@@ -91,11 +93,12 @@ fun AiConfigPanel(
     }
 
     fun runFetchModels() {
-        if (loadingModels || url.isBlank() || key.isBlank()) return
+        if (loadingModels || key.isBlank()) return
+        val fetchUrl = url.trim().ifBlank { AiConfig.DEFAULT_URL }
         loadingModels = true
         error = null
         scope.launch(Dispatchers.IO) {
-            val result = AiConfig.fetchModels(url, key)
+            val result = AiConfig.fetchModels(fetchUrl, key)
             withContext(Dispatchers.Main) {
                 loadingModels = false
                 if (result.ok) {
@@ -111,19 +114,21 @@ fun AiConfigPanel(
 
     fun runVerifyAndSave() {
         if (verifying) return
-        if (url.isBlank() || key.isBlank() || model.isBlank()) {
-            error = "API 地址、API Key、模型名称都要填写"
+        if (key.isBlank()) {
+            error = "API Key 必须填写"
             return
         }
+        val targetUrl = url.trim().ifBlank { AiConfig.DEFAULT_URL }
+        val targetModel = model.trim().ifBlank { AiConfig.DEFAULT_MODEL }
         verifying = true
         error = null
         scope.launch(Dispatchers.IO) {
-            val result = AiConfig.verify(url, key, model)
+            val result = AiConfig.verify(targetUrl, key, targetModel)
             withContext(Dispatchers.Main) {
                 verifying = false
                 if (result.ok) {
-                    val finalModel = model.trim().ifBlank { result.models.firstOrNull().orEmpty() }
-                    AiConfig.saveVerified(url, key, finalModel)
+                    val finalModel = targetModel.ifBlank { result.models.firstOrNull().orEmpty() }
+                    AiConfig.saveVerified(targetUrl, key, finalModel)
                     showToast("已保存")
                     onSaved(AiConfig.status)
                     onDismiss()
@@ -164,9 +169,9 @@ fun AiConfigPanel(
 
         SoftCard(contentPadding = 14) {
             AiInputField(
-                label = "API 地址",
+                label = "API 地址（留空用默认）",
                 value = url,
-                placeholder = "https://api.deepseek.com",
+                placeholder = AiConfig.DEFAULT_URL,
                 onChange = { url = it; error = null },
             )
             AiInputField(
@@ -465,10 +470,11 @@ fun AiInputField(
                 maxLines = 4,
                 textStyle = TextStyle(fontSize = 14.sp, color = WxPalette.textPrimary()),
                 cursorBrush = SolidColor(WxPalette.Primary),
+                // 不要再套 verticalScroll：外层滚动容器会抢走触摸，输入框点不进去、改不了内容。
+                // 多行 BasicTextField 内部本来就会跟着光标滚动。
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 96.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .heightIn(max = 96.dp),
             )
         }
     }

@@ -592,7 +592,10 @@ object AiConfig {
             lower.endsWith("/chat/completions") -> trimmed
             lower.endsWith("/models") -> trimmed.dropLast("/models".length) + "/chat/completions"
             Regex("/v\\d+$").containsMatchIn(lower) -> "$trimmed/chat/completions"
-            else -> "$trimmed/v1/chat/completions"
+            // 只给「协议 + 域名」补默认路径；用户填了自定义路径（中转站、网关）就原样用，
+            // 否则会被拼成 .../custom/path/v1/chat/completions 直接 404。
+            Regex("^https?://[^/]+$").containsMatchIn(lower) -> "$trimmed/v1/chat/completions"
+            else -> trimmed
         }
     }
 
