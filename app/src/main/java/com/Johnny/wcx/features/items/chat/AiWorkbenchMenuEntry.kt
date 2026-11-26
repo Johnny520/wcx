@@ -57,21 +57,19 @@ object AiWorkbenchMenuEntry : ApiFeature(), WeChatMessageContextMenuApi.IMenuIte
             multiSelect = WeChatMessageContextMenuApi.MultiSelectSupport.Unsupported,
         ) { _, chattingContext, _ ->
             val activity = runCatching { chattingContext.activity }.getOrNull()
-            if (activity == null) {
-                showToast("没拿到聊天界面，稍后再试")
-                return@MenuItem
-            }
             val talker = runCatching { WeCurrentConversationApi.value }.getOrDefault("")
-            if (talker.isBlank()) {
-                showToast("没识别到当前聊天")
-                return@MenuItem
+            when {
+                activity == null -> showToast("没拿到聊天界面，稍后再试")
+                talker.isBlank() -> showToast("没识别到当前聊天")
+                else -> {
+                    // 会话名要读库，放到后台算完再弹面板。
+                    Thread({
+                        val title = runCatching { AiDigestSource.displayName(talker) }
+                            .getOrNull()?.takeIf { it.isNotBlank() } ?: talker
+                        AiWorkbench.show(activity, talker, title, talker.isGroupChatWxId)
+                    }, "WCX-AiWorkbenchOpen").start()
+                }
             }
-            // 会话名要读库，放到后台算完再弹面板。
-            Thread({
-                val title = runCatching { AiDigestSource.displayName(talker) }
-                    .getOrNull()?.takeIf { it.isNotBlank() } ?: talker
-                AiWorkbench.show(activity, talker, title, talker.isGroupChatWxId)
-            }, "WCX-AiWorkbenchOpen").start()
         },
     )
 }
