@@ -26,6 +26,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.LaunchedEffect
+import android.graphics.Bitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -218,6 +221,14 @@ object AiWorkbench {
 
     // ── 发送 / 复制 ─────────────────────────────────────────────────────────
 
+    /** 页脚时间戳，例如「11-26 12:30」。 */
+    internal fun timeLabel(): String =
+        try {
+            java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA).format(java.util.Date())
+        } catch (_: Throwable) {
+            ""
+        }
+
     internal fun sendToChat(talker: String, text: String): Boolean = runCatching {
         val ok = WeMessageApi.sendText(talker, text)
         if (!ok) throw IOException("发送失败（微信发送接口不可用）")
@@ -254,6 +265,7 @@ private fun AiWorkbenchDialog(
     var input by remember { mutableStateOf("") }
     var pendingInput by remember { mutableStateOf<AiWorkbench.Task?>(null) }
     var showPromptEditor by remember { mutableStateOf(false) }
+    var showImagePanel by remember { mutableStateOf(false) }
     var promptDraft by remember { mutableStateOf(AiWorkbench.groupSummaryTemplate()) }
 
     fun start(task: AiWorkbench.Task, value: String) {
@@ -419,6 +431,7 @@ private fun AiWorkbenchDialog(
                     copyToClipboard(content)
                     showToast("已复制")
                 }
+                PillButton("生成图片", enabled = content.isNotBlank()) { showImagePanel = true }
                 PillButton("发送到本会话", enabled = content.isNotBlank()) {
                     val text = content
                     scope.launch {
@@ -432,6 +445,16 @@ private fun AiWorkbenchDialog(
                 }
             }
         }
+    }
+
+    // 分享长图：选样式 → 预览 → 保存 / 发送
+    if (showImagePanel) {
+        ShareImagePanel(
+            talker = talker,
+            title = title,
+            body = content,
+            onDismiss = { showImagePanel = false },
+        )
     }
 
     // 群总结提示词编辑
@@ -535,4 +558,114 @@ private fun PillButton(
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
     )
+}
+
+/**
+ * 分享长图面板：四套样式实时切换，预览后可以存相册或直接发到当前会话。
+ *
+ * 渲染在 Default 线程做（长文折行 + 大位图），切换样式会重新画一张并回收上一张。
+ */
+@Composable
+private fun ShareImagePanel(
+    talker: String,
+    title: String,
+    body: String,
+    onDismiss: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var style by remember { mutableStateOf(AiShareImage.Style.CLASSIC) }
+    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var rendering by remember { mutableStateOf(true) }
+
+    LaunchedEffect(style, body) {
+        rendering = true
+        val old = bitmap
+        val next = withContext(Dispatchers.Default) {
+            runCatching { AiShareImage.render(style, "$title · AI 总结", AiWorkbench.timeLabel(), body) }
+                .getOrNull()
+        }
+        if (old != null && old !== next && !old.isRecycled) runCatching { old.recycle() }
+        bitmap = next
+        rendering = false
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC000000))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.9f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(WxPalette.pageBackground())
+                .clickable(enabled = false) {}
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("生成分享图", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = WxPalette.textPrimary())
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AiShareImage.Style.values().forEach { item ->
+                    val selected = item == style
+                    Text(
+                        text = item.label,
+                        fontSize = 12.sp,
+                        color = if (selected) WxPalette.Primary else WxPalette.textSecondary(),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) WxPalette.primarySoft() else WxPalette.insetSurface())
+                            .clickable { style = item }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(WxPalette.cardBackground()),
+                contentAlignment = Alignment.Center,
+            ) {
+                val image = bitmap
+                when {
+                    rendering -> Text("正在生成图片…", fontSize = 13.sp, color = WxPalette.textSecondary())
+                    image == null -> Text("生成失败，换个样式再试", fontSize = 13.sp, color = Color(0xFFE04B4B))
+                    else -> androidx.compose.foundation.Image(
+                        bitmap = image.asImageBitmap(),
+                        contentDescription = "分享图预览",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillButton("保存到相册", enabled = bitmap != null) {
+                    val image = bitmap ?: return@PillButton
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            AiShareImage.saveToGallery(context, image, "wcx-ai-${System.currentTimeMillis()}")
+                        }
+                        showToast(if (ok) "已保存到相册" else "保存失败")
+                    }
+                }
+                PillButton("发送到本会话", enabled = bitmap != null) {
+                    val image = bitmap ?: return@PillButton
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            val file = AiShareImage.saveTemp(context, image) ?: return@withContext false
+                            AiShareImage.sendToChat(talker, file)
+                        }
+                        showToast(if (ok) "已发送" else "发送失败，可先保存到相册再发")
+                    }
+                }
+                PillButton("关闭", secondary = true) { onDismiss() }
+            }
+        }
+    }
 }
