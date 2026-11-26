@@ -46,6 +46,9 @@ object AiShareImage {
         COMIC("漫画日报"),
         NEON("霓虹科技"),
         MINIMAL("极简白卡"),
+
+        /** 浅蓝渐变页头 + 白卡细红边 + 红色小节标题（报告风）。 */
+        REPORT("分析报告"),
     }
 
     /** 一套样式的全部配色与结构参数。 */
@@ -65,6 +68,10 @@ object AiShareImage {
         val footerBar: Int = Color.TRANSPARENT,
         val footerText: Int,
         val cardPadding: Int = 56,
+        /** 卡片描边色（0 = 不描边）。 */
+        val border: Int = Color.TRANSPARENT,
+        /** 正文里「1. / 一、」这类小标题用的颜色（0 = 不区分）。 */
+        val headingAccent: Int = Color.TRANSPARENT,
     )
 
     private fun skinOf(style: Style): Skin = when (style) {
@@ -110,6 +117,22 @@ object AiShareImage {
             subColor = Color.parseColor("#9FE8FF"),
             footerBar = Color.parseColor("#00F0FF"),
             footerText = Color.parseColor("#0A0E27"),
+        )
+
+        Style.REPORT -> Skin(
+            background = Color.parseColor("#E3F2FD"),
+            backgroundEnd = Color.parseColor("#FDEBF4"),
+            card = Color.WHITE,
+            cardRadius = 28,
+            headerStart = Color.WHITE,
+            headerEnd = Color.WHITE,
+            headerHeight = 210,
+            titleColor = Color.parseColor("#1F3864"),
+            bodyColor = Color.parseColor("#333333"),
+            subColor = Color.parseColor("#5A6B7A"),
+            footerText = Color.parseColor("#999999"),
+            border = Color.parseColor("#D85B5B"),
+            headingAccent = Color.parseColor("#C94C4C"),
         )
 
         Style.MINIMAL -> Skin(
@@ -193,6 +216,14 @@ object AiShareImage {
         val cardRect = RectF(cardLeft, cardTop, cardRight, cardBottom)
         val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = skin.card }
         canvas.drawRoundRect(cardRect, skin.cardRadius.toFloat(), skin.cardRadius.toFloat(), cardPaint)
+        if (skin.border != Color.TRANSPARENT) {
+            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                setStyle(Paint.Style.STROKE)
+                strokeWidth = 3f
+                color = skin.border
+            }
+            canvas.drawRoundRect(cardRect, skin.cardRadius.toFloat(), skin.cardRadius.toFloat(), borderPaint)
+        }
 
         // 4) 标题横幅（顶部圆角、底部直角）
         canvas.save()
@@ -230,10 +261,15 @@ object AiShareImage {
         )
 
         // 6) 正文
+        val headingPaint = Paint(bodyPaint).apply {
+            color = if (skin.headingAccent != Color.TRANSPARENT) skin.headingAccent else skin.bodyColor
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
         var y = cardTop + skin.headerHeight + skin.cardPadding + BODY_SIZE
         for (line in lines) {
             if (y > cardBottom - 150) break
-            canvas.drawText(line, cardLeft + skin.cardPadding, y, bodyPaint)
+            val isHeading = skin.headingAccent != Color.TRANSPARENT && looksLikeHeading(line)
+            canvas.drawText(line, cardLeft + skin.cardPadding, y, if (isHeading) headingPaint else bodyPaint)
             y += lineHeight
         }
 
@@ -257,6 +293,15 @@ object AiShareImage {
         )
 
         return bitmap
+    }
+
+    /** 「1. / 1、/ 一、」这类行按小标题处理。 */
+    private fun looksLikeHeading(line: String): Boolean {
+        val value = line.trim()
+        if (value.isEmpty() || value.length > 40) return false
+        val numbered = Regex("^\d{1,2}[.、)）]").containsMatchIn(value)
+        val chinese = Regex("^[一二三四五六七八九十]{1,3}、").containsMatchIn(value)
+        return numbered || chinese
     }
 
     /** 按像素宽度折行（中文逐字，英文按空格）。 */

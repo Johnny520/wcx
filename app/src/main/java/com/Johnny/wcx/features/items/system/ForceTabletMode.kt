@@ -67,6 +67,16 @@ object ForceTabletMode : SwitchFeature(), IResolveDex {
 
     private const val LOGIN_HISTORY_UI = "com.tencent.mm.plugin.account.ui.LoginHistoryUI"
 
+    /**
+     * 真正决定「作为其他设备登录」按钮显示的地方。
+     *
+     * 8.0.80 实测：`qb1.h0#a(View, LifecycleOwner)` 里通过 DynFeature 反射调用
+     * `LoginUtil$Companion#updateLoginAsExdevice(View, LifecycleOwner)`，由它按账号状态
+     * 决定按钮的可见性 —— 所以光显示一次没用，必须在这个函数之后再兜一遍。
+     */
+    private const val LOGIN_UTIL_COMPANION = "com.tencent.mm.plugin.account.model.LoginUtil\$Companion"
+    private const val LOGIN_UTIL = "com.tencent.mm.plugin.account.model.LoginUtil"
+
     /** 按钮的资源名（微信一直保留这个名字，运行时可按名取 id）。 */
     private const val ID_LOGIN_AS_OTHER_DEVICE = "loginAsOtherDeviceBtn"
 
@@ -76,6 +86,7 @@ object ForceTabletMode : SwitchFeature(), IResolveDex {
     override fun onEnable() {
         hookIsTablet()
         hookLoginAsOtherDeviceButton()
+        hookUpdateLoginAsExdevice()
         hookLoginHistoryUi()
     }
 
@@ -131,6 +142,41 @@ object ForceTabletMode : SwitchFeature(), IResolveDex {
                 }
             })
         }.onFailure { WeLogger.w(TAG, "hook $LOGIN_HISTORY_UI#initView 失败", it) }
+    }
+
+    /**
+     * 钩住微信自己用来刷新这个按钮的函数。
+     *
+     * 它会按账号状态把按钮设成 GONE / VISIBLE，我们只在其之后补一次显示，
+     * 并延迟 400ms 再补一次（微信随后还有异步回调会再刷一次可见性）。
+     */
+    private fun hookUpdateLoginAsExdevice() {
+        val candidates = buildList {
+            runCatching {
+                val companion = Class.forName(LOGIN_UTIL_COMPANION, false, ClassLoaders.HOST)
+                addAll(companion.declaredMethods.filter { it.name == "updateLoginAsExdevice" })
+            }
+            runCatching {
+                val util = Class.forName(LOGIN_UTIL, false, ClassLoaders.HOST)
+                addAll(util.declaredMethods.filter { it.name == "updateLoginAsExdevice" })
+            }
+        }.distinct()
+        if (candidates.isEmpty()) {
+            WeLogger.w(TAG, "没找到 updateLoginAsExdevice（版本变化），只用登录设备页兜底")
+            return
+        }
+        candidates.forEach { method ->
+            runCatching {
+                XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                        val root = param.args.firstOrNull { it is View } as? View ?: return
+                        runCatching { revealOtherDeviceLogin(root) }
+                        runCatching { root.postDelayed({ runCatching { revealOtherDeviceLogin(root) } }, 400L) }
+                    }
+                })
+                WeLogger.i(TAG, "已 hook updateLoginAsExdevice（${method.parameterTypes.size} 参）")
+            }.onFailure { WeLogger.w(TAG, "hook updateLoginAsExdevice 失败", it) }
+        }
     }
 
     /**
