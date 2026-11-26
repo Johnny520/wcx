@@ -240,7 +240,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                         returnType = android.view.MenuItem::class
                     }
 
-                val applicableItems = menuItems.snapshot()
+                val applicableItems = menuItems.snapshotFiltered(::aiMenuOwnerAllowed)
                     .filter { it.isSupported(msgInfoWrapper) }
 
                 if (mergeEnabled) {
@@ -286,7 +286,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
             val context = getChattingContextFromOnSelectHandler(thisObject)
             try {
                 if (menuItem.itemId == MERGED_MENU_ITEM_ID) {
-                    val applicableItems = menuItems.snapshot()
+                    val applicableItems = menuItems.snapshotFiltered(::aiMenuOwnerAllowed)
                         .filter { it.isSupported(msgInfoWrapper) }
                     showMergedMenuDialog(curView, context, msgInfoWrapper, applicableItems)
                     // 仅当原方法返回 void 时才设置 result = null
@@ -299,7 +299,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
                     return@hookBefore
                 }
 
-                for (item in menuItems.snapshot()) {
+                for (item in menuItems.snapshotFiltered(::aiMenuOwnerAllowed)) {
                     if (item.id == menuItem.itemId) {
                         item.onClick(curView, context, msgInfoWrapper)
                         // 仅当原方法返回 void 时才设置 result = null
@@ -326,7 +326,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
 
             try {
                 // nothing to offer if no provider supports multi-select
-                val hasMultiSelectItem = menuItems.snapshot()
+                val hasMultiSelectItem = menuItems.snapshotFiltered(::aiMenuOwnerAllowed)
                     .any { it.multiSelect !is MultiSelectSupport.Unsupported }
                 if (!hasMultiSelectItem) return@hookBefore
 
@@ -437,7 +437,7 @@ object WeChatMessageContextMenuApi : ApiFeature(), IResolveDex {
         chattingContext: ChattingContext,
         msgInfos: List<MessageInfo>
     ) {
-        val allItems = menuItems.snapshot()
+        val allItems = menuItems.snapshotFiltered(::aiMenuOwnerAllowed)
 
         val adaptedRows = allItems.mapNotNull { item ->
             val support = item.multiSelect as? MultiSelectSupport.Adapted ?: return@mapNotNull null

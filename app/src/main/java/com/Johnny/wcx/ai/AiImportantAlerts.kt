@@ -1,5 +1,6 @@
 package com.Johnny.wcx.ai
 
+import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.WeLogger
 import kotlinx.serialization.Serializable
@@ -94,6 +95,7 @@ object AiImportantAlerts {
      * 避免对方连发几条同样的内容刷出一串提醒。
      */
     fun maybeRecord(talker: String, name: String, text: String, at: Long = System.currentTimeMillis()) {
+        if (!AiConfig.isMasterEnabled) return
         val body = text.trim()
         if (body.isEmpty() || body.length < 4) return
         if (!isImportant(body)) return

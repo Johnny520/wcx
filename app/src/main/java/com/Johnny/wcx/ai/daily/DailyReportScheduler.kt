@@ -2,6 +2,7 @@ package com.Johnny.wcx.ai.daily
 
 import android.os.Handler
 import android.os.HandlerThread
+import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.WeLogger
 import kotlinx.coroutines.runBlocking
@@ -112,7 +113,8 @@ object DailyReportScheduler {
         val delay = millisUntilNextRun()
         h.postDelayed({
             if (isEnabled) {
-                runGeneration()
+                // 总开关关着就跳过这一轮，但照常排下一轮，打开后自动恢复。
+                if (AiConfig.isMasterEnabled) runGeneration()
                 scheduleNext()
             }
         }, delay)

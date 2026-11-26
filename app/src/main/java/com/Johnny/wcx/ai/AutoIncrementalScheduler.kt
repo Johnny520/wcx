@@ -2,6 +2,7 @@ package com.Johnny.wcx.ai
 
 import android.os.Handler
 import android.os.HandlerThread
+import com.Johnny.wcx.features.ai.AiConfig
 import com.Johnny.wcx.preferences.WePrefs
 import com.Johnny.wcx.utils.WeLogger
 import java.util.Calendar
@@ -110,6 +111,11 @@ object AutoIncrementalScheduler {
     private val checkRunnable = object : Runnable {
         override fun run() {
             if (!isEnabled) return
+            if (!AiConfig.isMasterEnabled) {
+                // 总开关关着：这一轮不跑，但继续排队 —— 用户在设置里打开后自动恢复，不用重启微信。
+                handler?.postDelayed(this, TICK_MS)
+                return
+            }
             val today = todayKey()
             val last = runCatching { WePrefs.getStringOrDef(KEY_LAST_DAY, "") }.getOrDefault("")
             val nowHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)

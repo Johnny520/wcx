@@ -1,5 +1,6 @@
 package com.Johnny.wcx.features.api.ui
 
+import com.Johnny.wcx.features.ai.AiConfig
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -14,7 +15,10 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 internal class MenuRegistry<T> {
 
-    private val entries = LinkedHashMap<String, List<T>>()
+    /** 一条注册记录。记住 owner，取菜单时才能按 AI 助手总开关整组剔除。 */
+    private class Entry<T>(val owner: Any, val items: List<T>)
+
+    private val entries = LinkedHashMap<String, Entry<T>>()
 
     @Volatile
     private var cached: List<T>? = null
@@ -27,7 +31,7 @@ internal class MenuRegistry<T> {
      */
     @Synchronized
     fun register(owner: Any, items: List<T>) {
-        entries[owner.javaClass.name] = items
+        entries[owner.javaClass.name] = Entry(owner, items)
         cached = null
     }
 
@@ -46,9 +50,39 @@ internal class MenuRegistry<T> {
         cached?.let { return it }
         synchronized(this) {
             cached?.let { return it }
-            return entries.values.flatten().also { cached = it }
+            return entries.values.flatMap { it.items }.also { cached = it }
         }
     }
+    /**
+     * 只保留 owner 满足 [allow] 的菜单项。
+     *
+     * 宿主菜单弹出时用它剔除「AI 助手总开关已关闭」的 AI 菜单项；带过滤时不吃缓存
+     * （菜单弹出的频率很低，注册表也很小，现算即可）。
+     */
+    fun snapshotFiltered(allow: (owner: Any) -> Boolean): List<T> = synchronized(this) {
+        val out = ArrayList<T>()
+        for (entry in entries.values) if (allow(entry.owner)) out.addAll(entry.items)
+        out
+    }
+}
+
+/**
+ * AI 助手总开关关闭时，AI 助手提供的菜单项一律不出现在宿主菜单里。
+ *
+ * 判定按类名约定（模块内 AI 工具都在 features/items 下，且类名带 AI 前缀）：
+ * `AiTodoExtract` / `AiMessagePolish` / `AiMomentsComment` → Ai 开头；
+ * `ChatAiSummary` → ChatAi 开头；输入栏那批共用一个匿名 provider，
+ * 其类名来自 `AiChatToolsKt`。非 AI 的菜单 provider 不会命中这三条。
+ */
+internal fun aiMenuOwnerAllowed(owner: Any): Boolean =
+    AiConfig.isMasterEnabled || !looksLikeAiOwner(owner)
+
+private fun looksLikeAiOwner(owner: Any): Boolean {
+    // 注意不能用 Class.getSimpleName()：输入栏那批 provider 是匿名对象，
+    // 匿名类的 simpleName 是空串。这里从全名截取，匿名类形如
+    // `com.Johnny.wcx.features.items.chat.AiChatToolsKt$inputBarProvider$1`，同样以 Ai 开头。
+    val name = owner.javaClass.name.substringAfterLast('.')
+    return name.startsWith("Ai") || name.startsWith("ChatAi") || name.contains("AiChatTools")
 }
 
 /**

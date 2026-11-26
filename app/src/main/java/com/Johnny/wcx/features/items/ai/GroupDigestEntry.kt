@@ -1,6 +1,7 @@
 package com.Johnny.wcx.features.items.ai
 
 import android.app.Activity
+import com.Johnny.wcx.features.ai.AiConfig
 import android.app.Application
 import android.os.Bundle
 import android.os.Handler
@@ -136,6 +137,11 @@ object GroupDigestEntry {
     }
 
     fun sync(act: Activity, visible: Boolean) {
+        if (!AiConfig.isMasterEnabled) {
+            // AI 助手总开关关闭：首页的群总结入口整体撤掉，不留一个点了没反应的按钮。
+            if (root != null) detach()
+            return
+        }
         val current = root
         if (current == null) {
             if (visible) attach(act)

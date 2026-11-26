@@ -112,8 +112,8 @@ object AiSuggestGesture : ApiFeature() {
 
     private fun hookTouch(className: String) {
         // 总开关关掉就不挂 hook：分发路径上每条触摸都要跑，不值得挂着再判断。
-        if (!AiConfig.isSuggestGestureEnabled) {
-            WeLogger.i(TAG, "双击建议已关闭，跳过手势挂载（$className）")
+        if (!AiConfig.isMasterEnabled || !AiConfig.isSuggestGestureEnabled) {
+            WeLogger.i(TAG, "双击建议已关闭（或 AI 助手总开关已关），跳过手势挂载（$className）")
             return
         }
         val method = runCatching {
@@ -127,7 +127,7 @@ object AiSuggestGesture : ApiFeature() {
 
     private fun handleTouch(param: XC_MethodHook.MethodHookParam) {
         // 设置里关掉后立即生效：hook 已挂上也不必等重启，读一次内存里的开关即可。
-        if (!AiConfig.isSuggestGestureEnabled) return
+        if (!AiConfig.isMasterEnabled || !AiConfig.isSuggestGestureEnabled) return
         val activity = param.thisObject as? Activity ?: return
         val event = param.args.getOrNull(0) as? MotionEvent ?: return
         if (activity.isFinishing || activity.isDestroyed) return

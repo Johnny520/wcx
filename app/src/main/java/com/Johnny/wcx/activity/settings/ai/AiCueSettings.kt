@@ -59,6 +59,7 @@ internal fun AiCueSettings(
     var enabled by remember { mutableStateOf(AiConfig.isCueSoundEnabled) }
     var selectedId by remember { mutableStateOf(AiConfig.cueSoundId) }
     val selectedIndex = AiCueSound.Style.indexOf(selectedId)
+    var masterEnabled by remember { mutableStateOf(AiConfig.isMasterEnabled) }
 
     Column(
         modifier = Modifier
@@ -67,6 +68,21 @@ internal fun AiCueSettings(
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // AI 助手总开关：一关全关 —— 双击建议、长按菜单里的 AI 工具、自动回复、归档提醒、
+        // 定时整理全部停用，也不再向接口发任何请求。各项自己的开关保留原值，重新打开后照旧生效。
+        SoftCard(contentPadding = 0) {
+            AiSwitchRow(
+                title = "AI 助手总开关",
+                subtitle = "关掉后双击建议、长按菜单里的 AI 工具、自动回复、归档提醒与定时整理全部停用，也不再发任何请求",
+                checked = masterEnabled,
+                onCheckedChange = {
+                    masterEnabled = it
+                    AiConfig.setMasterEnabled(it)
+                },
+                showDivider = false,
+            )
+        }
+
         // AI 接口配置：全模块只有这一处入口，功能自己的设置页不再重复放置地址/Key 输入框。
         SoftCard(contentPadding = 0) {
             AiConfigStatusRow(onClick = onOpenConfig)
@@ -169,6 +185,7 @@ internal fun AiCueSettings(
             AiSwitchRow(
                 title = "档案自动整理",
                 subtitle = "每天到点给已就绪的好友档案补一次新增聊天（默认关，会消耗额度）",
+                enabled = masterEnabled,
                 checked = autoIncremental,
                 onCheckedChange = {
                     autoIncremental = it
@@ -244,6 +261,7 @@ internal fun AiCueSettings(
             AiSwitchRow(
                 title = "双击建议",
                 subtitle = "聊天页双击屏幕弹出 AI 建议卡（关掉后双击不响应）",
+                enabled = masterEnabled,
                 checked = gestureEnabled,
                 onCheckedChange = {
                     gestureEnabled = it
@@ -253,6 +271,7 @@ internal fun AiCueSettings(
             AiSwitchRow(
                 title = "聊天记录 AI 总结",
                 subtitle = "聊天输入栏长按菜单里总结最近消息，接口同上",
+                enabled = masterEnabled,
                 checked = summaryEnabled,
                 onCheckedChange = {
                     summaryEnabled = it
@@ -267,6 +286,7 @@ internal fun AiCueSettings(
             AiSwitchRow(
                 title = "双击提示音",
                 subtitle = "聊天页双击触发 AI 建议时响一声",
+                enabled = masterEnabled,
                 checked = enabled,
                 onCheckedChange = {
                     enabled = it

@@ -96,6 +96,8 @@ object AiAutoReplyFeature : ApiFeature(), WeDatabaseListenerApi.IInsertListener 
 
     override fun onInsert(table: String, values: ContentValues) {
         if (table != "message") return
+        // 总开关关着时连消息都不用解析，直接跳过（定时器之后也不会再排队）。
+        if (!AiConfig.isMasterEnabled) return
         if (!AiConfig.isConfigured) {
             WeLogger.d(TAG, "自动回复跳过：AI 未配置")
             return

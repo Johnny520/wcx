@@ -211,6 +211,9 @@ object TranslateSupport {
         config: AiConfig = aiConfig(),
         timeoutMs: Long = TIMEOUT_MS,
     ): Result<String> {
+        if (!AiSettings.isMasterEnabled) {
+            return Result.failure(IOException(AiSettings.MASTER_DISABLED_MESSAGE))
+        }
         if (!config.isUsable) {
             return Result.failure(
                 IOException("未配置 AI 接口，请先到「AI 自动回复」里填写接口地址与 API Key")
@@ -265,6 +268,9 @@ object TranslateSupport {
         config: AiConfig = aiConfig(),
         timeoutMs: Long = 60_000L,
     ): Result<String> {
+        if (!AiSettings.isMasterEnabled) {
+            return Result.failure(IOException(AiSettings.MASTER_DISABLED_MESSAGE))
+        }
         if (!config.isUsable) {
             return Result.failure(IOException("未配置 AI 接口，请先到「AI 助手 → 设置 → AI 接口」填写"))
         }

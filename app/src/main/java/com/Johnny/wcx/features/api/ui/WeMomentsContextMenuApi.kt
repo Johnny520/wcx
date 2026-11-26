@@ -168,7 +168,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
         // 原来的写法是「context 为 null 就不判断 shouldShow，照常添加」，结果是：
         // 关闭开关后菜单项照样出现（开关看起来失灵），且点下去也拿不到 snsInfo。
         if (context == null) {
-            if (menuItems.snapshot().isNotEmpty()) {
+            if (menuItems.snapshotFiltered(::aiMenuOwnerAllowed).isNotEmpty()) {
                 WeLogger.d(TAG, "菜单上下文解析失败，跳过注入（listener=${param.thisObject?.javaClass?.name}）")
             }
             return
@@ -190,7 +190,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
             )
         }
 
-        for (item in menuItems.snapshot()) {
+        for (item in menuItems.snapshotFiltered(::aiMenuOwnerAllowed)) {
             try {
                 if (!item.shouldShow(resolved, item.id)) continue
                 menu.reflekt()
@@ -237,7 +237,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
     private fun handleSelectMenu(param: XC_MethodHook.MethodHookParam) {
         val menuItem = param.args.getOrNull(0) as? android.view.MenuItem ?: return
         val clickedId = menuItem.itemId
-        if (menuItems.snapshot().none { it.id == clickedId }) return
+        if (menuItems.snapshotFiltered(::aiMenuOwnerAllowed).none { it.id == clickedId }) return
 
         val context = resolveContext(param.thisObject)
         if (context == null) {
@@ -245,7 +245,7 @@ object WeMomentsContextMenuApi : ApiFeature(), IResolveDex {
             return
         }
 
-        for (item in menuItems.snapshot()) {
+        for (item in menuItems.snapshotFiltered(::aiMenuOwnerAllowed)) {
             try {
                 if (item.id == clickedId) {
                     item.onClick(context)

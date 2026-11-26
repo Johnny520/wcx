@@ -107,6 +107,7 @@ object WeChatInputBarMenuApi : ApiFeature(), IResolveDex {
 
     fun showMenu(context: Context, chatFooter: ChatFooter) {
         val applicableItems = providers.snapshot()
+            .filter { aiMenuOwnerAllowed(it) }
             .flatMap { it.getActionItems() }
             .filter { it.isSupported(context, chatFooter) }
 
