@@ -199,20 +199,43 @@ object MonitorGroupMemberOperations : SwitchFeature(), IResolveDex, WeDatabaseLi
             val bufType = Class.forName("android.widget.TextView\$BufferType", false, ClassLoaders.HOST)
             TextView::class.java.getDeclaredMethod("setText", CharSequence::class.java, bufType)
                 .hookBeforeDirectly {
-                    val original = args.getOrNull(0) as? CharSequence ?: return@hookBeforeDirectly
-                    val raw = original.toString()
-                    if (!raw.contains(LINK_TAG)) return@hookBeforeDirectly
-                    val rendered = renderCustomLinks(raw) ?: return@hookBeforeDirectly
-                    args[0] = rendered
-                    (thisObject as? TextView)?.let { tv ->
-                        if (tv.movementMethod == null) {
-                            tv.movementMethod = LinkMovementMethod.getInstance()
+                    runCatching {
+                        val original = args.getOrNull(0) as? CharSequence ?: return@hookBeforeDirectly
+                        val raw = original.toString()
+                        if (!raw.contains(LINK_TAG)) return@hookBeforeDirectly
+                        val rendered = renderCustomLinks(raw) ?: return@hookBeforeDirectly
+                        // 关键：宿主（MMNeat7extView / NeatTextView）在 setText 之后仍会用「替换前」的
+                        // 文本长度去做 setSpan(span, 0, 原文长度)。如果这里把参数换成更短的渲染文本，
+                        // 宿主就会拿大范围索引短文本，抛
+                        //   RuntimeException: setSpan (0 ... 157) ends beyond length 43
+                        // 把主线程带走 —— 这就是开启本功能后上滑群聊历史闪退、会话列表/群分组显示异常的根因。
+                        // 所以必须把长度补齐到与原文本完全一致（零宽空格，视觉不可见、宽度为 0）。
+                        args[0] = padToSameLength(rendered, raw.length)
+                        (thisObject as? TextView)?.let { tv ->
+                            if (tv.movementMethod == null) {
+                                tv.movementMethod = LinkMovementMethod.getInstance()
+                            }
                         }
-                    }
+                    }.onFailure { WeLogger.w(TAG, "自定义链接渲染失败，本条按原文显示：${it.message}") }
                 }
             linkRenderingInstalled = true
             WeLogger.i(TAG, "自定义链接渲染兜底已安装")
         }.onFailure { WeLogger.e(TAG, "自定义链接渲染兜底安装失败", it) }
+    }
+
+    /**
+     * 把渲染后的可见文本用零宽空格补齐到原文本长度。
+     *
+     * 微信 NeatTextView 包装层在调用 setText 之后，还会用「调用前」的 CharSequence 长度
+     * 去 setSpan（setSpan(span, 0, charSequence.length(), 18)）。我们只缩短内容、不改长度时，
+     * 宿主就会用越界的范围索引短文本，直接抛 IndexOutOfBoundsException（表现为上滑历史闪退）。
+     * 补齐后长度恒等，任何按原长度索引的宿主代码都不会越界，可见内容也不受影响。
+     */
+    private fun padToSameLength(rendered: CharSequence, target: Int): CharSequence {
+        if (rendered.length >= target) return rendered
+        val builder = SpannableStringBuilder(rendered)
+        while (builder.length < target) builder.append('\u200B')
+        return builder
     }
 
     private fun renderCustomLinks(raw: String): CharSequence? {

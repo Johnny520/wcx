@@ -88,12 +88,30 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
     private const val TAG = "AIAutoReply"
 
+    /** v348 及更早版本写进配置的默认提示词。升级时按内容识别并替换，避免老用户继续得到旧行为。 */
+    private const val LEGACY_SYSTEM_PROMPT = "你是一个乐于助人的AI助手，请用简洁友好的语气回复用户的消息。"
+
+    /**
+     * 默认提示词：明确「你就是账号主人本人在回消息」。
+     *
+     * 旧默认提示词只说「你是乐于助人的 AI 助手」，模型于是把收到的内容当成「用户向我求助」，
+     * 结果在群里被 @ 骂时，它会跳出来分析「这段聊天记录火药味很重」「需要我帮你分析吗」——
+     * 完全是旁观者口吻，而且前言不搭后语。这里把角色、长度、边界都写死。
+     */
+    private const val DEFAULT_SYSTEM_PROMPT = """你正在代替微信账号主人本人回消息。你就是账号主人，不是客服、不是助手，也不要在回复里自称 AI 或「助手」。
+规则：
+1. 只输出要发出去的那一条消息正文：不要解释、不要分析聊天记录、不分点、不加括号说明、不加「回复：」之类前缀。
+2. 语气像真人微信聊天：短、口语、可以带表情；通常 3~40 字，能一句说完就一句，不写书面连接词。
+3. 对方是在跟你说话，不是在你面前讨论第三人。绝不要用「这段聊天记录」「火药味」「让我帮你分析」「需要我帮你」这类旁观者口吻。
+4. 对方挑衅、辱骂、阴阳怪气时：不对骂、不长篇说教、不追问原因，用一句轻描淡写带过（反问、自嘲、冷淡短句都可以），或只回一个表情词。
+5. 不承诺具体时间地点、不提钱、不发链接、不编造事实；不确定的事直说不知道。"""
+
     private var apiUrl by prefOption("ai_reply_api_url", "https://api.deepseek.com/chat/completions")
     private var apiKey by prefOption("ai_reply_api_key", "")
     private var model by prefOption("ai_reply_model", "deepseek-chat")
     private var systemPrompt by prefOption(
         "ai_reply_system_prompt",
-        "你是一个乐于助人的AI助手，请用简洁友好的语气回复用户的消息。"
+        DEFAULT_SYSTEM_PROMPT
     )
     private var enableForPrivate by prefOption("ai_reply_enable_private", true)
     private var enableForGroup by prefOption("ai_reply_enable_group", false)
@@ -163,7 +181,9 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
             msgs.mapNotNull { msg ->
                 val role = if (msg.isSend != 0) "assistant" else "user"
                 val text = msg.content?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-                role to text
+                // 上下文里混着双方的消息，不标说话人模型就分不清谁在骂谁
+                val speaker = if (msg.isSend != 0) "我" else "对方"
+                role to "$speaker：$text"
             }.reversed() // 按时间正序排列（最旧的在最前面）
         } catch (e: Exception) {
             WeLogger.e(TAG, "loadConversationContext error", e)
@@ -285,6 +305,12 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
     override fun onEnable() {
         WeDatabaseListenerApi.addListener(this)
+        // 老版本把通用助手提示词存进了配置：升级后自动换成新的人设提示词，
+        // 否则老用户仍然会得到「旁观者分析聊天记录」的回复。
+        if (systemPrompt == LEGACY_SYSTEM_PROMPT) {
+            systemPrompt = DEFAULT_SYSTEM_PROMPT
+            WeLogger.i(TAG, "已把旧默认提示词升级为新的人设提示词")
+        }
     }
 
     override fun onDisable() {
@@ -967,8 +993,28 @@ object AIAutoReply : ClickableFeature(), WeDatabaseListenerApi.IInsertListener {
 
                 if (cleanContent.isBlank()) return@runCatching
 
-                val contextMsgs = loadConversationContext(talker)
-                val reply = callAI(cleanContent, contextMsgs)
+                val contextMsgs = loadConversationContext(talker).let { list ->
+                    // 当前这条消息通常已经在上下文里（role=user），再作为最后一条 user 发一次会重复，
+                    // 模型容易把同一句话当成「又说了一遍」而去做多余的解读。
+                    val last = list.lastOrNull()
+                    if (last != null && last.second.endsWith(cleanContent)) list.dropLast(1) else list
+                }.map { (role, text) -> role to text }
+                val senderName = runCatching { WeDatabaseApi.getDisplayName(msgInfo.sender) }.getOrNull().orEmpty()
+                val talkerName = runCatching { WeDatabaseApi.getDisplayName(talker) }.getOrNull().orEmpty()
+                val scene = if (isGroup) {
+                    "群聊" + talkerName.takeIf { it.isNotBlank() }?.let { "「$it」" }.orEmpty()
+                } else {
+                    "私聊"
+                }
+                val prompt = buildString {
+                    appendLine("场景：$scene。")
+                    if (senderName.isNotBlank()) appendLine("发消息的人：$senderName")
+                    appendLine("对方刚刚发来的消息：")
+                    appendLine(cleanContent)
+                    appendLine()
+                    append("只回一条我要发出去的正文。")
+                }
+                val reply = callAI(prompt, contextMsgs)
                 if (reply.isNotBlank()) {
                     val finalReply = if (replyPrefix.isNotBlank()) "$replyPrefix$reply" else reply
                     WeMessageApi.sendText(talker, finalReply)
