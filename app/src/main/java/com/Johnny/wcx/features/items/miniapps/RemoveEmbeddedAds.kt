@@ -27,7 +27,17 @@ object RemoveEmbeddedAds : SwitchFeature(), IResolveDex {
         }
     }
 
-    private lateinit var protoField: Field
+    /**
+     * 奖励/激励视频广告位（用户主动看完拿奖励），不属于被动展示的嵌入广告，不拦。
+     * 「跳过」和「删掉」是两回事：把激励视频的请求也清空，用户拿不到奖励。
+     */
+    private val REWARDED_AD_POS_IDS = setOf(
+        "1030436212907001", // rewardedVideoAd
+        "5010365819466098", // wxAppVideo
+        "7090665964306299", // wxAppPreVideoAd
+    )
+
+    private var protoField: Field? = null
 
     /** 广告请求里表示广告位/插槽的字段，清空后接口拿不到可投广告的位置。 */
     private val AD_KEYS = arrayOf("ad_unit_id", "adunitid", "adUnitId", "pos_id", "ad_slot", "ad_slot_data")
@@ -56,20 +66,25 @@ object RemoveEmbeddedAds : SwitchFeature(), IResolveDex {
             if (idx < 0) return@hookBefore
             val json = runCatching { JSONObject(args[idx] as String) }.getOrNull() ?: return@hookBefore
             val data = json.optJSONObject("data") ?: JSONObject().also { json.put("data", it) }
+            // 激励视频放行：清空 ad_unit_id 会让「看完拿奖励」直接失效
+            val posId = data.optString("pos_id")
+            if (posId.isBlank() || posId in REWARDED_AD_POS_IDS) return@hookBefore
             AD_KEYS.forEach { key -> data.remove(key) }
             args[idx] = json.toString()
         }
 
         methodBaseTransferRequestOnLoad.hookBefore {
-            val transferResultInfo = args[0]
-            if (!::protoField.isInitialized) {
-                protoField = transferResultInfo.reflekt()
+            // 参数位可空 / 字段结构变了都要安全退出：宁可不去广告，
+            // 也不能让一条广告 hook 把品牌服务和小程序的业务数据一起吞掉（表现是列表全空）。
+            val transferResultInfo = args.getOrNull(0) ?: return@hookBefore
+            val field = protoField ?: runCatching {
+                transferResultInfo.reflekt()
                     .firstField {
                         type { !it.isBuiltin }
                     }.self
-            }
+            }.getOrNull()?.also { protoField = it } ?: return@hookBefore
 
-            val proto = protoField.get(transferResultInfo)
+            val proto = field.get(transferResultInfo) ?: return@hookBefore
             proto.reflekt()
                 .fields {
                     type = String::class
