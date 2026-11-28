@@ -333,6 +333,32 @@ object CrashInfoCollector {
         c.stackTrace.any { e -> MODULE_FRAME_PREFIXES.any { p -> e.className.startsWith(p) } }
     }
 
+    /** 第三方模块帧里常出现的前缀；这些不算「别的模块把锅甩过来」。 */
+    private val FRAMEWORK_FRAME_PREFIXES = arrayOf(
+        "de.robv.android.xposed", "android.", "com.android.", "com.tencent.", "java.", "kotlin.",
+    )
+
+    /**
+     * 找出「别的 Xposed 模块」的栈帧。
+     *
+     * 用户常常同时装了多个模块，别的模块在微信进程里崩了，报告却因为「栈里没有 WCX 代码」
+     * 被判成 HOST_OTHER，最后反馈到 WCX 这边。
+     * 典型例子（真实线上日志）：FakeLoc 的
+     *   io.github.cobylinweiqi.fakeloc.xposed.hooks.WebBridgeHooks
+     * 在主线程调用 WebView.setWebContentsDebuggingEnabled，但 WebView 数据目录已被
+     * com.tencent.mm:br 进程锁定，Chromium 直接抛 RuntimeException。
+     */
+    private fun foreignXposedModule(t: Throwable): String? = causeChain(t).asSequence()
+        .flatMap { it.stackTrace.asSequence() }
+        .map { it.className }
+        .firstOrNull { name ->
+            val looksLikeHookFrame = name.contains(".xposed.") || name.contains(".xposed_") ||
+                name.contains(".hook.", true) || name.contains("XposedHook")
+            looksLikeHookFrame &&
+                MODULE_FRAME_PREFIXES.none { name.startsWith(it) } &&
+                FRAMEWORK_FRAME_PREFIXES.none { name.startsWith(it) }
+        }
+
     /**
      * 崩溃分类：
      * - MODULE         栈中含模块代码，属模块问题
@@ -344,12 +370,20 @@ object CrashInfoCollector {
     private fun classifyCrash(throwable: Throwable): CrashClass = try {
         val classNames = causeChain(throwable).map { it.javaClass.name }
         val hasModuleFrame = stackContainsModuleFrame(throwable)
+        val foreignModule = foreignXposedModule(throwable)
         when {
             hasModuleFrame -> CrashClass(
                 code = "MODULE",
                 title = "调用栈包含模块代码，属模块相关问题",
                 reason = "崩溃调用栈出现 com.Johnny.wcx / h.Hchat / 脚本运行时等模块包名。",
                 advice = "请把完整日志反馈给维护者。",
+            )
+
+            foreignModule != null -> CrashClass(
+                code = "OTHER_MODULE",
+                title = "另一个 Xposed 模块导致，与 WCX 无关",
+                reason = "崩溃调用栈里出现了其它 Xposed 模块的代码：$foreignModule。",
+                advice = "请关闭该模块（或它的 WebView / 调试相关功能）后复测；这类崩溃不需要反馈 WCX。",
             )
 
             classNames.any {
