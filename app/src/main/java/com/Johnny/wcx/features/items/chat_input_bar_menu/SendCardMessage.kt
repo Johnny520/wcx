@@ -1,24 +1,11 @@
 package com.Johnny.wcx.features.items.chat_input_bar_menu
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import android.content.Context
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,20 +13,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Send_time_extension
+import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import com.Johnny.wcx.features.api.core.WeMessageApi
 import com.Johnny.wcx.features.api.ui.WeChatInputBarMenuApi
 import com.Johnny.wcx.features.api.ui.WeCurrentConversationApi
 import com.Johnny.wcx.features.core.Feature
 import com.Johnny.wcx.features.core.SwitchFeature
+import com.Johnny.wcx.ui.content.AiInputField
+import com.Johnny.wcx.ui.content.AlertDialogContent
+import com.Johnny.wcx.ui.content.Button
+import com.Johnny.wcx.ui.style.WxPalette
 import com.Johnny.wcx.ui.utils.showComposeDialog
-import com.Johnny.wcx.utils.android.showToast
 import com.Johnny.wcx.utils.WeLogger
+import com.Johnny.wcx.utils.android.showToast
 
 /**
  * 发送卡片消息。
@@ -49,6 +39,10 @@ import com.Johnny.wcx.utils.WeLogger
  *    自动拼成微信 appmsg(type=5) 卡片并直接发到当前聊天；
  * 2. 兼容老用法：输入框里已经是一段完整 `<msg><appmsg>…</appmsg></msg>` 时，
  *    直接发送它，不弹表单。
+ *
+ * 注意 UI 必须用 `ui.content` 这套（AlertDialogContent + AiInputField），
+ * 和输入栏菜单本体同一套宿主；早前用自绘 Column + material3 输入框时，
+ * 弹窗在 wrapContentSize 的 Dialog 里测不出高度，点菜单项看起来完全没反应。
  */
 @Feature(
     name = "发送卡片消息",
@@ -66,42 +60,12 @@ object SendCardMessage : SwitchFeature() {
                 icon = MaterialSymbols.Outlined.Send_time_extension,
                 label = "发送卡片消息",
                 onClick = { context, chatFooter ->
-                    val talker = runCatching { WeCurrentConversationApi.value }.getOrNull().orEmpty()
-                    if (talker.isBlank()) {
-                        showToast(context, "请先进入一个聊天再发送卡片消息")
-                        return@ActionItem
-                    }
-
-                    // 老用法：输入框里已经是完整 XML，原样发出去
-                    val typed = runCatching { chatFooter.lastText }.getOrNull().orEmpty()
-                    if (typed.contains("<appmsg>")) {
-                        val ok = runCatching { WeMessageApi.sendXmlAppMsg(talker, typed) }.getOrDefault(false)
-                        if (ok) {
-                            showToast(context, "卡片消息已发送")
-                            runCatching { chatFooter.lastText = "" }
-                        } else {
-                            showToast(context, "发送失败，请检查 XML（需要有 title 和 appmsg 节点）")
+                    // 菜单点击的任何异常都必须让用户看见，否则表现就是「点了没反应」
+                    runCatching { handleClick(context, chatFooter) }
+                        .onFailure {
+                            WeLogger.e(TAG, "发送卡片消息失败", it)
+                            showToast(context, "发送卡片消息失败：${it.message ?: "未知错误"}")
                         }
-                        return@ActionItem
-                    }
-
-                    showComposeDialog(context) {
-                        CardComposer(
-                            onCancel = { onDismiss() },
-                            onSend = { title, desc, thumb, link ->
-                                val xml = buildCardXml(title, desc, thumb, link)
-                                WeLogger.i(TAG, "发送卡片消息 -> $talker")
-                                val ok = runCatching { WeMessageApi.sendXmlAppMsg(talker, xml) }.getOrDefault(false)
-                                if (ok) {
-                                    showToast(context, "卡片消息已发送")
-                                    runCatching { chatFooter.lastText = "" }
-                                    onDismiss()
-                                } else {
-                                    showToast(context, "发送失败：卡片消息接口不可用（可在「脚本功能诊断 → 发送文本 API」查看）")
-                                }
-                            }
-                        )
-                    }
                 }
             )
         )
@@ -113,6 +77,45 @@ object SendCardMessage : SwitchFeature() {
 
     override fun onDisable() {
         WeChatInputBarMenuApi.removeProvider(provider)
+    }
+
+    private fun handleClick(context: Context, chatFooter: ChatFooter) {
+        val talker = runCatching { WeCurrentConversationApi.value }.getOrNull().orEmpty()
+        if (talker.isBlank()) {
+            showToast(context, "请先进入一个聊天再发送卡片消息")
+            return
+        }
+
+        // 老用法：输入框里已经是完整 XML，原样发出去
+        val typed = runCatching { chatFooter.lastText }.getOrNull().orEmpty()
+        if (typed.contains("<appmsg>")) {
+            val ok = runCatching { WeMessageApi.sendXmlAppMsg(talker, typed) }.getOrDefault(false)
+            if (ok) {
+                showToast(context, "卡片消息已发送")
+                runCatching { chatFooter.lastText = "" }
+            } else {
+                showToast(context, "发送失败，请检查 XML（需要有 title 和 appmsg 节点）")
+            }
+            return
+        }
+
+        showComposeDialog(context) {
+            CardComposer(
+                onCancel = { onDismiss() },
+                onSend = { title, desc, thumb, link ->
+                    val xml = buildCardXml(title, desc, thumb, link)
+                    WeLogger.i(TAG, "发送卡片消息 -> $talker")
+                    val ok = runCatching { WeMessageApi.sendXmlAppMsg(talker, xml) }.getOrDefault(false)
+                    if (ok) {
+                        showToast(context, "卡片消息已发送")
+                        runCatching { chatFooter.lastText = "" }
+                        onDismiss()
+                    } else {
+                        showToast(context, "发送失败：卡片消息接口不可用（可在「脚本功能诊断 → 发送文本 API」查看）")
+                    }
+                }
+            )
+        }
     }
 
     /** 拼出微信卡片消息 XML（type=5 = 网页卡片）。跳转网址留空时用图片地址兜底。 */
@@ -147,82 +150,38 @@ object SendCardMessage : SwitchFeature() {
         var link by remember { mutableStateOf("") }
         val ctx = LocalContext.current
 
-        // 卡片固定白底，因此内部强制浅色配色，避免深色模式下 Input 白字白底看不见
-        MaterialTheme(colorScheme = lightColorScheme()) {
-            Column(
-                modifier = Modifier
-                    .width(330.dp)
-                    .heightIn(max = 560.dp)
-                    .background(Color.White, RoundedCornerShape(18.dp))
-                    .padding(18.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(
-                    "发送卡片消息",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF1A1A1A)
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "填标题、描述、图片网址就能发；跳转网址不填时默认跳到图片地址。",
-                    fontSize = 12.sp,
-                    color = Color(0xFF8A8A8E)
-                )
-                Spacer(Modifier.height(14.dp))
-
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("标题") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = desc,
-                    onValueChange = { desc = it },
-                    label = { Text("描述") },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = thumb,
-                    onValueChange = { thumb = it },
-                    label = { Text("图片网址") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = link,
-                    onValueChange = { link = it },
-                    label = { Text("跳转网址（可选）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onCancel) { Text("取消") }
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            when {
-                                title.isBlank() -> showToast(ctx, "请填写标题")
-                                desc.isBlank() -> showToast(ctx, "请填写描述")
-                                thumb.isBlank() -> showToast(ctx, "请填写图片网址")
-                                else -> onSend(title.trim(), desc.trim(), thumb.trim(), link.trim())
-                            }
-                        }
-                    ) { Text("发送") }
+        AlertDialogContent(
+            title = { Text("发送卡片消息") },
+            text = {
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        "填标题、描述、图片网址就能发；跳转网址不填时默认跳到图片地址。",
+                        fontSize = 12.sp,
+                        color = WxPalette.textSecondary()
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    AiInputField("标题", title, "例如：WCX 更新了", { title = it })
+                    Spacer(Modifier.height(10.dp))
+                    AiInputField("描述", desc, "一句话说明这张卡片", { desc = it })
+                    Spacer(Modifier.height(10.dp))
+                    AiInputField("图片网址", thumb, "https://…/cover.jpg", { thumb = it })
+                    Spacer(Modifier.height(10.dp))
+                    AiInputField("跳转网址（可选）", link, "不填就跳图片地址", { link = it })
                 }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    when {
+                        title.isBlank() -> showToast(ctx, "请填写标题")
+                        desc.isBlank() -> showToast(ctx, "请填写描述")
+                        thumb.isBlank() -> showToast(ctx, "请填写图片网址")
+                        else -> onSend(title.trim(), desc.trim(), thumb.trim(), link.trim())
+                    }
+                }) { Text("发送") }
+            },
+            dismissButton = {
+                Button(onClick = onCancel) { Text("取消") }
             }
-        }
+        )
     }
 }
